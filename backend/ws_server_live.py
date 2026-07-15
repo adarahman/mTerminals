@@ -7,6 +7,10 @@ import threading
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, time as dtime
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
 from nse_eod_fetch import fetch_all_eod, is_trading_day
 
 import numpy as np
@@ -14,9 +18,6 @@ import orjson
 import aiohttp
 import websockets
 from aiohttp import web
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
 
 # option_chain_json.py parses sys.argv at import time — hide our own argv
 # from it so it doesn't choke on ws_server_live's --symbol/--poll-seconds flags.

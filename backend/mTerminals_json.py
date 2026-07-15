@@ -677,6 +677,20 @@ try:
 except ImportError:
     get_feature_for_trading_day = None
 
+try:
+    from smartapi_client import get_fno_underlyings
+except ImportError:
+    get_fno_underlyings = None
+
+# Minimal hardcoded fallback (mirrors the old COMMON_SYMBOLS in
+# dashboard.js) — only used if the ScripMaster-backed lookup below fails
+# (e.g. no cached/downloadable ScripMaster available), so the top-bar
+# symbol picker always has at least the indices instead of going empty.
+_FNO_SYMBOLS_FALLBACK = {
+    "indices": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"],
+    "stocks": [],
+}
+
 _FII_DII_CACHE = {"date": None, "features": None}
 
 
@@ -692,6 +706,22 @@ def _get_cached_fii_dii_sentiment():
             _FII_DII_CACHE["features"] = None
         _FII_DII_CACHE["date"] = today
     return _FII_DII_CACHE["features"]
+
+
+def _get_fno_symbols():
+    """{"indices": [...], "stocks": [...]} for the top-bar symbol picker —
+    every underlying currently carrying live F&O contracts, sourced from
+    the ScripMaster via smartapi_client.get_fno_underlyings() (see there
+    for caching/refresh details). Falls back to just the known indices if
+    that lookup isn't available for any reason, so the dropdown never
+    ends up empty."""
+    if get_fno_underlyings is None:
+        return _FNO_SYMBOLS_FALLBACK
+    try:
+        return get_fno_underlyings()
+    except Exception as e:
+        print(f"[WARN] F&O underlying list lookup failed: {e}")
+        return _FNO_SYMBOLS_FALLBACK
 
 # ── Main export function ───────────────────────────────────────────────────────
 def export_dashboard_json(
@@ -1107,6 +1137,13 @@ def export_dashboard_json(
         # ── Index ticker strip data (NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX) ──
         # Fetched from NSE allIndices endpoint + BSE getScripHeaderData when relevant
         "allIndices": all_indices or [],
+        # ── Top-bar symbol picker options ──────────────────────────────
+        # {"indices": [...], "stocks": [...]} covering EVERY NSE/BSE
+        # underlying with live F&O contracts (not just the 6-symbol
+        # COMMON_SYMBOLS list dashboard.js used to hardcode) — see
+        # smartapi_client.get_fno_underlyings() / renderSymbolOptions()
+        # in chain-views.js.
+        "fnoSymbols": _get_fno_symbols(),
     }
 
     # ── 10b. Simulator support fields (V51Pro) ──────────────────────────

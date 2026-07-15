@@ -17,6 +17,7 @@ Sections
 
 # ── 1. Imports & shared constants ──────────────────────────────────────────
 import os
+import re
 import time
 import json
 import threading
@@ -247,6 +248,70 @@ def list_expiries(underlying, exchange="NFO"):
         key=lambda d: datetime.strptime(d, "%d%b%Y"),
     )
     return expiries
+
+
+# Known index underlyings among F&O contracts — used to split the full
+# get_fno_underlyings() list into "indices" vs "stocks" groups for the
+# frontend symbol picker (see chain-views.js renderSymbolOptions()).
+_FNO_INDEX_NAMES = {
+    "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50",
+    "SENSEX", "BANKEX", "SENSEX50",
+}
+
+# Angel One's master carries a handful of dummy/test rows (e.g.
+# "011NSETEST") mixed in with real F&O underlyings — filtered out here so
+# they never show up in a user-facing dropdown.
+_TEST_SYMBOL_RE = re.compile(r"NSETEST")
+
+_fno_universe_cache = {"data": None, "built_at": None}
+_FNO_UNIVERSE_TTL_HOURS = SCRIP_MASTER_TTL_HOURS  # rebuild alongside the master
+
+
+def get_fno_underlyings(force_refresh=False):
+    """
+    Every underlying (NSE/BSE index or individual stock) that currently
+    has live F&O contracts, derived straight from the ScripMaster
+    (FUTSTK/FUTIDX rows on the NFO/BFO segments) instead of a hardcoded
+    list — so new stocks added to the F&O segment (and old ones dropped
+    from it, e.g. after an NSE quarterly review) show up automatically
+    the next time the master refreshes, with zero code changes here.
+
+    Returns {"indices": [...], "stocks": [...]}, both alphabetically
+    sorted. The result is cached in-memory and rebuilt at the same
+    cadence as the ScripMaster itself (SCRIP_MASTER_TTL_HOURS), since
+    scanning ~160k rows on every dashboard payload build would be wasteful.
+    """
+    now = datetime.now()
+    if (
+        not force_refresh
+        and _fno_universe_cache["data"] is not None
+        and _fno_universe_cache["built_at"]
+        and now - _fno_universe_cache["built_at"] < timedelta(hours=_FNO_UNIVERSE_TTL_HOURS)
+    ):
+        return _fno_universe_cache["data"]
+
+    data = _load_scrip_master()
+    names = set()
+    for row in data:
+        if row.get("instrumenttype") not in ("FUTSTK", "FUTIDX"):
+            continue
+        if row.get("exch_seg") not in ("NFO", "BFO"):
+            continue
+        name = (row.get("name") or "").strip().upper()
+        if not name or _TEST_SYMBOL_RE.search(name):
+            continue
+        names.add(name)
+
+    indices = sorted(n for n in names if n in _FNO_INDEX_NAMES)
+    stocks = sorted(n for n in names if n not in _FNO_INDEX_NAMES)
+    result = {"indices": indices, "stocks": stocks}
+
+    _fno_universe_cache.update(data=result, built_at=now)
+    logger.info(
+        "[smartapi_client] Built F&O universe: %d indices, %d stocks",
+        len(indices), len(stocks),
+    )
+    return result
 
 
 # ── 4. Market data fetchers ────────────────────────────────────────────────

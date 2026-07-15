@@ -934,11 +934,34 @@ window.moveExpirySelectIntoTopBar = moveExpirySelectIntoTopBar;
 // real routing; absent that, this falls back to a `?symbol=` query param
 // on the current WS URL as the simplest single-port convention.
 // ── TOP-BAR SYMBOL PICKER ──
-// Matches ws_server_live.py's INDEX_TICKER_SYMBOLS plus the two BSE names
-// it also recognizes (_BSE_SYMBOLS) and FINNIFTY (a real NSE index the
-// backend's pipeline supports but the 4-symbol ticker strip doesn't show).
-// Keep in sync with ws_server_live.py if either list changes.
+// Seed/fallback list shown until /api/symbols resolves (see fetchSymbolList()
+// in the DOMContentLoaded block below) — kept as a small known-good set in
+// case that fetch is slow or fails, not a whitelist. Once /api/symbols
+// returns, its contents (every OPTIDX/OPTSTK `name` in the ScripMaster —
+// same primary key find_option_token()/list_expiries() key off) replace
+// these in place. Mutated via length=0+push rather than reassigned, so
+// chain-views.js's reference to this same array stays live.
 const COMMON_SYMBOLS = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
+
+// Fetches the full underlying list from the backend (backed by
+// smartapi_client.list_underlyings()) and swaps it into COMMON_SYMBOLS in
+// place. Fire-and-forget — called once from the DOMContentLoaded bootstrap;
+// if it fails or is slow, the picker just keeps showing the seed list above
+// until the next render happens to catch the updated array.
+async function fetchSymbolList(){
+  try{
+    const res = await fetch('/api/symbols');
+    if(!res.ok) return;
+    const list = await res.json();
+    if(Array.isArray(list) && list.length){
+      COMMON_SYMBOLS.length = 0;
+      COMMON_SYMBOLS.push(...list);
+    }
+  }catch(e){
+    console.warn('[symbols] /api/symbols fetch failed, keeping seed list', e);
+  }
+}
+window.fetchSymbolList = fetchSymbolList;
 
 // Called by the top-bar <select onchange>. "Other…" prompts for a free-
 // text symbol (individual stocks, etc.) instead of switching straight
@@ -1374,5 +1397,3 @@ window.addEventListener('pageshow', function(event){
     location.reload();
   }
 });
-
-

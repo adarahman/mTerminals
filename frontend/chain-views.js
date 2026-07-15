@@ -464,16 +464,41 @@ class ChainView {
     this._lastSpot = null;
   }
 
-  // Builds the <option> list for the top-bar symbol picker. COMMON_SYMBOLS
-  // covers the usual NSE/BSE indices; if the currently active symbol isn't
-  // in that list (a custom stock picked via "Other…", or a --symbol the
-  // backend was started with that isn't one of these), it's prepended so
-  // the dropdown always shows the true current value instead of silently
-  // falling back to the first option.
-  renderSymbolOptions(active){
-    const list = COMMON_SYMBOLS.includes(active) ? COMMON_SYMBOLS : [active, ...COMMON_SYMBOLS];
-    return list.map(s=>`<option value="${s}"${s===active?' selected':''}>${s}</option>`).join('')
-      + `<option value="__other__">Other…</option>`;
+  // Builds the <option> list for the top-bar symbol picker.
+  //
+  // d.fnoSymbols — { indices: [...], stocks: [...] } — is sent by the
+  // backend (mTerminals_json.py -> smartapi_client.get_fno_underlyings())
+  // and covers EVERY NSE/BSE underlying that currently has live F&O
+  // contracts, not just the old 6-symbol COMMON_SYMBOLS shortlist. It's
+  // only sent on a full snapshot (not every delta tick), so it's cached
+  // on the instance the first time it's seen and reused after that.
+  //
+  // If the currently active symbol isn't in the cached list for some
+  // reason (backend hasn't sent fnoSymbols yet, or --symbol was started
+  // with something the ScripMaster doesn't recognize), it's prepended to
+  // "Indices" so the dropdown always shows the true current value instead
+  // of silently falling back to the first option.
+  renderSymbolOptions(active, fnoSymbols){
+    if (fnoSymbols && (fnoSymbols.indices || fnoSymbols.stocks)) {
+      this._fnoSymbolsCache = fnoSymbols;
+    }
+    const universe = this._fnoSymbolsCache;
+
+    if (!universe) {
+      // Fallback while waiting on the first full snapshot: the old
+      // hardcoded shortlist plus a manual "Other…" entry.
+      const list = COMMON_SYMBOLS.includes(active) ? COMMON_SYMBOLS : [active, ...COMMON_SYMBOLS];
+      return list.map(s=>`<option value="${s}"${s===active?' selected':''}>${s}</option>`).join('')
+        + `<option value="__other__">Other…</option>`;
+    }
+
+    let indices = universe.indices || [];
+    const stocks = universe.stocks || [];
+    if (!indices.includes(active) && !stocks.includes(active)) indices = [active, ...indices];
+
+    const opt = s => `<option value="${s}"${s===active?' selected':''}>${s}</option>`;
+    return `<optgroup label="Indices">${indices.map(opt).join('')}</optgroup>`
+      + `<optgroup label="Stocks">${stocks.map(opt).join('')}</optgroup>`;
   }
 
   renderTopBarHtml(d, isBear){
@@ -509,10 +534,11 @@ class ChainView {
            persistent-node re-parenting trick isn't needed here (unlike
            #expirySelect) since this rebuilds fresh each render anyway and
            doesn't need to preserve mid-edit state between ticks.
-           renderSymbolOptions() below fills in COMMON_SYMBOLS plus
-           whatever custom symbol is currently active if it isn't already
-           in that list (e.g. after picking "Other…"). -->
-      <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY')}</select>
+           renderSymbolOptions() below fills in the full backend-supplied
+           F&O universe (d.fnoSymbols — every NSE/BSE underlying with live
+           F&O contracts, grouped Indices/Stocks) plus whatever custom
+           symbol is currently active if it isn't already in that list. -->
+      <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY', d.fnoSymbols)}</select>
       <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
       ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}% (${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)})</span>`:''}
       ${renderIndexTicker(d)}
