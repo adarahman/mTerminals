@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>NIFTY Chart + Quick Order Panel</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{
+    --bg: #0b0e14;
+    --panel: #12161f;
+    --panel-border: #1f2530;
+    --up: #26a69a;
+    --down: #ef5350;
+    --accent: #7c5cff;
+    --text: #e6e9ef;
+    --text-dim: #8a91a0;
+    --buy: #1fae8a;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg); color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .toolbar{
+    display:flex; align-items:center; gap:16px;
+    padding:8px 14px; border-bottom:1px solid var(--panel-border);
+    font-size:13px; color:var(--text-dim);
+  }
+  .toolbar .sym{ color:var(--text); font-weight:600; }
+  .toolbar .up{ color:var(--up); }
+  .toolbar .tf{
+    background:var(--panel); border:1px solid var(--panel-border);
+    border-radius:6px; padding:4px 10px; color:var(--text); cursor:pointer;
+  }
+  .chart-wrap{
+    position:relative;
+    width:100%; height:640px;
+  }
+  #chart{ width:100%; height:100%; }
+
+  .ohlc{
+    position:absolute; top:10px; left:14px; z-index:5;
+    font-size:13px; display:flex; gap:14px; color:var(--text-dim);
+    background:rgba(11,14,20,0.6); padding:4px 8px; border-radius:6px;
+  }
+  .ohlc b{ color:var(--text); font-weight:600; }
+  .ohlc .neg{ color:var(--down); }
+  .ohlc .pos{ color:var(--up); }
+
+  /* Floating quick-order panel, docked bottom-center like the screenshot */
+  .order-panel{
+    position:absolute;
+    left:50%; bottom:18px; transform:translateX(-50%);
+    width:min(720px, 92%);
+    background:rgba(18,22,31,0.97);
+    border:1px solid var(--panel-border);
+    border-radius:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.45);
+    z-index:10;
+    overflow:hidden;
+  }
+  .op-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 14px; border-bottom:1px solid var(--panel-border);
+    font-size:13px;
+  }
+  .op-header .name{ font-weight:600; }
+  .op-header .chg{ color:var(--up); margin-left:8px; }
+  .op-body{
+    display:flex; align-items:center; gap:8px;
+    padding:10px 12px; flex-wrap:wrap;
+  }
+  .seg{
+    display:flex; background:var(--panel); border:1px solid var(--panel-border);
+    border-radius:8px; overflow:hidden;
+  }
+  .seg button{
+    border:none; background:transparent; color:var(--text-dim);
+    padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .seg button.active.buy{ background:var(--buy); color:#fff; }
+  .seg button.active.sell{ background:var(--down); color:#fff; }
+
+  .seg2 button.active{ background:var(--accent); color:#fff; }
+  .seg2 button{ min-width:56px; }
+
+  select, .qty, .price{
+    background:var(--panel); border:1px solid var(--panel-border);
+    color:var(--text); border-radius:8px; padding:8px 10px; font-size:13px;
+  }
+  .qty{ width:56px; text-align:center; }
+  .price{ width:100px; }
+
+  .submit-btn{
+    margin-left:auto;
+    background:var(--buy); color:#fff; border:none;
+    border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700;
+    cursor:pointer;
+  }
+  .submit-btn.sell{ background:var(--down); }
+  .submit-btn:active{ transform:scale(0.98); }
+
+  .icon-btn{
+    background:var(--panel); border:1px solid var(--panel-border);
+    color:var(--text-dim); border-radius:8px; padding:8px 10px; cursor:pointer;
+    font-size:12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <span class="sym">NIFTY <span id="ltp" class="up">24,158.10</span></span>
+  <span id="chgTop" class="up">+106.05 (+0.44%)</span>
+  <span class="tf">5m</span>
+</div>
+
+<div class="chart-wrap">
+  <div id="chart"></div>
+
+  <div class="ohlc" id="ohlc">
+    O<b>24160.15</b> H<b>24162.70</b> L<b>24156.10</b> C<b>24158.10</b>
+    <span class="neg">−2.00 (−0.01%)</span>
+  </div>
+
+  <div class="order-panel">
+    <div class="op-header">
+      <div><span class="name">NIFTY</span><span class="chg">24,158.10 ▲ +106.05 (+0.44%)</span></div>
+      <div style="color:var(--text-dim);cursor:pointer;">✕</div>
+    </div>
+    <div class="op-body">
+      <div class="seg">
+        <button class="active buy" id="btnBuy">B</button>
+        <button id="btnSell">S</button>
+      </div>
+
+      <div class="seg seg2">
+        <button class="active" id="btnCall">CALL</button>
+        <button id="btnPut">PUT</button>
+      </div>
+
+      <select id="strike">
+        <option>ATM</option>
+        <option>ITM 1</option>
+        <option>ITM 2</option>
+        <option>OTM 1</option>
+        <option>OTM 2</option>
+      </select>
+
+      <input class="qty" id="lots" type="number" value="1" min="1" />
+      <span style="color:var(--text-dim);font-size:12px;">Lots</span>
+
+      <select id="orderType">
+        <option>LIMIT</option>
+        <option>MARKET</option>
+      </select>
+
+      <input class="price" id="price" type="text" value="24160.25" />
+
+      <button class="submit-btn" id="submitBtn">BUY @ 24160.25</button>
+      <button class="icon-btn">SL/TGT</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- Chart setup ----
+const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  layout: {
+    background: { color: 'transparent' },
+    textColor: '#8a91a0',
+  },
+  grid: {
+    vertLines: { color: '#161b25' },
+    horzLines: { color: '#161b25' },
+  },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  rightPriceScale: { borderColor: '#1f2530' },
+  timeScale: { borderColor: '#1f2530', timeVisible: true, secondsVisible: false },
+});
+
+const series = chart.addCandlestickSeries({
+  upColor: '#26a69a', downColor: '#ef5350',
+  borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+  wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+});
+
+// ---- Sample data (swap this for your live feed) ----
+function genData(n){
+  let t = Math.floor(Date.now()/1000) - n*300;
+  let price = 24100;
+  const out = [];
+  for(let i=0;i<n;i++){
+    const open = price;
+    const drift = (Math.random()-0.5)*30;
+    const close = open + drift;
+    const high = Math.max(open, close) + Math.random()*12;
+    const low = Math.min(open, close) - Math.random()*12;
+    out.push({ time: t, open, high, low, close });
+    price = close;
+    t += 300;
+  }
+  return out;
+}
+const data = genData(180);
+series.setData(data);
+chart.timeScale().fitContent();
+
+function fmt(n){ return n.toFixed(2); }
+
+function updateOHLC(bar){
+  const chg = bar.close - bar.open;
+  const pct = (chg/bar.open*100).toFixed(2);
+  const cls = chg >= 0 ? 'pos' : 'neg';
+  const sign = chg >= 0 ? '+' : '';
+  document.getElementById('ohlc').innerHTML =
+    `O<b>${fmt(bar.open)}</b> H<b>${fmt(bar.high)}</b> L<b>${fmt(bar.low)}</b> C<b>${fmt(bar.close)}</b>
+     <span class="${cls}">${sign}${fmt(chg)} (${sign}${pct}%)</span>`;
+}
+updateOHLC(data[data.length-1]);
+
+chart.subscribeCrosshairMove(param => {
+  if (param.time){
+    const bar = param.seriesData.get(series);
+    if (bar) updateOHLC(bar);
+  }
+});
+
+// ---- Quick order panel wiring ----
+let side = 'BUY';
+const btnBuy = document.getElementById('btnBuy');
+const btnSell = document.getElementById('btnSell');
+const submitBtn = document.getElementById('submitBtn');
+const priceInput = document.getElementById('price');
+
+function refreshSubmit(){
+  submitBtn.textContent = `${side} @ ${priceInput.value}`;
+  submitBtn.classList.toggle('sell', side === 'SELL');
+}
+btnBuy.onclick = () => {
+  side = 'BUY';
+  btnBuy.classList.add('active','buy'); btnSell.classList.remove('active');
+  refreshSubmit();
+};
+btnSell.onclick = () => {
+  side = 'SELL';
+  btnSell.classList.add('active','sell'); btnBuy.classList.remove('active');
+  refreshSubmit();
+};
+
+const btnCall = document.getElementById('btnCall');
+const btnPut = document.getElementById('btnPut');
+btnCall.onclick = () => { btnCall.classList.add('active'); btnPut.classList.remove('active'); };
+btnPut.onclick = () => { btnPut.classList.add('active'); btnCall.classList.remove('active'); };
+
+priceInput.addEventListener('input', refreshSubmit);
+
+submitBtn.onclick = () => {
+  const payload = {
+    symbol: 'NIFTY',
+    side,
+    optType: btnCall.classList.contains('active') ? 'CALL' : 'PUT',
+    strike: document.getElementById('strike').value,
+    lots: document.getElementById('lots').value,
+    orderType: document.getElementById('orderType').value,
+    price: priceInput.value,
+  };
+  console.log('place_order', payload);
+  // Wire this to your ws_server_live.py place_order message, e.g.:
+  // ws.send(JSON.stringify({ type: 'place_order', ...payload }));
+  submitBtn.textContent = 'Sent ✓';
+  setTimeout(refreshSubmit, 900);
+};
+
+refreshSubmit();
+</script>
+</body>
+</html>

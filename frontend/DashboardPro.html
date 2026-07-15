@@ -1,0 +1,272 @@
+<!-- saved from url=(0046)file:///D:/NSE_CLAUDE/dashboard-v26.html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- Space Grotesk added: a sharper, angular display face used for nav
+     labels, tickers, and the big spot readout — the old all-Inter-at-9/10px
+     type was reading soft/blurry at normal zoom. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body><div class="db">
+
+<!-- Option Chain is now a native in-page section (see .chain-layout further
+     down) rendered from the same in-memory data as the rest of the
+     dashboard — no iframe/modal/separate page anymore. -->
+
+<!-- ── OI DASHBOARD MODAL OVERLAY (same-screen, no new window) ── -->
+<div id="oi-dashboard-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <span class="oc-modal-title">📈 OI Dashboard</span>
+      <button id="oi-modal-close" onclick="closeOIDashboardModal()" title="Close (Esc)">✕ Close</button>
+    </div>
+    <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Dashboard"></iframe>
+  </div>
+</div>
+
+<!-- The index ticker strip (NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX pills) no
+     longer has its own row here — it now renders inline inside the top-bar,
+     to the right of the big active-symbol spot readout (see
+     renderTopBarHtml() in dashboard.js, which calls renderIndexTicker()
+     directly). -->
+
+<!-- ── VERTICAL SECTION NAV (left rail) ──
+     Was a horizontal row above the top-bar; now a fixed vertical stripe
+     docked to the left edge of the screen so section jumps stay reachable
+     from anywhere without a horizontal bar eating vertical space. The
+     Expiry control has been pulled OUT of this list — it's no longer a
+     "jump to section" action, so it doesn't belong with the others. It's
+     relocated next to the DTE readout in the top-bar (see
+     #expiry-select-holder below and moveExpirySelectIntoTopBar() in
+     dashboard.js, which physically re-parents this same <select> into the
+     top-bar's dedicated Expiry pill on every render instead of rebuilding it — so its
+     option list and current selection survive live ticks). -->
+<div class="sec-nav" id="sec-nav-bar">
+  <span class="sec-nav-label">⚡ Jump</span>
+  <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
+  <button class="sec-btn" onclick="secJump('sec-oi-buildup')"><span>📈</span>OI Flow</button>
+  <button class="sec-btn" onclick="secJump('sec-iv')"><span>📉</span>IV Surface</button>
+  <button class="sec-btn sec-btn-simulator" onclick="secJump('sec-simulator')"><span>&#127970;</span>Simulator</button>
+  <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
+  <button class="sec-btn" id="option-chain-btn" onclick="secJump('sec-chain')" title="Jump to option chain"><span>📊</span>Chain</button>
+  <button class="sec-btn" id="oi-dashboard-btn" onclick="openOIDashboardModal()" title="Open OI dashboard"><span>📈</span>OI Dash</button>
+  <!-- Range & velocity toggle — relocated here from its old floating
+       .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
+       there). Reuses the sec-btn styling so it sits inline with the other
+       nav buttons instead of needing its own CSS. Still calls the same
+       toggleControlSidebar(), which just toggles the 'open' class on
+       #ctrl-sidebar — the panel markup/logic underneath is untouched. -->
+  <button class="sec-btn" id="ctrl-sidebar-toggle-btn" onclick="toggleControlSidebar()" title="Range & velocity controls"><span>🎛️</span>Range Vel</button>
+</div>
+
+<!-- Global expiry control — the ONLY expiry selector in the app. Kept as
+     a standalone static element (not inside the vertical nav, and not
+     inside the dashboard's rebuilt innerHTML) so dashboard.js can move
+     the *same* <select> node into the top-bar's dedicated Expiry pill on every render
+     without ever destroying/recreating it. Hidden here; visible once
+     re-parented. Changing it re-renders the whole dashboard (all
+     sections), regardless of which section is currently in view. -->
+<div id="expiry-select-holder" style="display:none;">
+  <select
+      id="expirySelect"
+      onchange="onExpiryChange(this.value)"
+      title="Select expiry — ● = live chain data available"
+  ></select>
+</div>
+
+<!-- ── CONTROL SIDEBAR (ATM range + velocity window, works from any section) ──
+     The old .ctrl-sidebar-toggle button that lived here has been removed —
+     it's now the "Range/Vel" button in the left #sec-nav-bar rail above,
+     since this floating button (pinned near the top of the screen) had
+     almost no visible/tappable height there. #ctrl-sidebar is still the
+     element whose 'open' class gets toggled — only the trigger moved. -->
+<div class="ctrl-sidebar" id="ctrl-sidebar">
+  <div class="ctrl-sidebar-panel">
+    <div class="ctrl-sidebar-group">
+      <div class="ctrl-sidebar-group-label">Vel Window</div>
+      <div class="tab-group" id="vel-tabs-side">
+        <div class="tab-btn active-vel" onclick="switchVelTab(5,this)">5m</div>
+        <div class="tab-btn" onclick="switchVelTab(15,this)">15m</div>
+        <div class="tab-btn" onclick="switchVelTab(30,this)">30m</div>
+      </div>
+    </div>
+    <div class="ctrl-sidebar-divider"></div>
+    <div class="ctrl-sidebar-group">
+      <div class="ctrl-sidebar-group-label">ATM Range</div>
+      <div class="tab-group" id="range-tabs-side">
+        <div class="tab-btn active-range" onclick="switchChainRange(3,this)">±3</div>
+        <div class="tab-btn" onclick="switchChainRange(5,this)">±5</div>
+        <div class="tab-btn" onclick="switchChainRange(10,this)">±10</div>
+        <div class="tab-btn" onclick="switchChainRange(15,this)">±15</div>
+        <div class="tab-btn" onclick="switchChainRange(9999,this)">All</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── LOADER ── -->
+<div id="loader" style="display: block;">
+  <div class="load-zone">
+    <div class="load-title">📊 Live Dashboard Feed</div>
+    <div class="load-sub">
+      <span id="ws-status" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:6px;"></span>
+      Connecting to Python engine over WebSocket at <code style="font-size:11px;background:var(--bg2);padding:2px 8px;border-radius:4px;font-family:var(--mono);" id="ws-url-label">ws://localhost:8765</code>. Updates push automatically — no polling, no file.
+    </div>
+    <div class="load-methods" style="grid-template-columns:1fr 1fr;">
+      <div class="load-btn" onclick="(function(){const u=prompt('WebSocket URL', _wsUrl); if(u) connectWebSocket(u);})()"><span>🔌 Change URL</span><small>Point to a different engine</small></div>
+      <div class="load-btn" onclick="triggerPaste()"><span>📋 Paste JSON</span><small>Manual fallback snapshot</small></div>
+    </div>
+    <input type="file" id="file-input" accept=".json" style="display:none;" onchange="handleFile(event)">
+    <textarea id="paste-area" placeholder="Paste JSON here…"></textarea>
+    <button id="load-go" onclick="loadFromPaste()">Load dashboard</button>
+    <div id="err-msg"></div>
+  </div>
+</div>
+<!-- ── OPTION CHAIN ──
+     This static block is relocated by dashboard.js on first render to sit
+     between the Decision/Executive boxes and OI Flow inside #dashboard
+     (see the #chain-anchor placeholder in renderDashboard()) — it lives
+     here in the markup only as its starting point before data arrives.
+     The old standalone `.head` bar (big "NIFTY OPTION CHAIN" title block)
+     has been removed as redundant with the sec-nav's expiry selector and
+     the Decision/Exec panels. Its "connecting…" status dot/text is gone
+     too — that element was never wired to anything in this file (dead
+     text stuck permanently on "connecting…"), and the loader screen
+     already shows real connection status before the dashboard appears.
+     Only the Greeks show/hide toggle — the one genuinely useful bit —
+     carries over, in a slim inline bar. -->
+<div class="chain-layout" id="sec-chain">
+<div class="chain-col">
+<!-- The ±3/±7/±13/ALL filter-bar that used to live here has been removed —
+     strike range and velocity window are now driven exclusively by the
+     global ctrl-sidebar (🎛️) control, so this table reads the same
+     currentRange/velocityWindowMin state instead of keeping its own. -->
+<div class="side-tag">
+    <div class="ce-tag">CALLS</div>
+    <div style="flex: 0.85"></div>
+    <div class="pe-tag">PUTS</div>
+</div>
+<div class="chain-wrap">
+<div class="chain-scroll" id="chain-scroll">
+<table id="chain">
+    <colgroup>
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="strike" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+        <col class="grp" />
+    </colgroup>
+    <thead>
+        <tr class="grp-row">
+            <th>IV</th>
+            <th>VOLUME</th>
+            <th>LTP</th>
+            <th>OI VELOCITY</th>
+            <th>OPEN INT</th>
+            <th class="strike-h">·</th>
+            <th>OPEN INT</th>
+            <th>OI VELOCITY</th>
+            <th>LTP</th>
+            <th>VOLUME</th>
+            <th>IV</th>
+            <th>SIGNAL</th>
+        </tr>
+        <tr class="sub-row">
+            <th>IV / Δ</th>
+            <th>Vol / %OI</th>
+            <th>LTP / chg</th>
+            <th>OI-vel / %OI</th>
+            <th>OI / chg</th>
+            <th class="strike-h">
+                STRIKE<br /><span
+                    style="
+                        font-size: 8.5px;
+                        color: var(--text-faint);
+                        font-weight: 400;
+                    "
+                    >PCR/PCRchg</span
+                >
+            </th>
+            <th>OI / chg</th>
+            <th>OI-vel / %OI</th>
+            <th>LTP / chg</th>
+            <th>Vol / %OI</th>
+            <th>IV / Δ</th>
+            <th style="text-align: left; padding-left: 10px">
+                Combined
+            </th>
+        </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+</div>
+</div>
+
+<div class="legend">
+    <div><b>IV/Δ</b> — implied vol & change vs prior snapshot</div>
+    <div>
+        <b>Vol/%OI</b> — traded volume & OI as % of that strike's
+        volume (OI × 100 / Vol)
+    </div>
+    <div>
+        <b>OI-vel/%OI</b> — OI change rate per interval & strike's share
+        of total side OI
+    </div>
+    <div><b>OI/chg</b> — open interest & day change</div>
+    <div><b>LTP/chg</b> — last price & change vs previous day's close (NSE)</div>
+    <div><b>Signal</b> — combined CE+PE buildup/unwind read for the strike</div>
+    <div style="color: var(--amber)">Amber row = ATM strike</div>
+</div>
+</div>
+<!-- Greeks toggle now sits in its own bar directly above the right-side
+     analytics panel, right above the "Signal" readout — a static wrapper
+     around #rightPanel so the button survives every innerHTML rebuild of
+     the dynamic panel underneath it. -->
+<div class="chain-right-col">
+<div class="chain-mini-bar" style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:6px;">
+    <button id="grk-toggle-btn" class="grk-toggle" onclick="toggleGreeks()" title="Show/hide Greeks for every strike">
+        <span id="grk-toggle-icon">▶</span> Greeks
+    </button>
+</div>
+<div class="chain-right-panel" id="rightPanel"></div>
+</div>
+</div>
+<!-- ^ closes .chain-layout#sec-chain. This closing tag was missing, which
+     meant the browser's parser nested EVERYTHING after this point —
+     including the entire #dashboard element — inside #sec-chain instead
+     of as its sibling. That's what caused dashboard.js's chain-anchor
+     insertBefore to throw "the new child element contains the parent"
+     (moving sec-chain into place would have required making it its own
+     new parent's ancestor) and made every other section render nested
+     inside the option-chain grid column instead of alongside it. -->
+
+<!-- ── DASHBOARD ──
+     dashboard.js relocates the Option Chain block above into this
+     container's Decision→OI Flow boundary on first render (see the
+     #chain-anchor placeholder in renderDashboard()), so visually: Decision
+     → Executive boxes → Option Chain → OI Flow → IV Surface → Simulator →
+     Strategy. Until that first render happens (i.e. while still
+     connecting) the chain simply sits above, in its markup position. -->
+<div id="dashboard" style="display: none;"></div>
+
+<!-- Greeks-by-Moneyness legend + canvas now render inside the dashboard
+     template, next to Strategy Payoff (see renderDashboard's grid). The
+     canvas is recreated on every innerHTML rebuild, so the Chart.js
+     instance below is created/re-bound lazily rather than once here. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="chart-legend.js"></script>
+<script src="price-chart.js"></script>
+<script src="chain-views.js"></script>
+<script src="panels-views.js"></script>
+<script src="ws-manager.js"></script>
+<script src="dashboard.js"></script>
+<script src="paper-trading.js"></script>
+</body></html>

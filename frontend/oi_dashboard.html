@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NIFTY OI Dashboard — Live</title>
+<link rel="stylesheet" href="oi-dashboard.css">
+</head>
+<body>
+<div class="db">
+
+  <div class="top-nav">
+    <div class="nav-brand">
+      <span>NIFTY</span>
+      <span class="spot-price" id="spotDisplay">—</span>
+      <span class="conn-badge down" id="connBadge">● connecting…</span>
+    </div>
+    <div class="ws-config">
+      <label>WS URL</label>
+      <input id="wsUrlInput" value="" />
+      <button onclick="reconnect()">Reconnect</button>
+      <span id="lastMsg">no data yet</span>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-view="oi">OI</div>
+    <div class="tab" data-view="oichng">OI Chng</div>
+    <div class="tab" data-view="combined">Combined</div>
+    <div class="tab" data-view="gex">GEX</div>
+  </div>
+
+  <div class="legend" id="legendRow"></div>
+
+  <div class="chart-wrap">
+    <canvas id="oiCanvas"></canvas>
+  </div>
+
+</div>
+
+<script src="oi-dashboard.js"></script>
+</body>
+</html>

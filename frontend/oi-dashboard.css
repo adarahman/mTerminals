@@ -1,0 +1,54 @@
+/* ═══════════════════════════════════════════════════════════════════
+   OI DASHBOARD (oi_dashboard.html) — extracted from that file's inline
+   <style> block, unchanged, on 2026-07-12.
+
+   NOT merged into the main styles.css on purpose: oi_dashboard.html is a
+   standalone document loaded on its own (opened directly, or dropped into
+   DashboardPro.html's #oi-modal-iframe as a separate document — never
+   parsed into the same DOM as DashboardPro.html). Its :root/.db/body/*
+   rules use the same names as the main dashboard's but with different
+   values (e.g. --bg0 is #0B0E14 here vs #0F1117 in styles.css, .db here
+   is a flex column vs styles.css's .db padding/max-width rules). Loading
+   both files' CSS into one document would make those collide, so this
+   page keeps its own stylesheet instead. If the two ever get merged into
+   one page, rename this file's tokens (--bg0/--bg1/--bg2/--border/--txt/
+   --txt2/--txt3/--green/--red/--blue/--amber/.db) the same way
+   option_chain.html's tokens were prefixed --oc-* below in styles.css.
+   ═══════════════════════════════════════════════════════════════════ */
+
+  :root{
+    --bg0:#0B0E14; --bg1:#10141C; --bg2:#1A1F2A; --border:rgba(255,255,255,0.08);
+    --txt:#E8EDF2; --txt2:#8A94A6; --txt3:#5E6B7E;
+    --green:#3FAE5A; --red:#C0392B; --blue:#2F6FD6; --amber:#FCC419;
+    --mono:'JetBrains Mono',monospace; --sans:'Inter',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;overflow:hidden;}
+  body{background:var(--bg0);color:var(--txt);font-family:var(--sans);padding:10px 18px;}
+  .db{max-width:1600px;margin:0 auto;height:100%;display:flex;flex-direction:column;min-height:0;}
+  .top-nav{display:flex;align-items:center;justify-content:space-between;padding:8px 18px;
+    background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;flex-wrap:wrap;gap:10px;flex:0 0 auto;}
+  .nav-brand{display:flex;align-items:center;gap:10px;font-weight:700;}
+  .spot-price{font-family:var(--mono);color:var(--green);font-size:20px;}
+  .conn-badge{font-size:10px;padding:3px 10px;border-radius:20px;font-weight:600;border:1px solid var(--border);}
+  .conn-badge.live{color:var(--green);border-color:var(--green);background:rgba(63,174,90,.12);}
+  .conn-badge.mock{color:var(--amber);border-color:var(--amber);background:rgba(252,196,25,.12);}
+  .conn-badge.down{color:var(--red);border-color:var(--red);background:rgba(192,57,43,.12);}
+  .tabs{display:flex;gap:28px;margin:4px 0 0;border-bottom:1px solid var(--border);padding:0 4px;flex:0 0 auto;}
+  .tab{font-size:14px;color:var(--txt2);padding:8px 2px 10px;cursor:pointer;border-bottom:2px solid transparent;font-weight:500;}
+  .tab:hover{color:var(--txt);}
+  .tab.active{color:#4DABF7;border-color:#4DABF7;font-weight:600;}
+  .legend{display:flex;gap:22px;justify-content:center;padding:8px 0 6px;font-size:12px;color:var(--txt2);flex:0 0 auto;flex-wrap:wrap;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .sw{width:11px;height:11px;border-radius:2px;display:inline-block;}
+  .sw.hollow{background:transparent;border:1.5px solid currentColor;}
+  .chart-wrap{background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:10px;
+    flex:1 1 auto;min-height:0;display:flex;}
+  #oiCanvas{width:100%;flex:1 1 auto;display:block;cursor:crosshair;min-height:0;}
+  .ws-config{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--txt3);}
+  .ws-config input{background:var(--bg2);border:1px solid var(--border);color:var(--txt);border-radius:4px;
+    padding:4px 8px;font-family:var(--mono);font-size:11px;width:190px;}
+  .ws-config button{background:var(--bg2);border:1px solid var(--border);color:var(--txt2);border-radius:4px;
+    padding:4px 10px;cursor:pointer;font-size:11px;}
+  .ws-config button:hover{border-color:#4DABF7;color:#4DABF7;}
+
