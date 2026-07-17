@@ -6,13 +6,19 @@
      labels, tickers, and the big spot readout — the old all-Inter-at-9/10px
      type was reading soft/blurry at normal zoom. -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="utilities.css">
 </head>
 <body><div class="db">
 
-<!-- Option Chain is now a native in-page section (see .chain-layout further
-     down) rendered from the same in-memory data as the rest of the
-     dashboard — no iframe/modal/separate page anymore. -->
+<!-- Option Chain no longer has an in-page table here — the dashboard now
+     shows a compact snapshot card (built inline by
+     ChainView.buildChainSummaryHtml() in chain-views.js, between the
+     Decision/Executive boxes and OI Flow) with a link to the full,
+     dedicated ledger at option-chain.html. See that file / option-chain.js
+     for the full CE/PE strike-by-strike table, Greeks toggle, and
+     buy/sell click-to-trade cells. -->
 
 <!-- ── OI DASHBOARD MODAL OVERLAY (same-screen, no new window) ── -->
 <div id="oi-dashboard-modal" class="oc-modal">
@@ -49,7 +55,7 @@
   <button class="sec-btn" onclick="secJump('sec-iv')"><span>📉</span>IV Surface</button>
   <button class="sec-btn sec-btn-simulator" onclick="secJump('sec-simulator')"><span>&#127970;</span>Simulator</button>
   <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
-  <button class="sec-btn" id="option-chain-btn" onclick="secJump('sec-chain')" title="Jump to option chain"><span>📊</span>Chain</button>
+  <button class="sec-btn" id="option-chain-btn" onclick="window.open('option-chain.html','_blank')" title="Open the redesigned option chain in a new tab"><span>📊</span>Chain</button>
   <button class="sec-btn" id="oi-dashboard-btn" onclick="openOIDashboardModal()" title="Open OI dashboard"><span>📈</span>OI Dash</button>
   <!-- Range & velocity toggle — relocated here from its old floating
        .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
@@ -124,137 +130,21 @@
   </div>
 </div>
 <!-- ── OPTION CHAIN ──
-     This static block is relocated by dashboard.js on first render to sit
-     between the Decision/Executive boxes and OI Flow inside #dashboard
-     (see the #chain-anchor placeholder in renderDashboard()) — it lives
-     here in the markup only as its starting point before data arrives.
-     The old standalone `.head` bar (big "NIFTY OPTION CHAIN" title block)
-     has been removed as redundant with the sec-nav's expiry selector and
-     the Decision/Exec panels. Its "connecting…" status dot/text is gone
-     too — that element was never wired to anything in this file (dead
-     text stuck permanently on "connecting…"), and the loader screen
-     already shows real connection status before the dashboard appears.
-     Only the Greeks show/hide toggle — the one genuinely useful bit —
-     carries over, in a slim inline bar. -->
-<div class="chain-layout" id="sec-chain">
-<div class="chain-col">
-<!-- The ±3/±7/±13/ALL filter-bar that used to live here has been removed —
-     strike range and velocity window are now driven exclusively by the
-     global ctrl-sidebar (🎛️) control, so this table reads the same
-     currentRange/velocityWindowMin state instead of keeping its own. -->
-<div class="side-tag">
-    <div class="ce-tag">CALLS</div>
-    <div style="flex: 0.85"></div>
-    <div class="pe-tag">PUTS</div>
-</div>
-<div class="chain-wrap">
-<div class="chain-scroll" id="chain-scroll">
-<table id="chain">
-    <colgroup>
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="strike" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-        <col class="grp" />
-    </colgroup>
-    <thead>
-        <tr class="grp-row">
-            <th>IV</th>
-            <th>VOLUME</th>
-            <th>LTP</th>
-            <th>OI VELOCITY</th>
-            <th>OPEN INT</th>
-            <th class="strike-h">·</th>
-            <th>OPEN INT</th>
-            <th>OI VELOCITY</th>
-            <th>LTP</th>
-            <th>VOLUME</th>
-            <th>IV</th>
-            <th>SIGNAL</th>
-        </tr>
-        <tr class="sub-row">
-            <th>IV / Δ</th>
-            <th>Vol / %OI</th>
-            <th>LTP / chg</th>
-            <th>OI-vel / %OI</th>
-            <th>OI / chg</th>
-            <th class="strike-h">
-                STRIKE<br /><span
-                    style="
-                        font-size: 8.5px;
-                        color: var(--text-faint);
-                        font-weight: 400;
-                    "
-                    >PCR/PCRchg</span
-                >
-            </th>
-            <th>OI / chg</th>
-            <th>OI-vel / %OI</th>
-            <th>LTP / chg</th>
-            <th>Vol / %OI</th>
-            <th>IV / Δ</th>
-            <th style="text-align: left; padding-left: 10px">
-                Combined
-            </th>
-        </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-</table>
-</div>
-</div>
-
-<div class="legend">
-    <div><b>IV/Δ</b> — implied vol & change vs prior snapshot</div>
-    <div>
-        <b>Vol/%OI</b> — traded volume & OI as % of that strike's
-        volume (OI × 100 / Vol)
-    </div>
-    <div>
-        <b>OI-vel/%OI</b> — OI change rate per interval & strike's share
-        of total side OI
-    </div>
-    <div><b>OI/chg</b> — open interest & day change</div>
-    <div><b>LTP/chg</b> — last price & change vs previous day's close (NSE)</div>
-    <div><b>Signal</b> — combined CE+PE buildup/unwind read for the strike</div>
-    <div style="color: var(--amber)">Amber row = ATM strike</div>
-</div>
-</div>
-<!-- Greeks toggle now sits in its own bar directly above the right-side
-     analytics panel, right above the "Signal" readout — a static wrapper
-     around #rightPanel so the button survives every innerHTML rebuild of
-     the dynamic panel underneath it. -->
-<div class="chain-right-col">
-<div class="chain-mini-bar" style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:6px;">
-    <button id="grk-toggle-btn" class="grk-toggle" onclick="toggleGreeks()" title="Show/hide Greeks for every strike">
-        <span id="grk-toggle-icon">▶</span> Greeks
-    </button>
-</div>
-<div class="chain-right-panel" id="rightPanel"></div>
-</div>
-</div>
-<!-- ^ closes .chain-layout#sec-chain. This closing tag was missing, which
-     meant the browser's parser nested EVERYTHING after this point —
-     including the entire #dashboard element — inside #sec-chain instead
-     of as its sibling. That's what caused dashboard.js's chain-anchor
-     insertBefore to throw "the new child element contains the parent"
-     (moving sec-chain into place would have required making it its own
-     new parent's ancestor) and made every other section render nested
-     inside the option-chain grid column instead of alongside it. -->
+     The full dense CE/PE strike table (previously a static #sec-chain
+     block relocated into #dashboard by a #chain-anchor placeholder) has
+     been removed from this file entirely. In its place, ChainView now
+     builds a compact "Option Chain Snapshot" card inline as part of the
+     normal #dashboard template — see ChainView.buildChainSummaryHtml()
+     in chain-views.js — so there's nothing to anchor or relocate here
+     anymore; it's just another section in the template string like OI
+     Flow or IV Surface. The full strike-by-strike ledger (Greeks toggle,
+     buy/sell click cells, Bid/Ask depth) lives at option-chain.html,
+     one click away via the snapshot card's "Full Chain" button. -->
 
 <!-- ── DASHBOARD ──
-     dashboard.js relocates the Option Chain block above into this
-     container's Decision→OI Flow boundary on first render (see the
-     #chain-anchor placeholder in renderDashboard()), so visually: Decision
-     → Executive boxes → Option Chain → OI Flow → IV Surface → Simulator →
-     Strategy. Until that first render happens (i.e. while still
-     connecting) the chain simply sits above, in its markup position. -->
+     Decision → Executive boxes → Option Chain Snapshot → OI Flow → IV
+     Surface → Simulator → Strategy, all built fresh into this container
+     on every render by ChainView.renderDashboard(). -->
 <div id="dashboard" style="display: none;"></div>
 
 <!-- Greeks-by-Moneyness legend + canvas now render inside the dashboard
@@ -263,10 +153,16 @@
      instance below is created/re-bound lazily rather than once here. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="chart-legend.js"></script>
+<script src="chart-data.js"></script>
+<script src="chart-renderer.js"></script>
+<script src="indicator-engine.js"></script>
+<script src="interaction-controller.js"></script>
+<script src="history-loader.js"></script>
 <script src="price-chart.js"></script>
 <script src="chain-views.js"></script>
 <script src="panels-views.js"></script>
 <script src="ws-manager.js"></script>
+<script src="market-store.js"></script>
 <script src="dashboard.js"></script>
 <script src="paper-trading.js"></script>
 </body></html>

@@ -60,31 +60,43 @@ for (const cfg of Object.values(PRICE_CHART_RANGES)) {
   cfg.ms = cfg.candles === Infinity ? Infinity : cfg.bucketMs * cfg.candles;
 }
 
+// Bottom "window" shortcut bar (1D/5D/1M/3M/6M/1Y/5Y), TradingView-style —
+// deliberately separate from PRICE_CHART_RANGES above. Those keys pick the
+// *candle interval* (top toolbar, e.g. "5m"); these just move the visible
+// window (via the existing zoom/pan state) without touching what interval
+// is plotted, same as clicking "1M" on a real chart doesn't change the
+// candle size. 'ALL' reuses the zoom-reset (null/null = full default
+// window for the active interval) rather than a fixed span.
+const PRICE_CHART_WINDOWS = [
+  { key: '1D',  ms: 24 * 60 * 60 * 1000 },
+  { key: '5D',  ms: 5 * 24 * 60 * 60 * 1000 },
+  { key: '1M',  ms: 30 * 24 * 60 * 60 * 1000 },
+  { key: '3M',  ms: 90 * 24 * 60 * 60 * 1000 },
+  { key: '6M',  ms: 182 * 24 * 60 * 60 * 1000 },
+  { key: '1Y',  ms: 365 * 24 * 60 * 60 * 1000 },
+  { key: '5Y',  ms: 5 * 365 * 24 * 60 * 60 * 1000 },
+  { key: 'ALL', ms: Infinity },
+];
+
 class PriceChartEngine {
   constructor(){
-    this.ticks = []; // {t: epoch ms, p: price}
-    this.MAX_TICKS = 50000;
     this.mounted = false;
     this.settings = this._loadSettings();
     this._resizeBound = () => this.render();
-    // Real OHLCV bars from SmartAPI, keyed by PRICE_CHART_RANGES key —
-    // separate from `ticks` because ticks carry no volume and (until a
-    // page has been open a long time) can't reconstruct real intraday
-    // high/low or genuine long-range history the way SmartAPI's own
-    // candles can. Populated by hydrateRange(); render() prefers this
-    // over tick-bucketing whenever it has bars for the active range.
-    this.historyBars = {};
-    this._hydratingRanges = new Set();
-    // Zoom/pan state — null means "use the range's default window" (today's
-    // behavior). Set by wheel (zoom) and drag (pan) handlers in
-    // _attachHandlers(); reset whenever range/type changes since a
-    // different range implies different underlying data/window.
+    
+    // Initialize component modules
+    this.chartData = new ChartData(50000);
+    this.chartRenderer = new ChartRenderer();
+    this.indicatorEngine = new IndicatorEngine();
+    this.historyLoader = new HistoryLoader(this.chartData, () => this.render());
+    
+    // Zoom/pan state
     this._zoomStart = null;
     this._zoomEnd = null;
-    // Populated at the end of each render() with the pixel<->time mapping
-    // that render actually used, so wheel/drag handlers (which run outside
-    // render) can convert mouse coordinates without recomputing everything.
-    this._lastRenderCtx = null;
+    this._lastHydratedSymbol = null;
+    
+    // Interaction controller (initialized later when canvas is available)
+    this.interactionController = null;
   }
 
   _loadSettings(){
@@ -98,9 +110,10 @@ class PriceChartEngine {
       showGrid: true,
       glow: true,
       lineColor: '#339AF0',
-      upColor: '#20C997',
-      downColor: '#FF6B6B',
+      upColor: '#26A69A',      // TradingView-style teal/coral candle palette
+      downColor: '#EF5350',
       vwapColor: '#FF8C42',
+      showVolume: true,        // volume sub-panel under the price panel
     };
     try{
       const raw = localStorage.getItem(PRICE_CHART_SETTINGS_KEY);
@@ -115,145 +128,33 @@ class PriceChartEngine {
   }
 
   addTick(price, t, vwap){
-    price = parseFloat(price);
-    if(!price || isNaN(price)) return;
-    const now = Date.now();
-    t = t || now;
-    const vw = (vwap != null && isFinite(vwap)) ? vwap : null;
-    const last = this.ticks[this.ticks.length - 1];
-    if(last && last.t === t){
-      if(last.p === price && last.vw === vw) return; // true no-op — exact repeat, nothing changed
-      // Price (or vwap) actually moved even though the incoming timestamp
-      // didn't — this happens when the backend timestamp has coarser
-      // (e.g. whole-second) resolution than the tick rate. Previously this
-      // branch just overwrote last.p/last.vw in place, so the point never
-      // advanced and the chart only visibly moved once per timestamp tick.
-      // Nudge the timestamp forward using client arrival time so the new
-      // price still lands as its own point.
-      t = Math.max(now, last.t + 1);
-    }
-    this.ticks.push({ t, p: price, vw });
-    if(this.ticks.length > this.MAX_TICKS) this.ticks.shift();
+    this.chartData.addTick(price, t, vwap);
   }
 
-  // Fetches real OHLCV history for one PRICE_CHART_RANGES key from the
-  // backend's /api/history endpoint (SmartAPI-sourced, full range —
-  // 'all' means Angel One's actual daily-candle limit, not just whatever
-  // ticks happened to accumulate client-side). Cached per range so
-  // switching back and forth doesn't re-hit SmartAPI's rate-limited
-  // historical endpoint every click; pass force=true to bypass the cache
-  // (e.g. a manual refresh action, if one gets added later).
   async hydrateRange(range, force){
-    if(!force && this.historyBars[range]) { this.render(); return; }
-    if(this._hydratingRanges.has(range)) return;
-    this._hydratingRanges.add(range);
-    try{
-      const res = await fetch(`/api/history?range=${encodeURIComponent(range)}`);
-      if(!res.ok){ console.warn('[priceChart] hydrateRange failed:', res.status, res.statusText, range); return; }
-      const rows = await res.json(); // expected: [{t,o,h,l,c,v}, ...] oldest→newest
-      if(!Array.isArray(rows)) return;
-      const bars = rows
-        .map(r => ({
-          t: Number(r.t), o: parseFloat(r.o), h: parseFloat(r.h),
-          l: parseFloat(r.l), c: parseFloat(r.c),
-          v: (r.v != null && isFinite(r.v)) ? Number(r.v) : null,
-        }))
-        .filter(r => Number.isFinite(r.t) && Number.isFinite(r.o) && Number.isFinite(r.h)
-                  && Number.isFinite(r.l) && Number.isFinite(r.c))
-        .sort((a,b) => a.t - b.t);
-      this.historyBars[range] = bars;
-      this.render();
-    }catch(e){
-      // Network hiccup — not fatal, that range just falls back to
-      // tick-bucketing (today's behavior) until a retry succeeds.
-      console.warn('[priceChart] hydrateRange error:', e);
-    }finally{
-      this._hydratingRanges.delete(range);
-    }
+    const symbol = (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || 'default';
+    await this.historyLoader.hydrateRange(range, force, symbol);
   }
 
-  // One-time backfill from the backend's short-term tick history, so a
-  // page load/reload doesn't have to sit and wait for the widest range
-  // (ALL) to fill in tick-by-tick. Call once, before the WS connection
-  // starts feeding addTick() — bails out quietly (chart just starts empty
-  // and builds up live, same as today) if the endpoint isn't there yet or
-  // errors, so this is safe to ship ahead of the backend work.
   async hydrate(url){
-    if(this._hydrateStarted) return; // only ever hydrate once, not "only if ticks are empty"
-    this._hydrateStarted = true;
-    try{
-      const res = await fetch(url);
-      if(!res.ok){ console.warn('[priceChart] hydrate failed:', res.status, res.statusText, url); return; }
-      const rows = await res.json(); // expected: [{t: epoch ms, p: price}, ...] oldest→newest
-      if(!Array.isArray(rows) || !rows.length) return;
-      const hydrated = rows
-        .map(r => ({ t: Number(r.t), p: parseFloat(r.p), vw: (r.vw != null && isFinite(r.vw)) ? Number(r.vw) : null }))
-        .filter(r => Number.isFinite(r.t) && Number.isFinite(r.p))
-        .sort((a,b) => a.t - b.t);
-      // If a live tick snuck in before or during this fetch (very common —
-      // the WS connection routinely beats this fetch to the punch), keep
-      // it — splice the backfill in front rather than overwriting.
-      this.ticks = hydrated.concat(this.ticks);
-      if(this.ticks.length > this.MAX_TICKS) this.ticks = this.ticks.slice(-this.MAX_TICKS);
-      this.render();
-    }catch(e){
-      // Network hiccup or endpoint not deployed yet — not fatal, chart
-      // just behaves exactly as it does today (builds up from mount).
-      console.warn('[priceChart] hydrate error:', e);
-    }
+    await this.historyLoader.hydrate(url);
   }
 
   _visibleTicks(){
     const cfg = PRICE_CHART_RANGES[this.settings.range] || PRICE_CHART_RANGES['5m'];
-    if(cfg.ms === Infinity) return this.ticks;
-    const cutoff = Date.now() - cfg.ms;
-    const idx = this.ticks.findIndex(tk => tk.t >= cutoff);
-    return idx < 0 ? [] : this.ticks.slice(idx);
+    return this.chartData.getVisibleTicks(cfg);
   }
 
   _aggregateCandles(ticks, bucketMs){
-    if(!ticks.length) return [];
-    const candles = [];
-    let cur = null;
-    for(const tk of ticks){
-      const bucketStart = Math.floor(tk.t / bucketMs) * bucketMs;
-      if(!cur || cur.t !== bucketStart){
-        if(cur) candles.push(cur);
-        cur = { t: bucketStart, o: tk.p, h: tk.p, l: tk.p, c: tk.p, vw: tk.vw };
-      } else {
-        cur.h = Math.max(cur.h, tk.p);
-        cur.l = Math.min(cur.l, tk.p);
-        cur.c = tk.p;
-        if(tk.vw != null) cur.vw = tk.vw;
-      }
-    }
-    if(cur) candles.push(cur);
-    return candles;
+    return this.chartData.aggregateCandles(ticks, bucketMs);
   }
 
   _sma(values, period){
-    const out = new Array(values.length).fill(null);
-    if(period <= 1 || values.length < period) return out;
-    let sum = 0;
-    for(let i = 0; i < values.length; i++){
-      sum += values[i];
-      if(i >= period) sum -= values[i - period];
-      if(i >= period - 1) out[i] = sum / period;
-    }
-    return out;
+    return this.indicatorEngine.sma(values, period);
   }
 
   _ema(values, period){
-    const out = new Array(values.length).fill(null);
-    if(period <= 1 || values.length < period) return out;
-    const k = 2 / (period + 1);
-    let prev = values.slice(0, period).reduce((a,b)=>a+b,0) / period;
-    out[period - 1] = prev;
-    for(let i = period; i < values.length; i++){
-      prev = values[i] * k + prev * (1 - k);
-      out[i] = prev;
-    }
-    return out;
+    return this.indicatorEngine.ema(values, period);
   }
 
   // ── DOM ──────────────────────────────────────────────
@@ -292,22 +193,24 @@ class PriceChartEngine {
     const rangeOpt = k => `<option value="${k}"${s.range===k?' selected':''}>${k.toUpperCase()}</option>`;
     const fieldOpt = (k,label) => `<option value="${k}"${s.ohlcField===k?' selected':''}>${label}</option>`;
     const typeBtn = (k,label) => `<button class="pc-btn pc-type-btn${s.type===k?' pc-active':''}" data-type="${k}">${label}</button>`;
+    const winBtn = w => `<button class="pc-win-btn" data-win="${w.key}">${w.key}</button>`;
     return `
-      <div class="pc-panel" style="background:var(--card-bg,#1E2028);border-radius:10px;padding:12px;margin-bottom:16px;">
+      <div class="pc-panel">
         <div class="pc-toolbar">
           <span class="pc-title">Live Price</span>
-          <span class="pc-spot-readout" id="pc-spot-readout"></span>
-          <span class="pc-spacer"></span>
-          <label class="pc-field">
-            Period
+          <label class="pc-field pc-interval-field">
             <select id="pc-range-select">${['1m','5m','15m','1h','1d','all'].map(rangeOpt).join('')}</select>
           </label>
+          ${typeBtn('line','Line')}
+          ${typeBtn('candle','Candles')}
+          <span class="pc-spacer"></span>
+          <button class="pc-btn pc-settings-btn" id="pc-settings-toggle" title="Chart settings">⚙</button>
+        </div>
+        <div class="pc-toolbar pc-toolbar-sub" id="pc-settings-row" style="display:none;">
           <label class="pc-field">
             Field
             <select id="pc-field-select">${fieldOpt('o','Open')}${fieldOpt('h','High')}${fieldOpt('l','Low')}${fieldOpt('c','Close')}</select>
           </label>
-          ${typeBtn('line','Line')}
-          ${typeBtn('candle','Candles')}
           <label class="pc-field">
             <input type="checkbox" id="pc-sma-toggle" ${s.smaPeriods.length?'checked':''}/> SMA
             <input type="number" id="pc-sma-period" value="${s.smaPeriods[0]||20}" min="2" max="500"/>
@@ -320,17 +223,37 @@ class PriceChartEngine {
             <input type="checkbox" id="pc-vwap-toggle" ${s.showVwap?'checked':''}/> VWAP
           </label>
           <label class="pc-field">
+            <input type="checkbox" id="pc-volume-toggle" ${s.showVolume?'checked':''}/> Volume
+          </label>
+          <label class="pc-field">
             <input type="checkbox" id="pc-grid-toggle" ${s.showGrid?'checked':''}/> Grid
           </label>
           <label class="pc-field">
             Color <input type="color" id="pc-line-color" value="${s.lineColor}"/>
           </label>
         </div>
+
+        <div class="pc-ohlc-readout" id="pc-ohlc-readout">
+          <span class="pc-ohlc-sym" id="pc-ohlc-sym">—</span>
+          <span class="pc-ohlc-item">O<b id="pc-ohlc-o">—</b></span>
+          <span class="pc-ohlc-item">H<b id="pc-ohlc-h">—</b></span>
+          <span class="pc-ohlc-item">L<b id="pc-ohlc-l">—</b></span>
+          <span class="pc-ohlc-item">C<b id="pc-ohlc-c">—</b></span>
+          <span class="pc-ohlc-chg" id="pc-ohlc-chg">—</span>
+        </div>
+
         <div class="pc-chart-wrap">
+          <div class="pc-watermark" id="pc-watermark">—</div>
           <canvas id="price-chart-canvas" style="width:100%;display:block;" height="220"></canvas>
+          <canvas id="price-chart-volume-canvas" style="width:100%;display:block;" height="48"></canvas>
           ${this._orderPanelHtml()}
         </div>
-        <div class="pc-footnote" id="pc-vwap-footnote">VWAP unavailable — this symbol's feed doesn't carry a volume field yet.</div>
+
+        <div class="pc-win-bar" id="pc-win-bar">
+          ${PRICE_CHART_WINDOWS.map(winBtn).join('')}
+          <span class="pc-spacer"></span>
+          <span class="pc-footnote" id="pc-vwap-footnote">VWAP unavailable — this symbol's feed doesn't carry a volume field yet.</span>
+        </div>
       </div>`;
   }
 
@@ -400,6 +323,51 @@ class PriceChartEngine {
     if(vwapToggle) vwapToggle.onchange = () => { this.settings.showVwap = vwapToggle.checked; this._saveSettings(); this.render(); };
     if(gridToggle) gridToggle.onchange = () => { this.settings.showGrid = gridToggle.checked; this._saveSettings(); this.render(); };
     if(lineColor) lineColor.onchange = () => { this.settings.lineColor = lineColor.value; this._saveSettings(); this.render(); };
+    const volumeToggle = $i('pc-volume-toggle');
+    if(volumeToggle) volumeToggle.onchange = () => { this.settings.showVolume = volumeToggle.checked; this._saveSettings(); this.render(); };
+
+    // Collapsed-by-default settings row (SMA/EMA/VWAP/grid/color) — the
+    // gear icon toggles it, keeping the main toolbar as uncluttered as a
+    // real trading platform's chart header instead of a wall of controls.
+    const settingsToggle = $i('pc-settings-toggle');
+    const settingsRow = $i('pc-settings-row');
+    if(settingsToggle && settingsRow){
+      settingsToggle.onclick = () => {
+        const open = settingsRow.style.display !== 'none';
+        settingsRow.style.display = open ? 'none' : 'flex';
+        settingsToggle.classList.toggle('pc-active', !open);
+      };
+    }
+
+    // ── Bottom window-shortcut bar (1D/5D/1M/3M/6M/1Y/5Y/ALL) ──
+    // Purely adjusts the visible zoom window, independent of the candle
+    // interval selected up top — same division of labor as a real chart's
+    // "5m" interval dropdown vs its date-range shortcuts underneath.
+    const winBar = $i('pc-win-bar');
+    if(winBar){
+      winBar.querySelectorAll('.pc-win-btn').forEach(b => {
+        b.onclick = () => {
+          winBar.querySelectorAll('.pc-win-btn').forEach(x => x.classList.remove('pc-active'));
+          b.classList.add('pc-active');
+          const w = PRICE_CHART_WINDOWS.find(x => x.key === b.dataset.win);
+          if(!w) return;
+          if(w.ms === Infinity){
+            this._zoomStart = null; this._zoomEnd = null;
+          } else {
+            const now = Date.now();
+            this._zoomStart = now - w.ms;
+            this._zoomEnd = now;
+          }
+          // Wide windows need real history beyond the tick buffer — make
+          // sure the 'all' bar set has been fetched so zooming out actually
+          // has data to show instead of empty space.
+          if(w.ms === Infinity || w.ms > (PRICE_CHART_RANGES[this.settings.range]||{}).ms){
+            this.hydrateRange('all');
+          }
+          this.render();
+        };
+      });
+    }
 
     // ── Zoom (wheel) / pan (drag) / reset (double-click) ──
     // Uses this._lastRenderCtx (set at the end of render()) to convert
@@ -432,35 +400,62 @@ class PriceChartEngine {
         this.render();
       };
 
-      let drag = null;
       canvas.onmousedown = (e) => {
         const rc = this._lastRenderCtx;
         if(!rc) return;
-        drag = {
+        this._drag = {
           startX: e.clientX,
           winStart: this._zoomStart != null ? this._zoomStart : rc.windowStart,
           winEnd: this._zoomEnd != null ? this._zoomEnd : rc.windowStart + rc.span,
         };
         canvas.style.cursor = 'grabbing';
       };
-      window.addEventListener('mousemove', (e) => {
-        if(!drag) return;
-        const rc = this._lastRenderCtx;
-        if(!rc) return;
-        const dxPx = e.clientX - drag.startX;
-        const spanMs = drag.winEnd - drag.winStart;
-        const dtMs = -(dxPx / rc.PW) * spanMs;
-        let newStart = drag.winStart + dtMs;
-        let newEnd = drag.winEnd + dtMs;
-        if(newStart < rc.dataMinT){ newStart = rc.dataMinT; newEnd = newStart + spanMs; }
-        if(newEnd > rc.dataMaxT){ newEnd = rc.dataMaxT; newStart = newEnd - spanMs; }
-        this._zoomStart = newStart; this._zoomEnd = newEnd;
-        this.render();
-      });
-      window.addEventListener('mouseup', () => {
-        if(drag){ drag = null; canvas.style.cursor = 'grab'; }
-      });
       canvas.ondblclick = () => { this._zoomStart = null; this._zoomEnd = null; this.render(); };
+
+      // Attached once per instance (not per canvas) — canvas gets looked
+      // up fresh each call so these keep working across a canvas swap
+      // instead of being re-added and piling up on window every rerender.
+      if(!this._panWired){
+        this._panWired = true;
+        window.addEventListener('mousemove', (e) => {
+          const drag = this._drag;
+          if(!drag) return;
+          const rc = this._lastRenderCtx;
+          if(!rc) return;
+          const dxPx = e.clientX - drag.startX;
+          const spanMs = drag.winEnd - drag.winStart;
+          const dtMs = -(dxPx / rc.PW) * spanMs;
+          let newStart = drag.winStart + dtMs;
+          let newEnd = drag.winEnd + dtMs;
+          if(newStart < rc.dataMinT){ newStart = rc.dataMinT; newEnd = newStart + spanMs; }
+          if(newEnd > rc.dataMaxT){ newEnd = rc.dataMaxT; newStart = newEnd - spanMs; }
+          this._zoomStart = newStart; this._zoomEnd = newEnd;
+          this.render();
+        });
+        window.addEventListener('mouseup', () => {
+          if(this._drag){
+            this._drag = null;
+            const liveCanvas = document.getElementById('price-chart-canvas');
+            if(liveCanvas) liveCanvas.style.cursor = 'grab';
+          }
+        });
+      }
+
+      // ── Crosshair ── separate from the drag/pan handler above: drag only
+      // starts once the mouse is actually held down (mousedown), so a plain
+      // hover here is unambiguous. Throttled to one render per animation
+      // frame so fast mouse movement doesn't queue up a redraw backlog.
+      canvas.onmousemove = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        this._hover = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        if(this._hoverRaf) return;
+        this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
+      };
+      canvas.onmouseleave = () => {
+        this._hover = null;
+        if(this._hoverRaf) return;
+        this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
+      };
     }
 
     this._attachOrderPanelHandlers();
@@ -577,54 +572,7 @@ class PriceChartEngine {
   // toReal() is the inverse, used by the wheel/drag handlers to convert a
   // mouse pixel position back into a real timestamp.
   _buildTimeMap(points, gapThreshold, gapCap){
-    if(!points.length){
-      return { toVirtual: t => t, toReal: v => v, virtualStart: 0, virtualEnd: 0 };
-    }
-    const segs = [{ real: points[0].t, virtual: 0, gapBefore: false }];
-    let vCursor = 0;
-    for(let i = 1; i < points.length; i++){
-      const delta = points[i].t - points[i - 1].t;
-      const isGap = delta > gapThreshold;
-      vCursor += isGap ? gapCap : delta;
-      segs.push({ real: points[i].t, virtual: vCursor, gapBefore: isGap });
-    }
-    const first = segs[0], last = segs[segs.length - 1];
-
-    const findSeg = (arr, key, val) => {
-      let lo = 0, hi = arr.length - 1;
-      while(hi - lo > 1){
-        const mid = (lo + hi) >> 1;
-        if(arr[mid][key] <= val) lo = mid; else hi = mid;
-      }
-      return [arr[lo], arr[hi]];
-    };
-
-    const toVirtual = (t) => {
-      if(t <= first.real) return first.virtual - (first.real - t);
-      if(t >= last.real) return last.virtual + (t - last.real);
-      const [a, b] = findSeg(segs, 'real', t);
-      const realDelta = b.real - a.real;
-      if(realDelta <= 0) return a.virtual;
-      return a.virtual + ((t - a.real) / realDelta) * (b.virtual - a.virtual);
-    };
-    const toReal = (v) => {
-      if(v <= first.virtual) return first.real - (first.virtual - v);
-      if(v >= last.virtual) return last.real + (v - last.virtual);
-      const [a, b] = findSeg(segs, 'virtual', v);
-      const virtDelta = b.virtual - a.virtual;
-      if(virtDelta <= 0) return a.real;
-      return a.real + ((v - a.virtual) / virtDelta) * (b.real - a.real);
-    };
-    // True when t falls strictly inside a compressed (non-trading) gap —
-    // i.e. between two consecutive points whose real spacing exceeded
-    // gapThreshold. Used to drop axis labels that would otherwise print a
-    // clock time (e.g. "7:00") for a stretch with no actual candles.
-    const isInGap = (t) => {
-      if(t <= first.real || t >= last.real) return false;
-      const [, b] = findSeg(segs, 'real', t);
-      return b.gapBefore === true;
-    };
-    return { toVirtual, toReal, isInGap, virtualStart: first.virtual, virtualEnd: last.virtual };
+    return this.chartRenderer.buildTimeMap(points, gapThreshold, gapCap);
   }
 
   _refreshToolbarState(){
@@ -639,16 +587,31 @@ class PriceChartEngine {
     const canvas = document.getElementById('price-chart-canvas');
     if(!canvas) return;
 
-    const readout = $i('pc-spot-readout');
-    const lastTick = this.ticks[this.ticks.length - 1];
-    if(readout) readout.textContent = lastTick ? fmtI(lastTick.p) : '—';
+    const lastTick = this.chartData.getLastTick();
     this._syncOrderPanel(lastTick);
+    const watermarkEl = $i('pc-watermark');
+    const symEl = $i('pc-ohlc-sym');
+    const symText = (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || '';
+    if(watermarkEl) watermarkEl.textContent = symText || '—';
+    if(symEl) symEl.textContent = symText || '—';
+
+    // Scrip switched — fetch that scrip's history for the active range.
+    // Previously nothing called hydrateRange() on a symbol change at all,
+    // so every scrip other than whichever was active when you last picked
+    // a range/window button just sat on tick-bucketed data with no real
+    // candle history.
+    if(symText && symText !== this._lastHydratedSymbol){
+      this._lastHydratedSymbol = symText;
+      this.hydrateRange(this.settings.range);
+    }
+
 
     const visible = this._visibleTicks();
     if(!visible.length){
-      const W0 = canvas.parentElement.clientWidth - 24, H0 = 220;
+      const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(160, canvas.parentElement.clientHeight);
       const ctx = sizeCanvasIfChanged(canvas, W0, H0);
       ctx.clearRect(0,0,W0,H0);
+      this._renderOhlcReadout(null, null);
       return;
     }
 
@@ -666,7 +629,7 @@ class PriceChartEngine {
       vwap: this.settings.vwapColor,
     };
 
-    const W0 = canvas.parentElement.clientWidth - 24, H0 = 220;
+    const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(160, canvas.parentElement.clientHeight);
     const ctx = sizeCanvasIfChanged(canvas, W0, H0);
     const W = W0, H = H0;
     const PAD = { l: 54, r: 12, t: 12, b: 22 };
@@ -675,7 +638,8 @@ class PriceChartEngine {
     ctx.clearRect(0,0,W,H);
 
     let series, values;
-    const bars = this.historyBars[this.settings.range];
+    const symbol = (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || '';
+    const bars = this.chartData.getHistoryBars(this.settings.range, symbol);
     const _now = Date.now();
     // Bounds of data actually available for this range — earliest real bar,
     // or earliest tick if no bars have loaded yet. Zoom/pan are clamped to
@@ -707,19 +671,18 @@ class PriceChartEngine {
       // than the last bar as one extra forming candle, so the chart stays
       // real-time instead of freezing at the last historical bar until the
       // next full re-hydrate.
-      const lastBarT = bars[bars.length - 1].t;
-      const liveTail = visible.filter(tk => tk.t > lastBarT);
-      const tailCandles = liveTail.length ? this._aggregateCandles(liveTail, cfg.bucketMs) : [];
-      let merged = bars.concat(tailCandles).filter(c => c.t >= windowStart && c.t <= windowEnd);
-      if(this.settings.type === 'candle'){
-        series = merged;
-      } else {
-        // Line mode reads t.p per point — alias the selected OHLC field
-        // (open/high/low/close) onto .p rather than rewriting the
-        // line-draw path below.
-        series = merged.map(c => ({ t: c.t, p: c[_fieldKey], vw: null }));
+      const merged = this.chartData.mergeLiveBars(bars, visible, cfg.bucketMs, windowStart, windowEnd);
+      if(merged){
+        if(this.settings.type === 'candle'){
+          series = merged;
+        } else {
+          // Line mode reads t.p per point — alias the selected OHLC field
+          // (open/high/low/close) onto .p rather than rewriting the
+          // line-draw path below.
+          series = merged.map(c => ({ t: c.t, p: c[_fieldKey], vw: null }));
+        }
+        values = merged.map(c=>c[_fieldKey]);
       }
-      values = merged.map(c=>c[_fieldKey]);
     } else if(this.settings.type === 'candle'){
       // bucketMs is now a real, fixed candle period (60s minimum across
       // every range) — always well above the feed's ~5-6s tick gap, so
@@ -733,8 +696,27 @@ class PriceChartEngine {
     }
     if(!series.length) return;
 
-    const yMin = Math.min(...(this.settings.type==='candle'?series.map(c=>c.l):values));
-    const yMax = Math.max(...(this.settings.type==='candle'?series.map(c=>c.h):values));
+    // ── OHLC readout ── defaults to the whole visible window's O/H/L and
+    // the latest close; overridden by whichever candle/point the crosshair
+    // is nearest to while hovering. hoverIdx is resolved properly once
+    // xScale exists further down — this first pass just seeds "no hover"
+    // so a mouseleave (this._hover === null) always falls back cleanly.
+    let hoverIdx = -1;
+
+    // Y-axis is fit to the most recent candles rather than the whole
+    // visible window — on wider ranges (e.g. a full session for '5m'),
+    // fitting to the entire window let big early-session swings dictate
+    // the scale, flattening small recent moves (a 4-5pt move became
+    // invisible against a 2000+pt session range). Fitting to a recent
+    // tail keeps the scale reactive to what's actually happening now;
+    // older candles outside this tail may draw clipped, which is the
+    // expected trade-off (same as a chart's "auto-scale visible" mode).
+    const FIT_LOOKBACK = 40;
+    const fitStart = Math.max(0, series.length - FIT_LOOKBACK);
+    const fitSeries = series.slice(fitStart);
+    const fitValues = values.slice(fitStart);
+    const yMin = Math.min(...(this.settings.type==='candle'?fitSeries.map(c=>c.l):fitValues));
+    const yMax = Math.max(...(this.settings.type==='candle'?fitSeries.map(c=>c.h):fitValues));
     const padY = (yMax - yMin) * 0.1 || 1;
     const y0 = yMin - padY, y1 = yMax + padY;
 
@@ -761,123 +743,26 @@ class PriceChartEngine {
     const xScale = t => PAD.l + ((tmap.toVirtual(t) - vWindowStart) / vSpan) * PW;
     const yScale = v => PAD.t + PH - ((v - y0)/(y1 - y0)) * PH;
 
-    // Expose the pixel<->time mapping this render used, so wheel/drag
-    // handlers (which run outside render()) can convert mouse coordinates
-    // without duplicating this logic.
-    this._lastRenderCtx = { windowStart, windowEnd, span, PAD, PW, dataMinT, dataMaxT, minSpan, tmap, vWindowStart, vSpan };
-
-    if(this.settings.showGrid){
-      ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
-      for(let g=0; g<=4; g++){
-        const gy = PAD.t + (g/4)*PH;
-        ctx.beginPath(); ctx.moveTo(PAD.l, gy); ctx.lineTo(W-PAD.r, gy); ctx.stroke();
-        const val = y1 - (g/4)*(y1-y0);
-        ctx.fillStyle = C.axisLbl; ctx.font = '10px Inter,sans-serif'; ctx.textAlign='right';
-        ctx.fillText(fmtI(val), PAD.l-6, gy+3);
-      }
+    // Use ChartRenderer for main rendering
+    const zoomState = { windowStart, windowEnd };
+    const dataBounds = { minT: dataMinT, maxT: dataMaxT };
+    const renderResult = this.chartRenderer.render(canvas, series, values, this.settings, cfg, zoomState, dataBounds);
+    
+    // Draw indicator overlays
+    if(renderResult && this.settings.smaPeriods.length){
+      this.chartRenderer.drawOverlay(renderResult.ctx, series, values, this.settings.smaPeriods, C.sma, renderResult.xScale, renderResult.yScale, this.indicatorEngine.sma.bind(this.indicatorEngine));
+    }
+    if(renderResult && this.settings.emaPeriods.length){
+      this.chartRenderer.drawOverlay(renderResult.ctx, series, values, this.settings.emaPeriods, C.ema, renderResult.xScale, renderResult.yScale, this.indicatorEngine.ema.bind(this.indicatorEngine));
     }
 
-    // ── X-AXIS TIME LABELS ──
-    // Snapped to round clock boundaries appropriate to the selected range
-    // (whole minutes for 5M, whole seconds only for 1M, etc.) instead of
-    // 6 raw fractions of the window — the old approach recomputed label
-    // timestamps as a fraction of "now" every frame, so on a live rolling
-    // window the seconds digits visibly ticked every single render even on
-    // the 5M/15M views, which read as "it's still on a 1-second timeframe".
-    const LABEL_STEP_MS = {
-      '1m': 10 * 60 * 1000,      // 1hr window   → every 10 min (~6 labels)
-      '5m': 60 * 60 * 1000,      // 6.25hr window → every 1 hr  (~6 labels)
-      '15m': 60 * 60 * 1000,     // 6.25hr window → every 1 hr  (~6 labels)
-      '1h': 6 * 60 * 60 * 1000,  // 32hr window   → every 6 hr  (~5 labels)
-      '1d': 14 * 24 * 60 * 60 * 1000, // 90d window → every 14 days (~6 labels)
-    };
-    let labelStep = LABEL_STEP_MS[this.settings.range];
-    if(!labelStep){ // 'all' — no fixed range, pick a step that yields ~6 labels
-      const niceSteps = [1000,5000,10000,30000,60000,300000,600000,900000,1800000,3600000,7200000,14400000,21600000,43200000,86400000,7*86400000,14*86400000,30*86400000,60*86400000,90*86400000,180*86400000,365*86400000,730*86400000,1825*86400000];
-      labelStep = niceSteps.find(s => s >= span/6) || niceSteps[niceSteps.length-1];
-    }
-    const showSeconds = labelStep < 60000;
-    const showDate = labelStep >= 24 * 60 * 60 * 1000; // 1D range, or 'all' zoomed out past a day
-    const fmtOpts = showDate
-      ? { month:'short', day:'numeric' }
-      : showSeconds
-        ? { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false }
-        : { hour:'2-digit', minute:'2-digit', hour12:false };
-    ctx.font = '10px Inter,sans-serif'; ctx.textAlign = 'center';
-    for(let t = Math.ceil(windowStart/labelStep)*labelStep; t <= windowEnd; t += labelStep){
-      if(tmap.isInGap(t)) continue;
-      const x = xScale(t);
-      if(x < PAD.l - 1 || x > W - PAD.r + 1) continue;
-      if(this.settings.showGrid){
-        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, PAD.t+PH); ctx.stroke();
-      }
-      const label = showDate ? new Date(t).toLocaleDateString([], fmtOpts) : new Date(t).toLocaleTimeString([], fmtOpts);
-      ctx.fillStyle = C.axisLbl;
-      ctx.fillText(label, x, H - 6);
-    }
-    ctx.textAlign = 'left';
-
-    if(this.settings.type === 'candle'){
-      // Candle width is derived from the bucket period against the
-      // (possibly gap-compressed) virtual span, not real span — within a
-      // session virtual delta == real delta == bucketMs, so this stays
-      // accurate whether or not the current window crosses a compressed
-      // overnight/weekend gap.
-      const bucketPx = cfg.bucketMs / vSpan * PW;
-      const cw = Math.max(2, bucketPx * 0.6);
-      series.forEach((c)=>{
-        const x = xScale(c.t);
-        const up = c.c >= c.o;
-        ctx.strokeStyle = ctx.fillStyle = up ? C.up : C.down;
-        ctx.beginPath(); ctx.moveTo(x, yScale(c.h)); ctx.lineTo(x, yScale(c.l)); ctx.stroke();
-        const bodyTop = yScale(Math.max(c.o,c.c)), bodyBot = yScale(Math.min(c.o,c.c));
-        ctx.fillRect(x-cw/2, bodyTop, cw, Math.max(1, bodyBot-bodyTop));
-      });
-    } else {
-      ctx.strokeStyle = C.line; ctx.lineWidth = 1.6;
-      if(this.settings.glow){ ctx.shadowColor = C.lineGlow; ctx.shadowBlur = 6; }
-      ctx.beginPath();
-      series.forEach((t,i)=>{ const x=xScale(t.t), y=yScale(t.p); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-
-    const drawOverlay = (periods, color, fn) => {
-      periods.forEach(p=>{
-        const out = fn(values, p);
-        ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.beginPath();
-        let started = false;
-        out.forEach((v,i)=>{
-          if(v==null) return;
-          const x = xScale(series[i].t), y = yScale(v);
-          if(!started){ ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
-        });
-        ctx.stroke();
-      });
-    };
-    if(this.settings.smaPeriods.length) drawOverlay(this.settings.smaPeriods, C.sma, this._sma.bind(this));
-    if(this.settings.emaPeriods.length) drawOverlay(this.settings.emaPeriods, C.ema, this._ema.bind(this));
-
-    // VWAP isn't a windowed function of `values` like SMA/EMA — each point
-    // already IS the session VWAP as of that tick (Value/Volume from
-    // allIndices), so just plot series[i].vw directly, dashed to
-    // distinguish it from the SMA/EMA overlays at a glance.
+    // VWAP overlay
     let lastVwap = null;
-    if(this.settings.showVwap){
-      ctx.save();
-      ctx.strokeStyle = C.vwap; ctx.lineWidth = 1.2; ctx.setLineDash([4,3]);
-      ctx.beginPath();
-      let started = false;
-      series.forEach((pt)=>{
-        if(pt.vw == null) return;
-        lastVwap = pt.vw;
-        const x = xScale(pt.t), y = yScale(pt.vw);
-        if(!started){ ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
-      });
-      ctx.stroke();
-      ctx.restore();
+    if(renderResult && this.settings.showVwap){
+      this.chartRenderer.drawVwap(renderResult.ctx, series, renderResult.xScale, renderResult.yScale, C.vwap);
+      lastVwap = series.find(pt => pt.vw != null)?.vw;
     }
+    
     const footnote = document.getElementById('pc-vwap-footnote');
     if(footnote){
       footnote.textContent = lastVwap != null
