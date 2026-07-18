@@ -1,0 +1,271 @@
+/* ═══════════════════════════════════════════════════════════════════
+   THEME.CSS — single source of truth for design tokens.
+
+   Import this FIRST in every HTML file, before styles.css / option-
+   chain.css / oi-dashboard.css / pc-order-panel.css:
+
+     <link rel="stylesheet" href="theme.css">
+     <link rel="stylesheet" href="styles.css">
+
+   Base palette taken from styles.css (the main dashboard). Where another
+   file used a genuinely different value for the "same" concept, that
+   value is preserved as a separate token (see MIGRATION MAP below) —
+   nothing here silently overwrites a color choice you made on purpose.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root{
+  /* ── Surfaces ── */
+  --bg-0:      #0F1117;   /* page background */
+  --bg-1:      #16181D;   /* panel / card background */
+  --bg-2:      #1E2028;   /* nested panel / input background */
+  --border:    rgba(255,255,255,0.08);
+  --border-2:  rgba(255,255,255,0.045); /* faint hairline, e.g. row dividers */
+
+  /* ── Text ── */
+  --text-primary:   #E9ECEF;
+  --text-secondary: #ADB5BD;
+  --text-muted:     #868E96;  /* distinct 4th tier — was styles.css's --muted, sits between secondary and tertiary */
+  --text-tertiary:  #6C757D;
+
+  /* ── Semantic status colors ──
+     Use --pos/--neg/--warn/--info everywhere instead of "green/red/
+     amber/blue" so a future palette swap (e.g. colorblind-safe mode)
+     is one edit here, not a find-replace across 4 files. */
+  --pos:      #20C997;  --pos-dim:  rgba(32,201,151,0.14);  --pos-strong: #12B886;
+  --neg:      #FF6B6B;  --neg-dim:  rgba(255,107,107,0.14); --neg-strong: #FA5252;
+  --warn:     #FFD43B;  --warn-dim: rgba(255,212,59,0.14);
+  --info:     #74C0FC;  --info-dim: rgba(116,192,252,0.14); --info-strong: #339AF0;
+
+  /* Alternate accent palette used by option-chain.css's "ledger" design
+     (call/put reads better than pos/neg in that context — kept as a
+     distinct, intentional pairing rather than merged into --pos/--neg). */
+  --call:      #35D0A5;  --call-dim: rgba(53,208,165,0.14);
+  --put:       #FF6E7F;  --put-dim:  rgba(255,110,127,0.14);
+  --spine:     #F4B740;  --spine-dim: rgba(244,183,64,0.12);
+
+  /* ── Radius scale ── */
+  --radius:    8px;   /* default/base radius — most common value, predates the sm/md/lg scale below */
+  --radius-sm: 5px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ── Spacing scale (add as you migrate hardcoded px gaps/padding) ── */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+
+  /* ── Typography ── */
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-sans:    'Inter', system-ui, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.16);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.30);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+
+  /* ── Z-index scale ──
+     Replaces the jump from 997 (top-bar) straight to 2147483xxx
+     (popover/toast/modal) with a real, extendable ramp. Sticky headers
+     stay under 1000; overlays get their own thousand-block so nothing
+     needs to reach for MAX_INT to "win". */
+  --z-sticky:   100;
+  --z-dropdown: 500;
+  --z-popover:  900;
+  --z-modal:    1000;
+  --z-toast:    1100;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LEGACY ALIASES — added 2026-07-17 after migration broke live charts.
+   Redeclares every pre-migration token name as a pointer to its new
+   equivalent, so anything NOT yet updated — especially JS that reads
+   colors via getComputedStyle(root).getPropertyValue('--green') for
+   canvas-drawn charts (butterfly OI flow, GEX, IV surface) — keeps
+   resolving to a real value instead of "". Safe to delete these once
+   every JS/HTML reference has been confirmed updated to the new names;
+   until then, both old and new names work simultaneously.
+   ═══════════════════════════════════════════════════════════════════ */
+:root{
+  /* styles.css old names */
+  --green: var(--pos); --green-dim: var(--pos-strong);
+  --red: var(--neg); --red-dim: var(--neg-strong);
+  --amber: var(--warn);
+  --blue: var(--info); --blue-dim: var(--info-strong);
+  --muted: var(--text-muted);
+  --bg0: var(--bg-0); --bg1: var(--bg-1); --bg2: var(--bg-2);
+  --txt: var(--text-primary); --txt2: var(--text-secondary); --txt3: var(--text-tertiary);
+  --mono: var(--font-mono); --sans: var(--font-sans); --display: var(--font-display);
+  /* .pt-* shadow-token names from styles.css */
+  --panel-bg: var(--bg-1);
+  --text: var(--text-primary);
+  --accent: var(--info);
+  /* option-chain.css old names (--blue here picks styles.css's shade —
+     if you specifically need option-chain's original #7C9CFF, use
+     --oc-blue directly, not this alias) */
+  --ink: var(--bg-0);
+  --panel: var(--bg-1);
+  --panel-2: var(--bg-2);
+  --row-alt: var(--bg-0);
+  --hairline: var(--border);
+  --hairline-2: var(--border-2);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-tertiary);
+  --r-sm: var(--radius-sm); --r-md: var(--radius-md); --r-lg: var(--radius-lg);
+  /* pc-order-panel.css old names (previously undeclared/fallback-only,
+     included here for completeness in case anything else referenced them) */
+  --border-color: var(--border);
+  --up-color: var(--pos);
+  --down-color: var(--neg);
+  /* --text-secondary needs no alias — pc-order-panel.css's old fallback
+     name already matches theme.css's real name exactly. */
+}
+   The repeated shapes across all 4 files — panel, pill, badge, toggle
+   group — collapsed into single definitions. Existing component classes
+   (.idx-pill, .oc-badge, .pt-mode-toggle, etc.) can extend these instead
+   of redeclaring background/border/radius/padding from scratch.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.u-panel{
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.u-pill{
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.u-badge{
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.u-badge::before{
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.u-badge-pos{ background: var(--pos-dim); color: var(--pos); }
+.u-badge-pos::before{ background: var(--pos); }
+.u-badge-neg{ background: var(--neg-dim); color: var(--neg); }
+.u-badge-neg::before{ background: var(--neg); }
+.u-badge-neutral{ background: rgba(255,255,255,.06); color: var(--text-secondary); }
+.u-badge-neutral::before{ background: var(--text-tertiary); }
+
+.u-toggle-group{
+  display: flex;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.u-toggle-btn{
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: .02em;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.u-toggle-btn:not(:last-child){ border-right: 1px solid var(--border); }
+.u-toggle-btn.active{ color: #fff; }
+
+.u-modal-overlay{
+  position: fixed; inset: 0;
+  z-index: var(--z-modal);
+  display: none;
+  background: rgba(0,0,0,.6);
+  align-items: center; justify-content: center;
+}
+.u-modal-overlay.open{ display: flex; }
+
+.u-toast{
+  max-width: 280px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 11px; line-height: 1.4;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MIGRATION MAP — old token/hardcoded-value → new token, per file.
+   Delete each file's own :root (or undeclared var() fallback) once its
+   rules are repointed at these names.
+   ═══════════════════════════════════════════════════════════════════
+
+   styles.css (:root)
+     --bg0/--bg1/--bg2        -> --bg-0/--bg-1/--bg-2        (same values, renamed)
+     --txt/--txt2/--txt3      -> --text-primary/-secondary/-tertiary
+     --green/--red/--amber/--blue -> --pos/--neg/--warn/--info
+     --radius-sm/md/lg        -> unchanged, now shared
+     --mono/--sans/--display  -> --font-mono/--font-sans/--font-display
+
+   styles.css (.pt-* paper-trading block — currently UNDECLARED fallbacks)
+     var(--panel-bg,#1a1d24)  -> var(--bg-1)              [was silently #1a1d24, not #16181D]
+     var(--text,#e8e8e8)      -> var(--text-primary)       [was silently #e8e8e8, not #E9ECEF]
+     var(--accent,#3b82f6)    -> var(--info)               [was silently #3b82f6, not #74C0FC]
+     var(--green,#2ecc71)     -> var(--pos)                [was silently #2ecc71, not #20C997]
+     var(--red,#e74c3c)       -> var(--neg)                [was silently #e74c3c, not #FF6B6B]
+     var(--muted,#888)        -> var(--text-tertiary)
+     var(--border,#333)       -> var(--border)
+
+   option-chain.css (:root)
+     --ink                    -> --bg-0                    [value differs from styles.css --bg0 — kept as override below if you want the ledger page darker, else point straight at --bg-0]
+     --panel/--panel-2        -> --bg-1 / --bg-2
+     --hairline/--hairline-2  -> --border / --border-2
+     --call/--put/--spine     -> unchanged (kept as intentional distinct accent set, see above)
+     --blue                   -> --info                    [was #7C9CFF, styles.css --blue is #74C0FC — pick one, see note below]
+     --text/--text-2/--text-3 -> --text-primary/-secondary/-tertiary
+     --r-sm/md/lg              -> --radius-sm/md/lg          [values already match]
+
+   oi-dashboard.css (:root)  ⚠️ highest risk — reused styles.css's exact
+   token names with different values. Intentionally isolated today
+   (standalone document, per your own comment), but repoint these if it
+   is ever merged or iframed into the same DOM as styles.css:
+     --bg0 (#0B0E14)          -> keep distinct, e.g. --oi-bg-0, OR accept --bg-0 (#0F1117) and re-check contrast
+     --green (#3FAE5A)        -> keep distinct, e.g. --oi-pos, OR accept --pos (#20C997)
+     --red (#C0392B)          -> keep distinct, e.g. --oi-neg, OR accept --neg (#FF6B6B)
+     --blue (#2F6FD6)         -> keep distinct, e.g. --oi-info, OR accept --info (#74C0FC)
+     (--border, --mono, --sans already match styles.css by coincidence — safe to just delete and let the shared theme.css value win)
+
+   pc-order-panel.css (no :root — all fallback-only)
+     var(--border-color,#2A2D38)   -> var(--border)         [fallback was a different gray, ~#2A2D38 vs rgba(255,255,255,.08)]
+     var(--up-color,#20C997)       -> var(--pos)             [fallback happened to already match --pos]
+     var(--down-color,#FF6B6B)     -> var(--neg)             [fallback happened to already match --neg]
+     var(--text-secondary,#8A8F98) -> var(--text-secondary)  [fallback was a different gray than the real --txt2 #ADB5BD]
+
+   NOTE ON --blue / --info CONFLICT:
+   Three different values currently claim to be "the accent blue":
+     styles.css:        #74C0FC
+     option-chain.css:  #7C9CFF
+     oi-dashboard.css:  #2F6FD6
+   These aren't automatically identical just because they're all "blue" —
+   pick one intentionally (probably styles.css's #74C0FC as the primary-
+   dashboard accent) rather than letting cascade order decide by accident.
+   ═══════════════════════════════════════════════════════════════════ */

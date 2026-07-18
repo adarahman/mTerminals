@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Option Chain — NIFTY</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="option-chain.css">
+</head>
+<body>
+
+<div class="oc-app">
+
+  <!-- ═══ LEDGER HEADER ═══ -->
+  <header class="oc-head">
+    <div class="oc-head-id">
+      <button class="oc-back" id="ocBack" title="Back to dashboard">←</button>
+      <div class="oc-head-text">
+        <div class="oc-eyebrow">Live Option Chain</div>
+        <h1 id="ocSymbol">NIFTY <span id="ocSpot">24,062.40</span> <span id="ocSpotChg" class="oc-spot-chg">+118.30 (0.49%)</span></h1>
+      </div>
+    </div>
+
+    <div class="oc-head-controls">
+      <label class="oc-field">
+        <span>Expiry</span>
+        <select id="ocExpiry"></select>
+      </label>
+      <div class="oc-toggle-group" id="ocRangeGroup" data-active="3">
+        <span class="oc-toggle-label">Strikes</span>
+        <button data-val="3">±3</button>
+        <button data-val="5">±5</button>
+        <button data-val="10">±10</button>
+        <button data-val="9999">All</button>
+      </div>
+      <div class="oc-toggle-group" id="ocVelGroup" data-active="5">
+        <span class="oc-toggle-label">Velocity</span>
+        <button data-val="5">5m</button>
+        <button data-val="15">15m</button>
+        <button data-val="30">30m</button>
+      </div>
+      <button class="oc-greeks-btn" id="ocGreeksBtn">
+        <span class="oc-greeks-icon">▸</span> Greeks
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ SUMMARY LEDGER — the read before the read ═══ -->
+  <div class="oc-summary">
+
+    <div class="oc-sum-card">
+      <div class="oc-sum-title">OI summary</div>
+      <div class="oc-skew-bar" id="ocSkewBar">
+        <div class="oc-skew-fill oc-skew-fill-pe chg-green" id="ocSkewPe"></div>
+        <div class="oc-skew-mid"></div>
+        <div class="oc-skew-fill oc-skew-fill-ce chg-red" id="ocSkewCe"></div>
+      </div>
+      <div class="oc-sum-readout">
+        <span class="oc-sum-num chg-green" id="ocTotalPe">293.51L</span>
+        <span class="oc-sum-vs">PE</span>
+        <span class="oc-sum-pill" id="ocTotalPcr">PCR 1.08</span>
+        <span class="oc-sum-vs">CE</span>
+        <span class="oc-sum-num chg-red" id="ocTotalCe">270.64L</span>
+      </div>
+      <div class="oc-sum-net" id="ocNetOi">Net (PE−CE) <b>+0L</b></div>
+    </div>
+
+    <div class="oc-sum-card">
+      <div class="oc-sum-title">Chg OI summary</div>
+      <div class="oc-skew-bar" id="ocChgSkewBar">
+        <div class="oc-skew-fill oc-skew-fill-pe chg-green" id="ocChgSkewPe"></div>
+        <div class="oc-skew-mid"></div>
+        <div class="oc-skew-fill oc-skew-fill-ce chg-red" id="ocChgSkewCe"></div>
+      </div>
+      <div class="oc-sum-readout">
+        <span class="oc-sum-num chg-green" id="ocChgTotalPe">+57.43L</span>
+        <span class="oc-sum-vs">PE</span>
+        <span class="oc-sum-pill" id="ocChgPcrShift">PCR Δ +0.04</span>
+        <span class="oc-sum-vs">CE</span>
+        <span class="oc-sum-num chg-red" id="ocChgTotalCe">+17.59L</span>
+      </div>
+      <div class="oc-sum-net" id="ocNetChgOi">Net (PE−CE) <b>+0L</b></div>
+    </div>
+
+    <div class="oc-sum-card">
+      <div class="oc-sum-title">dOI <span class="oc-sum-title-sub">5 · 15 · 30m</span></div>
+      <div class="oc-doi-grid" id="ocDoiGrid"><!-- 3 window columns injected, each with PE/CE values + net --></div>
+    </div>
+
+    <div class="oc-sum-card">
+      <div class="oc-sum-title">Volume <span class="oc-sum-title-sub">& Vol/OI</span></div>
+      <div class="oc-vratio-rows" id="ocVRatio"><!-- CE/PE volume + ratio rows injected --></div>
+    </div>
+
+  </div>
+
+  <!-- ═══ THE LEDGER ═══ -->
+  <div class="oc-ledger">
+    <div class="oc-ledger-scroll" id="ocScroll">
+      <table class="oc-table" id="ocTable">
+        <colgroup>
+          <col class="c-iv"><col class="c-vol"><col class="c-ltp"><col class="c-ltp">
+          <col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-vel"><col class="c-sig">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>IV <small>PE / CE</small></th>
+            <th>Volume <small>PE / CE</small></th>
+            <th class="oc-call-c">CE LTP <small id="ceLtpSub">chg</small></th>
+            <th class="oc-put-c oc-ltp-h-adjacent">PE LTP <small id="peLtpSub">chg</small></th>
+            <th class="oc-strike-h">Strike <small>PCR skew</small></th>
+            <th>Open Int <small>PE / CE</small></th>
+            <th>Chg OI <small>PE / CE</small></th>
+            <th>OI Velocity <small id="ocVelLabel">5 · 15 · 30m</small></th>
+            <th class="oc-sig-h">Signal <small>composite</small></th>
+          </tr>
+        </thead>
+        <tbody id="ocBody"><!-- rows injected --></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer class="oc-legend">
+    <span><b>IV</b> implied vol vs prior snapshot</span>
+    <span><b>Open Int bar</b> length = current OI · dashed = fresh buildup · hollow = unwind</span>
+    <span><b>Skew bar</b> put OI share (left) vs call OI share (right) of that strike</span>
+    <span><b>OI Vel</b> three-bar trend across 5 / 15 / 30 min windows</span>
+    <span><b>Signal</b> combined CE + PE buildup / unwind read</span>
+    <span class="oc-legend-atm">◆ amber spine = ATM strike</span>
+  </footer>
+
+</div>
+
+<!-- Strike detail drawer — row click opens strike summary, strike-cell
+     click opens Bid/Ask depth. Same drawer element, content swapped by
+     openDrawer(strike, mode) in option-chain.js. -->
+<div class="oc-drawer" id="ocDrawer">
+  <div class="oc-drawer-panel" id="ocDrawerPanel"></div>
+</div>
+
+<!-- Buy/Sell quick-order modal, opened by clicking a CE/PE LTP cell -->
+<div class="oc-trade-modal" id="ocTradeModal">
+  <div class="oc-trade-panel" id="ocTradePanel"></div>
+</div>
+
+<script src="option-chain.js"></script>
+</body>
+</html>

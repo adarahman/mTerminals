@@ -1,0 +1,508 @@
+/* ════════════════════════════════════════════════════════════════════
+   OPTION CHAIN — "LEDGER" DESIGN SYSTEM
+   A trading ledger, not a spreadsheet: the strike column reads as a
+   bound spine down the center of the page, calls and puts fan out from
+   it like facing pages, and every derived number (skew, velocity) gets
+   a tiny inline chart instead of a bare figure so the read is felt,
+   not just parsed.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Requires theme.css loaded first. --call/--put/--spine and their -dim
+   variants, plus --font-display/--font-sans/--font-mono, now come from
+   theme.css (values were already identical here, so nothing changes
+   visually — this just removes the duplicate declaration).
+
+   Everything below is kept LOCAL and --oc-prefixed because the value is
+   deliberately different from theme.css's equivalent (a slightly darker,
+   higher-contrast palette for this page's "ledger" look) — merging these
+   into the shared tokens would be a real visual change, not just a
+   rename, so that's left as a deliberate future decision rather than
+   done silently here. */
+:root{
+  --oc-ink:        #0A0C11;   /* vs theme --bg-0 #0F1117 */
+  --oc-panel:      #12151C;   /* vs theme --bg-1 #16181D */
+  --oc-panel-2:    #171B24;   /* vs theme --bg-2 #1E2028 */
+  --oc-row-alt:    #0D1017;
+  --oc-hairline:   rgba(255,255,255,0.07); /* vs theme --border 0.08 */
+  /* hairline-2 (0.045) matched theme's --border-2 exactly -> removed, uses theme.css directly */
+
+  --oc-blue:       #7C9CFF;   /* vs theme --info #74C0FC — a 3rd "blue" candidate, see theme.css migration notes */
+
+  --oc-text:       #EAEDF3;   /* vs theme --text-primary #E9ECEF */
+  --oc-text-2:     #97A0B3;   /* vs theme --text-secondary #ADB5BD */
+  --oc-text-3:     #5C6478;   /* vs theme --text-tertiary #6C757D */
+
+  --oc-r-sm: 6px; --oc-r-md: 10px; --oc-r-lg: 16px; /* vs theme --radius-sm/md/lg 5/10/14px */
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+html{font-size:16px;}
+body{
+  background:
+    radial-gradient(1200px 500px at 15% -10%, rgba(124,156,255,0.05), transparent 60%),
+    radial-gradient(1200px 500px at 90% 0%, rgba(244,183,64,0.04), transparent 55%),
+    var(--oc-ink);
+  color:var(--oc-text);
+  font-family:var(--font-sans);
+  min-height:100vh;
+  font-size:14px;
+  line-height:1.4;
+}
+
+.oc-app{max-width:1520px;margin:0 auto;padding:22px 24px 40px;}
+
+/* ── HEADER ── */
+.oc-head{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:20px;flex-wrap:wrap;
+  margin-bottom:18px;
+}
+.oc-head-id{display:flex;align-items:flex-start;gap:14px;}
+.oc-back{
+  width:34px;height:34px;border-radius:50%;
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);
+  color:var(--oc-text-2);font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,color .15s,transform .1s;
+  flex-shrink:0;margin-top:2px;
+}
+.oc-back:hover{border-color:var(--oc-blue);color:var(--oc-text);transform:translateX(-2px);}
+.oc-eyebrow{
+  font-family:var(--font-mono);font-size:10.5px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--oc-text-3);
+  display:flex;align-items:center;gap:6px;margin-bottom:4px;
+}
+.oc-eyebrow::before{
+  content:'';width:6px;height:6px;border-radius:50%;background:var(--call);
+  box-shadow:0 0 8px var(--call);
+  animation:oc-pulse 1.8s ease-in-out infinite;
+}
+@keyframes oc-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+.oc-head h1{
+  font-family:var(--font-display);font-weight:700;font-size:1.7rem;
+  letter-spacing:-0.01em;color:var(--oc-text);
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+}
+#ocSpot{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+.oc-spot-chg{
+  font-family:var(--font-mono);font-size:0.95rem;font-weight:600;
+  color:var(--call);
+}
+.oc-spot-chg.down{color:var(--put);}
+
+.oc-head-controls{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.oc-field{display:flex;flex-direction:column;gap:3px;}
+.oc-field span{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--oc-text-3);}
+.oc-field select{
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);color:var(--oc-text);
+  font-family:var(--font-mono);font-size:12.5px;font-weight:600;
+  padding:7px 10px;border-radius:var(--oc-r-sm);cursor:pointer;
+  min-width:150px;
+}
+.oc-field select:focus{outline:none;border-color:var(--oc-blue);}
+
+.oc-toggle-group{
+  display:flex;align-items:center;gap:6px;
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);
+  border-radius:999px;padding:4px 6px 4px 12px;
+}
+.oc-toggle-label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--oc-text-3);margin-right:2px;}
+.oc-toggle-group button{
+  background:transparent;border:none;color:var(--oc-text-2);
+  font-family:var(--font-mono);font-size:12px;font-weight:600;
+  padding:5px 10px;border-radius:999px;cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.oc-toggle-group button:hover{color:var(--oc-text);}
+.oc-toggle-group button.active{background:var(--oc-blue);color:#0A0C11;}
+
+.oc-greeks-btn{
+  display:flex;align-items:center;gap:6px;
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);color:var(--oc-text);
+  font-family:var(--font-sans);font-size:12.5px;font-weight:600;
+  padding:9px 14px;border-radius:999px;cursor:pointer;
+  transition:border-color .15s,background .15s;
+}
+.oc-greeks-btn:hover{border-color:var(--oc-blue);}
+.oc-greeks-btn.active{background:var(--oc-blue);color:#0A0C11;border-color:var(--oc-blue);}
+.oc-greeks-icon{display:inline-block;transition:transform .18s;font-size:10px;}
+.oc-greeks-btn.active .oc-greeks-icon{transform:rotate(90deg);}
+
+/* ── SUMMARY LEDGER (signature element #1) ──
+   Four cards read left-to-right as one sentence: how much OI sits where,
+   how much of it moved today, whether that movement is fresh (5/15/30m),
+   and whether volume backs it up. */
+.oc-summary{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;
+}
+@media (min-width:900px){
+  .oc-summary{grid-template-columns:repeat(4,1fr);}
+}
+.oc-sum-card{
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);
+  border-radius:var(--oc-r-md);padding:12px 16px;
+  display:flex;flex-direction:column;gap:9px;justify-content:center;
+  min-height:76px;
+}
+.oc-sum-title{
+  font-family:var(--font-display);font-weight:600;font-size:11.5px;color:var(--oc-text-2);
+  text-transform:uppercase;letter-spacing:.04em;
+}
+.oc-sum-title-sub{font-family:var(--font-mono);font-weight:500;color:var(--oc-text-3);text-transform:none;letter-spacing:0;margin-left:4px;}
+
+.oc-skew-bar{
+  position:relative;height:9px;border-radius:999px;
+  background:var(--oc-row-alt);overflow:hidden;
+  display:flex;align-items:center;
+}
+.oc-skew-fill{height:100%;transition:width .4s ease;}
+.oc-skew-fill-pe{margin-left:auto;}
+.oc-skew-fill-ce{}
+.oc-skew-fill-pe.chg-green{background:linear-gradient(90deg,transparent,var(--call));}
+.oc-skew-fill-pe.chg-red{background:linear-gradient(90deg,transparent,var(--put));}
+.oc-skew-fill-ce.chg-red{background:linear-gradient(90deg,var(--put),transparent);}
+.oc-skew-fill-ce.chg-green{background:linear-gradient(90deg,var(--call),transparent);}
+.oc-skew-mid{width:2px;height:15px;background:var(--spine);flex-shrink:0;box-shadow:0 0 6px var(--spine);}
+
+.oc-sum-readout{display:flex;align-items:baseline;gap:7px;white-space:nowrap;font-size:0;}
+.oc-sum-num{font-family:var(--font-mono);font-weight:700;font-size:12.5px;}
+.chg-red{color:var(--put);}
+.chg-green{color:var(--call);}
+.oc-put-c{color:var(--put);}
+.oc-call-c{color:var(--call);}
+.oc-sum-vs{font-size:9.5px;color:var(--oc-text-3);text-transform:uppercase;letter-spacing:.06em;}
+.oc-sum-pill{
+  font-family:var(--font-mono);font-weight:700;font-size:11px;color:var(--spine);
+  background:var(--spine-dim);padding:2px 8px;border-radius:999px;
+}
+
+/* Net readout — one line under OI summary / Chg OI summary cards giving
+   the single signed PE−CE figure directly, instead of making the reader
+   subtract the two numbers above it themselves. */
+.oc-sum-net{
+  font-family:var(--font-mono);font-size:10.5px;color:var(--oc-text-3);
+  padding-top:2px;border-top:1px solid var(--border-2);
+}
+.oc-sum-net b{font-weight:700;}
+.oc-sum-net.up b{color:var(--call);}
+.oc-sum-net.down b{color:var(--put);}
+
+/* dOI card — one column per window, PE above / CE below, bar length =
+   magnitude relative to the largest of the three windows so a trader can
+   see at a glance whether buildup is accelerating (bars growing 5→30) or
+   fading (bars shrinking). */
+.oc-doi-grid{display:flex;gap:10px;align-items:flex-end;height:auto;}
+.oc-doi-col{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;justify-content:flex-end;}
+.oc-doi-val{font-family:var(--font-mono);font-size:11.5px;font-weight:700;line-height:1.1;}
+.oc-doi-val.chg-red{color:var(--put);}
+.oc-doi-val.chg-green{color:var(--call);}
+.oc-doi-bars{display:flex;flex-direction:column;gap:2px;align-items:center;flex:1;justify-content:flex-end;height:40px;}
+.oc-doi-bar{width:16px;border-radius:2px 2px 0 0;min-height:2px;}
+.oc-doi-bar.chg-red{background:var(--put);}
+.oc-doi-bar.chg-green{background:var(--call);}
+.oc-doi-lbl{font-family:var(--font-mono);font-size:10.5px;color:var(--oc-text-3);margin-top:1px;}
+.oc-doi-net{font-family:var(--font-mono);font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;margin-top:2px;}
+.oc-doi-net.up{color:var(--call);background:var(--call-dim);}
+.oc-doi-net.down{color:var(--put);background:var(--put-dim);}
+.oc-doi-net.flat{color:var(--oc-text-3);background:var(--oc-row-alt);}
+
+/* Volume/OI ratio card — two compact rows, CE above PE, each a small
+   filled track (ratio capped visually at 3x) plus the exact number. */
+.oc-vratio-rows{display:flex;flex-direction:column;gap:6px;}
+.oc-vratio-row{display:flex;align-items:center;gap:8px;}
+.oc-vratio-side{width:20px;font-family:var(--font-mono);font-size:10px;font-weight:700;}
+.oc-vratio-num{font-family:var(--font-mono);font-size:11px;font-weight:600;min-width:44px;}
+.oc-vratio-track{flex:1;height:6px;border-radius:3px;background:var(--oc-row-alt);overflow:hidden;}
+.oc-vratio-fill{height:100%;border-radius:3px;}
+.oc-vratio-fill.ce{background:var(--call);}
+.oc-vratio-fill.pe{background:var(--put);}
+.oc-vratio-val{font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--oc-text);min-width:34px;text-align:right;}
+
+/* ── THE LEDGER TABLE ── */
+.oc-ledger{
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);
+  border-radius:var(--oc-r-lg);overflow:hidden;
+  box-shadow:0 20px 50px -20px rgba(0,0,0,.6);
+}
+.oc-ledger-scroll{max-height:640px;overflow-y:auto;overflow-x:auto;}
+.oc-ledger-scroll::-webkit-scrollbar{width:9px;height:9px;}
+.oc-ledger-scroll::-webkit-scrollbar-thumb{background:#262b38;border-radius:8px;}
+.oc-ledger-scroll::-webkit-scrollbar-track{background:transparent;}
+
+.oc-table{width:100%;border-collapse:separate;border-spacing:0;min-width:1260px;}
+
+/* c-ltp is shared by BOTH the PE and CE LTP <col> elements, so its width
+   counts twice toward the row total — that's the arithmetic that has to
+   add up to ~100%, not the number of CSS rules below. */
+.c-iv{width:8%;} .c-vol{width:9%;} .c-ltp{width:12%;}
+.c-strike{width:14%;} .c-oi{width:11%;} .c-chg{width:12%;}
+.c-vel{width:10%;} .c-sig{width:10%;}
+/* iv8 + vol9 + ltp12*2 + strike14 + oi11 + chg12 + vel10 + sig10 = 98% */
+
+/* head */
+thead th{
+  position:sticky;top:0;z-index:3;background:var(--oc-panel-2);
+  font-family:var(--font-sans);font-weight:600;font-size:10.5px;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--oc-text-2);
+  padding:9px 12px;text-align:right;border-bottom:1px solid var(--oc-hairline);
+  white-space:nowrap;
+}
+thead th small{display:block;font-size:9px;font-weight:500;letter-spacing:.03em;color:var(--oc-text-3);text-transform:none;margin-top:2px;}
+.oc-strike-h{text-align:center !important;color:var(--spine);}
+.oc-sig-h{text-align:left;}
+thead th:first-child, thead th:nth-child(2){text-align:right;}
+
+/* body cells */
+tbody td{
+  padding:9px 12px;border-bottom:1px solid var(--border-2);
+  font-family:var(--font-mono);font-size:12.5px;text-align:right;
+  vertical-align:middle;
+}
+tbody tr{background:var(--oc-panel);transition:background .12s;}
+tbody tr:nth-child(even){background:var(--oc-row-alt);}
+tbody tr:hover{background:#191E29;}
+tbody tr:last-child td{border-bottom:none;}
+
+.oc-stack{display:flex;flex-direction:column;gap:2px;align-items:flex-end;line-height:1.35;}
+.oc-stack .pe{color:var(--put);}
+.oc-stack .ce{color:var(--call);}
+.oc-mini-lbl{font-size:8.5px;color:var(--oc-text-3);font-family:var(--font-sans);letter-spacing:.04em;margin-right:3px;}
+
+/* LTP columns — both now sit left of the strike spine (CE outer, PE
+   inner). Only the inner one touching the spine needs a divider
+   border; alignment stays right (toward the spine) like every other
+   left-hand column, no left/right text-align split needed anymore. */
+.oc-ltp-cell{text-align:right;cursor:pointer;}
+.oc-ltp-cell:hover{background:rgba(124,156,255,0.07);}
+.oc-ltp-main{font-weight:700;font-size:13.5px;display:block;}
+.oc-ltp-sub{font-size:10.5px;color:var(--oc-text-3);display:block;margin-top:1px;}
+.oc-ltp-sub.up{color:var(--call);} .oc-ltp-sub.down{color:var(--put);}
+td.oc-ltp-adjacent{border-right:1px solid var(--border-2);}
+th.oc-ltp-h-adjacent{border-right:1px solid var(--border-2);}
+
+/* ── STRIKE SPINE (signature element #2) ── */
+td.oc-strike-cell{
+  position:relative;text-align:center;
+  background:var(--oc-panel-2);
+  border-left:1px solid var(--oc-hairline);
+  border-right:1px solid var(--oc-hairline);
+  padding:6px 10px;
+}
+.oc-strike-val{
+  font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--oc-text);
+  display:block;
+}
+.oc-strike-div{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-left:5px;vertical-align:middle;
+}
+.oc-strike-div.div-red{background:var(--put);box-shadow:0 0 6px var(--put);}
+.oc-strike-div.div-green{background:var(--call);box-shadow:0 0 6px var(--call);}
+.oc-strike-gauge{
+  position:relative;height:6px;border-radius:999px;background:#0A0C11;
+  margin:5px auto 4px;width:100%;max-width:120px;overflow:hidden;
+  display:flex;align-items:center;
+}
+.oc-strike-gauge-pe{height:100%;background:var(--put);margin-left:auto;}
+.oc-strike-gauge-ce{height:100%;background:var(--call);}
+.oc-strike-pcr{font-size:9.5px;color:var(--oc-text-3);font-family:var(--font-mono);}
+.oc-strike-pcr b{color:var(--oc-text-2);}
+
+tr.oc-atm td.oc-strike-cell{background:var(--spine-dim);}
+tr.oc-atm td.oc-strike-cell::before,
+tr.oc-atm td.oc-strike-cell::after{
+  content:'';position:absolute;top:0;bottom:0;width:2px;background:var(--spine);
+  box-shadow:0 0 8px var(--spine);
+}
+tr.oc-atm td.oc-strike-cell::before{left:0;}
+tr.oc-atm td.oc-strike-cell::after{right:0;}
+tr.oc-atm .oc-strike-val{color:var(--spine);}
+tr.oc-atm{background:linear-gradient(90deg,transparent,rgba(244,183,64,0.05) 45%,rgba(244,183,64,0.05) 55%,transparent);}
+
+/* OI bars — anchored inward toward the spine so a heavy strike visibly
+   "leans in" from both sides, the same fan-from-center language as the
+   strike gauge above. */
+/* NOTE: display:flex must NOT go on the <td> itself (.oc-oi-cell /
+   .oc-chg-cell / .oc-vel-cell). A flexed <td> stops participating in the
+   table's column layout like a normal table-cell, so it ignores the
+   <col> width from the colgroup and can bleed/wrap into neighboring
+   columns once the row gets tall (Greeks row, trade-modal changes,
+   etc). That was the "Chg OI wrapped below Open Int" bug. Flex only the
+   inner row divs — same pattern already used by .oc-stack — and stack
+   the two rows with margin instead of a flex gap on the cell. */
+.oc-oi-cell{vertical-align:middle;}
+.oc-oi-row{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+.oc-oi-row + .oc-oi-row{margin-top:4px;}
+.oc-oi-bar-track{flex:1;max-width:64px;height:5px;border-radius:3px;background:#0A0C11;overflow:hidden;}
+/* position:relative + overflow:hidden turns the fill into a clipped
+   positioning context so the embedded change indicator below can be
+   anchored to its trailing edge without ever spilling past the fill's
+   own (current-OI-driven) width, and without altering that width. */
+.oc-oi-bar-fill{height:100%;border-radius:3px;position:relative;overflow:hidden;}
+.oc-oi-bar-fill.chg-red{background:var(--put);}
+.oc-oi-bar-fill.chg-green{background:var(--call);}
+.oc-oi-val{min-width:52px;text-align:right;font-size:12px;}
+.oc-oi-val.chg-red{color:var(--put);}
+.oc-oi-val.chg-green{color:var(--call);}
+
+/* Embedded OI-change indicator — lives INSIDE the fill (never changes
+   total bar length) and is drawn as a translucent pattern rather than a
+   solid block so the base CE/PE color underneath always stays readable.
+   oi-added: dashed/hatched strokes = fresh buildup.
+   oi-reduced: darker hatch that reads as a "cut-out"/hollow notch =
+   unwind/covering. Same rule applied to both CE and PE bars. */
+.oc-oi-bar-indicator{position:absolute;top:0;right:0;height:100%;pointer-events:auto;}
+.oc-oi-bar-indicator.oi-added{
+  background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.6) 0 2px, transparent 2px 5px);
+}
+.oc-oi-bar-indicator.oi-reduced{
+  background-image:repeating-linear-gradient(135deg, rgba(10,12,17,.75) 0 2px, transparent 2px 5px);
+  box-shadow:inset 1px 0 0 rgba(10,12,17,.55);
+}
+
+.oc-chg-cell{vertical-align:middle;}
+.oc-chg-row{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+.oc-chg-row + .oc-chg-row{margin-top:4px;}
+.oc-chg-bar-track{flex:1;max-width:64px;height:5px;border-radius:3px;background:#0A0C11;overflow:hidden;}
+.oc-chg-bar-fill{height:100%;border-radius:3px;}
+.oc-chg-bar-fill.chg-red{background:var(--put);}
+.oc-chg-bar-fill.chg-green{background:var(--call);}
+.oc-chg-val{min-width:56px;text-align:right;font-size:12px;font-weight:600;}
+.oc-chg-val.chg-red{color:var(--put);}
+.oc-chg-val.chg-green{color:var(--call);}
+
+/* OI Velocity — tri-bar sparkline (signature element #3): three bars per
+   side for the 5/15/30m windows, height = magnitude, color = direction.
+   Reads as a tiny bar chart rather than an arrow glyph. */
+.oc-vel-cell{vertical-align:middle;text-align:right;}
+.oc-vel-row{display:flex;align-items:center;gap:5px;justify-content:flex-end;}
+.oc-vel-row + .oc-vel-row{margin-top:5px;}
+.oc-vel-bars{display:flex;align-items:flex-end;gap:2px;height:16px;}
+.oc-vel-bars i{display:block;width:4px;border-radius:1px;background:var(--oc-text-3);min-height:2px;}
+.oc-vel-bars i.up{background:var(--call);}
+.oc-vel-bars i.down{background:var(--put);}
+.oc-vel-num{font-size:10.5px;color:var(--oc-text-3);min-width:38px;text-align:right;}
+
+/* Signal badges */
+.oc-sig-cell{text-align:left;}
+.oc-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:var(--font-sans);font-size:10.5px;font-weight:700;letter-spacing:.02em;
+  padding:4px 10px;border-radius:999px;white-space:nowrap;
+}
+.oc-badge::before{content:'';width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.oc-badge-bullish{background:var(--call-dim);color:var(--call);}
+.oc-badge-bullish::before{background:var(--call);}
+.oc-badge-strong-bullish{background:rgba(53,208,165,.22);color:var(--call);box-shadow:inset 0 0 0 1px rgba(53,208,165,.35);}
+.oc-badge-strong-bullish::before{background:var(--call);box-shadow:0 0 6px var(--call);}
+.oc-badge-bearish{background:var(--put-dim);color:var(--put);}
+.oc-badge-bearish::before{background:var(--put);}
+.oc-badge-strong-bearish{background:rgba(255,110,127,.22);color:var(--put);box-shadow:inset 0 0 0 1px rgba(255,110,127,.35);}
+.oc-badge-strong-bearish::before{background:var(--put);box-shadow:0 0 6px var(--put);}
+.oc-badge-mixed{background:var(--spine-dim);color:var(--spine);}
+.oc-badge-mixed::before{background:var(--spine);}
+.oc-badge-neutral{background:rgba(255,255,255,.06);color:var(--oc-text-2);}
+.oc-badge-neutral::before{background:var(--oc-text-3);}
+
+/* row selection state (click strike -> drawer) */
+tr.oc-row{cursor:pointer;}
+tr.oc-row.oc-selected{outline:1px solid var(--oc-blue);outline-offset:-1px;}
+
+/* ── LEGEND ── */
+.oc-legend{
+  display:flex;flex-wrap:wrap;gap:18px;
+  margin-top:14px;padding:0 4px;
+  font-size:11px;color:var(--oc-text-3);
+}
+.oc-legend b{color:var(--oc-text-2);font-weight:600;}
+.oc-legend-atm{color:var(--spine);margin-left:auto;}
+
+/* ── DRAWER (Greeks / depth on strike click) ── */
+.oc-drawer{
+  position:fixed;inset:0;background:rgba(6,7,10,.6);backdrop-filter:blur(2px);
+  display:none;align-items:flex-end;justify-content:center;z-index:50;
+}
+.oc-drawer.open{display:flex;}
+.oc-drawer-panel{
+  width:min(680px,94vw);max-height:74vh;overflow-y:auto;
+  background:var(--oc-panel);border:1px solid var(--oc-hairline);
+  border-bottom:none;border-radius:var(--oc-r-lg) var(--oc-r-lg) 0 0;
+  padding:20px 24px 26px;
+  box-shadow:0 -20px 60px -20px rgba(0,0,0,.7);
+  animation:oc-drawer-up .18s ease-out;
+}
+@keyframes oc-drawer-up{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+
+/* ── BUY/SELL QUICK-ORDER MODAL (LTP click) ── */
+.oc-trade-modal{
+  position:fixed;inset:0;background:rgba(6,7,10,.6);backdrop-filter:blur(2px);
+  display:none;align-items:center;justify-content:center;z-index:60;
+}
+.oc-trade-modal.open{display:flex;}
+.oc-trade-panel{
+  width:min(360px,90vw);background:var(--oc-panel);border:1px solid var(--oc-hairline);
+  border-radius:var(--oc-r-lg);padding:20px 22px 22px;
+  box-shadow:0 20px 60px -20px rgba(0,0,0,.7);
+  animation:oc-trade-in .15s ease-out;
+}
+@keyframes oc-trade-in{from{transform:scale(.96);opacity:0;}to{transform:scale(1);opacity:1;}}
+.oc-trade-qty{
+  width:100%;background:var(--oc-row-alt);border:1px solid var(--oc-hairline);color:var(--oc-text);
+  font-family:var(--font-mono);font-size:14px;font-weight:600;padding:8px 10px;
+  border-radius:var(--oc-r-sm);margin:4px 0 14px;
+}
+.oc-trade-qty:focus{outline:none;border-color:var(--oc-blue);}
+.oc-trade-btns{display:flex;gap:10px;}
+.oc-trade-btn{
+  flex:1;border:none;border-radius:var(--oc-r-sm);padding:11px;
+  font-family:var(--font-sans);font-weight:700;font-size:13.5px;cursor:pointer;
+  transition:filter .12s;
+}
+.oc-trade-btn:hover{filter:brightness(1.12);}
+.oc-trade-btn-buy{background:var(--call);color:#06120E;}
+.oc-trade-btn-sell{background:var(--put);color:#1A0508;}
+.oc-trade-confirm{
+  margin-top:12px;font-size:12px;color:var(--oc-text-2);font-family:var(--font-mono);
+  padding:8px 10px;border-radius:var(--oc-r-sm);background:var(--oc-row-alt);display:none;
+}
+.oc-trade-confirm.show{display:block;}
+
+/* ── DEPTH (Bid/Ask + total buy/sell) rendered inside the drawer ── */
+.oc-depth-side{margin-bottom:14px;}
+.oc-depth-label{font-weight:700;font-size:12px;margin-bottom:6px;}
+.oc-depth-quote{font-family:var(--font-mono);font-size:12.5px;color:var(--oc-text-2);margin-bottom:6px;}
+.oc-depth-quote b{color:var(--oc-text);}
+.oc-depth-bar-track{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#0A0C11;}
+.oc-depth-bar-buy{background:var(--call);}
+.oc-depth-bar-sell{background:var(--put);}
+.oc-depth-totals{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10.5px;color:var(--oc-text-3);margin-top:4px;}
+
+/* ── GREEKS ROW — persists across renders while state.greeksOpen is
+   true; toggled only by the header Greeks button, never by row/strike
+   clicks, so it stays open until the person toggles it off again. ── */
+tr.oc-greek-row{background:var(--oc-panel-2) !important;}
+tr.oc-greek-row td{
+  padding:6px 12px;border-bottom:1px solid var(--border-2);
+  font-size:11px;color:var(--oc-text-2);
+}
+.oc-greek-wrap{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+.oc-greek-side{display:flex;gap:10px;align-items:center;}
+.oc-greek-side b{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;}
+.oc-greek-side.pe b{color:var(--put);}
+.oc-greek-side.ce b{color:var(--call);}
+.oc-greek-item{font-family:var(--font-mono);}
+.oc-greek-item span{color:var(--oc-text-3);}
+
+@media (max-width:860px){
+  .oc-app{padding:14px;}
+  .oc-head{flex-direction:column;}
+  .oc-summary{grid-template-columns:1fr 1fr;}
+  .oc-table{min-width:960px;}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .oc-eyebrow::before{animation:none;}
+  .oc-drawer-panel{animation:none;}
+}
