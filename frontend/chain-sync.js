@@ -15,11 +15,12 @@
   // nothing on this side ever opened that channel, so both messages went
   // nowhere: the tab stayed on demo data and its expiry dropdown looked
   // inert. This opens the same channel and answers both message types.
-ChainDenseView.prototype._initBroadcast = function() {
-    if (!("BroadcastChannel" in window)) return;
-    const chan = new BroadcastChannel("oc-live-sync");
-    window._ocChan = chan;
-    chan.addEventListener("message", (e) => {
+ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
+    if (!AppState.ocChan) return;   // was: if (!window._ocChan) return;
+    AppState.ocChan.postMessage({   // was: window._ocChan.postMessage({
+      rows: this.lastRows, symbol: payload.symbol, spot: payload.spot,
+    });
+    AppState.ocChan.addEventListener("message", (e) => { 
       const msg = e.data;
       if (!msg) return;
       if (msg.type === "oc-request-snapshot") {
@@ -34,8 +35,8 @@ ChainDenseView.prototype._initBroadcast = function() {
 };
 
 ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
-    if (!window._ocChan) return;
-    window._ocChan.postMessage({
+    if (!this._ocChan) return;
+    this._ocChan.postMessage({
       rows: this.lastRows, symbol: payload.symbol, spot: payload.spot,
       spotChg: payload.spotChg, spotChgPct: payload.spotChgPct,
       expiry: payload.expiry, expiryDates: payload.expiryDates,

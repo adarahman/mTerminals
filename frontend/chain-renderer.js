@@ -81,13 +81,13 @@ ChainDenseView.prototype.buildRowsHtml = function(rows) {
     if (!tbody) return; // dense chain markup not on this page — no-op
     const maxOI = Math.max(1, ...rows.map((r) => Math.max(r.ce.oi || 0, r.pe.oi || 0)));
     // Per-strike Greeks lookup, kept in sync by refreshView()/selectDepthStrike()
-    // via window._lastGreeks — same payload shape the mini chain panel uses.
+    // via AppState.lastGreeks — same payload shape the mini chain panel uses.
     const greeksByStrike = {};
-    (window._lastGreeks || []).forEach((g) => { greeksByStrike[g.strike] = g; });
+    (AppState.lastGreeks || []).forEach((g) => { greeksByStrike[g.strike] = g; });
     let html = "";
     rows.forEach((r) => {
       const g = greeksByStrike[r.strike] || {};
-      const rowVm = buildChainRowViewModel(r, g, maxOI, selectedDepthStrike);
+      const rowVm = buildChainRowViewModel(r, g, maxOI, AppState.selectedDepthStrike);
       html += renderChainRowTemplate(rowVm);
     });
     tbody.innerHTML = html;
@@ -106,8 +106,8 @@ ChainDenseView.prototype.refreshView = function(payload) {
     renderExpiryOptions(payload);
     window._lastRows = mapPayloadToRows(payload);
     this.lastRows = window._lastRows;
-    window._lastGreeks = payload.greeks || [];
-    this.lastGreeks = window._lastGreeks;
+    AppState.lastGreeks = payload.greeks || [];
+    this.lastGreeks = AppState.lastGreeks;
     this._broadcastToOptionChainTab(payload);
 
     if (!document.getElementById("tbody")) return; // dense chain markup not on this page

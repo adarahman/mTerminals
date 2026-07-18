@@ -124,6 +124,11 @@ class MarketStore {
       deepMerge(this.state, {[msg.type]: msg.payload});
     }
     this.emit('change', this.state);
+    // Phase 5 (event-bus.js): same merged state, published on the shared
+    // bus as 'market:update' alongside the existing 'change' emit above —
+    // DataService's store.on('change', ...) subscription (data-service.js)
+    // is untouched, so this is additive only.
+    if (window.eventBus) window.eventBus.emit('market:update', this.state);
     return this.state;
   }
 }

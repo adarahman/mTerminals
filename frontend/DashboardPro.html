@@ -76,6 +76,49 @@
   </div>
 </div>
 
+<!-- ── FII / DII PARTICIPANT OI MODAL OVERLAY (same-screen, no new window) ──
+     Full participant comparison table, moved out of the main dashboard so
+     the main view only shows the compact sentiment summary card (built by
+     ExecView.buildFiiDiiSummaryCard(), rendered below the exec grid), with
+     a "Full Table →" button that opens this modal. Same treatment as the
+     Greeks modal above: not an iframe — ExecView.renderFiiDiiModal()
+     writes straight into #fiidii-modal-content on every render/live tick
+     (via _rerenderChainPanels in chain-views.js), so this modal is always
+     current the moment it's opened. -->
+<div id="fiidii-dashboard-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <span class="oc-modal-title">🏦 FII / DII / Pro / Retail Participant OI</span>
+      <button id="fiidii-modal-close" onclick="closeFiiDiiModal()" title="Close (Esc)">✕ Close</button>
+    </div>
+    <div class="greeks-modal-body">
+      <div id="fiidii-modal-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── IV SURFACE MODAL OVERLAY (same-screen, no new window) ──
+     Full per-strike CE/PE IV bar table + Skew/Max IV/Min IV footer, moved
+     out of the main dashboard so the main view only shows the compact
+     alerts card (#iv-alerts-card, built by ChainView.buildIvAlertsHtml())
+     — elevated skew / IV rank extremes — with a "Full Surface →" button
+     that opens this modal. Same treatment as the Greeks modal: not an
+     iframe — ChainView.renderIvSurfaceModal() writes straight into
+     #iv-surface-content on every render/live tick (via
+     _rerenderChainPanels in chain-views.js), so this modal is always
+     current the moment it's opened. -->
+<div id="iv-surface-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <span class="oc-modal-title">📉 IV Surface</span>
+      <button id="iv-surface-modal-close" onclick="closeIvSurfaceModal()" title="Close (Esc)">✕ Close</button>
+    </div>
+    <div class="greeks-modal-body">
+      <div id="iv-surface-content"></div>
+    </div>
+  </div>
+</div>
+
 <!-- The index ticker strip (NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX pills) no
      longer has its own row here — it now renders inline inside the top-bar,
      to the right of the big active-symbol spot readout (see
@@ -103,6 +146,7 @@
   <button class="sec-btn" id="option-chain-btn" onclick="window.open('option-chain.html','_blank')" title="Open the redesigned option chain in a new tab"><span>📊</span>Chain</button>
   <button class="sec-btn" id="oi-dashboard-btn" onclick="openOIDashboardModal()" title="Open OI dashboard"><span>📈</span>OI Dash</button>
   <button class="sec-btn" id="greeks-dashboard-btn" onclick="openGreeksModal()" title="Open full Greeks & GEX table"><span>Δ</span>Greeks</button>
+  <button class="sec-btn" id="fiidii-dashboard-btn" onclick="openFiiDiiModal()" title="Open full FII/DII/Pro/Retail participant OI table"><span>🏦</span>FII/DII</button>
   <!-- Range & velocity toggle — relocated here from its old floating
        .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
        there). Reuses the sec-btn styling so it sits inline with the other
@@ -197,6 +241,11 @@
      template, next to Strategy Payoff (see renderDashboard's grid). The
      canvas is recreated on every innerHTML rebuild, so the Chart.js
      instance below is created/re-bound lazily rather than once here. -->
+<!-- Phase 5: EventBus. Zero-dependency, loads first so every module's
+     `if (window.eventBus) window.eventBus.emit(...)` guard is always true
+     regardless of load order after this point. -->
+<script src="app-state.js"></script>
+<script src="event-bus.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="chart-legend.js"></script>
 <script src="chart-data.js"></script>

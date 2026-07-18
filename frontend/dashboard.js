@@ -117,6 +117,7 @@ window.switchOiFlowTab = (...args) => app.oiFlow.switchOiFlowTab(...args);
 window.renderExecutiveDashboard = (...args) => app.exec.renderExecutiveDashboard(...args);
 window.buildDriversDraggersCard = (...args) => app.exec.buildDriversDraggersCard(...args);
 window.buildFiiDiiCard = (...args) => app.exec.buildFiiDiiCard(...args);
+window.buildFiiDiiSummaryCard = (...args) => app.exec.buildFiiDiiSummaryCard(...args);
 window.progress = (...args) => app.exec.progress(...args);
 window.signal = (...args) => app.exec.signal(...args);
 window.renderStratPayoff = (...args) => app.strategy.renderStratPayoff(...args);
@@ -134,6 +135,12 @@ window._openOIDashboardPopupFallback = (...args) => app.modal._openOIDashboardPo
 window.openGreeksModal = (...args) => app.modal.openGreeksModal(...args);
 window.closeGreeksModal = (...args) => app.modal.closeGreeksModal(...args);
 window._greeksEscHandler = (...args) => app.modal._greeksEscHandler(...args);
+window.openFiiDiiModal = (...args) => app.modal.openFiiDiiModal(...args);
+window.closeFiiDiiModal = (...args) => app.modal.closeFiiDiiModal(...args);
+window._fiidiiEscHandler = (...args) => app.modal._fiidiiEscHandler(...args);
+window.openIvSurfaceModal = (...args) => app.modal.openIvSurfaceModal(...args);
+window.closeIvSurfaceModal = (...args) => app.modal.closeIvSurfaceModal(...args);
+window._ivSurfaceEscHandler = (...args) => app.modal._ivSurfaceEscHandler(...args);
 
 // ── Ported from option-chain.js — now just expiry-dropdown population and
 // the BroadcastChannel sync to the standalone option-chain.html tab. The
@@ -146,56 +153,34 @@ window.buildVelocityLookup = (...args) => app.chainDense.buildVelocityLookup(...
 window.renderExpiryOptions = (...args) => app.chainDense.renderExpiryOptions(...args);
 window.refreshView = (...args) => panelManager.get('optionChain').refreshDense(...args);
 
-Object.defineProperty(window, '_fsaHandle', {
-  configurable: true,
-  get() { return app.data.fsaHandle; },
-  set(v) { app.data.fsaHandle = v; },
-});
-Object.defineProperty(window, '_legacyFile', {
-  configurable: true,
-  get() { return app.data.legacyFile; },
-  set(v) { app.data.legacyFile = v; },
-});
+// _fsaHandle / _legacyFile / _autoRefreshTimer / _countdownTimer /
+// _renderScheduled / _lastRenderedSymbol: removed (Phase 6 — remaining-
+// globals cleanup). All were only ever read/written from inside
+// DataService's own methods, which now use this.fsaHandle / this.legacyFile
+// / this.autoRefreshTimer / this.countdownTimer / this.renderScheduled /
+// this.lastRenderedSymbol directly — no other file ever touched these, so
+// the shims had no external consumer left.
 Object.defineProperty(window, '_data', {
   configurable: true,
   get() { return app.data.data; },
   set(v) { app.data.data = v; },
 });
-Object.defineProperty(window, '_autoRefreshTimer', {
-  configurable: true,
-  get() { return app.data.autoRefreshTimer; },
-  set(v) { app.data.autoRefreshTimer = v; },
-});
-Object.defineProperty(window, '_countdownTimer', {
-  configurable: true,
-  get() { return app.data.countdownTimer; },
-  set(v) { app.data.countdownTimer = v; },
-});
-Object.defineProperty(window, '_timerMins', {
-  configurable: true,
-  get() { return app.data.timerMins; },
-  set(v) { app.data.timerMins = v; },
-});
-Object.defineProperty(window, '_renderScheduled', {
-  configurable: true,
-  get() { return app.data.renderScheduled; },
-  set(v) { app.data.renderScheduled = v; },
-});
-Object.defineProperty(window, '_lastRenderedSymbol', {
-  configurable: true,
-  get() { return app.data.lastRenderedSymbol; },
-  set(v) { app.data.lastRenderedSymbol = v; },
-});
+// _timerMins: removed (Phase 6 — remaining-globals cleanup). DataService
+// (data-service.js) now reads/writes this.timerMins on itself directly,
+// and UiControls.switchTimer (ui-controls.js) writes app.data.timerMins
+// explicitly — no code reads window._timerMins anymore.
 Object.defineProperty(window, '_ws', {
   configurable: true,
   get() { return app.data.wsManager.ws; },
   set(v) { app.data.wsManager.ws = v; },
 });
-Object.defineProperty(window, '_wsState', {
-  configurable: true,
-  get() { return app.data.store.state; },
-  set(v) { app.data.store.state = v; },
-});
+// _wsState: removed (Phase 6 — remaining-globals cleanup). Every former
+// reader/writer now goes straight through app.data.store.state (the
+// MarketStore this shim used to proxy to) or, inside DataService's own
+// rAF-scheduled render, a genuine local const — no code reads
+// window._wsState anymore, so the shim itself was pure global pollution
+// with no consumer left. Same MarketStore instance (app.data.store),
+// same data, just no window property in between.
 Object.defineProperty(window, '_wsUrl', {
   configurable: true,
   get() { return app.data.wsManager.url; },

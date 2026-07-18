@@ -30,7 +30,7 @@ class ChartData {
 
   // Cache key for historyBars - includes symbol to avoid cross-symbol contamination
   _histKey(range, symbol) {
-    const sym = symbol || (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || 'default';
+    const sym = symbol || (typeof app !== 'undefined' && app.data.store.state && app.data.store.state.symbol) || 'default';
     return `${sym}::${range}`;
   }
 

@@ -213,6 +213,11 @@ function switchActiveIndex(sym) {
   // Default behavior
   const base = (_wsUrl || '').split('?')[0];
   connectWebSocket(`${base}?symbol=${encodeURIComponent(sym)}`);
+  // Phase 5 (event-bus.js): announce the switch on the shared bus. Purely
+  // additive — connectWebSocket() above is still the only thing that
+  // actually performs the switch; this just gives other modules a way to
+  // react to it later without switchActiveIndex needing to know who.
+  if (window.eventBus) window.eventBus.emit('symbol:change', { symbol: sym });
 }
 window.switchActiveIndex = switchActiveIndex;
 window.renderIndexTicker = renderIndexTicker;

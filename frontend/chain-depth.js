@@ -121,9 +121,9 @@ ChainDenseView.prototype.buildVelocityLookup = function(payload) {
 };
 
 ChainDenseView.prototype.selectDepthStrike = function(strike) {
-    selectedDepthStrike = selectedDepthStrike === strike ? null : strike;
-    if (window._lastRows) {
-      const _visRows = filterRowsByRange(window._lastRows);
+    _selectedDepthStrike = _selectedDepthStrike === strike ? null : strike;
+    if (app.chainDense.lastRows) {
+      const _visRows = filterRowsByRange(app.chainDense.lastRows);
       buildRowsHtml(_visRows);
       renderRightPanel(_visRows);
       if (_greeksVisible) document.querySelectorAll('[id^="grk-row-"]').forEach((el) => { el.style.display = ""; });
@@ -230,7 +230,7 @@ RightPanelView.prototype.renderRightPanel = function(rows) {
 
 RightPanelView.prototype.buildDepthBoxHtml = function(rows) {
     const atmRow = rows.find((r) => r.isAtm) || rows[Math.floor(rows.length / 2)];
-    const pinnedRow = selectedDepthStrike != null ? rows.find((r) => r.strike === selectedDepthStrike) : null;
+    const pinnedRow = _selectedDepthStrike != null ? rows.find((r) => r.strike === _selectedDepthStrike) : null;
     const depthRow = pinnedRow || atmRow;
     if (!depthRow) return "";
 

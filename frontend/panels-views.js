@@ -213,10 +213,85 @@ class ExecView {
 
 </div>
 
-<!-- FII / DII PARTICIPANT SENTIMENT (rendered below exec grid) -->
-${buildFiiDiiCard(d)}
+<!-- FII / DII crux summary (rendered below exec grid). Full comparison
+     table moved to its own modal (see ModalManager.openFiiDiiModal() /
+     #fiidii-dashboard-modal in DashboardPro.html) so it no longer eats
+     main-dashboard real estate on every rebuild — same treatment Greeks/
+     GEX already got. This card is just the composite read + a link out. -->
+${buildFiiDiiSummaryCard(d)}
 </div>
 `;}
+
+  // ── FII / DII CRUX SUMMARY (main dashboard card) ──
+  // Same alert-card visual language as ChainView.buildGreeksAlertsHtml():
+  // a compact, always-visible read (composite per-participant sentiment tag
+  // + any divergence flags) plus a "Full Table →" button that opens the
+  // full comparison table in its own modal instead of rendering inline.
+  buildFiiDiiSummaryCard(d){
+  const s = d.fiiDiiSentiment || {};
+  const hasData = s && s.source_date;
+
+  if(!hasData){
+    return `
+  <div class="exec-card c-fiidii" style="grid-column:1/-1;">
+    <div class="exec-title">🏦 FII / DII / Pro / Retail Sentiment</div>
+    <div class="dd-empty">Awaiting EOD participant-OI feed — populates after the first two post-close fetches.</div>
+  </div>`;
+  }
+
+  const sentColor = (tag) => {
+    if(!tag) return 'var(--txt3)';
+    if(tag.includes('Bullish')) return 'var(--green)';
+    if(tag.includes('Bearish')) return 'var(--red)';
+    if(tag==='Mixed') return 'var(--amber)';
+    return 'var(--txt3)';
+  };
+
+  const participants = [
+    { p: 'fii',    label: 'FII'    },
+    { p: 'dii',    label: 'DII'    },
+    { p: 'pro',    label: 'PRO'    },
+    { p: 'retail', label: 'RETAIL' },
+  ];
+
+  const tags = participants.map(({p,label}) => {
+    const sentiment = s[`${p}_sentiment`];
+    return `<span style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:rgba(255,255,255,0.03);border-left:2px solid ${sentColor(sentiment)};border-radius:4px;font-size:11px;">
+      <strong style="color:var(--txt2);">${label}</strong>
+      <span style="color:${sentColor(sentiment)};">${sentiment||'—'}</span>
+    </span>`;
+  }).join('');
+
+  const divergent = !!s.fii_dii_divergence;
+  const proDivergent = !!s.pro_vs_fii_dii_divergence;
+
+  return `
+  <div class="exec-card c-fiidii" style="grid-column:1/-1;">
+    <div class="exec-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+      <span>🏦 FII / DII / Pro / Retail Sentiment <span style="font-weight:400;color:var(--txt3);font-size:0.75em;">— EOD ${s.source_date} vs ${s.compare_date||'—'}</span></span>
+      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openFiiDiiModal()" title="Open full participant OI table">Full Table →</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+      ${tags}
+    </div>
+    ${divergent ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--amber);">⚠ FII and DII index-future positioning diverged day-over-day — opposite-direction net OI change.</div>` : ''}
+    ${proDivergent ? `<div style="margin-top:${divergent?'4px':'8px'};${divergent?'':'padding-top:8px;border-top:1px solid var(--border);'}font-size:10px;color:var(--amber);">⚠ Pro desk positioning diverged from combined FII+DII flow day-over-day — prop writers moved opposite the institutional flow.</div>` : ''}
+  </div>`;
+}
+
+  // ── FII / DII FULL TABLE MODAL ──
+  // Writes the existing full comparison table (buildFiiDiiCard() below,
+  // logic untouched) straight into #fiidii-modal-content — same pattern as
+  // ChainView.renderGreeksGex() writing into #grkgex-content. Called from
+  // _rerenderChainPanels() on every render/tick (chain-views.js) so the
+  // modal is always current the moment it's opened, and again from
+  // ModalManager.openFiiDiiModal() so a stale-until-next-tick state can
+  // never be seen right after opening.
+  renderFiiDiiModal(d){
+  const el = $i('fiidii-modal-content');
+  if(!el) return;
+  el.innerHTML = this.buildFiiDiiCard(d);
+}
 
   buildFiiDiiCard(d){
   // d.fiiDiiSentiment comes from fii_dii_sentiment.get_feature_for_trading_day()
@@ -1205,9 +1280,9 @@ class ModalManager {
   if(!modal || !frame) return;
   if(!_oiFrameLoaded){
     frame.onload = function () {
-        if (window._wsState) {
+        if (app.data.store.state) {
             frame.contentWindow.postMessage(
-                { type: "OI_DASHBOARD_DATA", payload: window._wsState },
+                { type: "OI_DASHBOARD_DATA", payload: app.data.store.state },
                 "*"
             );
         }
@@ -1220,9 +1295,9 @@ class ModalManager {
   }
   // Every time the modal opens, send the latest state so reopening
   // doesn't show stale data.
-  if (frame.contentWindow && window._wsState) {
+  if (frame.contentWindow && app.data.store.state) {
     frame.contentWindow.postMessage(
-        { type: "OI_DASHBOARD_DATA", payload: window._wsState },
+        { type: "OI_DASHBOARD_DATA", payload: app.data.store.state },
         "*"
     );
   }
@@ -1295,6 +1370,61 @@ class ModalManager {
     ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no';
   _oiDashboardWin = window.open('oi_dashboard.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''), 'oiDashboardPopup', features);
   if(_oiDashboardWin) _oiDashboardWin.focus();
+}
+
+  // ── FII / DII MODAL ──
+  // Same treatment as the Greeks modal above: plain in-page markup
+  // (#fiidii-modal-content) that ExecView.renderFiiDiiModal() keeps
+  // continuously current via _rerenderChainPanels (chain-views.js) on
+  // every render/tick, whether or not this modal is open — opening is
+  // purely a visibility toggle, same chrome/Esc/backdrop behavior as the
+  // other two modals. Also refreshed right here on open in case something
+  // changed the underlying data without a live tick firing in between.
+  openFiiDiiModal(){
+  var modal = document.getElementById('fiidii-dashboard-modal');
+  if(!modal) return;
+  modal.classList.add('open');
+  document.addEventListener('keydown', _fiidiiEscHandler);
+  if(app.data.store.state && app.exec.renderFiiDiiModal) app.exec.renderFiiDiiModal(app.data.store.state);
+}
+
+  closeFiiDiiModal(){
+  var modal = document.getElementById('fiidii-dashboard-modal');
+  if(!modal) return;
+  modal.classList.remove('open');
+  document.removeEventListener('keydown', _fiidiiEscHandler);
+}
+
+  _fiidiiEscHandler(e){
+  if(e.key === 'Escape') closeFiiDiiModal();
+}
+
+  // ── IV SURFACE MODAL ──
+  // Same treatment as the Greeks/FII-DII modals above: plain in-page
+  // markup (#iv-surface-content) kept continuously current by
+  // ChainView.renderIvSurfaceModal() via _rerenderChainPanels
+  // (chain-views.js) on every render/tick, whether or not this modal is
+  // open. openIvSurfaceModal() was already being called by
+  // buildIvAlertsHtml()'s "Full Surface →" button, but this method itself
+  // (and closeIvSurfaceModal/_ivSurfaceEscHandler) had never actually been
+  // written, so that button threw a ReferenceError — root-cause fixed here.
+  openIvSurfaceModal(){
+  var modal = document.getElementById('iv-surface-modal');
+  if(!modal) return;
+  modal.classList.add('open');
+  document.addEventListener('keydown', _ivSurfaceEscHandler);
+  if(window.renderIvSurfaceModal) renderIvSurfaceModal();
+}
+
+  closeIvSurfaceModal(){
+  var modal = document.getElementById('iv-surface-modal');
+  if(!modal) return;
+  modal.classList.remove('open');
+  document.removeEventListener('keydown', _ivSurfaceEscHandler);
+}
+
+  _ivSurfaceEscHandler(e){
+  if(e.key === 'Escape') closeIvSurfaceModal();
 }
 }
 

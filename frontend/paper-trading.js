@@ -238,7 +238,7 @@ function ptComputeFundSummary(wsState){
   if (_ptLiveMode) {
     // Real account funds arrive as wsState.funds — a generic
     // `{type:"funds", payload:{...}}` WS message that Dashboard.js's
-    // deepMerge(_wsState, {[msg.type]: msg.payload}) already lands there
+    // deepMerge(AppState.wsState, {[msg.type]: msg.payload}) already lands there
     // automatically, same as .portfolio/.chain/etc, no extra frontend
     // wiring needed once the backend actually sends it (see
     // smartapi_client.py's get_funds(), which wraps rmsLimit() — as of
@@ -286,7 +286,7 @@ window.ptComputeFundSummary = ptComputeFundSummary;
 // fine for display, but it's exactly why "current LTP required, FAR and
 // NEAR both" MARKET orders were getting rejected: the label "FAR"/"NEAR"
 // was being sent as-is in the order payload and used as-is for the live
-// LTP lookup, and neither the option chain (_wsState.chain/.chains) nor
+// LTP lookup, and neither the option chain (AppState.wsState.chain/.chains) nor
 // the backend engine has any entry keyed by the literal string "FAR" or
 // "NEAR" — only real "DD-Mon-YYYY" dates. This resolves the label to an
 // actual expiry date (nearest available for NEAR, farthest available for
@@ -295,10 +295,10 @@ window.ptComputeFundSummary = ptComputeFundSummary;
 function ptResolveStrategyExpiry(expiry){
   if(!expiry) return expiry;
   const norm = String(expiry).trim().toUpperCase();
-  if(!_wsState) return expiry;
-  const dates = (_wsState.expiryDates && _wsState.expiryDates.length)
-    ? _wsState.expiryDates
-    : Object.keys(_wsState.chains || {});
+  if(!AppState.wsState) return expiry;
+  const dates = (AppState.wsState.expiryDates && AppState.wsState.expiryDates.length)
+    ? AppState.wsState.expiryDates
+    : Object.keys(AppState.wsState.chains || {});
   if(!dates.length) return expiry;
   // renderExpiryOptions() builds the expiry <select> by iterating
   // expiryDates in the order the backend sends them — i.e. chronological,
@@ -617,7 +617,7 @@ function ptMountPanel(){
   // active scrip/expiry) needs zero typing — and populate the expiry/
   // strike <select>s from real chain data instead of leaving them as
   // free-typed text boxes.
-  if(_wsState && _wsState.symbol) $i('pt-symbol').value = _wsState.symbol;
+  if(AppState.wsState && AppState.wsState.symbol) $i('pt-symbol').value = AppState.wsState.symbol;
   ptRefreshExpiryStrikeOptions();
   ptRefreshLotSizes();
   ptUpdateLotSizeHint();
@@ -628,7 +628,7 @@ function ptMountPanel(){
 // Rebuilds the expiry <select> (and, via ptRefreshStrikeOptions, the
 // strike <select>) from live chain data instead of requiring manual
 // typing. Only the symbol the backend is actually streaming
-// (_wsState.symbol) has expiry/strike data available client-side; for
+// (AppState.wsState.symbol) has expiry/strike data available client-side; for
 // any other symbol picked in pt-symbol the dropdowns are left disabled
 // with a note, since there's no chain to source options from.
 function ptRefreshExpiryStrikeOptions(){
@@ -638,11 +638,11 @@ function ptRefreshExpiryStrikeOptions(){
   const needsExpiry = instype === 'CE' || instype === 'PE' || instype === 'FUT';
   const needsStrike = instype === 'CE' || instype === 'PE';
 
-  const sameSymbol = _wsState && _wsState.symbol === symbol;
-  const chainStore = (sameSymbol && _wsState.chains) || {};
+  const sameSymbol = AppState.wsState && AppState.wsState.symbol === symbol;
+  const chainStore = (sameSymbol && AppState.wsState.chains) || {};
   let expiries = Object.keys(chainStore);
-  if(!expiries.length && sameSymbol && (_wsState.expiry || (_wsState._activeExpiry))) {
-    expiries = [_wsState._primaryExpiry || _wsState.expiry];
+  if(!expiries.length && sameSymbol && (AppState.wsState.expiry || (AppState.wsState._activeExpiry))) {
+    expiries = [AppState.wsState._primaryExpiry || AppState.wsState.expiry];
   }
 
   const prevExpiry = expSel.value;
@@ -674,11 +674,11 @@ function ptRefreshStrikeOptions(){
   }
   const symbol = $i('pt-symbol').value;
   const expiry = $i('pt-expiry').value;
-  const sameSymbol = _wsState && _wsState.symbol === symbol;
+  const sameSymbol = AppState.wsState && AppState.wsState.symbol === symbol;
   let rows = [];
   if(sameSymbol){
-    if(_wsState.chains && _wsState.chains[expiry]) rows = _wsState.chains[expiry];
-    else if(expiry && expiry === _wsState.expiry) rows = _wsState.chain || [];
+    if(AppState.wsState.chains && AppState.wsState.chains[expiry]) rows = AppState.wsState.chains[expiry];
+    else if(expiry && expiry === AppState.wsState.expiry) rows = AppState.wsState.chain || [];
   }
   const prevStrike = strikeSel.value;
   strikeSel.innerHTML = '';
@@ -689,7 +689,7 @@ function ptRefreshStrikeOptions(){
   }
   const strikes = rows.map(r=>r.strike).sort((a,b)=>a-b);
   strikes.forEach(sk=> strikeSel.appendChild(new Option(fmtI(sk), sk)));
-  const atm = sameSymbol ? activeAtm(_wsState) : null;
+  const atm = sameSymbol ? activeAtm(AppState.wsState) : null;
   const keep = strikes.map(String).includes(prevStrike) ? prevStrike
     : (atm && strikes.includes(atm) ? String(atm) : String(strikes[0]));
   strikeSel.value = keep;
@@ -709,12 +709,12 @@ let _ptLastAutoLimit = null;
 // hand). Centralizing this means every order path checks price
 // availability the same way instead of each guessing independently.
 function ptResolveLtp(symbol, instrument_type, expiry, strike){
-  if(!(_wsState && _wsState.symbol === symbol)) return null;
-  if(instrument_type === 'INDEX') return parseFloat(_wsState.spot) || null;
-  if(instrument_type === 'FUT') return parseFloat(_wsState.futLTP || _wsState.spot) || null;
+  if(!(AppState.wsState && AppState.wsState.symbol === symbol)) return null;
+  if(instrument_type === 'INDEX') return parseFloat(AppState.wsState.spot) || null;
+  if(instrument_type === 'FUT') return parseFloat(AppState.wsState.futLTP || AppState.wsState.spot) || null;
   if(!expiry || strike == null || isNaN(strike)) return null;
-  let rows = (_wsState.chains && _wsState.chains[expiry]) ? _wsState.chains[expiry]
-    : (expiry === _wsState.expiry ? (_wsState.chain||[]) : []);
+  let rows = (AppState.wsState.chains && AppState.wsState.chains[expiry]) ? AppState.wsState.chains[expiry]
+    : (expiry === AppState.wsState.expiry ? (AppState.wsState.chain||[]) : []);
   const row = rows.find(r=>r.strike===strike);
   if(!row) return null;
   const v = instrument_type==='CE' ? row.ceLTP : row.peLTP;
@@ -1060,12 +1060,12 @@ function _ptSendOrderNow(payload, errEl){
     setTimeout(()=>{
       const row = _ptPending.find(p=>p.id===pending.id);
       if(row){
-        if(ptFindMatchingConfirmedOrder(row, (_wsState && _wsState.orders) || [])){
+        if(ptFindMatchingConfirmedOrder(row, (AppState.wsState && AppState.wsState.orders) || [])){
           _ptPending = _ptPending.filter(p=>p.id!==pending.id);
         } else {
           row.status = 'TIMEOUT';
         }
-        if(_wsState) renderPaperTradingPanel(_wsState);
+        if(AppState.wsState) renderPaperTradingPanel(AppState.wsState);
       }
     }, 10000);
     ptToast((payload.live ? '🔴 LIVE — ' : '') + label + ' — sent', 'ok');
@@ -1080,7 +1080,7 @@ function _ptSendOrderNow(payload, errEl){
     // closed the whole time.
     const panel = $i('pt-panel');
     if(panel) panel.classList.add('open');
-    if(_wsState) renderPaperTradingPanel(_wsState);
+    if(AppState.wsState) renderPaperTradingPanel(AppState.wsState);
   } else {
     ptToast(label + ' — failed to send (WS not connected)', 'err');
     if(errEl) errEl.textContent = 'WS not connected — order not sent';
@@ -1191,9 +1191,9 @@ function ptNotifyNewRejections(orders){
 function ptOpenQuickOrder(evt, strike, instrument_type, ltp){
   evt.stopPropagation();
   const pop = $i('pt-quick-popover');
-  if(!pop || !_wsState) return;
-  const symbol = _wsState.symbol || '';
-  const expiry = _wsState._activeExpiry || _selectedExpiry || _wsState.expiry || '';
+  if(!pop || !AppState.wsState) return;
+  const symbol = AppState.wsState.symbol || '';
+  const expiry = AppState.wsState._activeExpiry || _selectedExpiry || AppState.wsState.expiry || '';
   pop.innerHTML = `
     <div class="pt-qp-hdr"><span>${symbol} ${fmtI(strike)} ${instrument_type}</span><span class="pt-qp-close" onclick="$i('pt-quick-popover').style.display='none'">✕</span></div>
     <div class="pt-qp-ltp">LTP: ${ltp!=null ? ptFmtN(ltp,2) : '—'} &nbsp;|&nbsp; ${expiry||'—'}</div>
@@ -1248,12 +1248,12 @@ function ptQuickSubmit(side, strike, instrument_type, expiry){
   // Same guard as the main panel: don't send a MARKET order the backend
   // has no price to fill, re-checked live (not the possibly-stale LTP the
   // popover was opened with) since some time may have passed while typing.
-  if(order_type==='MARKET' && ptResolveLtp(_wsState.symbol, instrument_type, expiry, strike) == null){
+  if(order_type==='MARKET' && ptResolveLtp(AppState.wsState.symbol, instrument_type, expiry, strike) == null){
     ptToast('No live price yet for this strike — order not sent', 'err');
     return;
   }
   const payload = {
-    symbol: _wsState.symbol, instrument_type, expiry, strike, side,
+    symbol: AppState.wsState.symbol, instrument_type, expiry, strike, side,
     qty_lots, order_type, limit_price
   };
   ptDispatchOrder(payload, null);
@@ -1388,7 +1388,7 @@ function ptSquareOffPosition(symbol, expiry, strike, instrument_type, net_qty_lo
 window.ptSquareOffPosition = ptSquareOffPosition;
 
 function ptSquareOffAll(){
-  const positions = (_wsState && _wsState.portfolio && _wsState.portfolio.positions) || [];
+  const positions = (AppState.wsState && AppState.wsState.portfolio && AppState.wsState.portfolio.positions) || [];
   const open = positions.filter(p => p.net_qty_lots);
   if(!open.length) return;
   open.forEach(p => ptSquareOffPosition(p.symbol, p.expiry, p.strike, p.instrument_type, p.net_qty_lots));
@@ -1407,7 +1407,7 @@ window.ptCancelOrder = ptCancelOrder;
 // unrealized_pnl on each position only reflect whatever LTP it had at
 // the time it last recomputed (typically on order/fill events). Rather
 // than wait for a backend change, re-price every open CE/PE/FUT/INDEX
-// position here against whatever chain/spot data this tick's _wsState
+// position here against whatever chain/spot data this tick's AppState.wsState
 // already carries, so the portfolio panel tracks the live market tick
 // by tick instead of freezing between orders.
 function ptLiveReprice(pf, d){
@@ -1469,9 +1469,9 @@ function ptLiveReprice(pf, d){
 // render split below since it's neither: it's DOM form state syncing
 // against the live tick, not a derived number and not a table paint.
 function ptSyncFormFromWsState(wsState){
-  // BUGFIX: pt-symbol is prefilled from _wsState.symbol at mount time, but
+  // BUGFIX: pt-symbol is prefilled from AppState.wsState.symbol at mount time, but
   // ptMountPanel() runs on DOMContentLoaded — before connectWebSocket()'s
-  // first tick — so _wsState.symbol is usually still unknown then and the
+  // first tick — so AppState.wsState.symbol is usually still unknown then and the
   // dropdown silently falls back to whatever's first in PT_LOT_SIZES
   // (NIFTY). Nothing ever re-synced it once the real symbol arrived, so if
   // the backend was actually streaming e.g. BANKNIFTY the form stayed
@@ -1728,7 +1728,7 @@ function ptResetOrderLog(){
   try{ localStorage.setItem('pt_orders_reset_at', String(_ptOrdersResetAt)); }catch(e){}
   _ptPending = [];
   ptToast('Order/Trade log, Charges & Net P&L cleared', 'ok');
-  if(_wsState) renderPaperTradingPanel(_wsState);
+  if(AppState.wsState) renderPaperTradingPanel(AppState.wsState);
 }
 window.ptResetOrderLog = ptResetOrderLog;
 window.renderPaperTradingPanel = renderPaperTradingPanel;

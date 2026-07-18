@@ -132,7 +132,7 @@ class PriceChartEngine {
   }
 
   async hydrateRange(range, force){
-    const symbol = (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || 'default';
+    const symbol = (AppState.wsState && AppState.wsState.symbol) || 'default';
     await this.historyLoader.hydrateRange(range, force, symbol);
   }
 
@@ -632,7 +632,7 @@ class PriceChartEngine {
     this._syncOrderPanel(lastTick);
     const watermarkEl = $i('pc-watermark');
     const symEl = $i('pc-ohlc-sym');
-    const symText = (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || '';
+    const symText = (AppState.wsState && AppState.wsState.symbol) || '';
     if(watermarkEl) watermarkEl.textContent = symText || '—';
     if(symEl) symEl.textContent = symText || '—';
 
@@ -679,7 +679,7 @@ class PriceChartEngine {
     ctx.clearRect(0,0,W,H);
 
     let series, values;
-    const symbol = (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || '';
+    const symbol = (AppState.wsState && AppState.wsState.symbol) || '';
     const bars = this.chartData.getHistoryBars(this.settings.range, symbol);
     const _now = Date.now();
     // Bounds of data actually available for this range — earliest real bar,

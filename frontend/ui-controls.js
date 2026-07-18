@@ -9,11 +9,12 @@
 // market-store.js already got.
 //
 // Depends on $i (dom-utils.js, loaded earlier) and on the global
-// startAutoRefresh(...)/​_timerMins compatibility shims that dashboard.js's
-// App-bootstrap section defines — those are only touched from inside
-// switchTimer(), which (like every other UI handler here) only ever runs
-// after a user interaction, i.e. long after all scripts + dashboard.js's
-// wiring have finished running. See DashboardPro.html script order.
+// startAutoRefresh(...) compatibility shim / app.data.timerMins that
+// dashboard.js's App-bootstrap section defines — those are only touched
+// from inside switchTimer(), which (like every other UI handler here)
+// only ever runs after a user interaction, i.e. long after all scripts +
+// dashboard.js's wiring have finished running. See DashboardPro.html
+// script order.
 // ============================================================
 
 // ── STICKY HEADER STACK ──
@@ -55,7 +56,7 @@ class UiControls {
 }
 
   switchTimer(mins,el){
-  _timerMins=mins;
+  app.data.timerMins=mins;
   document.querySelectorAll('[id^="timer-btn-"]').forEach(b=>b.classList.remove('active-range'));
   if(el) el.classList.add('active-range');
   startAutoRefresh(mins);

@@ -13,7 +13,7 @@ class HistoryLoader {
 
   // Fetch real OHLCV history for a specific range from backend
   async hydrateRange(range, force = false, symbol) {
-    const sym = symbol || (typeof _wsState !== 'undefined' && _wsState && _wsState.symbol) || 'default';
+    const sym = symbol || (typeof app !== 'undefined' && app.data.store.state && app.data.store.state.symbol) || 'default';
     
     if (!force && this.chartData.getHistoryBars(range, sym)) {
       this.onRenderRequest();

@@ -32,20 +32,30 @@
 // visible across re-renders instead of resetting to collapsed.
 let _greeksVisible = false;
 
+// Tracks which strike's Bid/Ask depth box is pinned in the (currently
+// unmounted — no page ships #tbody/#rightPanel today, see
+// ChainDenseView.refreshView's early-return) right analytics panel.
+// Was an undeclared bare `selectedDepthStrike` assignment (implicit
+// window global); now explicit module state shared by
+// ChainDenseView.selectDepthStrike (chain-depth.js), RightPanelView's
+// buildDepthBoxHtml (chain-depth.js), and buildRowsHtml's row-vm mapping
+// (chain-renderer.js) the same way _greeksVisible already is.
+let _selectedDepthStrike = null;
+
 class ChainDenseView {
   constructor() {
     this.currentRange = "3";
     this.velocityWindowMin = 5;
     this.prevSnapshot = {};
     // Previously ad-hoc window._lastPayload/_lastRows/_lastGreeks globals —
-    // moved onto the instance so this view's state lives in one place,
-    // same as every other panel's app.* state. Cross-class readers (e.g.
-    // ChainView.switchChainRange/switchVelTab below) now read
-    // app.chainDense.lastX instead of window._lastX.
+    // now this.lastPayload/lastRows/lastGreeks on the instance, so this
+    // view's state lives in one place, same as every other panel's app.*
+    // state. Cross-class readers (e.g. ChainView.switchChainRange/
+    // switchVelTab below) read app.chainDense.lastX instead of window._lastX.
     this.lastPayload = null;
     this.lastRows = null;
     this.lastGreeks = [];
-    this._initBroadcast();
+    // this._initBroadcast();
   }
 }
 
@@ -116,8 +126,8 @@ class ChainView {
   // now just follows whatever range the global sidebar selects.
   if (typeof currentRange !== 'undefined') {
     currentRange = (range === 9999) ? 'all' : String(range);
-    if (window._lastRows) {
-      const _visRows = filterRowsByRange(window._lastRows);
+    if (app.chainDense.lastRows) {
+      const _visRows = filterRowsByRange(app.chainDense.lastRows);
       buildRowsHtml(_visRows);
       renderRightPanel(_visRows);
       requestAnimationFrame(() => app.chain.sizeAndScrollChain(null));
@@ -141,9 +151,9 @@ class ChainView {
   // ── KEEP THE DENSE CHAIN TABLE (#tbody/#rightPanel) IN SYNC ──
   // It used to have its own 5m/15m/30m toggle; that's gone, so it now
   // just follows whatever window the global sidebar selects.
-  if (typeof velocityWindowMin !== 'undefined' && window._lastPayload) {
+  if (typeof velocityWindowMin !== 'undefined' && app.chainDense.lastPayload) {
     velocityWindowMin = win;
-    refreshView(window._lastPayload);
+    refreshView(app.chainDense.lastPayload);
   }
 
   if(_data) _rerenderChainPanels();

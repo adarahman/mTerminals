@@ -54,8 +54,8 @@ class DataService {
   // emitting 'change') — this function is now pure side-effects: no more
   // branching on msg.type here, that lives in WSManager.
   updateDashboard(state){
-  _wsState = state;
-  if(!_wsState) return;
+  AppState.wsState = state;
+  if(!AppState.wsState) return;
 
   // OI dashboard iframe / popup — only push when the panel is actually
   // open. Previously every SmartAPI/REST tick structured-cloned the full
@@ -74,8 +74,8 @@ class DataService {
       const self = this;
       requestAnimationFrame(function(){
         self._oiPostScheduled = false;
-        if(!_wsState) return;
-        const msg = { type: "OI_DASHBOARD_DATA", payload: _wsState };
+        if(!AppState.wsState) return;
+        const msg = { type: "OI_DASHBOARD_DATA", payload: AppState.wsState };
         const frame = document.getElementById("oi-modal-iframe");
         if (frame && frame.contentWindow && frame.offsetParent !== null) {
           frame.contentWindow.postMessage(msg, "*");
@@ -95,7 +95,7 @@ class DataService {
   // of the dashboard (see applyExpirySelection below), so both the KPI/
   // analytics panels and the Option Chain table stay driven by one piece of
   // state (_selectedExpiry) off one payload.
-  applyExpirySelection(_wsState, _selectedExpiry);
+  applyExpirySelection(AppState.wsState, _selectedExpiry);
 
   // Feed the live price chart from this same tick's spot value. Client-side
   // timestamp (not a backend one) since no timestamp field exists on the
@@ -113,14 +113,14 @@ class DataService {
   // wanted later, it needs to come from NIFTY FUTURES turnover/volume
   // (see fetch_nifty_futures in market_api.py) or SmartAPI's own volume
   // field on the index token, not this basket aggregate.
-  if(_wsState.spot != null) priceChart.addTick(_wsState.spot, Date.now(), null);
+  if(AppState.wsState.spot != null) priceChart.addTick(AppState.wsState.spot, Date.now(), null);
 
   // Drive the native Option Chain table/right panel straight off this same
   // tick — no separate WebSocket, no postMessage relay, no iframe.
   // refreshView() itself no-ops (checks for #tbody) when this page doesn't
   // have the dense chain markup mounted, so this is always safe to call
   // unconditionally.
-  app.chainDense.refreshView(_wsState);
+  app.chainDense.refreshView(AppState.wsState);
 
   // Multiple WS messages (e.g. spot+oi+greeks) often arrive back-to-back
   // for the same logical tick. Coalesce them into a single render per
@@ -129,11 +129,11 @@ class DataService {
 }
 
   scheduleRender(){
-  if(_renderScheduled) return;
-  _renderScheduled = true;
-  requestAnimationFrame(function(){
-    _renderScheduled = false;
-    if(!_wsState) return;
+  if(this.renderScheduled) return;
+  this.renderScheduled = true;
+  requestAnimationFrame(()=> {
+    this.renderScheduled = false;
+    if(!AppState.wsState) return;
     // ── FLICKER FIX ──
     // Every live tick used to go through parseAndRender() -> renderDashboard(),
     // which nukes and rebuilds the ENTIRE #dashboard subtree from a fresh
@@ -158,7 +158,7 @@ class DataService {
     // Symptom: switching symbol (NIFTY -> BANKNIFTY etc, e.g. reconnecting
     // to a different --symbol backend) updated the expiry dropdown and
     // chain table correctly (both driven through _rerenderChainPanels /
-    // applyExpirySelection off the fresh _wsState), but the Decision Engine
+    // applyExpirySelection off the fresh AppState.wsState), but the Decision Engine
     // box kept showing the OLD scrip's bias/confidence/strategy until a
     // manual page refresh. Root cause: patchTopBarAndDecision() only ever
     // patches individual fields/DOM nodes in place — it was never designed
@@ -169,24 +169,24 @@ class DataService {
     // back to a full rebuild — the same one already used for the very
     // first tick — which rebuilds the Decision Engine box (and everything
     // else) from scratch off the new symbol's data.
-    const symbolChanged = _wsState.symbol && _lastRenderedSymbol && _wsState.symbol !== _lastRenderedSymbol;
+    const symbolChanged = AppState.wsState.symbol && this.lastRenderedSymbol && AppState.wsState.symbol !== this.lastRenderedSymbol;
     if (notYetBuilt || symbolChanged) {
-      _lastRenderedSymbol = _wsState.symbol || _lastRenderedSymbol;
-      parseAndRender(JSON.stringify(_wsState));
+      this.lastRenderedSymbol = AppState.wsState.symbol || this.lastRenderedSymbol;
+      parseAndRender(JSON.stringify(AppState.wsState));
       // parseAndRender() just replaced #dashboard's entire innerHTML, which
       // wipes out the price-chart panel since it lives inside #dashboard —
       // remount it into the freshly-rebuilt container right here.
       if (window.priceChart) priceChart.render();
-      if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(_wsState);
+      if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
       return;
     }
-    _lastRenderedSymbol = _wsState.symbol || _lastRenderedSymbol;
-    _data = _wsState;
+    this.lastRenderedSymbol = AppState.wsState.symbol || _lastRenderedSymbol;
+    _data = AppState.wsState;
     if (window._afterRenderStratPayoff) _afterRenderStratPayoff();
     if (window._rerenderChainPanels) app.chain._rerenderChainPanels();
     // Decision Engine box + top-bar spot/badge/DTE strip are cheap to patch
     // in place too, so they stay live without rebuilding their containers.
-    if (window.patchTopBarAndDecision) patchTopBarAndDecision(_wsState);
+    if (window.patchTopBarAndDecision) patchTopBarAndDecision(AppState.wsState);
     // Live price chart — cheap redraw onto the existing canvas surface
     // (sizeCanvasIfChanged only resets it when the on-screen size changed),
     // so this rides the same per-frame coalescing as the other panels above.
@@ -195,7 +195,7 @@ class DataService {
     // bottom of file), so it's never touched by the rebuild above and just
     // needs its own cheap patch-in-place call here, same pattern as the
     // other panels on this line.
-    if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(_wsState);
+    if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
   });
 }
 

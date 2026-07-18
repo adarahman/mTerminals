@@ -13,18 +13,12 @@
    translation layer. Two ways to feed it real data:
 
    1. BroadcastChannel (recommended — keeps this as its own tab/window,
-      updates live, no polling). On the MAIN dashboard, after
-      window._lastRows is set in chain-views.js's refreshView(), add:
-
-        if (window._ocChan) window._ocChan.postMessage({
-          rows: window._lastRows, symbol: payload.symbol, spot: payload.spot,
-          spotChg: payload.spotChg, spotChgPct: payload.spotChgPct,
-          expiry: payload.expiry, expiryDates: payload.expiryDates
-        });
-
-      with `window._ocChan = new BroadcastChannel('oc-live-sync');` set up
-      once near the top of dashboard.js. That's the only change needed on
-      the dashboard side — this file already listens for it below.
+      updates live, no polling). On the MAIN dashboard, ChainDenseView
+      (chain-sync.js) already opens a BroadcastChannel('oc-live-sync')
+      in its constructor and posts the latest rows to it (via its own
+      this._ocChan instance property, not a window global) every time
+      refreshView() runs. That's the only wiring needed on the dashboard
+      side — this file already listens for it below.
 
    2. window.postMessage from an opener window, if you'd rather open this
       as a child tab via window.open() than a broadcast — see
@@ -53,6 +47,12 @@
     greeksOpen: false,
     selectedStrike: null,
   };
+  // Set by initLiveSync() when a BroadcastChannel to the dashboard tab is
+  // open; used by the expiry dropdown's change handler to ask the
+  // dashboard to drive the real expiry switch. Module state (closure
+  // variable), not window._ocRequestExpiry — nothing outside this IIFE
+  // ever needs to read it.
+  let _ocRequestExpiry = null;
 
   // Figures below are RAW absolute numbers (contracts / shares) — the
   // same units chain-views.js's mapPayloadToRows() produces for ce.oi,
@@ -592,7 +592,7 @@
 
     $("ocExpiry").addEventListener("change", (e) => {
       state.expiry = e.target.value;
-      if (window._ocRequestExpiry) window._ocRequestExpiry(state.expiry); // hook for live integration
+      if (_ocRequestExpiry) _ocRequestExpiry(state.expiry); // hook for live integration
       renderAll();
     });
 
@@ -718,7 +718,6 @@
     if ("BroadcastChannel" in window) {
       const chan = new BroadcastChannel("oc-live-sync");
       chan.addEventListener("message", (e) => applyLivePayload(e.data));
-      window._ocChan = chan;
       // ask the dashboard tab (if any) to replay its last snapshot immediately
       chan.postMessage({ type: "oc-request-snapshot" });
       // Wires up the expiry-dropdown hook (see wireEvents' ocExpiry change
@@ -728,8 +727,10 @@
       // re-rendered the SAME rows, making the dropdown look inert. Posting
       // over the same channel the dashboard already listens on lets
       // chain-views.js drive the real #expirySelect and let its existing
-      // change handler do the actual chain switch.
-      window._ocRequestExpiry = (expiry) => {
+      // change handler do the actual chain switch. Kept as a closure
+      // variable (module state), not window._ocRequestExpiry — nothing
+      // outside this IIFE ever needs to read it.
+      _ocRequestExpiry = (expiry) => {
         chan.postMessage({ type: "oc-request-expiry", expiry });
       };
     }
