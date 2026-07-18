@@ -71,6 +71,71 @@ class OiFlowView {
   if(lbl) lbl.textContent=oiFlowLabel(mode);
   _rerenderChainPanels();
 }
+
+  // Compact "OI Flow Snapshot" card — replaces the full strike-by-strike
+  // butterfly table that used to live in #sec-oi-buildup. That full table
+  // (same buildOiFlowRows()/buildOiTopMoversStrip() logic, same CE|Strike|PE
+  // layout) now lives in the OI Dashboard's "Butterfly" tab (oi_dashboard.html
+  // / oi-dashboard.js) so it can be viewed full-size without competing for
+  // space with Greeks/GEX on the main dashboard. This card is the "glance"
+  // version: biggest CE/PE build, the ATM strike's own OI/PCR read, and a
+  // button straight into that Butterfly tab — same pattern as the Option
+  // Chain Snapshot card that replaced the old inline chain table.
+  buildOiFlowSummaryHtml(chain, atm, velByStrike){
+  if(!chain || !chain.length){
+    return `
+  <div class="section-card algn-card" id="oi-flow-summary-card" style="min-width:0;">
+    <div class="section-header"><span class="section-title">📈 OI Flow Snapshot</span></div>
+    <div class="dd-empty">Awaiting chain data…</div>
+  </div>`;
+  }
+
+  const atmRow = chain.find(r=>r.atm||r.strike===atm) || chain[Math.floor(chain.length/2)];
+  const ceAtm = atmRow.ceOI||0, peAtm = atmRow.peOI||0;
+  const pcrAtm = ceAtm>0 ? (peAtm/ceAtm) : 0;
+  const pcrAtmClr = pcrAtm>1?'var(--green)':pcrAtm<1?'var(--red)':'var(--txt3)';
+
+  const totalCe = chain.reduce((s,r)=>s+(r.ceOI||0),0);
+  const totalPe = chain.reduce((s,r)=>s+(r.peOI||0),0);
+  const oiTotal = totalCe+totalPe || 1;
+  const pcr = totalPe/(totalCe||1);
+
+  return `
+  <div class="section-card algn-card" id="oi-flow-summary-card" style="min-width:0;">
+    <div class="section-header">
+      <span class="section-title">📈 OI Flow Snapshot</span>
+      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openOIDashboardModal('butterfly')">Butterfly View →</button>
+    </div>
+    <div style="padding:10px 2px 4px;">
+      <div style="height:6px;border-radius:999px;overflow:hidden;display:flex;background:var(--bg2);margin-bottom:8px;">
+        <div style="width:${(totalPe/oiTotal)*100}%;background:linear-gradient(90deg,var(--green),transparent);"></div>
+        <div style="width:${(totalCe/oiTotal)*100}%;background:linear-gradient(90deg,transparent,var(--red));"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:13px;font-weight:700;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="color:var(--green);">${fmtK(totalPe)}</span>
+        <span style="font-size:9px;color:var(--txt3);font-weight:400;">PE</span>
+        <span style="background:rgba(245,166,35,.15);color:var(--amber);padding:2px 8px;border-radius:999px;font-size:11px;">PCR ${fmtN(pcr,2)}</span>
+        <span style="font-size:9px;color:var(--txt3);font-weight:400;">CE</span>
+        <span style="color:var(--red);">${fmtK(totalCe)}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
+          <div style="font-size:9px;color:var(--txt3);letter-spacing:.04em;margin-bottom:4px;">ATM ${fmtI(atmRow.strike)}</div>
+          <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;font-weight:700;">
+            <span style="color:var(--red);">${fmtK(ceAtm)}</span>
+            <span style="font-size:9px;color:var(--txt3);font-weight:400;">CE / PE</span>
+            <span style="color:var(--green);">${fmtK(peAtm)}</span>
+          </div>
+          <div style="font-size:10px;color:${pcrAtmClr};margin-top:3px;">PCR ${fmtN(pcrAtm,2)}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
+          <div style="font-size:9px;color:var(--txt3);letter-spacing:.04em;margin-bottom:4px;">BIGGEST BUILD</div>
+          <div style="font-size:10.5px;line-height:1.7;">${buildOiTopMoversStrip(chain, velByStrike, 'oi') || '<span style="color:var(--txt3);">—</span>'}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
 }
 
 class ExecView {
@@ -106,7 +171,8 @@ class ExecView {
   const thetaScore   = Math.max(10, Math.min(90, Math.round((thetaNorm * 0.6 + dtePressure * 0.4) * 90)));
 
   return `
-<div class="exec-grid" id="exec-grid-wrap" style="grid-template-columns:0.85fr 1fr 1.15fr;">
+<div id="exec-section-wrap">
+<div class="exec-grid" style="grid-template-columns:0.85fr 1fr 1.15fr;">
 
   <!-- ── CARD 1: MARKET HEALTH ── -->
   <div class="exec-card c-blue">
@@ -145,16 +211,10 @@ class ExecView {
   <!-- ── CARD 3: TOP MOVERS (drivers & draggers) ── -->
   ${buildDriversDraggersCard(d)}
 
-  <!-- Moved inside exec-grid-wrap (was a trailing sibling) so the live-tick
-       patch at execWrap.outerHTML = renderExecutiveDashboard(_data) replaces
-       this atomically along with everything else. As a sibling, outerHTML
-       only ever swapped out #exec-grid-wrap itself — this card had no id
-       for that assignment to find and remove, so every WS tick left the
-       previous tick's copy behind and appended a fresh one on top of it,
-       producing an ever-growing stack of duplicate FII/DII cards. Still
-       spans the full row via grid-column:1/-1, so the layout is unchanged. -->
-  ${buildFiiDiiCard(d)}
+</div>
 
+<!-- FII / DII PARTICIPANT SENTIMENT (rendered below exec grid) -->
+${buildFiiDiiCard(d)}
 </div>
 `;}
 
@@ -818,7 +878,12 @@ class SimulatorView {
 
   var simGEX = this.simState.greeks.map(function(g) {
     var adjGex = (g.netGEX || 0) * ivRatio * vannaAdj;
-    return { strike: g.strike, netGEX: adjGex, iv: g.iv, cDelta: g.cDelta, pDelta: g.pDelta, cGamma: g.cGamma };
+    // g.iv from the greeks payload is a decimal fraction (0.40 = 40%), unlike
+    // every other IV field in this app (ceIV/peIV/atmIV are already percent,
+    // e.g. 37.87). Convert here so simRenderTable's "fmtN(iv,1) + '%'" shows
+    // real values instead of everything collapsing toward 0.x% after rounding.
+    var ivPct = g.iv != null ? g.iv * 100 : null;
+    return { strike: g.strike, netGEX: adjGex, iv: ivPct, cDelta: g.cDelta, pDelta: g.pDelta, cGamma: g.cGamma };
   });
 
   var totalGEX = simGEX.reduce(function(s, g) { return s + g.netGEX; }, 0);
@@ -1066,10 +1131,25 @@ class SimulatorView {
   var near = sorted.slice(0, 10);
   near.sort(function(a, b) { return b.strike - a.strike; });
 
+  // "Institutional" should mean "large resting size relative to the other
+  // strikes on screen right now" — a flat magic number (previously 5000)
+  // is off by orders of magnitude vs. real OI (tens of thousands to
+  // millions), so it was true for almost every strike regardless of actual
+  // positioning. Use the median totalOI across the visible strikes instead,
+  // so the label actually discriminates within whatever data is loaded.
+  var oiTotals = near.map(function(g) {
+    var s = oiByStrike[g.strike] || { ce: 0, pe: 0 };
+    return s.ce + s.pe;
+  }).sort(function(a, b) { return a - b; });
+  var midIdx = Math.floor(oiTotals.length / 2);
+  var medianOI = oiTotals.length ? oiTotals[midIdx] : 0;
+
   var html = '';
   near.forEach(function(g) {
     var isAtm = g.strike === atm;
-    var ratio = ratios[String(g.strike)] || { ce: 0, pe: 0, ce_vol: 0, pe_vol: 0 };
+    var rawRatio = ratios[String(g.strike)];
+    var hasRatioData = !!rawRatio;
+    var ratio = rawRatio || { ce: 0, pe: 0, ce_vol: 0, pe_vol: 0 };
     var ceVol = ratio.ce_vol || 0;
     var peVol = ratio.pe_vol || 0;
     var totalVol = ceVol + peVol;
@@ -1077,14 +1157,14 @@ class SimulatorView {
     var totalOI = oiSplit.ce + oiSplit.pe;
     var volRatio = totalOI > 0 ? ((ratio.ce || 0) + (ratio.pe || 0)) / 2 : 0;
     // volRatio is on the same scale as the CE/PE Vol/OI Ratio panel above
-    // (roughly 0-100+, "volume as % of OI"), not a 0-1 fraction — comparing
-    // it against 0.5 meant the institutional-accumulation branch could
-    // basically never fire (real values are routinely 30-70+), so this
-    // always fell through to "Retail Flow". Threshold now assumes the same
-    // percent-like scale: "less than half of OI has traded today" reads as
-    // large resting size rather than active churn.
-    var isInst = totalOI > 5000 && volRatio < 50;
-    var actLabel = isInst ? 'Institutional Accumulation' : 'Retail Flow';
+    // (roughly 0-100+, "volume as % of OI"), not a 0-1 fraction. Large
+    // resting size (OI well above the pack's median) plus low turnover
+    // (< half of OI traded today) reads as institutional accumulation;
+    // if we never received a ratio for this strike, that's missing data,
+    // not a "0% turnover" reading, so it must not default into the
+    // institutional branch.
+    var isInst = hasRatioData && totalOI > medianOI * 1.5 && volRatio < 50;
+    var actLabel = !hasRatioData ? 'No Data' : (isInst ? 'Institutional Accumulation' : 'Retail Flow');
     var netDelta = Math.abs((g.cDelta || 0) - Math.abs(g.pDelta || 0));
 
     var oiDominant = oiSplit.ce >= oiSplit.pe ? 'CE' : 'PE';
@@ -1115,9 +1195,9 @@ class ModalManager {
     this.oiFrameLoaded = false;
   }
 
-  openOIDashboardModal(){
+  openOIDashboardModal(tab){
   if(location.protocol === 'file:'){
-    _openOIDashboardPopupFallback();
+    _openOIDashboardPopupFallback(tab);
     return;
   }
   var modal = document.getElementById('oi-dashboard-modal');
@@ -1131,8 +1211,11 @@ class ModalManager {
                 "*"
             );
         }
+        if (tab) {
+            frame.contentWindow.postMessage({ type: "OI_DASHBOARD_SET_TAB", tab: tab }, "*");
+        }
     };
-    frame.src = 'oi_dashboard.html?v=' + Date.now(); // must sit alongside this file when deployed
+    frame.src = 'oi_dashboard.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''); // must sit alongside this file when deployed
     _oiFrameLoaded = true;
   }
   // Every time the modal opens, send the latest state so reopening
@@ -1142,6 +1225,13 @@ class ModalManager {
         { type: "OI_DASHBOARD_DATA", payload: window._wsState },
         "*"
     );
+  }
+  // Re-selecting the tab on every open (not just the first load) matters
+  // because the iframe is created once and reused — a later call asking
+  // for 'butterfly' after the panel already booted on 'oi' would otherwise
+  // silently land on whatever tab was last active instead.
+  if (tab && frame.contentWindow) {
+    frame.contentWindow.postMessage({ type: "OI_DASHBOARD_SET_TAB", tab: tab }, "*");
   }
   modal.classList.add('open');
   document.addEventListener('keydown', _oiEscHandler);
@@ -1158,9 +1248,43 @@ class ModalManager {
   if(e.key === 'Escape') closeOIDashboardModal();
 }
 
-  _openOIDashboardPopupFallback(){
+  // ── GREEKS / GEX MODAL ──
+  // Unlike the OI Dashboard modal above, this isn't an iframe to a
+  // separate document — the full Greeks/GEX table (renderGreeksGex() in
+  // ChainView) already renders straight into #grkgex-content/#grkgex-footer,
+  // which now live inside this modal's markup in DashboardPro.html instead
+  // of inline in the main dashboard template. Those elements are never
+  // destroyed by a dashboard rebuild (they're outside the rebuilt
+  // #dashboard container), so they're kept continuously up to date by the
+  // normal render/tick path whether or not the modal is currently open —
+  // opening it is purely a visibility toggle, same chrome/Esc/backdrop
+  // behavior as the OI Dashboard modal.
+  openGreeksModal(){
+  var modal = document.getElementById('greeks-dashboard-modal');
+  if(!modal) return;
+  modal.classList.add('open');
+  document.addEventListener('keydown', _greeksEscHandler);
+  // Refresh immediately on open too, in case something changed the
+  // underlying data without a live tick firing in between (e.g. a
+  // paste-load or an expiry switch made while the modal was closed).
+  if(window.renderGreeksGex) renderGreeksGex(_grkView);
+}
+
+  closeGreeksModal(){
+  var modal = document.getElementById('greeks-dashboard-modal');
+  if(!modal) return;
+  modal.classList.remove('open');
+  document.removeEventListener('keydown', _greeksEscHandler);
+}
+
+  _greeksEscHandler(e){
+  if(e.key === 'Escape') closeGreeksModal();
+}
+
+  _openOIDashboardPopupFallback(tab){
   if(_oiDashboardWin && !_oiDashboardWin.closed){
     _oiDashboardWin.focus();
+    if (tab) _oiDashboardWin.postMessage({ type: "OI_DASHBOARD_SET_TAB", tab: tab }, "*");
     return;
   }
   var w = Math.min(1200, Math.round(screen.availWidth * 0.85));
@@ -1169,7 +1293,7 @@ class ModalManager {
   var top = Math.round((screen.availHeight - h) / 2);
   var features = 'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top +
     ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no';
-  _oiDashboardWin = window.open('oi_dashboard.html?v=' + Date.now(), 'oiDashboardPopup', features);
+  _oiDashboardWin = window.open('oi_dashboard.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''), 'oiDashboardPopup', features);
   if(_oiDashboardWin) _oiDashboardWin.focus();
 }
 }

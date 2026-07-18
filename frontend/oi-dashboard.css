@@ -1,54 +1,69 @@
 /* ═══════════════════════════════════════════════════════════════════
    OI DASHBOARD (oi_dashboard.html) — extracted from that file's inline
-   <style> block, unchanged, on 2026-07-12.
+   <style> block on 2026-07-12, migrated to theme.css tokens on 2026-07-17.
 
-   NOT merged into the main styles.css on purpose: oi_dashboard.html is a
-   standalone document loaded on its own (opened directly, or dropped into
-   DashboardPro.html's #oi-modal-iframe as a separate document — never
-   parsed into the same DOM as DashboardPro.html). Its :root/.db/body/*
-   rules use the same names as the main dashboard's but with different
-   values (e.g. --bg0 is #0B0E14 here vs #0F1117 in styles.css, .db here
-   is a flex column vs styles.css's .db padding/max-width rules). Loading
-   both files' CSS into one document would make those collide, so this
-   page keeps its own stylesheet instead. If the two ever get merged into
-   one page, rename this file's tokens (--bg0/--bg1/--bg2/--border/--txt/
-   --txt2/--txt3/--green/--red/--blue/--amber/.db) the same way
-   option_chain.html's tokens were prefixed --oc-* below in styles.css.
+   Colors here are intentionally darker/different from the main dashboard
+   (e.g. --oi-bg-0 #0B0E14 vs theme.css's --bg-0 #0F1117) — that's a real
+   design choice for this page, not drift, so it keeps its own --oi-*
+   prefixed tokens rather than reusing --bg-0/--pos/--neg/--info from
+   theme.css. Fonts and .db layout are NOT redeclared here anymore since
+   they're either identical to theme.css (--font-mono/--font-sans) or
+   page-specific layout that doesn't need a shared token.
+
+   Still loaded standalone (own document / iframe, never sharing a DOM
+   with styles.css) — but the --oi- prefix means that's now a safety net,
+   not a requirement: this file can be merged into any other page without
+   any name collisions with theme.css or styles.css.
+
+   Requires theme.css loaded first for --font-mono / --font-sans.
+   .db layout intentionally differs from styles.css's .db (flex column
+   vs padding/max-width) — this is a distinct page, not a shared component.
    ═══════════════════════════════════════════════════════════════════ */
 
   :root{
-    --bg0:#0B0E14; --bg1:#10141C; --bg2:#1A1F2A; --border:rgba(255,255,255,0.08);
-    --txt:#E8EDF2; --txt2:#8A94A6; --txt3:#5E6B7E;
-    --green:#3FAE5A; --red:#C0392B; --blue:#2F6FD6; --amber:#FCC419;
-    --mono:'JetBrains Mono',monospace; --sans:'Inter',system-ui,sans-serif;
+    --oi-bg-0:#0B0E14; --oi-bg-1:#10141C; --oi-bg-2:#1A1F2A; --oi-border:rgba(255,255,255,0.08);
+    --oi-text:#E8EDF2; --oi-text-2:#8A94A6; --oi-text-3:#5E6B7E;
+    --oi-green:#3FAE5A; --oi-red:#C0392B; --oi-blue:#2F6FD6; --oi-amber:#FCC419;
+    /* Legacy aliases — added 2026-07-17 after migration broke live
+       charts elsewhere. This file's canvas chart (#oiCanvas) is drawn by
+       JS, and if that JS reads colors via getComputedStyle(root).
+       getPropertyValue('--green') etc. (the pre-migration names), these
+       keep it working without needing theme.css to be loaded in this
+       standalone document. */
+    --bg0: var(--oi-bg-0); --bg1: var(--oi-bg-1); --bg2: var(--oi-bg-2);
+    --border: var(--oi-border);
+    --txt: var(--oi-text); --txt2: var(--oi-text-2); --txt3: var(--oi-text-3);
+    --green: var(--oi-green); --red: var(--oi-red); --blue: var(--oi-blue); --amber: var(--oi-amber);
+    --mono: var(--font-mono, 'JetBrains Mono', monospace);
+    --sans: var(--font-sans, 'Inter', system-ui, sans-serif);
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;overflow:hidden;}
-  body{background:var(--bg0);color:var(--txt);font-family:var(--sans);padding:10px 18px;}
+  body{background:var(--oi-bg-0);color:var(--oi-text);font-family:var(--font-sans);padding:10px 18px;}
   .db{max-width:1600px;margin:0 auto;height:100%;display:flex;flex-direction:column;min-height:0;}
   .top-nav{display:flex;align-items:center;justify-content:space-between;padding:8px 18px;
-    background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;flex-wrap:wrap;gap:10px;flex:0 0 auto;}
+    background:var(--oi-bg-1);border:1px solid var(--oi-border);border-radius:8px;margin-bottom:8px;flex-wrap:wrap;gap:10px;flex:0 0 auto;}
   .nav-brand{display:flex;align-items:center;gap:10px;font-weight:700;}
-  .spot-price{font-family:var(--mono);color:var(--green);font-size:20px;}
-  .conn-badge{font-size:10px;padding:3px 10px;border-radius:20px;font-weight:600;border:1px solid var(--border);}
-  .conn-badge.live{color:var(--green);border-color:var(--green);background:rgba(63,174,90,.12);}
-  .conn-badge.mock{color:var(--amber);border-color:var(--amber);background:rgba(252,196,25,.12);}
-  .conn-badge.down{color:var(--red);border-color:var(--red);background:rgba(192,57,43,.12);}
-  .tabs{display:flex;gap:28px;margin:4px 0 0;border-bottom:1px solid var(--border);padding:0 4px;flex:0 0 auto;}
-  .tab{font-size:14px;color:var(--txt2);padding:8px 2px 10px;cursor:pointer;border-bottom:2px solid transparent;font-weight:500;}
-  .tab:hover{color:var(--txt);}
+  .spot-price{font-family:var(--font-mono);color:var(--oi-green);font-size:20px;}
+  .conn-badge{font-size:10px;padding:3px 10px;border-radius:20px;font-weight:600;border:1px solid var(--oi-border);}
+  .conn-badge.live{color:var(--oi-green);border-color:var(--oi-green);background:rgba(63,174,90,.12);}
+  .conn-badge.mock{color:var(--oi-amber);border-color:var(--oi-amber);background:rgba(252,196,25,.12);}
+  .conn-badge.down{color:var(--oi-red);border-color:var(--oi-red);background:rgba(192,57,43,.12);}
+  .tabs{display:flex;gap:28px;margin:4px 0 0;border-bottom:1px solid var(--oi-border);padding:0 4px;flex:0 0 auto;}
+  .tab{font-size:14px;color:var(--oi-text-2);padding:8px 2px 10px;cursor:pointer;border-bottom:2px solid transparent;font-weight:500;}
+  .tab:hover{color:var(--oi-text);}
   .tab.active{color:#4DABF7;border-color:#4DABF7;font-weight:600;}
-  .legend{display:flex;gap:22px;justify-content:center;padding:8px 0 6px;font-size:12px;color:var(--txt2);flex:0 0 auto;flex-wrap:wrap;}
+  .legend{display:flex;gap:22px;justify-content:center;padding:8px 0 6px;font-size:12px;color:var(--oi-text-2);flex:0 0 auto;flex-wrap:wrap;}
   .legend span{display:inline-flex;align-items:center;gap:6px;}
   .sw{width:11px;height:11px;border-radius:2px;display:inline-block;}
   .sw.hollow{background:transparent;border:1.5px solid currentColor;}
-  .chart-wrap{background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:10px;
+  .chart-wrap{background:var(--oi-bg-1);border:1px solid var(--oi-border);border-radius:8px;padding:10px;
     flex:1 1 auto;min-height:0;display:flex;}
   #oiCanvas{width:100%;flex:1 1 auto;display:block;cursor:crosshair;min-height:0;}
-  .ws-config{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--txt3);}
-  .ws-config input{background:var(--bg2);border:1px solid var(--border);color:var(--txt);border-radius:4px;
-    padding:4px 8px;font-family:var(--mono);font-size:11px;width:190px;}
-  .ws-config button{background:var(--bg2);border:1px solid var(--border);color:var(--txt2);border-radius:4px;
+  .ws-config{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--oi-text-3);}
+  .ws-config input{background:var(--oi-bg-2);border:1px solid var(--oi-border);color:var(--oi-text);border-radius:4px;
+    padding:4px 8px;font-family:var(--font-mono);font-size:11px;width:190px;}
+  .ws-config button{background:var(--oi-bg-2);border:1px solid var(--oi-border);color:var(--oi-text-2);border-radius:4px;
     padding:4px 10px;cursor:pointer;font-size:11px;}
   .ws-config button:hover{border-color:#4DABF7;color:#4DABF7;}
 

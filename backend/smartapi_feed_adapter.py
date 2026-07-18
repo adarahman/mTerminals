@@ -40,11 +40,21 @@ class TickAggregator:
     flush_interval: seconds between merged-row broadcasts.
     """
 
-    def __init__(self, token_meta, loop, broadcast_fn, flush_interval=0.25):
+    def __init__(self, token_meta, loop, broadcast_fn, flush_interval=0.25, tick_event=None):
         self.token_meta = token_meta
         self.loop = loop
         self.broadcast_fn = broadcast_fn
         self.flush_interval = flush_interval
+        # Optional asyncio.Event, set (thread-safely, via
+        # loop.call_soon_threadsafe — this runs on the flush thread, not
+        # the event loop) after each successful flush. Lets a consumer
+        # like ws_server_live.py's engine_loop() wake early on real tick
+        # activity instead of always waiting out its full poll interval —
+        # see that file's MIN_TICK_RECOMPUTE_SECONDS for why a floor is
+        # still needed on top of this (ticks arrive every flush_interval
+        # during market hours, so "wake on every tick" alone would turn a
+        # slow poll into a faster one, not remove polling).
+        self.tick_event = tick_event
         self._buffer = {}          # strike -> partial row, accumulates ce_*/pe_*
         # Pending {"spot":.., "spotChange":.., "spotChgPct":..} from the
         # underlying INDEX token, if it's ticked since the last flush. Kept
@@ -184,6 +194,8 @@ class TickAggregator:
                 asyncio.run_coroutine_threadsafe(
                     self.broadcast_fn(message), self.loop
                 )
+                if self.tick_event is not None:
+                    self.loop.call_soon_threadsafe(self.tick_event.set)
             except Exception as e:
                 logger.error(f"[TickAggregator] failed to schedule broadcast: {e}")
 

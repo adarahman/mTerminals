@@ -13,10 +13,74 @@ function sendWsMessage(type, payload){
 }
 window.sendWsMessage = sendWsMessage;
 
-// Mirrors paper_trading.py's LOT_SIZES — kept in sync manually since this
-// is a separate process; same UNVERIFIED caveat applies (confirm against
-// NSE's current circular before relying on these for real sizing).
-const PT_LOT_SIZES = { NIFTY:75, BANKNIFTY:35, MIDCPNIFTY:140, SENSEX:20, FINNIFTY:65 };
+// Lot sizes are resolved server-side (paper_trading.py's get_lot_size(),
+// which reads the live AngelOne instrument master via
+// smartapi_instruments.py) rather than duplicated here as a static table —
+// a hardcoded copy silently goes wrong the moment NSE revises a lot size,
+// or for any symbol (stock F&O, BANKEX, SENSEX50, ...) that was never
+// added to the hand-maintained list.
+//
+// PT_LOT_SIZES is a client-side CACHE, not a source of truth: it starts
+// empty and fills in as ptGetLotSize() below resolves each symbol.
+const PT_LOT_SIZES = {};
+
+// Symbols this UI actually offers in the dropdown (see PT_LOT_SIZES.forEach
+// usage further down) — used to warm the cache on load.
+const PT_KNOWN_SYMBOLS = ['NIFTY', 'BANKNIFTY', 'MIDCPNIFTY', 'SENSEX', 'FINNIFTY'];
+
+// Only used if the backend lookup has never succeeded for this symbol AND
+// there's nothing cached yet (e.g. page just loaded, request in flight or
+// failed). Deliberately small — anything not in here fails loud (returns
+// null) instead of quietly pricing/margining against a guessed lot size.
+// Emergency-only until /api/lot-sizes responds (FUT-derived server map).
+// Keep roughly aligned with a recent master snapshot — never treat as source of truth.
+const PT_LOT_SIZE_HARDCODED_FALLBACK = { NIFTY:65, BANKNIFTY:30, MIDCPNIFTY:120, SENSEX:20, FINNIFTY:65 };
+
+// Synchronous lookup for hot paths (charge calcs, PnL, table renders).
+// Returns the cached value if we have one, else the narrow static
+// fallback, else null (caller must handle "unknown" rather than silently
+// treating it as 1 lot, which was the previous bug).
+function ptGetLotSize(symbol){
+  if (PT_LOT_SIZES[symbol] != null) return PT_LOT_SIZES[symbol];
+  if (PT_LOT_SIZE_HARDCODED_FALLBACK[symbol] != null) return PT_LOT_SIZE_HARDCODED_FALLBACK[symbol];
+  return null;
+}
+
+// Every call site below used to do `ptGetLotSize(x) || 1`, which silently
+// re-introduced the exact bug the null-return above was meant to prevent:
+// any symbol that isn't one of the 5 indices in PT_LOT_SIZE_HARDCODED_FALLBACK
+// (i.e. every stock F&O name, BANKEX, SENSEX50, ...) priced/PnL'd/margined
+// against a lot size of 1 until /api/lot-sizes happened to resolve it —
+// wrong by whatever that symbol's real lot size is (e.g. off by 250x for a
+// stock with lot size 250), with nothing on screen indicating the number
+// was unreliable. Route unresolved lookups through here instead: log once
+// per symbol (not once per render) and let each caller decide how to
+// represent "unknown" (skip the contribution, show "—", skip a live
+// reprice), rather than guessing 1.
+const _ptLotWarned = new Set();
+function ptWarnUnresolvedLot(symbol){
+  if (_ptLotWarned.has(symbol)) return;
+  _ptLotWarned.add(symbol);
+  console.warn('[paper-trading] lot size not yet resolved for "' + symbol + '" — skipping this value rather than guessing 1. Will self-correct once /api/lot-sizes responds.');
+}
+
+// Populates PT_LOT_SIZES from the backend. Wire this to whatever endpoint
+// exposes paper_trading.get_lot_size() per symbol — e.g. a REST route like
+// GET /api/lot-sizes returning {"NIFTY":75,"BANKNIFTY":35,...}, or a WS
+// request/response message if ws_server_live.py already has a channel for
+// this. Call once on panel init, and re-call periodically (e.g. once at
+// market open) since lot sizes can change on NSE's quarterly review.
+async function ptRefreshLotSizes(){
+  try{
+    const res = await fetch('/api/lot-sizes');
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    Object.assign(PT_LOT_SIZES, data);
+    ptUpdateLotSizeHint();
+  }catch(e){
+    console.warn('[paper-trading] lot size refresh failed, using cached/fallback values', e);
+  }
+}
 
 // ── Fund / available margin (paper-trading estimate) ───────────────────
 // paper_trading.py's portfolio payload only carries realized/unrealized
@@ -88,7 +152,8 @@ function ptCalcCharges(premium, qtyLots, lotSize, side){
 function ptTotalCharges(orders){
   return (orders || []).reduce((sum, o)=>{
     if(String(o.status||'').toUpperCase() !== 'FILLED') return sum;
-    const lot = PT_LOT_SIZES[o.symbol] || 1;
+    const lot = ptGetLotSize(o.symbol);
+    if(lot == null){ ptWarnUnresolvedLot(o.symbol); return sum; }
     const premium = o.fill_price ?? o.limit_price ?? 0;
     return sum + ptCalcCharges(premium, o.qty_lots, lot, o.side).total;
   }, 0);
@@ -108,7 +173,8 @@ function ptTotalCharges(orders){
 function ptEstimateExitCharges(positions){
   return (positions || []).reduce((sum, p)=>{
     if(!p.net_qty_lots) return sum;
-    const lot = PT_LOT_SIZES[p.symbol] || 1;
+    const lot = ptGetLotSize(p.symbol);
+    if(lot == null){ ptWarnUnresolvedLot(p.symbol); return sum; }
     const exitPrice = p.last_price ?? p.avg_price ?? 0;
     const exitSide = p.net_qty_lots > 0 ? 'SELL' : 'BUY'; // opposite of the open side
     return sum + ptCalcCharges(exitPrice, Math.abs(p.net_qty_lots), lot, exitSide).total;
@@ -125,9 +191,10 @@ function ptEstimateExitCharges(positions){
 function ptEstimateMarginBlocked(positions, wsState){
   const spot = Number(wsState && wsState.spot) || 0;
   return (positions || []).reduce((sum, p) => {
-    const lot = PT_LOT_SIZES[p.symbol] || 1;
     const qty = Math.abs(p.net_qty_lots || 0);
     if (!qty) return sum;
+    const lot = ptGetLotSize(p.symbol);
+    if (lot == null) { ptWarnUnresolvedLot(p.symbol); return sum; }
     if (p.net_qty_lots > 0) {
       return sum + (Number(p.avg_price) || 0) * qty * lot;
     }
@@ -333,6 +400,7 @@ function ptMountPanel(){
         <select id="pt-side" style="display:none;"><option value="BUY">BUY</option><option value="SELL">SELL</option></select>
         <input id="pt-qty" type="number" min="1" value="1" placeholder="Lots">
       </div>
+      <div id="pt-lotsize-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">Lot size: — · Total qty: —</div>
       <div class="pt-row">
         <div class="pt-toggle-group pt-toggle-group-6" id="pt-ordtype-toggle" role="group" aria-label="Order type">
           <button type="button" class="pt-toggle-btn active" data-value="MARKET">MARKET</button>
@@ -480,7 +548,7 @@ function ptMountPanel(){
 
   console.log('[paper-trading] panel mounted:', document.body.contains(btn), document.body.contains(panel));
 
-  Object.keys(PT_LOT_SIZES).forEach(sym=>{
+  PT_KNOWN_SYMBOLS.forEach(sym=>{
     const o = document.createElement('option'); o.value = sym; o.textContent = sym;
     $i('pt-symbol').appendChild(o);
   });
@@ -539,7 +607,8 @@ function ptMountPanel(){
   $i('pt-instype').onchange = ptRefreshExpiryStrikeOptions;
   $i('pt-expiry').onchange  = ptRefreshStrikeOptions;
   $i('pt-strike').onchange  = ptUpdateLtpHint;
-  $i('pt-symbol').onchange  = ()=>{ _ptSymbolTouched = true; ptRefreshExpiryStrikeOptions(); };
+  $i('pt-symbol').onchange  = ()=>{ _ptSymbolTouched = true; ptRefreshExpiryStrikeOptions(); ptUpdateLotSizeHint(); };
+  $i('pt-qty').addEventListener('input', ptUpdateLotSizeHint);
 
   $i('pt-submit-btn').onclick = ptSubmitOrder;
 
@@ -550,6 +619,8 @@ function ptMountPanel(){
   // free-typed text boxes.
   if(_wsState && _wsState.symbol) $i('pt-symbol').value = _wsState.symbol;
   ptRefreshExpiryStrikeOptions();
+  ptRefreshLotSizes();
+  ptUpdateLotSizeHint();
   ptUpdateOrdTypeFields();
   ptRenderBasket();
 }
@@ -656,6 +727,25 @@ function ptFindLiveLtp(){
   const expiry  = $i('pt-expiry').value;
   const strike  = parseFloat($i('pt-strike').value);
   return ptResolveLtp(symbol, instype, expiry, strike);
+}
+
+// Shows the exchange-fixed lot size for whatever symbol is currently
+// selected, plus the actual quantity (lot size × lots) the order form
+// will submit — mirrors what NSE/BSE broker terminals show next to the
+// "Qty" field so it's clear "3 lots" of BANKNIFTY (lot 35) means 105
+// units, not 3.
+function ptUpdateLotSizeHint(){
+  const hint = $i('pt-lotsize-hint');
+  if(!hint) return;
+  const symbol = $i('pt-symbol').value;
+  const lot = ptGetLotSize(symbol);
+  const lots = parseInt($i('pt-qty').value, 10);
+  if(lot == null){
+    hint.textContent = 'Lot size: resolving… · Total qty: —';
+    return;
+  }
+  const totalQty = (lots > 0) ? lot * lots : null;
+  hint.textContent = 'Lot size: ' + lot + ' · Total qty: ' + (totalQty != null ? totalQty : '—');
 }
 
 function ptUpdateLtpHint(){
@@ -1111,6 +1201,7 @@ function ptOpenQuickOrder(evt, strike, instrument_type, ltp){
       <input id="pt-qp-qty" type="number" min="1" value="1" placeholder="Lots">
       <select id="pt-qp-ordtype"><option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option></select>
     </div>
+    <div id="pt-qp-lotsize-hint" style="font-size:10px;opacity:.65;margin:2px 0 4px;"></div>
     <div class="pt-qp-row" id="pt-qp-pricerow" style="display:none;">
       <input id="pt-qp-price" type="number" placeholder="Limit price" value="${ltp!=null?ltp:''}">
     </div>
@@ -1120,6 +1211,21 @@ function ptOpenQuickOrder(evt, strike, instrument_type, ltp){
     </div>
   `;
   $i('pt-qp-ordtype').onchange = (e)=>{ $i('pt-qp-pricerow').style.display = e.target.value==='LIMIT' ? 'flex' : 'none'; };
+  // Same lot-size/total-qty hint as the main panel, keyed off the symbol
+  // this popover was opened for (not the main panel's pt-symbol, which
+  // may point at a different scrip).
+  function ptQpUpdateLotSizeHint(){
+    const lot = ptGetLotSize(symbol);
+    const lots = parseInt($i('pt-qp-qty').value, 10);
+    if(lot == null){
+      $i('pt-qp-lotsize-hint').textContent = 'Lot size: resolving… · Total qty: —';
+      return;
+    }
+    const totalQty = (lots > 0) ? lot * lots : null;
+    $i('pt-qp-lotsize-hint').textContent = 'Lot size: ' + lot + ' · Total qty: ' + (totalQty != null ? totalQty : '—');
+  }
+  $i('pt-qp-qty').addEventListener('input', ptQpUpdateLotSizeHint);
+  ptQpUpdateLotSizeHint();
   // Position near the click, clamped so it never spills off-screen.
   const pad = 12;
   let x = evt.clientX + 10, y = evt.clientY + 10;
@@ -1290,6 +1396,13 @@ function ptSquareOffAll(){
 }
 window.ptSquareOffAll = ptSquareOffAll;
 
+function ptCancelOrder(orderId){
+  if(!orderId) return;
+  if(!confirm('Cancel this pending order?')) return;
+  sendWsMessage('cancel_order', { order_id: orderId });
+}
+window.ptCancelOrder = ptCancelOrder;
+
 // Backend-agnostic "live portfolio" fix: paper_trading.py's last_price /
 // unrealized_pnl on each position only reflect whatever LTP it had at
 // the time it last recomputed (typically on order/fill events). Rather
@@ -1327,10 +1440,14 @@ function ptLiveReprice(pf, d){
       }
     }
     if(liveLtp != null && symMatches){
-      const lot = PT_LOT_SIZES[p.symbol] || 1;
-      p.last_price = liveLtp;
-      p.unrealized_pnl = (liveLtp - p.avg_price) * p.net_qty_lots * lot;
-      p._live = true;
+      const lot = ptGetLotSize(p.symbol);
+      if(lot == null){
+        ptWarnUnresolvedLot(p.symbol);
+      } else {
+        p.last_price = liveLtp;
+        p.unrealized_pnl = (liveLtp - p.avg_price) * p.net_qty_lots * lot;
+        p._live = true;
+      }
     }
   });
   
@@ -1339,21 +1456,19 @@ function ptLiveReprice(pf, d){
   return pf;
 }
 
-function renderPaperTradingPanel(wsState){
-  if(!$i('pt-panel')) ptMountPanel();
-  if(!wsState) return;
-
-  // BUGFIX: the symbol/expiry/strike/LTP sync below used to live AFTER the
-  // `if(!wsState.portfolio) return;` guard further down, which meant NONE
-  // of it ever ran until the backend started sending {type:"portfolio",...}
-  // messages. That message type needs separate wiring into
-  // ws_server_live.py (see the note above sendWsMessage()) and may not be
-  // hooked up yet — but the option chain (which is what actually drives
-  // the expiry/strike dropdowns) arrives via a completely different,
-  // already-working WS message stream. So this sync must not be blocked
-  // on `portfolio` existing at all — only the P&L/positions/orders
-  // rendering below genuinely needs it.
-
+// BUGFIX: the symbol/expiry/strike/LTP sync below used to live AFTER the
+// `if(!wsState.portfolio) return;` guard further down, which meant NONE
+// of it ever ran until the backend started sending {type:"portfolio",...}
+// messages. That message type needs separate wiring into
+// ws_server_live.py (see the note above sendWsMessage()) and may not be
+// hooked up yet — but the option chain (which is what actually drives
+// the expiry/strike dropdowns) arrives via a completely different,
+// already-working WS message stream. So this sync must not be blocked
+// on `portfolio` existing at all — only the P&L/positions/orders
+// rendering below genuinely needs it. Kept separate from the P&L calc/
+// render split below since it's neither: it's DOM form state syncing
+// against the live tick, not a derived number and not a table paint.
+function ptSyncFormFromWsState(wsState){
   // BUGFIX: pt-symbol is prefilled from _wsState.symbol at mount time, but
   // ptMountPanel() runs on DOMContentLoaded — before connectWebSocket()'s
   // first tick — so _wsState.symbol is usually still unknown then and the
@@ -1386,16 +1501,17 @@ function renderPaperTradingPanel(wsState){
     ptRefreshExpiryStrikeOptions();
   }
   ptUpdateLtpHint();
+}
 
-  // Everything from here on (P&L summary, positions table, orders table)
-  // genuinely does need the backend's paper-trading portfolio feed, so
-  // this is the right place — and the ONLY place — to bail on it missing.
-  if(!wsState.portfolio) return;
-
+// ── Pure calculation: wsState -> portfolio view-model ──────────────────
+// No DOM access anywhere in this function. Everything renderPaperTrading-
+// Panel's three render functions need — repriced positions, charges, net
+// P&L, fund summary, the filtered order log — is computed once here and
+// handed to them as plain data, so the P&L math can be read, tested, or
+// reused (e.g. by a future export/summary feature) independently of how
+// it happens to be painted to the DOM today.
+function ptComputePortfolioView(wsState){
   const pf = ptLiveReprice(wsState.portfolio, wsState);
-  setHtmlIfChanged($i('pt-realized'), '<span class="'+ptPnlClass(pf.realized_pnl)+'">'+ptFmtN(pf.realized_pnl)+'</span>');
-  setHtmlIfChanged($i('pt-unrealized'), '<span class="'+ptPnlClass(pf.unrealized_pnl)+'">'+ptFmtN(pf.unrealized_pnl)+'</span>');
-  setHtmlIfChanged($i('pt-total'), '<span class="'+ptPnlClass(pf.total_pnl)+'">'+ptFmtN(pf.total_pnl)+'</span>');
 
   // Realized/Unrealized/Total above are gross mark-to-market — the actual
   // amount you'd walk away with is that minus statutory charges incurred
@@ -1419,22 +1535,32 @@ function renderPaperTradingPanel(wsState){
   const totalCharges = ptTotalCharges(ordersSinceReset);
   const filledCount = ordersSinceReset.filter(o=>String(o.status||'').toUpperCase()==='FILLED').length;
   const netPnl = pf.total_pnl - totalCharges;
-  setHtmlIfChanged($i('pt-charges'), '<span class="pt-neg">−'+ptFmtN(totalCharges)+'</span>');
-  setHtmlIfChanged($i('pt-charges-count'), String(filledCount));
-  setHtmlIfChanged($i('pt-net-pnl'), '<span class="'+ptPnlClass(netPnl)+'">'+ptFmtN(netPnl)+'</span>');
 
   // Forward-looking: what you'd actually walk away with if every open
   // position were flattened right now, including the exit-leg charges
   // that haven't been incurred yet (see ptEstimateExitCharges).
   const estExitCharges = ptEstimateExitCharges(pf.positions || []);
   const netPnlIfFlat = netPnl - estExitCharges;
-  setHtmlIfChanged($i('pt-net-pnl-if-flat'), '<span class="'+ptPnlClass(netPnlIfFlat)+'">'+ptFmtN(netPnlIfFlat)+'</span>');
 
   // Fund / available margin — see ptComputeFundSummary() above for the
-  // capital/margin model. Uses the same wsState the rest of this render
-  // pass already has, so this stays in lockstep with Realized/Unrealized/
-  // Total above rather than recomputing pf a second time.
+  // capital/margin model. Uses the same wsState so this stays in lockstep
+  // with Realized/Unrealized/Total rather than recomputing pf a second time.
   const fundSummary = ptComputeFundSummary(wsState);
+
+  return { pf, ordersSinceReset, totalCharges, filledCount, netPnl, estExitCharges, netPnlIfFlat, fundSummary };
+}
+
+// ── Render: P&L summary strip (realized/unrealized/total/charges/net/fund) ──
+function ptRenderPortfolioSummary(view){
+  const { pf, totalCharges, filledCount, netPnl, netPnlIfFlat, fundSummary } = view;
+  setHtmlIfChanged($i('pt-realized'), '<span class="'+ptPnlClass(pf.realized_pnl)+'">'+ptFmtN(pf.realized_pnl)+'</span>');
+  setHtmlIfChanged($i('pt-unrealized'), '<span class="'+ptPnlClass(pf.unrealized_pnl)+'">'+ptFmtN(pf.unrealized_pnl)+'</span>');
+  setHtmlIfChanged($i('pt-total'), '<span class="'+ptPnlClass(pf.total_pnl)+'">'+ptFmtN(pf.total_pnl)+'</span>');
+  setHtmlIfChanged($i('pt-charges'), '<span class="pt-neg">−'+ptFmtN(totalCharges)+'</span>');
+  setHtmlIfChanged($i('pt-charges-count'), String(filledCount));
+  setHtmlIfChanged($i('pt-net-pnl'), '<span class="'+ptPnlClass(netPnl)+'">'+ptFmtN(netPnl)+'</span>');
+  setHtmlIfChanged($i('pt-net-pnl-if-flat'), '<span class="'+ptPnlClass(netPnlIfFlat)+'">'+ptFmtN(netPnlIfFlat)+'</span>');
+
   if (fundSummary) {
     if (fundSummary.fundSource === 'live-unavailable') {
       // No real AngelOne funds fetch exists yet (see ptComputeFundSummary's
@@ -1452,7 +1578,11 @@ function renderPaperTradingPanel(wsState){
     const warnEl = $i('pt-fund-warn');
     if (warnEl) warnEl.style.display = fundSummary.lowFund ? 'block' : 'none';
   }
+}
 
+// ── Render: open positions table ──
+function ptRenderPositionsTable(view){
+  const { pf } = view;
   const posRows = (pf.positions || []).map(p=>{
     const label = (p.instrument_type === 'CE' || p.instrument_type === 'PE')
       ? p.strike + ' ' + p.instrument_type : p.instrument_type;
@@ -1476,16 +1606,19 @@ function renderPaperTradingPanel(wsState){
     squareOffBtn.style.opacity = hasPositions ? '1' : '.4';
     squareOffBtn.style.cursor = hasPositions ? 'pointer' : 'default';
   }
+}
 
+// ── Render: order/trade log table (confirmed + still-pending rows) ──
+function ptRenderOrdersTable(view, wsState){
   // Real backend-confirmed orders first, then any not-yet-confirmed
   // orders sent from this tab, so something always shows up the instant
   // "Place Order"/BUY/SELL is clicked instead of an empty table until
   // the next `orders` WS message arrives.
   // Orders/pending older than _ptOrdersResetAt are filtered out by the
-  // "Reset" button (ptResetOrderLog) — same ordersSinceReset computed
-  // above for Charges/Net P&L, reused here so the visible log and the
+  // "Reset" button (ptResetOrderLog) — same ordersSinceReset computed by
+  // ptComputePortfolioView, reused here so the visible log and the
   // charges total can never drift out of sync with each other.
-  const orders = ordersSinceReset;
+  const orders = view.ordersSinceReset;
   ptNotifyNewRejections(wsState.orders || []);
   const rowsAll = orders.slice(0, 15).map(o=>{
     const hasExpiry = o.instrument_type==='CE' || o.instrument_type==='PE' || o.instrument_type==='FUT';
@@ -1498,24 +1631,42 @@ function renderPaperTradingPanel(wsState){
     const statusReason = o.reason || o.reject_reason || o.rejection_reason || o.message || o.error || '';
     const isRejected = String(o.status||'').toUpperCase()==='REJECTED';
     const isFilled = String(o.status||'').toUpperCase()==='FILLED';
-    const statusTd = isRejected
-      ? '<td class="pt-neg pt-status-tap" data-reason="'+ptEscAttr(statusReason || 'No reason provided by engine')+'" title="Tap for reason">'+o.status+'</td>'
-      : '<td>'+o.status+'</td>';
+    const isPending = String(o.status||'').toUpperCase()==='PENDING';
+    
+    let statusTd = '<td>'+o.status+'</td>';
+    if(isRejected){
+      statusTd = '<td class="pt-neg pt-status-tap" data-reason="'+ptEscAttr(statusReason || 'No reason provided by engine')+'" title="Tap for reason">'+o.status+'</td>';
+    } else if(isPending){
+      const cancelBtn = '<span onclick="ptCancelOrder(\''+o.id+'\')" title="Cancel this pending order" '
+        + 'style="cursor:pointer;margin-left:6px;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;'
+        + 'background:var(--red,#e74c3c);color:#fff;">✕</span>';
+      statusTd = '<td>'+o.status + cancelBtn + '</td>';
+    }
+
     // Only a FILLED order actually incurs statutory charges — a REJECTED
     // or still-PENDING order never executed, so there's no turnover to
     // charge against.
     let chargesTd = '<td style="opacity:.4;">—</td>';
     if(isFilled){
-      const lot = PT_LOT_SIZES[o.symbol] || 1;
-      const c = ptCalcCharges(priceVal, o.qty_lots, lot, o.side);
-      chargesTd = '<td class="pt-neg" title="STT '+ptFmtN(c.stt,2)+' · Exch '+ptFmtN(c.exchangeTxn,2)
-        +' · SEBI '+ptFmtN(c.sebiFee,2)+' · Stamp '+ptFmtN(c.stampDuty,2)+' · GST '+ptFmtN(c.gst,2)+'">−'
-        +ptFmtN(c.total,2)+'</td>';
+      const lot = ptGetLotSize(o.symbol);
+      if(lot == null){
+        ptWarnUnresolvedLot(o.symbol);
+        chargesTd = '<td style="opacity:.4;" title="Lot size not resolved yet">…</td>';
+      } else {
+        const c = ptCalcCharges(priceVal, o.qty_lots, lot, o.side);
+        chargesTd = '<td class="pt-neg" title="STT '+ptFmtN(c.stt,2)+' · Exch '+ptFmtN(c.exchangeTxn,2)
+          +' · SEBI '+ptFmtN(c.sebiFee,2)+' · Stamp '+ptFmtN(c.stampDuty,2)+' · GST '+ptFmtN(c.gst,2)+'">−'
+          +ptFmtN(c.total,2)+'</td>';
+      }
     }
     return '<tr><td title="'+symText+'">'+symText+'</td><td title="'+(o.expiry||'')+'">'+expCell+'</td>'
       + '<td><span class="pt-side-badge '+sideCls+'">'+o.side+'</span></td><td>'+o.qty_lots+'</td>'
       + '<td>'+o.order_type+'</td><td>'+ptFmtN(priceVal, 2)+'</td>' + chargesTd
-      + statusTd + '<td>'+(tsVal ? new Date(tsVal*1000).toLocaleTimeString() : '—')+'</td></tr>';
+      + statusTd + '<td>'+(tsVal ? new Date(tsVal*1000).toLocaleString('en-IN', {
+  day: '2-digit', month: 'short', year: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+  hour12: true
+}) : '—')+'</td></tr>';
   });
   const rowsPending = _ptPending
     .filter(p=>p.ts >= _ptOrdersResetAt*1000)
@@ -1542,6 +1693,26 @@ function renderPaperTradingPanel(wsState){
   const ordRows = (rowsPending.join('') + rowsAll.join(''))
     || '<tr><td colspan="9" style="text-align:center;opacity:.5">No orders yet</td></tr>';
   setHtmlIfChanged($i('pt-orders-table').querySelector('tbody'), ordRows);
+}
+
+// ── Orchestrator ── unchanged entry point / call signature, now just
+// wires: mount -> form sync (always) -> guard -> compute -> render x3.
+function renderPaperTradingPanel(wsState){
+  if(!$i('pt-panel')) ptMountPanel();
+  if(!wsState) return;
+
+  // Must not be blocked on `portfolio` existing — see ptSyncFormFromWsState.
+  ptSyncFormFromWsState(wsState);
+
+  // Everything from here on (P&L summary, positions table, orders table)
+  // genuinely does need the backend's paper-trading portfolio feed, so
+  // this is the right place — and the ONLY place — to bail on it missing.
+  if(!wsState.portfolio) return;
+
+  const view = ptComputePortfolioView(wsState);
+  ptRenderPortfolioSummary(view);
+  ptRenderPositionsTable(view);
+  ptRenderOrdersTable(view, wsState);
 }
 
 // Clears what the Order/Trade Log table displays. This is a display-only

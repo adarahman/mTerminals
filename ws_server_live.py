@@ -61,6 +61,14 @@ _parser = argparse.ArgumentParser()
 _parser.add_argument("--symbol", default="NIFTY")
 _parser.add_argument("--expiry", default=None)
 _parser.add_argument("--poll-seconds", type=int, default=5)
+_parser.add_argument("--min-tick-recompute-seconds", type=float, default=2.0,
+                      help="Floor on how often SmartAPI tick activity can wake engine_loop "
+                           "early. --poll-seconds becomes a ceiling (fires anyway if no ticks "
+                           "arrive — quiet market, symbol has no SmartAPI feed, etc.); this is "
+                           "the floor (never recompute faster than this even while ticks are "
+                           "flooding in, since ticks arrive every ~0.25s during market hours — "
+                           "waking on every single one would make the heavy Greeks/OI-velocity/ "
+                           "GEX recompute run MORE often than the old fixed poll, not less).")
 _parser.add_argument("--host", default="localhost")
 _parser.add_argument("--port", type=int, default=8765)
 _parser.add_argument("--http-port", type=int, default=5500, help="HTTP static file server port")
@@ -117,6 +125,7 @@ ARGS = _parser.parse_args()
 SYMBOL       = ARGS.symbol.strip().upper()
 EXPIRY       = ARGS.expiry
 POLL_SECONDS = ARGS.poll_seconds
+MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
 WS_HOST      = ARGS.host
 WS_PORT      = ARGS.port
 HTTP_PORT    = ARGS.http_port
@@ -131,8 +140,11 @@ STRIKES_EACH_SIDE    = ARGS.strikes_each_side if ARGS.strikes_each_side is not N
 option_chain_json.STRIKES_EACH_SIDE = STRIKES_EACH_SIDE
 
 print(
-    f"[feed] chain source: market_api.py (NSE/BSE REST, poll={POLL_SECONDS}s) "
-    f"+ {'SmartAPI websocket overlay ENABLED' if USE_SMARTAPI else 'SmartAPI overlay DISABLED (--no-smartapi)'}",
+    f"[feed] chain source: SmartAPI REST (via option_chain_json.py/smartapi_pipeline_adapter.py), "
+    f"analytics recompute ceiling={POLL_SECONDS}s floor={MIN_TICK_RECOMPUTE_SECONDS}s "
+    f"+ {'SmartAPI websocket overlay ENABLED' if USE_SMARTAPI else 'SmartAPI overlay DISABLED (--no-smartapi)'} "
+    f"| market_api.py now used only for fetch_all_indices() (ffmc/Top Drivers-Draggers, "
+    f"20s-cached — see DF_IDX_TTL_SECONDS in option_chain_json.py)",
     flush=True,
 )
 print(
@@ -169,6 +181,17 @@ LAST_FUNDS = None
 # place_order, engine_loop for the tick-driven mark-to-market/broadcast), so
 # no extra locking is needed around the sqlite3 connection.
 PT_ENGINE = PaperTradingEngine()
+
+# _build_current_prices() only ever sees ONE symbol's chain per tick — the
+# currently-active dashboard SYMBOL, since that's all a single option_chain_json
+# pipeline run produces. Without this, positions on any OTHER symbol (e.g. a
+# NIFTY leg opened earlier, now viewing SENSEX) silently lose their LTP the
+# moment you switch symbols, showing "—" instead of their last real price.
+# This cache holds the last known price per instrument_key across symbol
+# switches, so a leg only ever goes blank if it's never been priced at all
+# (never the case for an open position, since it had to be priced to fill).
+_LAST_KNOWN_LEG_PRICES: dict[str, float] = {}
+
 # Throttle for the fast-path portfolio broadcast fired from
 # _smartapi_sync_and_broadcast (see PORTFOLIO_POLL_SECONDS) — separate from
 # engine_loop()'s own POLL_SECONDS-paced broadcast, which still runs
@@ -268,6 +291,11 @@ def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
 _PIPELINE_LOCK = asyncio.Lock()
 INDEX_QUOTES = {}  # {"BANKNIFTY": {"spot":.., "spotChange":.., "spotChgPct":..}, ...}
 _SYMBOL_SWITCH_EVENT = asyncio.Event()
+# Set (thread-safely) by TickAggregator's flush loop on every real tick
+# flush. engine_loop() waits on this OR _SYMBOL_SWITCH_EVENT, whichever
+# comes first, bounded by MIN_TICK_RECOMPUTE_SECONDS as a floor and
+# POLL_SECONDS as a ceiling — see engine_loop() for the full reasoning.
+_TICK_ACTIVITY_EVENT = asyncio.Event()
 
 
 def _json_default(obj):
@@ -406,6 +434,16 @@ async def ws_handler(request):
                         import traceback
                         print(f"[paper-trading] place_order FAILED: {e}", flush=True)
                         traceback.print_exc()
+                elif data.get("type") == "cancel_order":
+                    try:
+                        order_id = (data.get("payload") or {}).get("order_id")
+                        if order_id:
+                            success = PT_ENGINE.cancel_order(order_id)
+                            print(f"[paper-trading] CANCEL {order_id}: {'success' if success else 'failed'}", flush=True)
+                            current_prices = _build_current_prices(LAST_PAYLOAD)
+                            await _broadcast_portfolio(current_prices)
+                    except Exception as e:
+                        print(f"[paper-trading] cancel_order FAILED: {e}", flush=True)
                 elif data.get("type") == "toggle_live_mode":
                     # Sent by paper-trading.js's ptToggleLiveMode() whenever
                     # the dashboard's PAPER/LIVE pill is flipped. This ONLY
@@ -440,10 +478,10 @@ def _build_current_prices(payload):
     what the user sees on screen, never a stale/separate fetch."""
     prices = {}
     if not payload:
-        return prices
+        return dict(_LAST_KNOWN_LEG_PRICES)
     symbol = payload.get("symbol")
     if not symbol:
-        return prices
+        return dict(_LAST_KNOWN_LEG_PRICES)
 
     spot = payload.get("spot")
     if spot is not None:
@@ -468,7 +506,12 @@ def _build_current_prices(payload):
             if row.get("peLTP") is not None:
                 prices[_instrument_key(symbol, exp, strike, "PE")] = row["peLTP"]
 
-    return prices
+    # This tick only ever prices ONE symbol's legs (see _LAST_KNOWN_LEG_PRICES
+    # docstring above) — merge in, don't replace, so positions on other
+    # symbols keep showing their last known price instead of "—" the moment
+    # the dashboard's active symbol changes.
+    _LAST_KNOWN_LEG_PRICES.update(prices)
+    return {**_LAST_KNOWN_LEG_PRICES, **prices}
 
 
 async def _broadcast_portfolio(current_prices):
@@ -479,6 +522,13 @@ async def _broadcast_portfolio(current_prices):
     already there."""
     portfolio = PT_ENGINE.get_portfolio_summary(current_prices)
     orders = PT_ENGINE.get_orders()
+
+    # Add fund summary (using NIFTY spot as a proxy for index-margin checks
+    # if the active symbol's spot is missing) so the frontend's Fund pill
+    # stays synced with the backend's PT_STARTING_CAPITAL and SPAN estimation.
+    spot = current_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
+    portfolio["funds"] = PT_ENGINE.get_fund_summary(spot_price=spot)
+
     await broadcast({"type": "portfolio", "payload": portfolio})
     await broadcast({"type": "orders", "payload": orders})
 
@@ -1016,7 +1066,10 @@ def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=Non
             return
         exchange, token_meta, expiry, index_token, index_exchange_type, futures_token, futures_exchange_type = resolved
 
-        _smartapi_aggregator = TickAggregator(token_meta, loop, _smartapi_sync_and_broadcast)
+        _smartapi_aggregator = TickAggregator(
+            token_meta, loop, _smartapi_sync_and_broadcast,
+            tick_event=_TICK_ACTIVITY_EVENT,
+        )
         _smartapi_aggregator.start()
 
         _smartapi_stream = SmartTickStream(on_tick=_smartapi_aggregator.on_tick, mode=3)
@@ -1427,17 +1480,42 @@ async def engine_loop():
 
         remaining = POLL_SECONDS - (time.monotonic() - tick_start)
         if remaining > 0:
-            # Same sleep as before, except a switch_symbol() call (from a
-            # client reconnecting with ?symbol=... — see ws_handler) can cut
-            # it short via _SYMBOL_SWITCH_EVENT, so the new symbol's first
-            # tick fires immediately instead of waiting out however much of
-            # --poll-seconds was left on the OLD symbol.
-            try:
-                await asyncio.wait_for(_SYMBOL_SWITCH_EVENT.wait(), timeout=remaining)
-                _SYMBOL_SWITCH_EVENT.clear()
-                print("[ws] symbol switch — ticking early", flush=True)
-            except asyncio.TimeoutError:
-                pass
+            # POLL_SECONDS is a CEILING: fires anyway if nothing happens
+            # (quiet market, --no-smartapi, or this symbol has no SmartAPI
+            # feed — spot/OI stay on the old REST-poll cadence in that
+            # case). MIN_TICK_RECOMPUTE_SECONDS is a FLOOR: even with
+            # ticks flooding in continuously (every ~0.25s during market
+            # hours — see TickAggregator.flush_interval), this loop won't
+            # re-run the heavy Greeks/OI-velocity/GEX pipeline faster than
+            # this floor. Without the floor, "wake on every tick" would
+            # make this run MORE often than the old fixed poll, not less.
+            floor_remaining = MIN_TICK_RECOMPUTE_SECONDS - (time.monotonic() - tick_start)
+            if floor_remaining > 0:
+                await asyncio.sleep(min(floor_remaining, remaining))
+                remaining = POLL_SECONDS - (time.monotonic() - tick_start)
+
+            if remaining > 0:
+                wait_switch = asyncio.create_task(_SYMBOL_SWITCH_EVENT.wait())
+                wait_tick = asyncio.create_task(_TICK_ACTIVITY_EVENT.wait())
+                try:
+                    done, pending = await asyncio.wait(
+                        {wait_switch, wait_tick},
+                        timeout=remaining,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for t in pending:
+                        t.cancel()
+                    if wait_switch in done:
+                        _SYMBOL_SWITCH_EVENT.clear()
+                        print("[ws] symbol switch — ticking early", flush=True)
+                    elif wait_tick in done:
+                        _TICK_ACTIVITY_EVENT.clear()
+                        print("[ws] tick activity — ticking early "
+                              f"(floor={MIN_TICK_RECOMPUTE_SECONDS}s)", flush=True)
+                    # else: timed out at the POLL_SECONDS ceiling, nothing to clear
+                except Exception as e:
+                    print(f"[ws] WARNING: wake-wait failed, falling back to plain sleep: {e}", flush=True)
+                    await asyncio.sleep(remaining)
         elif pipeline_elapsed > POLL_SECONDS:
             print(
                 f"[ws] WARNING: pipeline took {pipeline_elapsed:.2f}s, "
@@ -1594,11 +1672,33 @@ async def history_handler(request):
     return web.json_response(rows)
 
 
+async def lot_sizes_handler(request):
+    """GET /api/lot-sizes → {"NIFTY": 65, "RELIANCE": 500, ...}
+
+    Lot sizes come from FUTSTK/FUTIDX rows in the AngelOne instrument
+    master (see smartapi_instruments.get_all_lot_sizes) — one futures
+    contract per underlying is enough because FUT and all CE/PE share
+    the same lot size for a given NSE revision. paper-trading.js calls
+    this on panel init via ptRefreshLotSizes().
+    """
+    try:
+        from smartapi_instruments import get_all_lot_sizes
+        lots = await asyncio.to_thread(get_all_lot_sizes)
+        return web.json_response(lots)
+    except Exception as e:
+        print(f"[http] /api/lot-sizes failed: {e}", flush=True)
+        return web.json_response(
+            {"error": str(e)},
+            status=500,
+        )
+
+
 async def main():
     app = web.Application(middlewares=[no_cache_middleware])
     app.router.add_get('/ws', ws_handler)
     app.router.add_get('/api/spot-history', spot_history_handler)
     app.router.add_get('/api/history', history_handler)
+    app.router.add_get('/api/lot-sizes', lot_sizes_handler)
     FRONTEND_DIR = SCRIPT_DIR / "frontend"
     app.router.add_static('/', path=FRONTEND_DIR, name='static')
 

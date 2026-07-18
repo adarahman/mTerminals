@@ -9,6 +9,15 @@
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="utilities.css">
+<style>
+  /* Greeks/GEX modal body — the OI Dashboard modal's panel wraps a full
+     iframe (.oc-modal-iframe fills the panel edge-to-edge by design), but
+     this modal wraps plain in-page markup instead (#grkgex-content /
+     #grkgex-footer — the same nodes ChainView.renderGreeksGex() already
+     writes into), which needs scroll + padding rather than iframe sizing,
+     so it gets its own class instead of reusing .oc-modal-iframe on a div. */
+  .greeks-modal-body{ flex:1; min-height:0; overflow-y:auto; padding:12px 14px; }
+</style>
 </head>
 <body><div class="db">
 
@@ -28,6 +37,42 @@
       <button id="oi-modal-close" onclick="closeOIDashboardModal()" title="Close (Esc)">✕ Close</button>
     </div>
     <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Dashboard"></iframe>
+  </div>
+</div>
+
+<!-- ── GREEKS / GEX MODAL OVERLAY (same-screen, no new window) ──
+     Full per-strike Greeks/GEX table, moved out of the main dashboard so
+     the main view only shows the compact alerts card (#greeks-alerts-card,
+     built by ChainView.buildGreeksAlertsHtml()) — gamma flip / short-gamma
+     regime / high theta decay flags, with a "Full Table →" button that
+     opens this modal. Not an iframe like the OI Dashboard modal above:
+     ChainView.renderGreeksGex() already writes straight into
+     #grkgex-content/#grkgex-footer below on every render and live tick
+     (those ids used to sit inline in the dashboard template — moving them
+     here is a pure relocation, no rendering logic changed), so this modal
+     is always current the moment it's opened; no data needs to be pushed
+     into it the way OI_DASHBOARD_DATA is pushed into the OI iframe. -->
+<div id="greeks-dashboard-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <span class="oc-modal-title">Δ Greeks &amp; Net GEX</span>
+      <div class="tab-group" id="grk-tabs">
+        <div class="tab-btn active-grk" onclick="switchGrkTab('delta',this)">Δ</div>
+        <div class="tab-btn" onclick="switchGrkTab('gamma',this)">Γ</div>
+        <div class="tab-btn" onclick="switchGrkTab('theta',this)">Θ</div>
+        <div class="tab-btn" onclick="switchGrkTab('vega',this)">Vega</div>
+      </div>
+      <button id="greeks-modal-close" onclick="closeGreeksModal()" title="Close (Esc)">✕ Close</button>
+    </div>
+    <div class="greeks-modal-body">
+      <!-- Single strike-indexed table: Greeks (CE/PE, tab-selected) and
+      -- Net GEX share one <td> per strike instead of two separate cards
+      -- each repeating the strike column. -->
+      <div id="grkgex-content" class="algn-body"></div>
+      <!-- Total/Regime/Flip strip — pinned outside the scrolling table,
+      -- same treatment as OI Flow's top-movers strip. -->
+      <div id="grkgex-footer" class="section-footer"></div>
+    </div>
   </div>
 </div>
 
@@ -57,6 +102,7 @@
   <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
   <button class="sec-btn" id="option-chain-btn" onclick="window.open('option-chain.html','_blank')" title="Open the redesigned option chain in a new tab"><span>📊</span>Chain</button>
   <button class="sec-btn" id="oi-dashboard-btn" onclick="openOIDashboardModal()" title="Open OI dashboard"><span>📈</span>OI Dash</button>
+  <button class="sec-btn" id="greeks-dashboard-btn" onclick="openGreeksModal()" title="Open full Greeks & GEX table"><span>Δ</span>Greeks</button>
   <!-- Range & velocity toggle — relocated here from its old floating
        .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
        there). Reuses the sec-btn styling so it sits inline with the other
@@ -159,10 +205,46 @@
 <script src="interaction-controller.js"></script>
 <script src="history-loader.js"></script>
 <script src="price-chart.js"></script>
-<script src="chain-views.js"></script>
+<script src="formatters.js"></script>
+<script src="dom-utils.js"></script>
+<script src="chain-helpers.js"></script>
+<!-- chain-views.js split (Phase 2 chain-view decomposition) into 7 files.
+     chain-view.js must load FIRST — it declares the ChainDenseView/
+     RightPanelView/ChainView classes that the other 6 attach methods to
+     via ClassName.prototype.method = ... . The other 6 can load in any
+     order relative to each other, but all must load before dashboard.js
+     (whose App constructor does `new ChainDenseView()` / `new ChainView()`
+     and expects every prototype method already attached). See each
+     chain-*.js file's own header comment for what it holds. -->
+<script src="chain-view.js"></script>
+<script src="chain-template.js"></script>
+<script src="chain-renderer.js"></script>
+<script src="chain-depth.js"></script>
+<script src="chain-greeks.js"></script>
+<script src="chain-sync.js"></script>
+<script src="chain-utils.js"></script>
+<!-- Phase 3 rendering/logic split: chain-view-models.js (pure business
+     logic — row/strike-detail view-model builders) and chain-templates.js
+     (pure HTML templates consuming those view models) replace the inline
+     calculation+markup that used to live in ChainDenseView.buildRowsHtml
+     (chain-renderer.js) and ChainDenseView.buildStrikeDetailHtml
+     (chain-depth.js). Both are plain function files (no classes), so
+     nothing here depends on chain-view.js's class declarations having run
+     first — but they must load before chain-renderer.js/chain-depth.js,
+     whose methods call into them at render time. -->
+<script src="chain-view-models.js"></script>
+<script src="chain-templates.js"></script>
 <script src="panels-views.js"></script>
 <script src="ws-manager.js"></script>
 <script src="market-store.js"></script>
+<script src="data-service.js"></script>
+<script src="ui-controls.js"></script>
+<!-- Phase 4 Panel Manager: panel-manager.js declares the Panel base class
+     and PanelManager registry; dashboard-panels.js's six Panel subclasses
+     extend it. Both must load before dashboard.js, whose App constructor
+     does `new PanelManager()` and `new PriceChartPanel()` / etc. -->
+<script src="panel-manager.js"></script>
+<script src="dashboard-panels.js"></script>
 <script src="dashboard.js"></script>
 <script src="paper-trading.js"></script>
 </body></html>

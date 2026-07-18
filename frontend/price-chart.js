@@ -581,6 +581,47 @@ class PriceChartEngine {
     panel.querySelectorAll('.pc-type-btn').forEach(b=>b.classList.toggle('pc-active', b.dataset.type===this.settings.type));
   }
 
+  // Populates the #pc-ohlc-readout strip (O/H/L/C + change) from a given
+  // point, or resets every field back to the '—' placeholder when called
+  // with null (e.g. the no-visible-data early-return path in render()
+  // below). Accepts either a candle-shaped point ({t,o,h,l,c}) or a
+  // line-mode point ({t,p}), since render() plots either depending on
+  // this.settings.type — for the latter, o/h/l/c all collapse to the
+  // same value `p`.
+  _renderOhlcReadout(point, idx){
+    const oEl = $i('pc-ohlc-o'), hEl = $i('pc-ohlc-h'), lEl = $i('pc-ohlc-l'),
+          cEl = $i('pc-ohlc-c'), chgEl = $i('pc-ohlc-chg');
+    if(!point){
+      if(oEl) oEl.textContent = '—';
+      if(hEl) hEl.textContent = '—';
+      if(lEl) lEl.textContent = '—';
+      if(cEl) cEl.textContent = '—';
+      if(chgEl){ chgEl.textContent = '—'; chgEl.className = 'pc-ohlc-chg'; }
+      return;
+    }
+    const fmt = v => (v == null ? '—' : v.toLocaleString('en-IN', {maximumFractionDigits:2}));
+    const o = point.o != null ? point.o : point.p;
+    const h = point.h != null ? point.h : point.p;
+    const l = point.l != null ? point.l : point.p;
+    const c = point.c != null ? point.c : point.p;
+    if(oEl) oEl.textContent = fmt(o);
+    if(hEl) hEl.textContent = fmt(h);
+    if(lEl) lEl.textContent = fmt(l);
+    if(cEl) cEl.textContent = fmt(c);
+    if(chgEl){
+      if(o != null && c != null){
+        const chg = c - o;
+        const pct = o !== 0 ? (chg / o) * 100 : 0;
+        const sign = chg > 0 ? '+' : '';
+        chgEl.textContent = `${sign}${fmt(chg)} (${sign}${pct.toFixed(2)}%)`;
+        chgEl.className = 'pc-ohlc-chg ' + (chg > 0 ? 'pc-up' : chg < 0 ? 'pc-down' : '');
+      } else {
+        chgEl.textContent = '—';
+        chgEl.className = 'pc-ohlc-chg';
+      }
+    }
+  }
+
   // ── RENDER ───────────────────────────────────────────
   render(forceResize){
     this.ensureMounted();

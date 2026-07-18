@@ -26,23 +26,24 @@ import time
 
 import pandas as pd
 
+from concurrent.futures import ThreadPoolExecutor
+
 from smartapi_client import (
     _load_scrip_master,
     get_index_quote,
+    get_spot_quote,
     get_batch_quotes,
     get_ltp,
     STRIKE_INTERVALS,
     _round_to_strike,
+    _get_strike_interval,
     safe_float,
 )
 from engine import solve_iv  # your existing Newton-Raphson IV solver
 
 ANNUAL_RISK_FREE_RATE_DEFAULT = 0.07
 
-# Mirrors option_chain_json.py's LOT_SIZES. Imported lazily inside
-# _lot_size() below (option_chain_json.py imports THIS module at top
-# level, so importing it back here at module scope would be circular);
-# this local copy is only the fallback for if that import ever fails.
+# Emergency fallback only if the instrument-master resolver is unavailable.
 _LOT_SIZES_FALLBACK = {
     "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
     "SENSEX": 20, "BANKEX": 30, "SENSEX50": 75, "PNB": 8000,
@@ -50,11 +51,17 @@ _LOT_SIZES_FALLBACK = {
 
 
 def _lot_size(underlying: str) -> int:
+    """FUTSTK/FUTIDX-derived lot size (shared by futures + all options)."""
+    sym = (underlying or "").upper()
     try:
-        from option_chain_json import LOT_SIZES
-        return LOT_SIZES.get(underlying.upper(), 65)
+        from smartapi_instruments import get_lot_size
+        return get_lot_size(sym)
     except Exception:
-        return _LOT_SIZES_FALLBACK.get(underlying.upper(), 65)
+        try:
+            from option_chain_json import LOT_SIZES
+            return LOT_SIZES.get(sym, 65)
+        except Exception:
+            return _LOT_SIZES_FALLBACK.get(sym, 65)
 
 # ── Expiry format bridge ──────────────────────────────────────────────────
 # Rest of the pipeline (option_chain_json.py, engine.py) uses 'DD-Mon-YYYY'
@@ -239,14 +246,14 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
     fields get_atm_chain() drops)."""
     expiry_smart = _to_smartapi_expiry(expiry_dash)
 
-    quote = get_index_quote(underlying)
+    quote = get_spot_quote(underlying)
     if not quote:
         print(f"[smartapi_pipeline_adapter] no spot quote for {underlying}")
         return pd.DataFrame()
     spot = quote["ltp"]
 
     atm = _round_to_strike(spot, underlying)
-    interval = STRIKE_INTERVALS.get(underlying.upper(), 50)
+    interval = _get_strike_interval(underlying)
     strikes = {atm + (i * interval) for i in range(-strikes_around_atm, strikes_around_atm + 1)}
 
     data = _load_scrip_master()
@@ -363,8 +370,8 @@ def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
     if not q:
         return pd.DataFrame()
 
-    idx_quote = get_index_quote(underlying)
-    spot = idx_quote["ltp"] if idx_quote else 0.0
+    spot_quote = get_spot_quote(underlying)
+    spot = spot_quote["ltp"] if spot_quote else 0.0
     ltp = safe_float(q.get("ltp"))
 
     return pd.DataFrame([{
@@ -412,3 +419,71 @@ def fetch_vix_smartapi() -> tuple[float | None, float]:
     close = safe_float(d.get("close"))
     chg_pct = round((ltp - close) / close * 100.0, 2) if close else 0.0
     return (ltp if ltp else None), chg_pct
+
+
+# ── SmartAPI-sourced ticker-strip pills ──────────────────────────────────
+# Replacement for market_api.build_ticker_payload_from_df_idx(), which
+# derives NIFTY/BANKNIFTY/MIDCPNIFTY/FINNIFTY pill data as a byproduct of
+# fetch_all_indices()'s NSE equity-stock-indices call (see that function's
+# docstring — "instead of a second /api/allIndices round-trip"). That
+# byproduct relationship means ticker pills currently go blank if the NSE
+# call fails/times out, and can't update faster than df_idx's own cadence.
+#
+# This calls smartapi_client.get_index_quote() per symbol instead — pure
+# SmartAPI REST, independent of df_idx entirely. Trade-off: it does NOT
+# carry Volume/Value (get_index_quote's underlying ltpData call doesn't
+# return them, same limitation NSE's own /api/allIndices has for index-
+# level rows) — option_chain_json.py's Volume/Value merge into
+# all_indices still reads df_idx separately for that, unchanged.
+_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
+
+
+def _index_quote_to_ticker_entry(symbol: str, quote: dict | None) -> dict | None:
+    """Reshape smartapi_client.get_index_quote()'s {"ltp","open","high",
+    "low","close"} into the {"Symbol","BackendSymbol","Last Price",
+    "% Change","Change","Prev Close"} shape build_ticker_payload_from_df_idx()
+    produces, so option_chain_json.py's downstream consumers (dashboard.js's
+    renderIndexTicker(), the Volume/Value merge keyed on "Symbol") don't
+    need to change at all."""
+    if not quote:
+        return None
+    ltp, close = quote.get("ltp"), quote.get("close")
+    change = round(ltp - close, 2) if (ltp is not None and close) else 0.0
+    pct = round((change / close) * 100.0, 2) if close else 0.0
+    return {
+        "Symbol":        symbol,
+        "BackendSymbol": symbol,
+        "Last Price":    ltp,
+        "% Change":      pct,
+        "Change":        change,
+        "Prev Close":    close,
+    }
+
+
+def fetch_ticker_payload_smartapi(symbols=None) -> list:
+    """SmartAPI-only replacement for build_ticker_payload_from_df_idx(df_idx).
+    Fires get_index_quote() for each ticker symbol in parallel — same
+    ThreadPoolExecutor pattern option_chain_json.py's main() already uses
+    for its other concurrent fetches. A single symbol failing doesn't blank
+    the whole strip (unlike the old df_idx-empty -> [] behavior)."""
+    symbols = symbols or _TICKER_SYMBOLS
+    payload = []
+    with ThreadPoolExecutor(max_workers=len(symbols)) as ex:
+        futures = {ex.submit(get_index_quote, sym): sym for sym in symbols}
+        for fut in futures:
+            sym = futures[fut]
+            try:
+                entry = _index_quote_to_ticker_entry(sym, fut.result())
+            except Exception as e:
+                print(f"[fetch_ticker_payload_smartapi] {sym} failed: {e}")
+                continue
+            if entry:
+                payload.append(entry)
+    return payload
+
+
+def fetch_sensex_ticker_smartapi():
+    """Replacement for market_api.fetch_bse_index_quote('SENSEX') — same
+    output shape, sourced via SmartAPI's INDEX_TOKENS instead of BSE's
+    getScripHeaderData endpoint."""
+    return _index_quote_to_ticker_entry("SENSEX", get_index_quote("SENSEX"))

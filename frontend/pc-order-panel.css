@@ -1,3 +1,10 @@
+/* Requires theme.css to be loaded first (defines --border, --pos, --neg,
+   --text-secondary, --radius-sm/md). This file previously referenced
+   var(--border-color,...), var(--up-color,...), var(--down-color,...),
+   var(--text-secondary,...) with no matching :root anywhere — it was
+   silently running on the fallback hex values only. Now points at the
+   real shared tokens. */
+
 /* ── Quick-order panel (floats over price-chart-canvas) ── */
 .pc-chart-wrap{ position:relative; }
 
@@ -6,44 +13,48 @@
   left:50%; bottom:10px; transform:translateX(-50%);
   width:min(640px, 94%);
   background:rgba(20,22,30,0.97);
-  border:1px solid var(--border-color,#2A2D38);
-  border-radius:10px;
+  border:1px solid var(--border);
+  border-radius:var(--radius-md);
   box-shadow:0 8px 24px rgba(0,0,0,0.4);
   z-index:5;
   font-size:12px;
 }
 .pc-order-head{
   display:flex; align-items:center; gap:8px;
-  padding:6px 12px; border-bottom:1px solid var(--border-color,#2A2D38);
+  padding:6px 12px; border-bottom:1px solid var(--border);
 }
 .pc-order-name{ font-weight:600; }
-.pc-order-chg.pc-pos{ color:var(--up-color,#20C997); }
-.pc-order-chg.pc-neg{ color:var(--down-color,#FF6B6B); }
+.pc-order-chg.pc-pos{ color:var(--pos); }
+.pc-order-chg.pc-neg{ color:var(--neg); }
 
 .pc-order-body{
   display:flex; align-items:center; gap:6px; flex-wrap:wrap;
   padding:8px 10px;
 }
-.pc-order-lbl{ color:var(--text-secondary,#8A8F98); font-size:11px; }
+.pc-order-lbl{ color:var(--text-secondary); font-size:11px; }
 .pc-order-qty{ width:48px; text-align:center; }
 .pc-order-price{ width:88px; }
 
 .pc-order-panel .pc-seg{
-  display:flex; border:1px solid var(--border-color,#2A2D38);
-  border-radius:6px; overflow:hidden;
+  display:flex; border:1px solid var(--border);
+  border-radius:var(--radius-sm); overflow:hidden;
 }
 .pc-order-panel .pc-seg button{
-  border:none; background:transparent; color:var(--text-secondary,#8A8F98);
+  border:none; background:transparent; color:var(--text-secondary);
   padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer;
 }
+/* #1FAE8A (buy) and #7C5CFF (neutral/spread leg) are deliberately their
+   own shades, not --pos/--info — kept distinct rather than force-fit
+   into the shared palette. Flag for a follow-up decision if you'd
+   rather they match --pos exactly. */
 .pc-order-panel .pc-seg button.pc-active.pc-buy{ background:#1FAE8A; color:#fff; }
-.pc-order-panel .pc-seg button.pc-active.pc-sell{ background:var(--down-color,#FF6B6B); color:#fff; }
+.pc-order-panel .pc-seg button.pc-active.pc-sell{ background:var(--neg); color:#fff; }
 .pc-order-panel .pc-seg button.pc-active:not(.pc-buy):not(.pc-sell){ background:#7C5CFF; color:#fff; }
 
 .pc-order-submit{
   margin-left:auto;
   background:#1FAE8A; color:#fff; border:none;
-  border-radius:6px; padding:8px 16px; font-size:12px; font-weight:700;
+  border-radius:var(--radius-sm); padding:8px 16px; font-size:12px; font-weight:700;
   cursor:pointer;
 }
-.pc-order-submit.pc-sell{ background:var(--down-color,#FF6B6B); }
+.pc-order-submit.pc-sell{ background:var(--neg); }

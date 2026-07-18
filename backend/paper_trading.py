@@ -25,31 +25,127 @@ Suggested integration:
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
+from smartapi_instruments import get_lot_size as _resolve_lot_size
+
 DB_PATH = "paper_trading.db"
+
+logger = logging.getLogger("paper_trading")
 
 OrderSide = Literal["BUY", "SELL"]
 OrderType = Literal["MARKET", "LIMIT"]
 OrderStatus = Literal["PENDING", "FILLED", "CANCELLED", "REJECTED"]
 InstrumentType = Literal["CE", "PE", "FUT", "EQ", "INDEX"]
 
-# NSE revises F&O lot sizes periodically (typically each quarterly review).
-# These are UNVERIFIED as of this file's creation — confirm against NSE's
-# current circular before relying on this for margin/notional calculations.
-# Wrong lot size silently produces wrong P&L, same failure class as the
-# VWAP bug — it won't error, it'll just be quietly incorrect.
-LOT_SIZES = {
-    "NIFTY": 75,
-    "BANKNIFTY": 35,
-    "MIDCPNIFTY": 140,
+# Last-resort fallback ONLY — used if the live instrument master can't be
+# reached (network/API down) and this symbol has never been resolved
+# before, so there's nothing in _lot_size_cache to fall back on either.
+# Deliberately covers only the handful of index underlyings this engine
+# actually trades; anything else raises rather than guessing.
+# Emergency-only, kept roughly in line with a recent master snapshot.
+# Live path always prefers smartapi_instruments (FUT-derived) first.
+_FALLBACK_LOT_SIZES = {
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "MIDCPNIFTY": 120,
     "SENSEX": 20,
     "FINNIFTY": 65,
 }
+
+# symbol -> last-known-good lot size, populated the first time each symbol
+# resolves successfully via smartapi_instruments. Avoids re-hitting the
+# resolver (and its network/master-file cost) on every single order/mark-
+# to-market call, while still tracking whatever's currently live instead of
+# a hardcoded snapshot that goes stale after NSE's quarterly lot revisions.
+_lot_size_cache: dict[str, int] = {}
+
+
+def get_lot_size(symbol: str) -> int:
+    """Resolves the *current* lot size for `symbol` off the live AngelOne
+    instrument master (via smartapi_instruments), not a hardcoded table.
+    Falls back to the last value successfully resolved for this symbol,
+    then to _FALLBACK_LOT_SIZES, only if the live lookup itself fails —
+    never silently substitutes some *other* symbol's lot size."""
+    symbol = symbol.upper()
+    try:
+        lot = _resolve_lot_size(symbol)
+        _lot_size_cache[symbol] = lot
+        return lot
+    except Exception as e:
+        if symbol in _lot_size_cache:
+            logger.warning(
+                "Lot size lookup failed for %s (%s); using last-known value %d",
+                symbol, e, _lot_size_cache[symbol],
+            )
+            return _lot_size_cache[symbol]
+        if symbol in _FALLBACK_LOT_SIZES:
+            logger.warning(
+                "Lot size lookup failed for %s (%s); no cached value, using "
+                "static fallback %d — VERIFY against current NSE circular.",
+                symbol, e, _FALLBACK_LOT_SIZES[symbol],
+            )
+            return _FALLBACK_LOT_SIZES[symbol]
+        raise KeyError(
+            f"Cannot resolve lot size for '{symbol}': live lookup failed ({e}) "
+            f"and no fallback registered."
+        ) from e
+
+
+class _LiveLotSizes(dict):
+    """Back-compat shim for callers (e.g. ws_server_live.py) that still do
+    `from paper_trading import LOT_SIZES` and use it as a plain dict/`.get()`.
+    Unlike the old static table, misses are resolved live through
+    get_lot_size() (instrument master) on first access and cached here —
+    so `LOT_SIZES["RELIANCE"]` or `LOT_SIZES.get(sym, default)` now returns
+    the real, current lot size instead of silently falling to whatever
+    default the caller happened to pass."""
+
+    def __missing__(self, key):
+        try:
+            value = get_lot_size(key)
+        except Exception:
+            raise KeyError(key)
+        self[key] = value
+        return value
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
+# Prefer calling get_lot_size(symbol) directly in new code — LOT_SIZES is
+# kept only so existing imports (ws_server_live.py etc.) don't break, and
+# it's now live-resolving rather than a hardcoded snapshot.
+LOT_SIZES = _LiveLotSizes(_FALLBACK_LOT_SIZES)
+
+# ── Risk / RMS-style order checks ────────────────────────────────────────
+# Loose simulator-side stand-ins for the categories a real broker's Risk
+# Management System checks before accepting an order (insufficient margin,
+# price bands, max position/order value). This is NOT a real SPAN+exposure
+# margin engine — it exists so the dashboard's rejection-handling UI
+# (pt-status-tap already renders reject_reason) has realistic REJECTED
+# orders to render, not just the three input-validation rejects that used
+# to be the only ones this module could produce. Tune these constants
+# rather than the check logic if the numbers feel off for your account.
+PT_STARTING_CAPITAL = 100_000.0        # ₹1,00,000 paper capital — mirrors
+                                        # PT_STARTING_CAPITAL in paper-trading.js;
+                                        # keep both in sync manually, same as LOT_SIZES.
+SHORT_MARGIN_PCT = 0.12                # crude SPAN+exposure stand-in for short/
+                                        # written options — mirrors PT_SHORT_MARGIN_PCT
+                                        # in paper-trading.js's ptEstimateMarginBlocked.
+MAX_NOTIONAL_PER_ORDER = 1_00_00_000.0  # ₹1 crore per-order cap ("Max Position
+                                        # Limits" / total order value category).
+PRICE_BAND_PCT = 0.20                  # LIMIT orders priced more than ±20% away
+                                        # from current_ltp are rejected as a stand-in
+                                        # for exchange LPP/price-band rejection.
 
 
 def _instrument_key(symbol: str, expiry: str, strike: float | None,
@@ -138,11 +234,83 @@ class PaperTradingEngine:
                      expiry: str = "", strike: float | None = None,
                      order_type: OrderType = "MARKET",
                      limit_price: float | None = None,
-                     current_ltp: float | None = None) -> Order:
+                     current_ltp: float | None = None,
+                     spot_price: float | None = None,
+                     account_capital: float = PT_STARTING_CAPITAL,
+                     enforce_risk_checks: bool = True) -> Order:
+        """spot_price and account_capital only matter when enforce_risk_checks
+        is True. spot_price is the underlying's current price, used to size
+        short-option margin the same way ptEstimateMarginBlocked() does in
+        paper-trading.js; if omitted, the option's own price is used as a
+        rougher stand-in rather than hard-failing on missing spot data.
+        Pass enforce_risk_checks=False to get the old (input-validation-only)
+        behavior, e.g. for backtests that don't care about account sizing."""
         if qty_lots <= 0:
             return self._reject(symbol, expiry, strike, instrument_type,
                                  side, qty_lots, order_type, limit_price,
                                  "qty_lots must be positive")
+        if order_type == "MARKET" and current_ltp is None:
+            return self._reject(symbol, expiry, strike, instrument_type,
+                                 side, qty_lots, order_type, limit_price,
+                                 "MARKET order requires current_ltp")
+        if order_type == "LIMIT" and limit_price is None:
+            return self._reject(symbol, expiry, strike, instrument_type,
+                                 side, qty_lots, order_type, limit_price,
+                                 "LIMIT order requires limit_price")
+
+        ref_price = current_ltp if order_type == "MARKET" else limit_price
+        lot_size = get_lot_size(symbol)
+
+        if enforce_risk_checks:
+            # 1) Price band / LPP stand-in — only meaningful for LIMIT
+            # orders, since a MARKET order fills at current_ltp itself and
+            # can't be "far" from it.
+            if order_type == "LIMIT" and current_ltp:
+                band = abs(limit_price - current_ltp) / current_ltp
+                if band > PRICE_BAND_PCT:
+                    return self._reject(
+                        symbol, expiry, strike, instrument_type, side,
+                        qty_lots, order_type, limit_price,
+                        f"Price {limit_price:.2f} outside allowed band "
+                        f"(±{PRICE_BAND_PCT:.0%} of LTP {current_ltp:.2f})")
+
+            # 2) Max order value — premium turnover, same "turnover" concept
+            # ptCalcCharges() uses in paper-trading.js.
+            order_notional = ref_price * qty_lots * lot_size
+            if order_notional > MAX_NOTIONAL_PER_ORDER:
+                return self._reject(
+                    symbol, expiry, strike, instrument_type, side, qty_lots,
+                    order_type, limit_price,
+                    f"Order value \u20b9{order_notional:,.0f} exceeds max "
+                    f"per-order limit (\u20b9{MAX_NOTIONAL_PER_ORDER:,.0f})")
+
+            # 3) Margin/funds — only bites if this order OPENS or ADDS to a
+            # position. Closing/reducing an existing position releases
+            # margin rather than requiring more, same as a real broker.
+            key = _instrument_key(symbol, expiry, strike, instrument_type)
+            existing = self._conn.execute(
+                "SELECT net_qty_lots FROM positions WHERE instrument_key=?",
+                (key,)).fetchone()
+            existing_net = existing["net_qty_lots"] if existing else 0
+            signed_qty = qty_lots if side == "BUY" else -qty_lots
+            is_reducing = (existing_net != 0
+                           and (existing_net > 0) != (signed_qty > 0)
+                           and abs(signed_qty) <= abs(existing_net))
+
+            if not is_reducing:
+                if side == "BUY":
+                    order_margin = order_notional  # premium paid in full
+                else:
+                    underlying_ref = spot_price or ref_price
+                    order_margin = SHORT_MARGIN_PCT * underlying_ref * qty_lots * lot_size
+                existing_margin = self._estimate_margin_blocked(spot_price)
+                if existing_margin + order_margin > account_capital:
+                    free = max(0.0, account_capital - existing_margin)
+                    return self._reject(
+                        symbol, expiry, strike, instrument_type, side,
+                        qty_lots, order_type, limit_price,
+                        f"Insufficient margin — order needs \u20b9{order_margin:,.0f}, "
+                        f"only \u20b9{free:,.0f} free")
 
         order = Order(
             id=str(uuid.uuid4()), timestamp=time.time(), symbol=symbol,
@@ -152,19 +320,46 @@ class PaperTradingEngine:
         )
 
         if order_type == "MARKET":
-            if current_ltp is None:
-                return self._reject(symbol, expiry, strike, instrument_type,
-                                     side, qty_lots, order_type, limit_price,
-                                     "MARKET order requires current_ltp")
             self._fill(order, current_ltp)
         else:
-            if limit_price is None:
-                return self._reject(symbol, expiry, strike, instrument_type,
-                                     side, qty_lots, order_type, limit_price,
-                                     "LIMIT order requires limit_price")
             self._save_order(order)
 
         return order
+
+    def _estimate_margin_blocked(self, spot_price: float | None = None) -> float:
+        """Approximate margin currently locked by open positions — mirrors
+        ptEstimateMarginBlocked() in paper-trading.js. Longs: premium
+        already paid (avg_price * qty * lot_size). Shorts: SHORT_MARGIN_PCT
+        of notional (spot * qty * lot_size); falls back to the position's
+        own avg_price if no spot_price is supplied, which is rougher but
+        avoids a hard dependency on a live spot feed being threaded through
+        every call site."""
+        rows = self._conn.execute(
+            "SELECT * FROM positions WHERE net_qty_lots != 0").fetchall()
+        total = 0.0
+        for row in rows:
+            lot_size = get_lot_size(row["symbol"])
+            qty = abs(row["net_qty_lots"])
+            if row["net_qty_lots"] > 0:
+                total += row["avg_price"] * qty * lot_size
+            else:
+                underlying_ref = spot_price or row["avg_price"]
+                total += SHORT_MARGIN_PCT * underlying_ref * qty * lot_size
+        return total
+
+    def get_fund_summary(self, spot_price: float | None = None,
+                          account_capital: float = PT_STARTING_CAPITAL) -> dict:
+        """Server-side equivalent of paper-trading.js's ptComputeFundSummary()
+        for the paper-mode branch — lets a caller show the same fund/margin
+        figures without duplicating the estimation logic client-side."""
+        margin_blocked = self._estimate_margin_blocked(spot_price)
+        fund = account_capital - margin_blocked
+        return {
+            "capital": account_capital,
+            "margin_blocked": round(margin_blocked, 2),
+            "fund": round(fund, 2),
+            "low_fund": fund < account_capital * 0.20,
+        }
 
     def _reject(self, symbol, expiry, strike, instrument_type, side,
                 qty_lots, order_type, limit_price, reason) -> Order:
@@ -248,7 +443,7 @@ class PaperTradingEngine:
             # SELL closing a long realizes (fill_price - avg_price) per lot.
             pnl_per_lot = (avg_price - order.fill_price) if order.side == "BUY" \
                 else (order.fill_price - avg_price)
-            lot_size = LOT_SIZES.get(order.symbol, 65)
+            lot_size = get_lot_size(order.symbol)
             realized += pnl_per_lot * closed_qty * lot_size
             if abs(signed_qty) > abs(net_qty):
                 # Flipped through zero — remainder opens a new position at fill price.
@@ -349,4 +544,20 @@ if __name__ == "__main__":
 
     key = _instrument_key("NIFTY", "31-Jul-2026", 25000, "CE")
     print("\nPortfolio:", eng.get_portfolio_summary({key: 150.0}))
+
+    # Price-band reject: LIMIT price >20% away from current_ltp.
+    o3 = eng.place_order("NIFTY", "BUY", qty_lots=1, instrument_type="CE",
+                          expiry="31-Jul-2026", strike=25000,
+                          order_type="LIMIT", limit_price=200.0,
+                          current_ltp=120.5)
+    print("\nOrder 3 (price band reject):", o3.status, "-", o3.reject_reason)
+
+    # Margin reject: a large fresh position against a small paper account.
+    o4 = eng.place_order("BANKNIFTY", "SELL", qty_lots=50, instrument_type="PE",
+                          expiry="31-Jul-2026", strike=52000,
+                          order_type="MARKET", current_ltp=300.0,
+                          spot_price=52000.0, account_capital=100_000.0)
+    print("Order 4 (margin reject):", o4.status, "-", o4.reject_reason)
+
+    print("\nFund summary:", eng.get_fund_summary(spot_price=25100.0))
     print("\nAll orders:", eng.get_orders())

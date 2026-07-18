@@ -1,3 +1,9 @@
+// Tracks whether the per-strike Greeks rows are expanded. Toggled by
+// ChainView.toggleGreeks(); read on every render (renderDashboard,
+// ChainDenseView.refreshView, switchChainRange) to keep expanded rows
+// visible across re-renders instead of resetting to collapsed.
+let _greeksVisible = false;
+
 class ChainDenseView {
   constructor() {
     this.currentRange = "3";
@@ -11,6 +17,41 @@ class ChainDenseView {
     this.lastPayload = null;
     this.lastRows = null;
     this.lastGreeks = [];
+    this._initBroadcast();
+  }
+
+  // ── BROADCAST SYNC to the standalone option-chain.html tab ──
+  // option-chain.js already listens on a BroadcastChannel('oc-live-sync')
+  // and posts {type:'oc-request-snapshot'} on load and
+  // {type:'oc-request-expiry', expiry} when its dropdown changes — but
+  // nothing on this side ever opened that channel, so both messages went
+  // nowhere: the tab stayed on demo data and its expiry dropdown looked
+  // inert. This opens the same channel and answers both message types.
+  _initBroadcast() {
+    if (!("BroadcastChannel" in window)) return;
+    const chan = new BroadcastChannel("oc-live-sync");
+    window._ocChan = chan;
+    chan.addEventListener("message", (e) => {
+      const msg = e.data;
+      if (!msg) return;
+      if (msg.type === "oc-request-snapshot") {
+        if (this.lastPayload) this._broadcastToOptionChainTab(this.lastPayload);
+      } else if (msg.type === "oc-request-expiry") {
+        // Drive the switch through the real expiry-change path (same one
+        // the global #expirySelect uses) — it updates _data and then
+        // itself calls refreshView(), which re-broadcasts below.
+        if (window.onExpiryChange) window.onExpiryChange(msg.expiry);
+      }
+    });
+  }
+
+  _broadcastToOptionChainTab(payload) {
+    if (!window._ocChan) return;
+    window._ocChan.postMessage({
+      rows: this.lastRows, symbol: payload.symbol, spot: payload.spot,
+      spotChg: payload.spotChg, spotChgPct: payload.spotChgPct,
+      expiry: payload.expiry, expiryDates: payload.expiryDates,
+    });
   }
 
   setStatus(live, text) {
@@ -24,6 +65,14 @@ class ChainDenseView {
     const chainArr = payload.chain || [];
     const expiryKey = payload.expiry || "";
     const velLookup = buildVelocityLookup(payload);
+    // Resolved ATM strike, same helper used everywhere else in this file
+    // (IV surface, GEX table, etc.) to fall back past a possibly-unset
+    // per-row `.atm` flag — see activeAtm() in dashboard.js for the
+    // fallback chain (payload.atm -> row.atm -> row.atmStrike -> nearest
+    // strike to spot). Without this, isAtm below was `!!row.atm` only,
+    // which is false for every row whenever the backend doesn't stamp
+    // that flag on the chain rows themselves.
+    const atmStrike = (typeof activeAtm === "function") ? activeAtm(payload) : payload.atm;
 
     let totalCeOi = 0, totalPeOi = 0;
     chainArr.forEach((r) => {
@@ -71,7 +120,7 @@ class ChainDenseView {
       }
 
       return {
-        strike: row.strike, isAtm: !!row.atm,
+        strike: row.strike, isAtm: !!row.atm || row.strike === atmStrike,
         pcr: pcr != null ? pcr.toFixed(2) : "—",
         pcrChg: pcrChg != null ? sign(pcrChg.toFixed(2)) : "—",
         ce, pe, totalCeOi, totalPeOi,
@@ -215,7 +264,8 @@ class ChainDenseView {
   renderExpiryOptions(payload) {
     const sel = getExpirySelectNode();
     if (!sel) return;
-    const dates = payload.expiryDates || [payload.expiry];
+    const rawDates = payload.expiryDates || [payload.expiry];
+    const dates = (typeof sortExpiryDates === "function") ? sortExpiryDates(rawDates) : rawDates;
     const chainStore = payload.chains || {};
     const activeExpiry = payload.expiry || "";
     const key = dates.join("|");
@@ -242,16 +292,28 @@ class ChainDenseView {
   }
 
   refreshView(payload) {
+    // Everything below this point (expiry options, row mapping, and the
+    // BroadcastChannel push to option-chain.html) must run regardless of
+    // whether the dense in-dashboard chain table exists on this page — it
+    // no longer does on the main dashboard (moved to option-chain.html),
+    // but the main dashboard is exactly the page that has to keep
+    // computing rows and broadcasting them for that standalone tab to stay
+    // live. Only the actual table-DOM writes further down are page-specific.
+    window._lastPayload = payload;
+    this.lastPayload = payload;
+    renderExpiryOptions(payload);
+    window._lastRows = mapPayloadToRows(payload);
+    this.lastRows = window._lastRows;
+    window._lastGreeks = payload.greeks || [];
+    this.lastGreeks = window._lastGreeks;
+    this._broadcastToOptionChainTab(payload);
+
     if (!document.getElementById("tbody")) return; // dense chain markup not on this page
     // payload is expected to already reflect the globally-selected expiry —
     // callers (updateDashboard's WS tick handler, and renderDashboard for
     // paste/file loads) run it through applyExpirySelection(payload,
     // _selectedExpiry) first, so there's no separate override step here.
-    window._lastPayload = payload;
-    renderExpiryOptions(payload);
     updateHeader(payload);
-    window._lastRows = mapPayloadToRows(payload);
-    window._lastGreeks = payload.greeks || [];
     const _visRows = filterRowsByRange(window._lastRows);
     // ── FIXED-HEIGHT CHAIN BOX ──
     // Capture scroll position before the table body is rebuilt below, so a
@@ -269,7 +331,7 @@ class ChainDenseView {
     if (_greeksVisible) document.querySelectorAll('[id^="grk-row-"]').forEach((el) => { el.style.display = ""; });
     if (window.updateGreeksMoneynessChart) window.updateGreeksMoneynessChart(payload);
     if (_firstRender || _expiryChanged) _centerChainOnATM = true;
-    requestAnimationFrame(() => sizeAndScrollChain(_prevScrollTop));
+    requestAnimationFrame(() => app.chain.sizeAndScrollChain(_prevScrollTop));
   }
 }
 
@@ -900,6 +962,7 @@ class ChainView {
   // Signal / OI Analytics / Volume Analytics boxes plus a Bid/Ask depth
   // box. velByStrike/velMax below are still needed by the OI Flow panel
   // further down this function.
+  h += this.buildChainSummaryHtml(d);
   h += '<div id="chain-anchor"></div>';
   const velBlock=(d.oiVelocity||[]).find(b=>b.window===_velWin)||(d.oiVelocity||[])[0];
   const velByStrike={};
@@ -912,106 +975,28 @@ class ChainView {
   // anything that isn't per-strike data (PCR toggle, biggest-build
   // summary) sits outside that stack so it can't knock rows out of line.
   h+=`<div id="sec-oi-buildup">
-    <div class="oi-grkgex-col">
-      <div class="section-card algn-card" style="min-width:0;">
-        <div class="section-header"><span class="section-title" id="oi-flow-label">${oiFlowLabel(_oiFlowMode)}</span>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <div class="tab-group" id="oi-flow-tabs">
-              <div class="tab-btn${_oiFlowMode==='oi'?' active-oif':''}" onclick="switchOiFlowTab('oi',this)">OI</div>
-              <div class="tab-btn${_oiFlowMode==='chg'?' active-oif':''}" onclick="switchOiFlowTab('chg',this)">OI Chg</div>
-              <div class="tab-btn${_oiFlowMode==='vel'?' active-oif':''}" onclick="switchOiFlowTab('vel',this)">OI Vel</div>
-            </div>
-          </div>
-        </div>
-        <div class="oi-bfly-head algn-colhead"><span>CE</span><span>Strike</span><span>PE</span><span>PCR</span></div>
-        <div id="oi-flow-body" class="algn-body">${buildOiFlowRows(chain, atm, maxOI, velByStrike, velMax, _oiFlowMode)}</div>
-        <!-- Biggest single CE/PE build — pinned below the scrolling rows,
-        -- same footer pattern as Net GEX's Total/Regime line, so it can't
-        -- push this card's rows out of alignment with Greeks/GEX above it,
-        -- and doesn't get scrolled away with the strikes either. -->
-        <div id="oi-top-movers" class="section-footer">${buildOiTopMoversStrip(chain, velByStrike, _oiFlowMode)}</div>
-      </div>
-      <div class="section-card algn-card" style="min-width:0;">
-        <div class="section-header">
-          <span class="section-title">Greeks / Net GEX</span>
-          <div class="tab-group" id="grk-tabs">
-            <div class="tab-btn active-grk" onclick="switchGrkTab('delta',this)">Δ</div>
-            <div class="tab-btn" onclick="switchGrkTab('gamma',this)">Γ</div>
-            <div class="tab-btn" onclick="switchGrkTab('theta',this)">Θ</div>
-            <div class="tab-btn" onclick="switchGrkTab('vega',this)">Vega</div>
-          </div>
-        </div>
-        <!-- Single strike-indexed table: Greeks (CE/PE, tab-selected) and
-        -- Net GEX share one <td> per strike instead of two separate cards
-        -- each repeating the strike column. -->
-        <div id="grkgex-content" class="algn-body"></div>
-        <!-- Total/Regime/Flip strip — pinned outside the scrolling table,
-        -- same treatment as OI Flow's top-movers strip above. -->
-        <div id="grkgex-footer" class="section-footer"></div>
-      </div>
-    </div>
+    ${buildOiFlowSummaryHtml(chain, atm, velByStrike)}
   </div>`;
-  
-  // ── IV SURFACE ──
-  h+=`<div id="sec-iv" class="two-col">
-    <div class="section-card">
-      <div class="section-header">
-        <span class="section-title">IV surface (ATM ± 3)</span>
-        <div style="display:flex;gap:16px;font-size:10px;font-weight:600;align-items:center;">
-          <span style="color:var(--red);">● CE</span>
-          <span style="color:var(--green);">● PE</span>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px;">`;
-  
-  const atmIdx = chain.findIndex(r => r.atm || r.strike === atm);
-  let ivRows = [];
-  if (atmIdx >= 0) {
-    const start = Math.max(0, atmIdx - 3);
-    const end = Math.min(chain.length, atmIdx + 4);
-    ivRows = chain.slice(start, end);
-  } else {
-    ivRows = chain.slice(0, 6);
-  }
-  const maxIV = Math.max(...ivRows.map(r => Math.max(r.ceIV||0, r.peIV||0)), 1);
-  const barMaxWidth = 160;
-  
-  ivRows.forEach(r => {
-    const ia = r.atm || r.strike === atm;
-    const ceIV = r.ceIV || 0;
-    const peIV = r.peIV || 0;
-    const ceWidth = Math.max((ceIV / maxIV) * barMaxWidth, 4);
-    const peWidth = Math.max((peIV / maxIV) * barMaxWidth, 4);
-    h+=`<div style="display:grid;grid-template-columns:1fr 80px 1fr;align-items:center;gap:0;padding:3px 6px;${ia?'background:rgba(18,184,134,0.08);border-radius:4px;':''}">
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--red);font-weight:600;white-space:nowrap;">${fmtN(ceIV,2)}%</span>
-        <div style="height:8px;border-radius:3px 0 0 3px;background:var(--red);width:${ceWidth}px;min-width:3px;flex-shrink:0;"></div>
-      </div>
-      <div style="text-align:center;padding:0 4px;">
-        <span style="font-family:var(--mono);font-size:10px;font-weight:${ia?700:400};color:${ia?'var(--green)':'var(--txt3)'};">${fmtI(r.strike)}${ia?' ★':''}</span>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:flex-start;gap:5px;">
-        <div style="height:8px;border-radius:0 3px 3px 0;background:var(--green);width:${peWidth}px;min-width:3px;flex-shrink:0;"></div>
-        <span style="font-size:9px;font-family:var(--mono);color:var(--green);font-weight:600;white-space:nowrap;">${fmtN(peIV,2)}%</span>
-      </div>
-    </div>`;
-  });
-  h+=`</div>
-      <div style="font-size:11px;color:var(--txt3);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap;">
-        <span>Skew <strong style="color:var(--amber);">${fmtN(d.atmSkew,2)}%</strong> at ATM</span>
-        <span>Max IV <strong style="color:var(--red);">${fmtN(maxIV,2)}%</strong></span>
-        <span>Min IV <strong style="color:var(--green);">${fmtN(Math.min(...ivRows.map(r => Math.min(r.ceIV||0, r.peIV||0))),2)}%</strong></span>
-      </div>
-    </div>
-    <div class="section-card">
-      <div class="section-header"><span class="section-title">ATM Greeks ${fmtI(d.atm)}</span></div>
-      <div class="iv-row"><span style="color:var(--txt3);">Delta</span><span style="font-weight:600;font-family:var(--mono);">${fmtN(d.atmDelta,4)}</span></div>
-      <div class="iv-row"><span style="color:var(--txt3);">Gamma ×10⁴</span><span style="font-weight:600;font-family:var(--mono);">${fmtN(d.atmGamma,4)}</span></div>
-      <div class="iv-row"><span style="color:var(--txt3);">Theta / day</span><span style="color:var(--red);font-weight:600;font-family:var(--mono);">${fmtN(d.atmTheta,2)}</span></div>
-      <div class="iv-row"><span style="color:var(--txt3);">Vega</span><span style="font-weight:600;font-family:var(--mono);">${fmtN(d.atmVega,2)}</span></div>
-      <div class="iv-row"><span style="color:var(--txt3);">IV vs HV</span><span style="color:var(--amber);font-weight:600;">${fmtN((d.atmIV||0)-(d.hv30||0),2)}% rich</span></div>
-      <div class="iv-row"><span style="color:var(--txt3);">IV rank</span><span style="color:var(--blue);font-weight:600;">${Math.round(d.ivRank||0)} / 100</span></div>
-    </div>
+
+  // ── GREEKS SUMMARY — alerts card (gamma flip / short-gamma / theta
+  // decay) grouped together with the ATM Greeks numbers, since both are
+  // "Greeks" info and read better side by side than split across two
+  // unrelated sections. IV Surface (below) is a different data family
+  // (per-strike IV skew, not Greeks) so it stays separate. #atm-greeks-card
+  // gets its own id so it can be refreshed on an expiry switch the same
+  // way #greeks-alerts-card already is — previously it had no id and only
+  // ever updated on a full rebuild, going stale between expiry switches.
+  h+=`<div id="sec-greeks-summary" class="two-col">
+    ${this.buildGreeksAlertsHtml(greeks, atm, d)}
+    ${this.buildAtmGreeksHtml(d)}
+  </div>`;
+
+  // ── IV SURFACE — alerts-only summary here (elevated skew / IV rank
+  // extremes); the full per-strike CE/PE bar table moved into its own
+  // modal (openIvSurfaceModal(), same treatment as Greeks/GEX), refreshed
+  // by renderIvSurfaceModal() below rather than rebuilt inline here. ──
+  h+=`<div id="sec-iv">
+    ${this.buildIvAlertsHtml(d, chain, atm)}
   </div>`;
   
   // ── STRATEGIES + SIMULATOR (2-column) ──
@@ -1306,7 +1291,7 @@ class ChainView {
   // Full rebuild replaces every node, which resets scroll position; put it
   // back so a live tick doesn't yank the page while someone's reading it.
   window.scrollTo(0, _prevScrollY);
-  requestAnimationFrame(sizeAndScrollChain.bind(null, _prevChainScrollTop));
+  requestAnimationFrame(app.chain.sizeAndScrollChain.bind(app.chain, _prevChainScrollTop));
 
   // Swap the whole old subtrees back in first (covers their canvases too),
   // then fall back to the narrower canvas-only swap below for whichever
@@ -1438,7 +1423,7 @@ class ChainView {
       const _visRows = filterRowsByRange(window._lastRows);
       buildRowsHtml(_visRows);
       renderRightPanel(_visRows);
-      requestAnimationFrame(() => sizeAndScrollChain(null));
+      requestAnimationFrame(() => app.chain.sizeAndScrollChain(null));
     }
   }
 
@@ -1465,6 +1450,151 @@ class ChainView {
   }
 
   if(_data) _rerenderChainPanels();
+}
+
+  // Compact "Option Chain Snapshot" card — sits between the Executive
+  // boxes and OI Flow (see renderDashboard below). This was previously
+  // only a comment/placeholder (#chain-anchor expected a static #sec-chain
+  // block to be moved into it, but that block was removed from
+  // DashboardPro.html) — nothing was ever actually built here. The full
+  // strike-by-strike ledger (Greeks toggle, buy/sell click cells, Bid/Ask
+  // depth) still lives at option-chain.html; this card is just the ATM
+  // read plus a link there.
+  buildChainSummaryHtml(d){
+  const chain = getFilteredChain(d);
+
+  if(!chain.length){
+    return `
+  <div class="section-card" id="chain-summary-card">
+    <div class="section-header"><span class="section-title">📊 Option Chain Snapshot</span></div>
+    <div class="dd-empty">Awaiting chain data…</div>
+  </div>`;
+  }
+
+  // Unit-aware K/L/Cr formatter on the RAW number (not pre-scaled) — same
+  // approach as option-chain.js's fmt(), which this card is modeled on.
+  // chain-views.js's own global fmt()/fmtK() stop at "L" and never scale
+  // to "Cr", so a separate helper is needed here to match that reference
+  // layout's units exactly.
+  const fmtCrLK = (v) => {
+    if(v==null||isNaN(v)) return '—';
+    const a = Math.abs(v);
+    const s = v<0 ? '-' : '';
+    if(a>=1e7) return s+(a/1e7).toFixed(2)+'Cr';
+    if(a>=1e5) return s+(a/1e5).toFixed(2)+'L';
+    if(a>=1e3) return s+(a/1e3).toFixed(1)+'K';
+    return s+a.toFixed(0);
+  };
+  const signedFmt = (v) => (v>0?'+':'') + fmtCrLK(v);
+  const netClr = (v) => v>0?'var(--green)':v<0?'var(--red)':'var(--txt3)';
+
+  // ── OI summary ──
+  const totalCe = chain.reduce((s,r)=>s+(r.ceOI||0),0);
+  const totalPe = chain.reduce((s,r)=>s+(r.peOI||0),0);
+  const oiTotal = totalCe+totalPe || 1;
+  const pcr = totalPe/(totalCe||1);
+
+  // ── Chg OI summary (+ how much that shifted PCR) ──
+  const totalCeChg = chain.reduce((s,r)=>s+(r.ceChgOI||0),0);
+  const totalPeChg = chain.reduce((s,r)=>s+(r.peChgOI||0),0);
+  const chgTotal = Math.abs(totalCeChg)+Math.abs(totalPeChg) || 1;
+  const prevCe = totalCe-totalCeChg, prevPe = totalPe-totalPeChg;
+  const prevPcr = prevPe/(prevCe||1);
+  const pcrShift = pcr-prevPcr;
+
+  const netOi = totalPe-totalCe;
+  const netChgOi = totalPeChg-totalCeChg;
+
+  // ── dOI across 5/15/30m — net PE vs CE change per window, summed over
+  // the currently visible strikes ──
+  const VEL_WINDOWS = [5,15,30];
+  const doiCols = VEL_WINDOWS.map(w=>{
+    const block = (d.oiVelocity||[]).find(b=>b.window===w);
+    const byStrike = {};
+    if(block&&block.rows) block.rows.forEach(vr=>{byStrike[vr.strike]=vr;});
+    const ceSum = chain.reduce((s,r)=>s+((byStrike[r.strike]||{}).ceDOI||0),0);
+    const peSum = chain.reduce((s,r)=>s+((byStrike[r.strike]||{}).peDOI||0),0);
+    return {w, ceSum, peSum, net: peSum-ceSum};
+  });
+
+  // ── Volume / OI ratio ──
+  const totalCeVol = chain.reduce((s,r)=>s+(r.ceVol||0),0);
+  const totalPeVol = chain.reduce((s,r)=>s+(r.peVol||0),0);
+  const ratioCap = 3;
+  const ceRatio = totalCeVol/(totalCe||1);
+  const peRatio = totalPeVol/(totalPe||1);
+
+  return `
+  <div class="section-card" id="chain-summary-card">
+    <div class="section-header">
+      <span class="section-title">📊 Option Chain Snapshot</span>
+      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="window.open('option-chain.html','_blank')">Full Chain →</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1.15fr 1.15fr 1fr 1fr;gap:16px;padding:10px 2px 4px;">
+
+      <div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;letter-spacing:.04em;">OI SUMMARY</div>
+        <div style="height:6px;border-radius:999px;overflow:hidden;display:flex;background:var(--bg2);margin-bottom:8px;">
+          <div style="width:${(totalPe/oiTotal)*100}%;background:linear-gradient(90deg,var(--green),transparent);"></div>
+          <div style="width:${(totalCe/oiTotal)*100}%;background:linear-gradient(90deg,transparent,var(--red));"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:13px;font-weight:700;flex-wrap:wrap;">
+          <span style="color:var(--green);">${fmtCrLK(totalPe)}</span>
+          <span style="font-size:9px;color:var(--txt3);font-weight:400;">PE</span>
+          <span style="background:rgba(245,166,35,.15);color:var(--amber);padding:2px 8px;border-radius:999px;font-size:11px;">PCR ${fmtN(pcr,2)}</span>
+          <span style="font-size:9px;color:var(--txt3);font-weight:400;">CE</span>
+          <span style="color:var(--red);">${fmtCrLK(totalCe)}</span>
+        </div>
+        <div style="font-size:11px;color:${netClr(netOi)};margin-top:6px;font-family:var(--mono);">Net (PE−CE) <b>${signedFmt(netOi)}</b></div>
+      </div>
+
+      <div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;letter-spacing:.04em;">CHG OI SUMMARY</div>
+        <div style="height:6px;border-radius:999px;overflow:hidden;display:flex;background:var(--bg2);margin-bottom:8px;">
+          <div style="width:${(Math.abs(totalPeChg)/chgTotal)*100}%;background:linear-gradient(90deg,var(--green),transparent);"></div>
+          <div style="width:${(Math.abs(totalCeChg)/chgTotal)*100}%;background:linear-gradient(90deg,transparent,var(--red));"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:13px;font-weight:700;flex-wrap:wrap;">
+          <span style="color:var(--green);">${signedFmt(totalPeChg)}</span>
+          <span style="font-size:9px;color:var(--txt3);font-weight:400;">PE</span>
+          <span style="background:rgba(245,166,35,.15);color:var(--amber);padding:2px 8px;border-radius:999px;font-size:11px;">PCR Δ ${signedFmt(pcrShift)}</span>
+          <span style="font-size:9px;color:var(--txt3);font-weight:400;">CE</span>
+          <span style="color:var(--red);">${signedFmt(totalCeChg)}</span>
+        </div>
+        <div style="font-size:11px;color:${netClr(netChgOi)};margin-top:6px;font-family:var(--mono);">Net (PE−CE) <b>${signedFmt(netChgOi)}</b></div>
+      </div>
+
+      <div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;letter-spacing:.04em;">dOI <span style="font-weight:400;">5 · 15 · 30m</span></div>
+        <div style="display:flex;justify-content:space-between;gap:6px;">
+          ${doiCols.map(c=>`
+          <div style="text-align:center;flex:1;">
+            <div style="font-size:10px;font-family:var(--mono);color:var(--green);">${signedFmt(c.peSum)}</div>
+            <div style="font-size:10px;font-family:var(--mono);color:var(--red);margin-bottom:2px;">${signedFmt(c.ceSum)}</div>
+            <div style="font-size:9px;color:var(--txt3);">${c.w}m</div>
+            <div style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:999px;margin-top:2px;display:inline-block;color:${netClr(c.net)};background:var(--bg2);">net ${signedFmt(c.net)}</div>
+          </div>`).join('')}
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;letter-spacing:.04em;">VOLUME <span style="font-weight:400;">&amp; Vol/OI</span></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:6px;">
+          <span style="color:var(--red);min-width:18px;">CE</span>
+          <span style="color:var(--red);font-family:var(--mono);min-width:56px;">${fmtCrLK(totalCeVol)}</span>
+          <div style="flex:1;height:5px;border-radius:999px;background:var(--bg2);overflow:hidden;"><div style="height:100%;width:${Math.min(100,(ceRatio/ratioCap)*100)}%;background:var(--red);"></div></div>
+          <span style="font-family:var(--mono);color:var(--txt3);font-size:10px;">${fmtN(ceRatio,2)}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;">
+          <span style="color:var(--green);min-width:18px;">PE</span>
+          <span style="color:var(--green);font-family:var(--mono);min-width:56px;">${fmtCrLK(totalPeVol)}</span>
+          <div style="flex:1;height:5px;border-radius:999px;background:var(--bg2);overflow:hidden;"><div style="height:100%;width:${Math.min(100,(peRatio/ratioCap)*100)}%;background:var(--green);"></div></div>
+          <span style="font-family:var(--mono);color:var(--txt3);font-size:10px;">${fmtN(peRatio,2)}x</span>
+        </div>
+      </div>
+
+    </div>
+  </div>`;
 }
 
   sizeAndScrollChain(prevScrollTop){
@@ -1546,6 +1676,189 @@ class ChainView {
   document.querySelectorAll('#grk-tabs .tab-btn').forEach(t=>t.classList.remove('active-grk'));
   el.classList.add('active-grk');
   renderGreeksGex(view);
+}
+
+  // ── GREEKS ALERTS (main-dashboard summary card) ──
+  // The full per-strike Greeks/GEX table (Δ/Γ/Θ/Vega tabs + Net GEX +
+  // Regime columns) moved out of the main dashboard into its own modal —
+  // openGreeksModal()/closeGreeksModal() in ModalManager, mirroring the
+  // existing OI Dashboard modal — so it never crowds the main view. What
+  // stays inline here is just the handful of things worth reacting to:
+  // a gamma-flip strike sitting inside the visible ATM range, a
+  // short-gamma dealer regime (hedging flows amplify rather than dampen
+  // moves), and unusually fast theta burn relative to the ATM straddle's
+  // own premium. The %/day threshold below is a tunable heuristic — the
+  // backend doesn't send an explicit "this is high" flag — not a value
+  // pulled from the payload.
+  buildGreeksAlertsHtml(greeks, atm, d){
+  const GREEKS_ALERT_THETA_PCT = 5; // ATM theta/day as % of ATM straddle premium
+  const straddle = (d.callPremium||0) + (d.putPremium||0);
+  const totalGEX = greeks.reduce((s,g)=>s+(g.netGEX||0),0);
+  const flipRow  = findGammaFlipStrike(greeks);
+  const thetaPct = straddle>0 ? Math.abs(d.atmTheta||0)/straddle*100 : 0;
+
+  const alerts=[];
+  if(flipRow){
+    alerts.push({
+      icon:'⚡', clr:'var(--amber)',
+      text:`Gamma flip at <strong>${fmtI(flipRow.strike)}</strong> — regime crosses ${flipRow.netGEX>=0?'short → long':'long → short'} γ there`
+    });
+  }
+  if(totalGEX<0){
+    alerts.push({
+      icon:'⚠', clr:'var(--red)',
+      text:`Dealer <strong>short gamma</strong> (${fmtN(totalGEX,3)}B) — hedging flows likely amplify moves`
+    });
+  }
+  if(thetaPct>GREEKS_ALERT_THETA_PCT){
+    alerts.push({
+      icon:'⏳', clr:'var(--red)',
+      text:`High theta decay — ATM straddle losing <strong>${fmtN(thetaPct,1)}%</strong> of premium/day`
+    });
+  }
+
+  const rows = alerts.length
+    ? alerts.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(255,255,255,0.03);border-left:2px solid ${a.clr};border-radius:4px;font-size:12px;line-height:1.4;"><span style="flex-shrink:0;">${a.icon}</span><span style="color:var(--txt2);">${a.text}</span></div>`).join('')
+    : `<div style="font-size:12px;color:var(--txt3);padding:6px 8px;">No Greek alerts right now — γ regime stable, theta normal.</div>`;
+
+  return `<div class="section-card algn-card" id="greeks-alerts-card" style="min-width:0;">
+    <div class="section-header">
+      <span class="section-title">Greeks / Net GEX</span>
+      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openGreeksModal()" title="Open full Greeks &amp; GEX table">Full Table →</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;padding:2px 0;">
+      ${rows}
+    </div>
+  </div>`;
+}
+
+  // Grouped next to the alerts card above (both are "Greeks" info). Pulled
+  // out into its own method — same as buildGreeksAlertsHtml — so the
+  // incremental expiry-switch refresh in _rerenderChainPanels can rebuild
+  // this exact card instead of duplicating the markup; previously this had
+  // no id and only ever updated on a full rebuild, so it went stale
+  // between expiry switches.
+  buildAtmGreeksHtml(d){
+  return `<div class="section-card" id="atm-greeks-card">
+      <div class="section-header"><span class="section-title">ATM Greeks ${fmtI(d.atm)}</span></div>
+      <div class="iv-row"><span style="color:var(--txt3);">Delta</span><span style="font-weight:600;font-family:var(--mono);">${fmtN(d.atmDelta,4)}</span></div>
+      <div class="iv-row"><span style="color:var(--txt3);">Gamma ×10⁴</span><span style="font-weight:600;font-family:var(--mono);">${fmtN(d.atmGamma,4)}</span></div>
+      <div class="iv-row"><span style="color:var(--txt3);">Theta / day</span><span style="color:var(--red);font-weight:600;font-family:var(--mono);">${fmtN(d.atmTheta,2)}</span></div>
+      <div class="iv-row"><span style="color:var(--txt3);">Vega</span><span style="font-weight:600;font-family:var(--mono);">${fmtN(d.atmVega,2)}</span></div>
+      <div class="iv-row"><span style="color:var(--txt3);">IV vs HV</span><span style="color:var(--amber);font-weight:600;">${fmtN((d.atmIV||0)-(d.hv30||0),2)}% rich</span></div>
+      <div class="iv-row"><span style="color:var(--txt3);">IV rank</span><span style="color:var(--blue);font-weight:600;">${Math.round(d.ivRank||0)} / 100</span></div>
+    </div>`;
+}
+
+  // ── IV ALERTS (main-dashboard summary card) ──
+  // Same treatment as buildGreeksAlertsHtml: the full per-strike IV
+  // surface (CE/PE bars, ATM ± 3) moved into its own modal
+  // (openIvSurfaceModal()), so the main view only surfaces two things
+  // worth reacting to — elevated put/call skew, and an IV rank sitting
+  // near either extreme (options unusually rich or unusually cheap).
+  // Thresholds are tunable heuristics, not backend-supplied flags.
+  buildIvAlertsHtml(d, chain, atm){
+  const IV_ALERT_SKEW_PCT = 1.5;   // |atmSkew| above this is called "elevated"
+  const IV_ALERT_RANK_HIGH = 80;   // ivRank above this is called "rich"
+  const IV_ALERT_RANK_LOW  = 20;   // ivRank below this is called "cheap"
+  const skew = d.atmSkew||0;
+  const rank = d.ivRank||0;
+
+  const alerts=[];
+  if(Math.abs(skew) > IV_ALERT_SKEW_PCT){
+    alerts.push({
+      icon:'📐', clr:'var(--amber)',
+      text:`Elevated ${skew>0?'put':'call'} skew — <strong>${fmtN(skew,2)}%</strong> at ATM`
+    });
+  }
+  if(rank >= IV_ALERT_RANK_HIGH){
+    alerts.push({
+      icon:'🔺', clr:'var(--red)',
+      text:`IV rank <strong>${Math.round(rank)}/100</strong> — options historically rich, consider selling premium`
+    });
+  } else if(rank <= IV_ALERT_RANK_LOW){
+    alerts.push({
+      icon:'🔻', clr:'var(--green)',
+      text:`IV rank <strong>${Math.round(rank)}/100</strong> — options historically cheap, consider buying premium`
+    });
+  }
+
+  const rows = alerts.length
+    ? alerts.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(255,255,255,0.03);border-left:2px solid ${a.clr};border-radius:4px;font-size:12px;line-height:1.4;"><span style="flex-shrink:0;">${a.icon}</span><span style="color:var(--txt2);">${a.text}</span></div>`).join('')
+    : `<div style="font-size:12px;color:var(--txt3);padding:6px 8px;">No IV alerts right now — skew and rank both in normal range.</div>`;
+
+  return `<div class="section-card" id="iv-alerts-card">
+    <div class="section-header">
+      <span class="section-title">IV Surface</span>
+      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openIvSurfaceModal()" title="Open full IV surface">Full Surface →</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;padding:2px 0;">
+      ${rows}
+    </div>
+  </div>`;
+}
+
+  // ── FULL IV SURFACE (modal content) ──
+  // Same per-strike CE/PE bar table + Skew/Max IV/Min IV footer that used
+  // to render inline in the main template. Pulled out into its own method
+  // so it can be (a) written once into the modal's static content div and
+  // (b) refreshed from that same place on every tick / expiry switch via
+  // renderIvSurfaceModal() below, instead of duplicating this markup in
+  // both the initial template and the incremental-refresh path.
+  buildIvSurfaceHtml(d, chain, atm){
+  const atmIdx = chain.findIndex(r => r.atm || r.strike === atm);
+  let ivRows = [];
+  if (atmIdx >= 0) {
+    const start = Math.max(0, atmIdx - 3);
+    const end = Math.min(chain.length, atmIdx + 4);
+    ivRows = chain.slice(start, end);
+  } else {
+    ivRows = chain.slice(0, 6);
+  }
+  const maxIV = Math.max(...ivRows.map(r => Math.max(r.ceIV||0, r.peIV||0)), 1);
+  const barMaxWidth = 160;
+
+  let rowsHtml = '';
+  ivRows.forEach(r => {
+    const ia = r.atm || r.strike === atm;
+    const ceIV = r.ceIV || 0;
+    const peIV = r.peIV || 0;
+    const ceWidth = Math.max((ceIV / maxIV) * barMaxWidth, 4);
+    const peWidth = Math.max((peIV / maxIV) * barMaxWidth, 4);
+    rowsHtml += `<div style="display:grid;grid-template-columns:1fr 80px 1fr;align-items:center;gap:0;padding:3px 6px;${ia?'background:rgba(18,184,134,0.08);border-radius:4px;':''}">
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;">
+        <span style="font-size:9px;font-family:var(--mono);color:var(--red);font-weight:600;white-space:nowrap;">${fmtN(ceIV,2)}%</span>
+        <div style="height:8px;border-radius:3px 0 0 3px;background:var(--red);width:${ceWidth}px;min-width:3px;flex-shrink:0;"></div>
+      </div>
+      <div style="text-align:center;padding:0 4px;">
+        <span style="font-family:var(--mono);font-size:10px;font-weight:${ia?700:400};color:${ia?'var(--green)':'var(--txt3)'};">${fmtI(r.strike)}${ia?' ★':''}</span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:flex-start;gap:5px;">
+        <div style="height:8px;border-radius:0 3px 3px 0;background:var(--green);width:${peWidth}px;min-width:3px;flex-shrink:0;"></div>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--green);font-weight:600;white-space:nowrap;">${fmtN(peIV,2)}%</span>
+      </div>
+    </div>`;
+  });
+  const minIV = Math.min(...ivRows.map(r => Math.min(r.ceIV||0, r.peIV||0)));
+
+  return `<div style="display:flex;flex-direction:column;gap:4px;">${rowsHtml}</div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap;">
+      <span>Skew <strong style="color:var(--amber);">${fmtN(d.atmSkew,2)}%</strong> at ATM</span>
+      <span>Max IV <strong style="color:var(--red);">${fmtN(maxIV,2)}%</strong></span>
+      <span>Min IV <strong style="color:var(--green);">${fmtN(minIV,2)}%</strong></span>
+    </div>`;
+}
+
+  // Writes the full IV surface (buildIvSurfaceHtml above) into the modal's
+  // static content div. Reads _data itself (same pattern as
+  // renderGreeksGex(view) below) so it can be called with no args from
+  // renderDashboard's post-render block, live ticks, and expiry switches.
+  renderIvSurfaceModal(){
+  const el = $i('iv-surface-content');
+  if(!el || !_data) return;
+  const chain = getFilteredChain(_data);
+  const atm = activeAtm(_data);
+  el.innerHTML = this.buildIvSurfaceHtml(_data, chain, atm);
 }
 
   // Merged Greeks + Net GEX table. One <td> per strike shared by both
@@ -1750,7 +2063,7 @@ class ChainView {
     chainEl.innerHTML = rows;
     if(_greeksVisible) document.querySelectorAll('[id^="grk-row-"]').forEach(el=>{el.style.display='';});
     _centerChainOnATM=true; // expiry just changed — snap the viewport back to ATM ±5
-    requestAnimationFrame(()=>sizeAndScrollChain(null));
+    requestAnimationFrame(()=>app.chain.sizeAndScrollChain(null));
   }
 
   // ── 2. DTE pill ──────────────────────────────────────────────────────────
@@ -1868,19 +2181,45 @@ class ChainView {
     </div>`;
   }
 
-  // 4. OI Buildup section (OI / OI Chg / OI Vel tabbed chart)
-  const oiFlowBodyEl = document.getElementById("oi-flow-body");
-  if(oiFlowBodyEl){
-    setHtmlIfChanged(oiFlowBodyEl, buildOiFlowRows(chain, atm, maxOI, velByStrike, velMax, _oiFlowMode));
+  // 4. OI Flow Snapshot card (compact — full butterfly table now lives in
+  // the OI Dashboard's Butterfly tab, see buildOiFlowSummaryHtml()).
+  const oiFlowSummaryEl = document.getElementById("oi-flow-summary-card");
+  if(oiFlowSummaryEl){
+    const freshOiFlowSummary = buildOiFlowSummaryHtml(chain, atm, velByStrike);
+    // buildOiFlowSummaryHtml() returns the whole card including its own
+    // #oi-flow-summary-card wrapper — swap the wrapper's contents/attrs via
+    // outerHTML so setHtmlIfChanged's dataset-diff cache stays meaningful
+    // (it lives on the element itself, which outerHTML replaces wholesale).
+    if(oiFlowSummaryEl.dataset.lastHtml !== freshOiFlowSummary){
+      oiFlowSummaryEl.outerHTML = freshOiFlowSummary;
+      const fresh = document.getElementById("oi-flow-summary-card");
+      if(fresh) fresh.dataset.lastHtml = freshOiFlowSummary;
+    }
   }
-  const oiFlowLabelEl = document.getElementById("oi-flow-label");
-  if(oiFlowLabelEl) oiFlowLabelEl.textContent = oiFlowLabel(_oiFlowMode);
 
-
-  // ── 5. Top movers strip (biggest single CE/PE build) ───────────────────────
-  const oiTopMoversEl = document.getElementById('oi-top-movers');
-  if(oiTopMoversEl){
-    oiTopMoversEl.innerHTML = buildOiTopMoversStrip(chain, velByStrike, _oiFlowMode);
+  // 4b. Greeks summary — alerts card (gamma flip / short-gamma regime /
+  // theta decay) and the ATM Greeks card next to it, same outerHTML-diff
+  // treatment as the OI Flow card above, so an expiry switch reflects the
+  // new expiry's Greeks immediately instead of waiting for the next tick
+  // (or, for ATM Greeks, the next full rebuild — it had no id before and
+  // never got an incremental refresh at all).
+  const greeksAlertsEl = document.getElementById("greeks-alerts-card");
+  if(greeksAlertsEl){
+    const freshGreeksAlerts = app.chain.buildGreeksAlertsHtml(greeks, atm, _data);
+    if(greeksAlertsEl.dataset.lastHtml !== freshGreeksAlerts){
+      greeksAlertsEl.outerHTML = freshGreeksAlerts;
+      const fresh = document.getElementById("greeks-alerts-card");
+      if(fresh) fresh.dataset.lastHtml = freshGreeksAlerts;
+    }
+  }
+  const atmGreeksEl = document.getElementById("atm-greeks-card");
+  if(atmGreeksEl){
+    const freshAtmGreeks = app.chain.buildAtmGreeksHtml(_data);
+    if(atmGreeksEl.dataset.lastHtml !== freshAtmGreeks){
+      atmGreeksEl.outerHTML = freshAtmGreeks;
+      const fresh = document.getElementById("atm-greeks-card");
+      if(fresh) fresh.dataset.lastHtml = freshAtmGreeks;
+    }
   }
 
   // ── 6. IV Surface ─────────────────────────────────────────────────────────
@@ -1943,7 +2282,7 @@ class ChainView {
   // Same gap as above — this block was only ever built once, during the
   // full renderDashboard() pass, so GEX/PCR/theta figures in these three
   // cards went stale after an expiry-only switch.
-  const execWrap = document.getElementById('exec-grid-wrap');
+  const execWrap = document.getElementById('exec-section-wrap');
   if (execWrap) {
     _data.totalGEX = greeks.reduce((s,g)=>s+(g.netGEX||0),0);
     execWrap.outerHTML = renderExecutiveDashboard(_data);

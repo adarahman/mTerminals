@@ -19,6 +19,8 @@ from smartapi_pipeline_adapter import (
     fetch_futures_wide,
     fetch_vix_smartapi,
     get_available_expiries,
+    fetch_ticker_payload_smartapi,
+    fetch_sensex_ticker_smartapi,
 )
 # No manual session object needed here — smartapi_pipeline_adapter.py's
 # functions call through to mTerminals.smartapi_client's module-level
@@ -29,14 +31,34 @@ from smartapi_pipeline_adapter import (
 # therefore a second _session singleton) even though it's the same file on
 # disk, causing two independent logins to race each other on startup.
 
-from market_api import (
-    fetch_bse_json_options,
-    fetch_bse_futures,
-    fetch_bse_index_quote,
-    build_ticker_payload_from_df_idx,
-)
 from market_api import fetch_all_indices
 from expiry_manager import make_expiry_manager
+
+# ─── df_idx TTL cache ────────────────────────────────────────────────
+# fetch_all_indices() is the one NSE HTTP call with no SmartAPI equivalent
+# — it's what feeds _compute_index_contributors()'s ffmc weighting AND the
+# Volume/Value merge into all_indices (SmartAPI's index ltpData has neither
+# field). Ticker-pill LTP/change values used to piggyback on this same
+# call for free; they're now sourced from SmartAPI directly (see
+# fetch_ticker_payload_smartapi import above) and no longer need df_idx.
+#
+# That means df_idx's only remaining consumers — ffmc contributor weights
+# and Volume/Value — don't need per-tick (POLL_SECONDS) freshness the way
+# live LTP does: per-stock free-float weighting and session volume totals
+# don't meaningfully change second to second. So this call is decoupled
+# from the main poll loop onto its own TTL, cutting real NSE HTTP volume
+# without touching anything that reads df_idx downstream (same DataFrame,
+# just refreshed less often).
+DF_IDX_TTL_SECONDS = 20
+_DF_IDX_CACHE = {"df": None, "ts": 0.0}
+
+
+def _fetch_all_indices_cached():
+    now = time.time()
+    if _DF_IDX_CACHE["df"] is None or (now - _DF_IDX_CACHE["ts"]) >= DF_IDX_TTL_SECONDS:
+        _DF_IDX_CACHE["df"] = fetch_all_indices()
+        _DF_IDX_CACHE["ts"] = now
+    return _DF_IDX_CACHE["df"]
 
 # ─── Virtual OI estimator coordinator loader ──────────────────────────
 # Import conditionally to avoid loading models when --no-virtual-oi is set
@@ -156,15 +178,19 @@ print(f"    Loop    : {'every ' + str(LOOP_INTERVAL) + ' min' if LOOP_INTERVAL >
 
 def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
     if exchange == "BSE":
-        bse_expiry = pd.to_datetime(expiry, format="%d-%b-%Y").strftime("%d %b %Y")
-        scrip_cd   = BSE_SCRIP_CD.get(symbol, "1")
-        df_bse, spot = fetch_bse_json_options(expiry_str=bse_expiry, scrip_cd=scrip_cd)
-        if df_bse is None or df_bse.empty:
-            raise RuntimeError("BSE fetch empty")
-        df_bse = df_bse.rename(columns={"Strike": "StrikePrice"})
-        df_bse["Expiry"], df_bse["Spot"], df_bse["Symbol"] = expiry, spot, symbol
+        # Was fetch_bse_json_options() — BSE's own JSON option-chain HTTP
+        # endpoint. fetch_option_chain_wide() is exchange-parametrized
+        # (STRIKE_INTERVALS/_get_strike_interval already cover SENSEX/
+        # BANKEX/SENSEX50), so exchange="BFO" is a genuine drop-in: same
+        # output columns (StrikePrice/Expiry/Spot/Symbol/CE_*/PE_*) this
+        # branch used to hand-build via the Strike->StrikePrice rename
+        # below, now produced natively.
+        df = fetch_option_chain_wide(symbol, expiry, exchange="BFO")
+        if df.empty:
+            raise RuntimeError(f"SmartAPI BFO chain fetch empty for {symbol} {expiry}")
+        spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0
         expiry_dates = _generate_bse_expiry_series(symbol)
-        return df_bse, spot, expiry_dates
+        return df, spot, expiry_dates
     else:
         expiry_dates = get_available_expiries(symbol)
         resolved = expiry
@@ -199,7 +225,49 @@ def _resolve_expiry(data, requested_expiry, strict=False):
         except Exception: continue
     raise RuntimeError(f"No valid future expiry found: {available}")
 
-LOT_SIZES = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120, "SENSEX": 20, "BANKEX": 30, "SENSEX50": 75, "PNB": 8000}
+# Emergency fallback only — live lot sizes come from FUTSTK/FUTIDX rows in
+# the AngelOne master via smartapi_instruments.get_lot_size(). These static
+# numbers go stale on every NSE quarterly lot revision; never add stocks
+# here hoping to cover the universe (there are 200+).
+_STATIC_LOT_SIZES = {
+    "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
+    "SENSEX": 20, "BANKEX": 30, "SENSEX50": 75, "PNB": 8000,
+}
+
+
+class _LiveLotSizes:
+    """dict-like shim so existing LOT_SIZES.get(sym, default) call sites
+    resolve through FUT-derived lot sizes without a hard-coded table."""
+
+    def get(self, symbol, default=65):
+        sym = (symbol or "").upper()
+        try:
+            from smartapi_instruments import get_lot_size
+            return get_lot_size(sym)
+        except Exception:
+            return _STATIC_LOT_SIZES.get(sym, default)
+
+    def __getitem__(self, symbol):
+        sym = (symbol or "").upper()
+        try:
+            from smartapi_instruments import get_lot_size
+            return get_lot_size(sym)
+        except Exception:
+            if sym in _STATIC_LOT_SIZES:
+                return _STATIC_LOT_SIZES[sym]
+            raise KeyError(symbol)
+
+    def __contains__(self, symbol):
+        sym = (symbol or "").upper()
+        try:
+            from smartapi_instruments import get_lot_size
+            get_lot_size(sym)
+            return True
+        except Exception:
+            return sym in _STATIC_LOT_SIZES
+
+
+LOT_SIZES = _LiveLotSizes()
 
 # Maps our dashboard SYMBOL to the literal "Index" tag used inside df_idx
 # (i.e. the exact string passed to fetch_fno_index() as part of
@@ -328,29 +396,31 @@ def main():
         with ThreadPoolExecutor(max_workers=5) as ex:
             if EXCHANGE == "BSE":
                 fut_chain = ex.submit(_fetch_and_parse, SYMBOL, EXPIRY, "BSE", STRICT_EXPIRY)
-                fut_fut   = ex.submit(
-                    fetch_bse_futures,
-                    expiry_str=pd.to_datetime(EXPIRY, format="%d-%b-%Y").strftime("%d %b %Y"),
-                    scrip_cd=BSE_SCRIP_CD.get(SYMBOL, "1"),
-                )
+                # Was fetch_bse_futures() (BSE HTTP + scrip code lookup).
+                # fetch_futures_wide() already resolves FUTIDX contracts
+                # generically off the ScripMaster (_get_futures_contract),
+                # same as the NSE branch below — exchange="BFO" is the only
+                # difference.
+                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, EXPIRY, exchange="BFO")
             else:
                 fut_chain = ex.submit(_fetch_and_parse, SYMBOL, EXPIRY, "NSE", STRICT_EXPIRY)
                 fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, EXPIRY)
-            fut_idx = ex.submit(fetch_all_indices)
-            # NSE ticker pills (NIFTY/BANKNIFTY/MIDCPNIFTY) — unconditional
-            # every tick, same reasoning as get_unified_market_data()'s own
-            # docstring: these pills must stay populated even while the
-            # active symbol is SENSEX/BANKEX. get_unified_market_data() is
-            # now VIX-only (it derives ticker pills from df_idx, but df_idx
-            # isn't resolved until fut_idx.result() below — a future can't
-            # hand its result to another future submitted alongside it), so
-            # ticker_payload is built synchronously from df_idx after both
-            # resolve, a few lines down. That's an in-memory filter, not a
-            # network call, so this doesn't add any latency back.
+            # df_idx now TTL-cached (see _fetch_all_indices_cached above) —
+            # still submitted through the pool each tick, but only actually
+            # hits NSE once every DF_IDX_TTL_SECONDS; other ticks get the
+            # cached DataFrame back instantly.
+            fut_idx = ex.submit(_fetch_all_indices_cached)
+            # Ticker pills (NIFTY/BANKNIFTY/MIDCPNIFTY/FINNIFTY) — now pure
+            # SmartAPI REST via fetch_ticker_payload_smartapi(), independent
+            # of df_idx entirely. Unconditional every tick, same reasoning
+            # as before: pills must stay populated even while the active
+            # symbol is SENSEX/BANKEX.
+            fut_ticker = ex.submit(fetch_ticker_payload_smartapi)
             fut_unified = ex.submit(fetch_vix_smartapi)
-            # BSE SENSEX pill — separate exchange/endpoint, also unconditional
-            # so it stays live while viewing NSE symbols.
-            fut_sensex = ex.submit(fetch_bse_index_quote, "SENSEX")
+            # SENSEX pill — also SmartAPI now (INDEX_TOKENS), replacing the
+            # old BSE getScripHeaderData round-trip. Still unconditional so
+            # it stays live while viewing NSE symbols.
+            fut_sensex = ex.submit(fetch_sensex_ticker_smartapi)
 
             if EXCHANGE == "BSE":
                 df, spot, expiry_dates = fut_chain.result()
@@ -363,7 +433,7 @@ def main():
             _live_vix, _live_vix_chg_pct = fut_unified.result()
             _live_vix = _live_vix or 0.0
             sensex_quote = fut_sensex.result()
-            ticker_payload = build_ticker_payload_from_df_idx(df_idx)
+            ticker_payload = fut_ticker.result()
             all_indices = list(ticker_payload)
             if sensex_quote:
                 all_indices.append(sensex_quote)

@@ -24,10 +24,33 @@ import threading
 from datetime import datetime, timedelta
 
 import requests
+
+# Force IPv4-only DNS resolution for this process's HTTP calls (requests/
+# urllib3, which is what SmartApi's SDK uses under the hood for every
+# call — see smartConnect.py's _postRequest/_request). Diagnosed
+# 2026-07-17: this machine has a live IPv6 address distinct from the
+# IPv4 address whitelisted on Angel One's SmartAPI developer console. If
+# urllib3 prefers the IPv6 route for outbound calls, Angel's IP whitelist
+# check (entered as IPv4) fails even though the IPv4 entry itself is
+# correct and current — this looked identical to a rate-limit/access
+# issue ("Access denied because of exceeding access rate") but had
+# nothing to do with request volume. Forcing IPv4-only removes the
+# ambiguity entirely rather than requiring the IPv6 address to be kept
+# in sync with whatever the ISP reassigns it to.
+try:
+    import urllib3.util.connection as _urllib3_conn
+    _urllib3_conn.HAS_IPV6 = False
+except Exception:
+    pass
 import pyotp
 from dotenv import load_dotenv
 from logzero import logger
 from SmartApi import SmartConnect
+
+try:
+    import orjson as _orjson
+except ImportError:  # pragma: no cover
+    _orjson = None
 
 # Load .env from mTerminals/ (the parent of this file's backend/ folder),
 # regardless of what directory the process was launched from.
@@ -49,15 +72,40 @@ SCRIP_MASTER_CACHE_PATH = os.path.join(
 )
 SCRIP_MASTER_TTL_HOURS = 20  # refresh once a day; contracts don't change intraday
 
-# Index -> underlying token/exchange mapping SmartAPI expects for spot quotes
-INDEX_TOKENS = {
-    "NIFTY":      {"token": "99926000", "exchange": "NSE"},
-    "BANKNIFTY":  {"token": "99926009", "exchange": "NSE"},
-    "FINNIFTY":   {"token": "99926037", "exchange": "NSE"},
-    "MIDCPNIFTY": {"token": "99926074", "exchange": "NSE"},
-    "SENSEX":     {"token": "99919000", "exchange": "BSE"},
-    "BANKEX":     {"token": "99919012", "exchange": "BSE"},
-}
+# INDEX_TOKENS (index -> underlying token/exchange mapping SmartAPI expects
+# for spot quotes) is built dynamically below by _build_index_tokens() from
+# the live ScripMaster — see that function for the short-code alias table
+# (e.g. SENSEX50) that keeps lookups working across ScripMaster refreshes.
+
+def _build_index_tokens():
+    """Dynamically build the index token map from the ScripMaster
+    (instrumenttype == 'AMXIDX') instead of hardcoding entries — new or
+    renamed indices (e.g. NIFTYNXT50, which was previously missing) are
+    picked up automatically on the next ScripMaster refresh."""
+    tokens = {}
+    data = _load_scrip_master()
+    for row in data:
+        if row.get("instrumenttype") == "AMXIDX":
+            name = row.get("name", "").upper()
+            if name:
+                tokens[name] = {
+                    "token": row["token"],
+                    "exchange": row.get("exch_seg", "NSE"),
+                }
+
+    # A few BSE indices carry a long descriptive `name` in the ScripMaster
+    # (e.g. "S&P BSE SENSEX 50") instead of the short code the rest of this
+    # app uses everywhere else (BSE_SCRIP_CD, LOT_SIZES, _BSE_SYMBOLS,
+    # _FNO_INDEX_NAMES, etc.) — alias those here so INDEX_TOKENS.get(SYMBOL)
+    # resolves regardless of which spelling the ScripMaster uses this run.
+    _SHORT_CODE_ALIASES = {
+        "SENSEX50": "S&P BSE SENSEX 50",
+    }
+    for short_code, long_name in _SHORT_CODE_ALIASES.items():
+        if short_code not in tokens and long_name in tokens:
+            tokens[short_code] = tokens[long_name]
+
+    return tokens
 
 
 def safe_float(val, default=0.0):
@@ -136,31 +184,185 @@ class SmartApiSession:
         """
         Call a SmartConnect method by name, auto re-logging in once on
         auth-type failures (expired/invalid token) before giving up.
+
+        Rate-limit / access-denied responses are NOT treated as auth
+        failures — re-login on those used to double the request volume
+        and make Angel's rate limit worse. Those paths sleep + retry once.
         """
+        _rate_limit_wait(fn_name)
         smart_api = self.ensure_session()
         method = getattr(smart_api, fn_name)
         try:
             result = method(*args, **kwargs)
         except Exception as e:
+            if _is_rate_limited(e):
+                return self._retry_after_rate_limit(fn_name, method, args, kwargs, e)
+            if isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+                # Transient network blip (timeout, connection reset) — the
+                # existing session/token is fine, so retrying on the SAME
+                # session is enough. Forcing a re-login here (as the generic
+                # branch below does) burns a full TOTP+login round-trip for
+                # something that has nothing to do with auth, and just
+                # delays the actual retry.
+                logger.warning(
+                    f"[smartapi_client] {fn_name} network error ({e}); "
+                    f"retrying once on same session (no re-login)"
+                )
+                time.sleep(1.0)
+                _rate_limit_wait(fn_name)
+                try:
+                    return method(*args, **kwargs)
+                except Exception as e2:
+                    logger.warning(f"[smartapi_client] {fn_name} failed again after retry: {e2}")
+                    return {"status": False, "message": str(e2)}
             logger.warning(f"[smartapi_client] {fn_name} raised {e}, retrying after re-login")
             with self._lock:
                 self._smart_api = None
             smart_api = self.ensure_session()
             method = getattr(smart_api, fn_name)
+            _rate_limit_wait(fn_name)
             result = method(*args, **kwargs)
             return result
 
         if isinstance(result, dict) and not result.get("status", True):
+            msg = str(result.get("message", ""))
             errorcode = str(result.get("errorcode", ""))
+            if _is_rate_limited(msg) or errorcode in {"AB8050", "AB8051"}:
+                return self._retry_after_rate_limit(
+                    fn_name, method, args, kwargs, f"code={errorcode or 'n/a'}"
+                )
             if errorcode in {"AG8001", "AG8002", "AB1010", "AB1050"}:  # token/session errors
                 logger.warning(f"[smartapi_client] {fn_name} token error {errorcode}, re-logging in")
                 with self._lock:
                     self._smart_api = None
                 smart_api = self.ensure_session()
                 method = getattr(smart_api, fn_name)
+                _rate_limit_wait(fn_name)
                 result = method(*args, **kwargs)
 
         return result
+
+    def _retry_after_rate_limit(self, fn_name, method, args, kwargs, reason):
+        """Escalating backoff for rate-limited calls: 1.25s, 2.5s, 5s across
+        up to _RATE_LIMIT_MAX_RETRIES attempts. Previously this was a single
+        fixed-length retry, which was enough to survive an isolated blip but
+        not a sustained rate-limit window — on 2026-07-17 the account stayed
+        rate-limited through the first retry for every one of NIFTY,
+        BANKNIFTY, MIDCPNIFTY, FINNIFTY, and the chain resolver's own spot
+        quote call, all within the same second, and every one of those gave
+        up after exactly one retry."""
+        delay = _RATE_LIMIT_BACKOFF_S
+        last_exc = None
+        for attempt in range(1, _RATE_LIMIT_MAX_RETRIES + 1):
+            logger.warning(
+                f"[smartapi_client] {fn_name} rate-limited ({reason}); "
+                f"backing off {delay}s (attempt {attempt}/{_RATE_LIMIT_MAX_RETRIES}, no re-login)"
+            )
+            time.sleep(delay)
+            _rate_limit_wait(fn_name)
+            try:
+                result = method(*args, **kwargs)
+            except Exception as e:
+                last_exc = e
+                if _is_rate_limited(e):
+                    delay *= 2
+                    continue
+                raise
+            if isinstance(result, dict) and not result.get("status", True):
+                msg = str(result.get("message", ""))
+                errorcode = str(result.get("errorcode", ""))
+                if _is_rate_limited(msg) or errorcode in {"AB8050", "AB8051"}:
+                    delay *= 2
+                    continue
+            return result
+        logger.warning(
+            f"[smartapi_client] {fn_name} still rate-limited after "
+            f"{_RATE_LIMIT_MAX_RETRIES} retries; giving up for this call"
+        )
+        if last_exc is not None:
+            return {"status": False, "message": str(last_exc)}
+        return {"status": False, "message": f"rate-limited ({reason}) after retries"}
+
+
+# Per-endpoint minimum spacing (seconds) between SmartAPI REST calls.
+# getCandleData is the one that trips Angel's "exceeding access rate" most
+# often (historical endpoint is tighter than live quotes). optionGreek is
+# documented at 1 req/sec. Everything else shares a mild global ceiling so
+# bursty multi-call paths (batch quotes + LTP + funds) don't stampede.
+_RATE_LIMIT_MIN_INTERVAL = {
+    "getCandleData": 0.40,   # ~2.5/s — under Angel's ~3/s historical cap
+    "optionGreek": 1.05,     # Angel docs: 1 req/sec
+    "placeOrderFullResponse": 0.35,
+    "placeOrder": 0.35,
+    # ltpData was previously falling through to the 25/s default, which is
+    # far looser than Angel actually enforces for single-symbol LTP calls —
+    # this is what produced the repeated "Access denied because of
+    # exceeding access rate" bursts on 2026-07-17 when 4+ index symbols
+    # were fetched back-to-back (NIFTY/BANKNIFTY/MIDCPNIFTY/FINNIFTY).
+    # Prefer get_index_quotes_batch()/get_batch_quotes() (one getMarketData
+    # call for many symbols) over calling ltpData per symbol wherever the
+    # caller can gather symbols up front — this floor just protects the
+    # cases where a single ltpData call is unavoidable.
+    "ltpData": 1.0,           # ~1/s — matches Angel's documented LTP cap
+    "getMarketData": 0.35,    # batch quote call — cheaper per-symbol but still capped
+}
+_RATE_LIMIT_DEFAULT_INTERVAL = 0.04  # ~25/s soft ceiling for RMS/orderBook/position etc
+_RATE_LIMIT_BACKOFF_S = 1.25
+_RATE_LIMIT_MAX_RETRIES = 3  # total attempts after the first backoff (was: 1, silently gave up after)
+_rate_limit_lock = threading.Lock()
+_rate_limit_last_ts: dict[str, float] = {}
+_rate_limit_global_last = 0.0
+
+
+def _is_rate_limited(err) -> bool:
+    text = str(err).lower()
+    return (
+        "access rate" in text
+        or "rate limit" in text
+        or "too many requests" in text
+        or "access denied because of exceeding" in text
+    )
+
+
+def _rate_limit_wait(fn_name: str) -> None:
+    """Sleep just enough to respect per-endpoint + global spacing."""
+    global _rate_limit_global_last
+    min_gap = _RATE_LIMIT_MIN_INTERVAL.get(fn_name, _RATE_LIMIT_DEFAULT_INTERVAL)
+    with _rate_limit_lock:
+        now = time.monotonic()
+        last_fn = _rate_limit_last_ts.get(fn_name, 0.0)
+        wait_fn = min_gap - (now - last_fn)
+        wait_global = _RATE_LIMIT_DEFAULT_INTERVAL - (now - _rate_limit_global_last)
+        wait = max(0.0, wait_fn, wait_global)
+        if wait > 0:
+            time.sleep(wait)
+            now = time.monotonic()
+        _rate_limit_last_ts[fn_name] = now
+        _rate_limit_global_last = now
+
+
+# Short-TTL cache for spot/index quotes. get_atm_chain() calls get_spot_quote()
+# internally, and separately ws_server_live.py's fetch_ticker_payload_smartapi
+# fetches the same index quotes for the ticker strip — within one poll tick
+# those are almost always the same value fetched twice. A ~1.5s TTL is short
+# enough that nothing goes stale for a live feed, but long enough to collapse
+# duplicate fetches happening within the same tick.
+_QUOTE_CACHE_TTL_S = float(os.getenv("SMARTAPI_QUOTE_TTL_S", "1.5"))
+_quote_cache_lock = threading.Lock()
+_quote_cache: dict[str, tuple] = {}  # symbol -> (fetched_at_monotonic, quote_dict)
+
+
+def _quote_cache_get(symbol):
+    with _quote_cache_lock:
+        entry = _quote_cache.get(symbol.upper())
+        if entry and (time.monotonic() - entry[0]) < _QUOTE_CACHE_TTL_S:
+            return entry[1]
+        return None
+
+
+def _quote_cache_set(symbol, quote):
+    with _quote_cache_lock:
+        _quote_cache[symbol.upper()] = (time.monotonic(), quote)
 
 
 _session = SmartApiSession()
@@ -168,39 +370,156 @@ _session = SmartApiSession()
 
 # ── 3. Instrument / token lookup ───────────────────────────────────────────
 _scrip_master_cache = {"data": None, "fetched_at": None}
+# Built once per ScripMaster load. Avoids O(n) scans over ~160k rows on
+# every find_option_token / list_expiries / get_atm_chain call.
+_scrip_indexes = {
+    "option": {},          # (exch, name, expiry, strike_int, CE|PE) -> {token, tradingsymbol}
+    "chain": {},           # (exch, name, expiry) -> {(strike_int, CE|PE): {token, tradingsymbol}}
+    "expiries": {},        # (exch, name) -> sorted list of expiry strings (ddMMMyyyy)
+    "equity": {},          # "RELIANCE" -> {token, tradingsymbol}  (NSE -EQ rows)
+    "strikes": {},         # (exch, name, expiry) -> sorted unique strike ints
+}
+
+
+def _json_loads_bytes(raw: bytes):
+    if _orjson is not None:
+        return _orjson.loads(raw)
+    return json.loads(raw)
+
+
+def _json_dump_file(path: str, data) -> None:
+    if _orjson is not None:
+        with open(path, "wb") as f:
+            f.write(_orjson.dumps(data))
+        return
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+
+def _build_scrip_indexes(data) -> None:
+    """One linear pass over the master → O(1) option/equity/expiry lookups."""
+    option_idx = {}
+    chain_idx = {}
+    expiry_sets = {}
+    equity_idx = {}
+    strike_sets = {}
+
+    for row in data:
+        exch = row.get("exch_seg")
+        name = row.get("name") or ""
+        symbol = row.get("symbol") or ""
+        expiry = row.get("expiry") or ""
+
+        # Equity cash tokens (for F&O stock underlyings)
+        if exch == "NSE" and symbol.endswith("-EQ") and name:
+            equity_idx.setdefault(name.upper(), {
+                "token": row["token"],
+                "tradingsymbol": symbol,
+            })
+
+        if not name or not expiry:
+            continue
+        if exch not in ("NFO", "BFO"):
+            continue
+
+        name_u = name.upper()
+        ek = (exch, name_u)
+        expiry_sets.setdefault(ek, set()).add(expiry)
+
+        if not (symbol.endswith("CE") or symbol.endswith("PE")):
+            continue
+        try:
+            strike_int = int(round(float(row["strike"]) / 100))
+        except (KeyError, ValueError, TypeError):
+            continue
+        opt_type = "CE" if symbol.endswith("CE") else "PE"
+        info = {"token": row["token"], "tradingsymbol": symbol}
+        option_idx[(exch, name_u, expiry, strike_int, opt_type)] = info
+        chain_idx.setdefault((exch, name_u, expiry), {})[(strike_int, opt_type)] = info
+        strike_sets.setdefault((exch, name_u, expiry), set()).add(strike_int)
+
+    expiries = {}
+    for key, s in expiry_sets.items():
+        try:
+            expiries[key] = sorted(s, key=lambda d: datetime.strptime(d, "%d%b%Y"))
+        except ValueError:
+            expiries[key] = sorted(s)
+
+    strikes = {k: sorted(v) for k, v in strike_sets.items()}
+
+    _scrip_indexes["option"] = option_idx
+    _scrip_indexes["chain"] = chain_idx
+    _scrip_indexes["expiries"] = expiries
+    _scrip_indexes["equity"] = equity_idx
+    _scrip_indexes["strikes"] = strikes
+    logger.info(
+        "[smartapi_client] ScripMaster indexed: %d option contracts, "
+        "%d underlyings, %d equity tokens",
+        len(option_idx),
+        len(expiries),
+        len(equity_idx),
+    )
 
 
 def _load_scrip_master():
     """Downloads (or reuses a local cache of) Angel One's ScripMaster —
-    the master list mapping tradingsymbol -> token for every instrument."""
+    the master list mapping tradingsymbol -> token for every instrument.
+    Builds lookup indexes on first load so hot-path resolvers don't scan
+    ~160k rows per call."""
     now = datetime.now()
     if (
         _scrip_master_cache["data"] is not None
         and _scrip_master_cache["fetched_at"]
         and now - _scrip_master_cache["fetched_at"] < timedelta(hours=SCRIP_MASTER_TTL_HOURS)
     ):
+        # Indexes should already exist from the load that filled the cache;
+        # rebuild only if something cleared them without the row data.
+        if not _scrip_indexes["option"]:
+            _build_scrip_indexes(_scrip_master_cache["data"])
         return _scrip_master_cache["data"]
 
     if os.path.exists(SCRIP_MASTER_CACHE_PATH):
         mtime = datetime.fromtimestamp(os.path.getmtime(SCRIP_MASTER_CACHE_PATH))
         if now - mtime < timedelta(hours=SCRIP_MASTER_TTL_HOURS):
-            with open(SCRIP_MASTER_CACHE_PATH, "r") as f:
-                data = json.load(f)
+            with open(SCRIP_MASTER_CACHE_PATH, "rb") as f:
+                data = _json_loads_bytes(f.read())
             _scrip_master_cache.update(data=data, fetched_at=now)
+            _build_scrip_indexes(data)
             logger.info(f"[smartapi_client] ScripMaster loaded from local cache ({len(data)} rows)")
             return data
 
     logger.info("[smartapi_client] Downloading fresh ScripMaster (~few MB, one-time)...")
-    resp = requests.get(SCRIP_MASTER_URL, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-
-    with open(SCRIP_MASTER_CACHE_PATH, "w") as f:
-        json.dump(data, f)
+    try:
+        resp = requests.get(SCRIP_MASTER_URL, timeout=(5, 20))  # (connect, read) timeouts
+        resp.raise_for_status()
+        data = resp.json()
+        _json_dump_file(SCRIP_MASTER_CACHE_PATH, data)
+        _scrip_master_cache.update(data=data, fetched_at=now)
+        _build_scrip_indexes(data)
+        logger.info(f"[smartapi_client] ScripMaster downloaded and cached ({len(data)} rows)")
+        return data
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.warning(f"[smartapi_client] ScripMaster download failed ({e}); "
+                        f"falling back to stale local cache if available")
+        if os.path.exists(SCRIP_MASTER_CACHE_PATH):
+            with open(SCRIP_MASTER_CACHE_PATH, "rb") as f:
+                data = _json_loads_bytes(f.read())
+            _scrip_master_cache.update(data=data, fetched_at=now)
+            _build_scrip_indexes(data)
+            mtime = datetime.fromtimestamp(os.path.getmtime(SCRIP_MASTER_CACHE_PATH))
+            age_hours = (now - mtime).total_seconds() / 3600
+            logger.warning(f"[smartapi_client] Using stale ScripMaster cache "
+                            f"({len(data)} rows, {age_hours:.1f}h old)")
+            return data
+        raise
 
     _scrip_master_cache.update(data=data, fetched_at=now)
+    _build_scrip_indexes(data)
     logger.info(f"[smartapi_client] ScripMaster downloaded and cached ({len(data)} rows)")
     return data
+
+
+INDEX_TOKENS = _build_index_tokens()
 
 
 def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
@@ -213,21 +532,21 @@ def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="
     opt_type:     'CE' | 'PE'
     exchange:     'NFO' for NSE options, 'BFO' for BSE (SENSEX) options
     """
-    data = _load_scrip_master()
-
-    for row in data:
-        if (
-            row.get("exch_seg") == exchange
-            and row.get("name") == underlying
-            and row.get("expiry") == expiry_ddmmmyyyy
-            and row.get("symbol", "").endswith(opt_type)
-        ):
-            try:
-                row_strike = round(float(row["strike"]) / 100)
-            except (KeyError, ValueError, TypeError):
-                continue
-            if row_strike == int(round(strike)):
-                return {"token": row["token"], "tradingsymbol": row["symbol"]}
+    _load_scrip_master()  # ensure indexes are warm
+    try:
+        strike_int = int(round(float(strike)))
+    except (TypeError, ValueError):
+        strike_int = int(round(strike)) if strike is not None else 0
+    key = (
+        exchange,
+        (underlying or "").upper(),
+        expiry_ddmmmyyyy,
+        strike_int,
+        (opt_type or "").upper(),
+    )
+    hit = _scrip_indexes["option"].get(key)
+    if hit:
+        return hit
 
     logger.warning(
         f"[smartapi_client] No token found for {underlying} {expiry_ddmmmyyyy} "
@@ -238,16 +557,8 @@ def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="
 
 def list_expiries(underlying, exchange="NFO"):
     """Return sorted list of available expiry strings for an underlying."""
-    data = _load_scrip_master()
-    expiries = sorted(
-        {
-            row["expiry"]
-            for row in data
-            if row.get("exch_seg") == exchange and row.get("name") == underlying and row.get("expiry")
-        },
-        key=lambda d: datetime.strptime(d, "%d%b%Y"),
-    )
-    return expiries
+    _load_scrip_master()
+    return list(_scrip_indexes["expiries"].get((exchange, (underlying or "").upper()), []))
 
 
 # Known index underlyings among F&O contracts — used to split the full
@@ -316,28 +627,175 @@ def get_fno_underlyings(force_refresh=False):
 
 # ── 4. Market data fetchers ────────────────────────────────────────────────
 def get_index_quote(symbol):
-    """LTP + basic OHLC for an index (NIFTY, BANKNIFTY, SENSEX, ...)."""
-    info = INDEX_TOKENS.get(symbol.upper())
+    """LTP + basic OHLC for an index (NIFTY, BANKNIFTY, SENSEX, ...).
+
+    Served from a short TTL cache (SMARTAPI_QUOTE_TTL_S, default 1.5s) when
+    a fresh-enough value is already on hand — see _quote_cache_get/set.
+    For fetching several index symbols together (e.g. the ticker strip),
+    prefer get_index_quotes_batch() instead of calling this in a loop: that
+    uses one getMarketData call instead of one ltpData call per symbol.
+    """
+    symbol = symbol.upper()
+    cached = _quote_cache_get(symbol)
+    if cached is not None:
+        return cached
+
+    info = INDEX_TOKENS.get(symbol)
     if not info:
         logger.warning(f"[smartapi_client] Unknown index symbol: {symbol}")
         return None
 
     result = _session.call(
-        "ltpData", info["exchange"], symbol.upper(), info["token"]
+        "ltpData", info["exchange"], symbol, info["token"]
     )
     if not result.get("status"):
         logger.warning(f"[smartapi_client] get_index_quote failed for {symbol}: {result}")
         return None
 
     d = result["data"]
-    return {
-        "symbol": symbol.upper(),
+    quote = {
+        "symbol": symbol,
         "ltp": safe_float(d.get("ltp")),
         "open": safe_float(d.get("open")),
         "high": safe_float(d.get("high")),
         "low": safe_float(d.get("low")),
         "close": safe_float(d.get("close")),
     }
+    _quote_cache_set(symbol, quote)
+    return quote
+
+
+def get_index_quotes_batch(symbols):
+    """Fetch several index quotes (NIFTY, BANKNIFTY, MIDCPNIFTY, FINNIFTY, ...)
+    in as few getMarketData calls as possible instead of one ltpData call per
+    symbol. This is the fix for the 2026-07-17 rate-limit cascade, where
+    fetch_ticker_payload_smartapi fetched 4 index symbols back-to-back via
+    ltpData and tripped Angel's per-second cap on every one of them.
+
+    symbols: iterable of index names, e.g. ['NIFTY', 'BANKNIFTY', 'MIDCPNIFTY', 'FINNIFTY']
+    Returns: {symbol: quote_dict_or_None, ...} — same shape as get_index_quote(),
+    one entry per input symbol (None if that symbol was unknown or Angel didn't
+    return a row for it).
+    """
+    symbols = [s.upper() for s in symbols]
+    out = {}
+    still_needed = []
+    for s in symbols:
+        cached = _quote_cache_get(s)
+        if cached is not None:
+            out[s] = cached
+        else:
+            still_needed.append(s)
+
+    if not still_needed:
+        return out
+
+    # Group by exchange (SENSEX etc. live on BSE, most indices on NSE) since
+    # getMarketData/get_batch_quotes takes one exchange per call.
+    by_exchange: dict[str, list] = {}
+    unknown = []
+    for s in still_needed:
+        info = INDEX_TOKENS.get(s)
+        if not info:
+            unknown.append(s)
+            continue
+        by_exchange.setdefault(info["exchange"], []).append((s, info["token"]))
+
+    for s in unknown:
+        logger.warning(f"[smartapi_client] Unknown index symbol: {s}")
+        out[s] = None
+
+    for exchange, pairs in by_exchange.items():
+        quotes_by_token = get_batch_quotes(
+            exchange, [(sym, token) for sym, token in pairs], mode="OHLC"
+        )
+        # get_batch_quotes keys by tradingSymbol as Angel returns it, which
+        # for indices is the plain symbol name we already passed in.
+        for sym, token in pairs:
+            d = quotes_by_token.get(sym)
+            if not d:
+                logger.warning(
+                    f"[smartapi_client] get_index_quotes_batch: no row returned for {sym}"
+                )
+                out[sym] = None
+                continue
+            quote = {
+                "symbol": sym,
+                "ltp": safe_float(d.get("ltp")),
+                "open": safe_float(d.get("open")),
+                "high": safe_float(d.get("high")),
+                "low": safe_float(d.get("low")),
+                "close": safe_float(d.get("close")),
+            }
+            _quote_cache_set(sym, quote)
+            out[sym] = quote
+
+    return out
+
+
+_equity_token_cache = {}  # symbol -> {"token": ..., "tradingsymbol": ...}, built lazily from ScripMaster
+
+
+def _find_equity_token(symbol):
+    """Resolve a stock's NSE cash-segment token from the ScripMaster
+    (e.g. 'SUNPHARMA' -> its '-EQ' row), for underlyings that aren't in
+    the hardcoded INDEX_TOKENS map. Indexed at ScripMaster load time."""
+    symbol = symbol.upper()
+    if symbol in _equity_token_cache:
+        return _equity_token_cache[symbol]
+
+    _load_scrip_master()
+    info = _scrip_indexes["equity"].get(symbol)
+    if info:
+        _equity_token_cache[symbol] = info
+        return info
+
+    logger.warning(f"[smartapi_client] No NSE equity token found for {symbol}")
+    return None
+
+
+def get_equity_quote(symbol):
+    """LTP + basic OHLC for an individual F&O stock (e.g. SUNPHARMA, RELIANCE),
+    resolved dynamically via the ScripMaster rather than a hardcoded table.
+    Counterpart to get_index_quote() for the ~200+ stock underlyings that
+    aren't in INDEX_TOKENS."""
+    symbol = symbol.upper()
+    cached = _quote_cache_get(symbol)
+    if cached is not None:
+        return cached
+
+    info = _find_equity_token(symbol)
+    if not info:
+        return None
+
+    result = _session.call(
+        "ltpData", "NSE", info["tradingsymbol"], info["token"]
+    )
+    if not result.get("status"):
+        logger.warning(f"[smartapi_client] get_equity_quote failed for {symbol}: {result}")
+        return None
+
+    d = result["data"]
+    quote = {
+        "symbol": symbol,
+        "ltp": safe_float(d.get("ltp")),
+        "open": safe_float(d.get("open")),
+        "high": safe_float(d.get("high")),
+        "low": safe_float(d.get("low")),
+        "close": safe_float(d.get("close")),
+    }
+    _quote_cache_set(symbol, quote)
+    return quote
+
+
+def get_spot_quote(underlying):
+    """Dispatcher: routes to get_index_quote() for the 6 hardcoded indices,
+    get_equity_quote() for everything else (individual F&O stocks). Use this
+    instead of calling get_index_quote() directly whenever `underlying` might
+    be a stock, e.g. in get_atm_chain()."""
+    if underlying.upper() in INDEX_TOKENS:
+        return get_index_quote(underlying)
+    return get_equity_quote(underlying)
 
 
 def get_ltp(exchange, tradingsymbol, token):
@@ -381,13 +839,51 @@ def get_full_option_chain(underlying, expiry_ddmmmyyyy, strikes, exchange="NFO")
     Fetch CE + PE rows for a list of strikes. Returns a list of dicts,
     shaped to be easy to merge into your existing option-chain DataFrame
     builders in mTerminals_json.py / engine.py.
+
+    Uses get_batch_quotes (≤50 tokens per REST call) instead of one LTP
+    request per contract — the old per-strike loop was the main way to
+    trip Angel's access-rate limits when building wide chains.
     """
-    rows = []
+    if not strikes:
+        return []
+
+    _load_scrip_master()
+    name_u = (underlying or "").upper()
+    chain_map = _scrip_indexes["chain"].get((exchange, name_u, expiry_ddmmmyyyy), {})
+    pairs = []
+    meta = []  # parallel to pairs: (strike, opt_type, token, tradingsymbol)
     for strike in strikes:
+        try:
+            strike_int = int(round(float(strike)))
+        except (TypeError, ValueError):
+            continue
         for opt_type in ("CE", "PE"):
-            row = get_option_chain_row(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange)
-            if row:
-                rows.append(row)
+            info = chain_map.get((strike_int, opt_type))
+            if not info:
+                continue
+            pairs.append((info["tradingsymbol"], info["token"]))
+            meta.append((strike_int, opt_type, info["token"], info["tradingsymbol"]))
+
+    if not pairs:
+        return []
+
+    quotes = get_batch_quotes(exchange, pairs, mode="FULL")
+    rows = []
+    for strike_int, opt_type, token, tradingsymbol in meta:
+        q = quotes.get(tradingsymbol) or quotes.get(token)
+        if not q:
+            continue
+        rows.append({
+            "tradingsymbol": tradingsymbol,
+            "token": token,
+            "strike": strike_int,
+            "type": opt_type,
+            "ltp": safe_float(q.get("ltp")),
+            "open": safe_float(q.get("open")),
+            "high": safe_float(q.get("high")),
+            "low": safe_float(q.get("low")),
+            "close": safe_float(q.get("close")),
+        })
     return rows
 
 
@@ -398,11 +894,43 @@ STRIKE_INTERVALS = {
     "MIDCPNIFTY": 25,
     "SENSEX": 100,
     "BANKEX": 100,
+    "SENSEX50": 50,
+
 }
 
 
+_stock_strike_interval_cache = {}  # underlying -> interval, derived from ScripMaster
+
+
+def _get_strike_interval(underlying):
+    """Strike spacing for `underlying`. Indices use the hardcoded
+    STRIKE_INTERVALS table; stocks vary too much for a fixed default
+    (e.g. a 50-point guess is wrong for most F&O names), so for anything
+    else this derives the real interval from consecutive strikes on the
+    nearest available expiry in the ScripMaster."""
+    underlying = underlying.upper()
+    if underlying in STRIKE_INTERVALS:
+        return STRIKE_INTERVALS[underlying]
+    if underlying in _stock_strike_interval_cache:
+        return _stock_strike_interval_cache[underlying]
+
+    _load_scrip_master()
+    expiries = list_expiries(underlying, exchange="NFO")
+    interval = 50  # last-resort fallback if nothing resolves below
+    if expiries:
+        nearest = expiries[0]
+        strikes = _scrip_indexes["strikes"].get(("NFO", underlying, nearest), [])
+        if len(strikes) >= 2:
+            gaps = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
+            if gaps:
+                interval = min(gaps)
+
+    _stock_strike_interval_cache[underlying] = interval
+    return interval
+
+
 def _round_to_strike(price, underlying):
-    interval = STRIKE_INTERVALS.get(underlying.upper(), 50)
+    interval = _get_strike_interval(underlying)
     return int(round(price / interval) * interval)
 
 
@@ -454,35 +982,26 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
         'expiry': ..., 'rows': [ {strike, type, ltp, oi, volume, ...}, ... ]
     }
     """
-    quote = get_index_quote(underlying)
+    quote = get_spot_quote(underlying)
     if not quote:
         logger.warning(f"[smartapi_client] Could not fetch spot for {underlying}")
         return None
 
     spot = quote["ltp"]
     atm = _round_to_strike(spot, underlying)
-    interval = STRIKE_INTERVALS.get(underlying.upper(), 50)
+    interval = _get_strike_interval(underlying)
     strikes = [atm + (i * interval) for i in range(-strikes_around_atm, strikes_around_atm + 1)]
+    strike_set = set(strikes)
 
-    data = _load_scrip_master()
-    strike_lookup = {}
-    for row in data:
-        if (
-            row.get("exch_seg") == exchange
-            and row.get("name") == underlying.upper()
-            and row.get("expiry") == expiry_ddmmmyyyy
-        ):
-            try:
-                strike_val = int(round(float(row["strike"]) / 100))
-            except (KeyError, ValueError):
-                continue
-            symbol = row.get("symbol", "")
-            opt_type = "CE" if symbol.endswith("CE") else "PE" if symbol.endswith("PE") else None
-            if opt_type and strike_val in strikes:
-                strike_lookup[(strike_val, opt_type)] = {
-                    "token": row["token"],
-                    "tradingsymbol": symbol,
-                }
+    _load_scrip_master()
+    chain_map = _scrip_indexes["chain"].get(
+        (exchange, underlying.upper(), expiry_ddmmmyyyy), {}
+    )
+    strike_lookup = {
+        key: info
+        for key, info in chain_map.items()
+        if key[0] in strike_set
+    }
 
     pairs = [
         (info["tradingsymbol"], info["token"])

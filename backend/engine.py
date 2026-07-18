@@ -970,6 +970,7 @@ def _build_smart_money_top(df: pd.DataFrame, top_n: int = 4) -> pd.DataFrame:
     df_scores['Score'] = df_scores['CE_Score']   # primary sort still CE vol/OI
     return df_scores.sort_values(by='Score', ascending=False).head(top_n)
 
+from mTerminals_json import _safe_num
 
 def _build_vol_oi_ratios(df: pd.DataFrame) -> dict:
     """Return per-strike CE and PE volume/OI ratios for DecisionEngine volume confirmation.
@@ -985,11 +986,11 @@ def _build_vol_oi_ratios(df: pd.DataFrame) -> dict:
     if not has_ce_vol and not has_pe_vol:
         return out
     for _, row in df.iterrows():
-        k   = str(int(float(row.get('StrikePrice', 0) or 0)))
-        ce_oi  = float(row.get('CE_OI', 0) or 0)
-        pe_oi  = float(row.get('PE_OI', 0) or 0)
-        ce_vol = float(row.get('CE_Volume', 0) or 0) if has_ce_vol else 0.0
-        pe_vol = float(row.get('PE_Volume', 0) or 0) if has_pe_vol else 0.0
+        k   = str(int(_safe_num(row.get('StrikePrice', 0))))
+        ce_oi  = _safe_num(row.get('CE_OI', 0))
+        pe_oi  = _safe_num(row.get('PE_OI', 0))
+        ce_vol = _safe_num(row.get('CE_Volume', 0)) if has_ce_vol else 0.0
+        pe_vol = _safe_num(row.get('PE_Volume', 0)) if has_pe_vol else 0.0
         out[k] = {
             'ce': round(ce_vol / ce_oi, 4) if ce_oi > 0 else 0.0,
             'pe': round(pe_vol / pe_oi, 4) if pe_oi > 0 else 0.0,

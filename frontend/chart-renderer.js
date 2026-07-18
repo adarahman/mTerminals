@@ -68,7 +68,7 @@ class ChartRenderer {
 
     ctx.clearRect(0, 0, W, H);
 
-    if (!series || !series.length) return { ctx, PAD, PW, PH, W, H };
+    if (!series || !series.length) return { ctx, PAD, PW, PH, W, H, xScale: null, yScale: null, tmap: null, y0: 0, y1: 0, C };
 
     const isDark = window.matchMedia('(prefers-color-scheme:dark)').matches;
     const C = {

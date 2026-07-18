@@ -7,6 +7,61 @@ import pytz
 import pandas as pd
 import numpy as np
 
+try:
+    import orjson as _orjson
+except ImportError:  # pragma: no cover
+    _orjson = None
+
+
+def _json_default(obj):
+    """Coerce numpy/pandas leftovers so orjson/stdlib can serialize the payload.
+
+    engine.py / decision_engine routinely leave np.float64/int64/bool_ and
+    occasional pandas Timestamps in nested dicts; stdlib json used to accept
+    some of these via float() fallbacks in custom paths, but orjson is
+    strict and raises TypeError without a default handler.
+    """
+    if isinstance(obj, np.generic):  # float64, int64, bool_, ...
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    if isinstance(obj, (datetime,)):
+        return obj.isoformat()
+    if isinstance(obj, set):
+        return list(obj)
+    # pandas NA / NaT
+    try:
+        if pd.isna(obj):
+            return None
+    except (TypeError, ValueError):
+        pass
+    raise TypeError(f"Type is not JSON serializable: {type(obj)}")
+
+
+def _write_dashboard_json(out_path: str, payload: dict) -> None:
+    """Write payload to disk. Prefer orjson (fast); fall back to stdlib json."""
+    if _orjson is not None:
+        try:
+            with open(out_path, "wb") as fh:
+                fh.write(
+                    _orjson.dumps(
+                        payload,
+                        default=_json_default,
+                        option=_orjson.OPT_NON_STR_KEYS
+                        | getattr(_orjson, "OPT_SERIALIZE_NUMPY", 0),
+                    )
+                )
+            return
+        except TypeError as e:
+            # Still unserializable — don't crash the live tick; fall through
+            # to stdlib which is more forgiving / uses the same default.
+            print(f"[JSON] orjson dump failed ({e}); falling back to stdlib json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, default=_json_default)
+
+
 # ── Volume-change snapshot store ──────────────────────────────────────────────
 # Used by _compute_vol_changes() (ceVolChg/peVolChg) only. The OI-velocity
 # fallback that used to share this store (_compute_vel_rows) is scrapped —
@@ -47,6 +102,22 @@ def _save_snapshots(snaps):
     global _OI_SNAPSHOTS_MEM
     _OI_SNAPSHOTS_MEM = snaps
 
+def _safe_num(val, default=0.0):
+    """Coerce a cell to float, treating NaN/None/missing as `default`.
+    Unlike `val or default`, this correctly catches NaN — NaN is truthy
+    in Python, so `NaN or 0` evaluates to NaN, not 0, and silently slips
+    through the old pattern used here. Illiquid strikes (common on
+    lower-volume stocks, less so on NIFTY) frequently arrive as NaN
+    rather than 0, which is what triggered the int(NaN) crash.
+    """
+    if val is None:
+        return default
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return default
+    return default if pd.isna(f) else f
+
 def _record_oi_snapshot(master):
     """Stores OI AND Volume snapshots for velocity calculations."""
     snaps = _load_snapshots()
@@ -56,12 +127,12 @@ def _record_oi_snapshot(master):
              if (now - datetime.fromisoformat(s[0])).total_seconds() <= cutoff]
     snap = {}
     for r in master.to_dict("records"):
-        sk = str(int(float(r.get("strike", 0))))
+        sk = str(int(_safe_num(r.get("strike", 0))))
         snap[sk] = [
-            int(float(r.get("ce_oi", 0) or 0)),
-            int(float(r.get("pe_oi", 0) or 0)),
-            int(float(r.get("ce_volume", 0) or 0)),   # <-- volume stored
-            int(float(r.get("pe_volume", 0) or 0)),   # <-- volume stored
+            int(_safe_num(r.get("ce_oi", 0))),
+            int(_safe_num(r.get("pe_oi", 0))),
+            int(_safe_num(r.get("ce_volume", 0))),   # <-- volume stored
+            int(_safe_num(r.get("pe_volume", 0))),   # <-- volume stored
         ]
     snaps.append([now.isoformat(), snap])
     _save_snapshots(snaps)
@@ -102,21 +173,17 @@ def _compute_vol_changes(master, window_minutes):
     _, old_snap = found
     vol_changes = {}
     for r in master.to_dict("records"):
-        sk = str(int(float(r.get("strike", 0))))
-        ce_vol_now = int(float(r.get("ce_volume", 0) or 0))
-        pe_vol_now = int(float(r.get("pe_volume", 0) or 0))
-        prev = old_snap.get(str(sk), [0, 0, ce_vol_now, pe_vol_now])
-
+        sk = str(int(_safe_num(r.get("strike", 0))))
+        ce_vol_now = int(_safe_num(r.get("ce_volume", 0)))
+        pe_vol_now = int(_safe_num(r.get("pe_volume", 0)))
+        prev = old_snap.get(sk, [0, 0, ce_vol_now, pe_vol_now])
         ce_vol_old = prev[2] if len(prev) > 2 else ce_vol_now
         pe_vol_old = prev[3] if len(prev) > 3 else pe_vol_now
         ce_vol_chg = ce_vol_now - ce_vol_old
         pe_vol_chg = pe_vol_now - pe_vol_old
-
         vol_changes[int(sk)] = (ce_vol_chg, pe_vol_chg)
     return vol_changes
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 def _r(v, decimals=4):
     if isinstance(v, (np.generic, pd.Series)):
         v = v.item()
@@ -1197,8 +1264,12 @@ def export_dashboard_json(
             }
 
 
-    with open(out_path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
+    # orjson is ~5-10× faster than stdlib json for the dashboard payload
+    # and is already a hard dependency of ws_server_live.py. Fall back to
+    # json.dump if orjson isn't available OR if a non-serializable type
+    # still sneaks into the payload after the default coercer runs
+    # (engine/decision paths routinely leave numpy scalars / Timestamps).
+    _write_dashboard_json(out_path, payload)
 
     vel_counts = [len(b["rows"]) for b in oi_velocity]
     vol_count = len([r for r in chain_rows if r.get("ceVolChg") != 0 or r.get("peVolChg") != 0])
