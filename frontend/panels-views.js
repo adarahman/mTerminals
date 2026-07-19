@@ -1413,7 +1413,7 @@ class ModalManager {
   if(!modal) return;
   modal.classList.add('open');
   document.addEventListener('keydown', _ivSurfaceEscHandler);
-  if(window.renderIvSurfaceModal) renderIvSurfaceModal();
+  if(typeof app !== 'undefined' && app.chain && app.chain.renderIvSurfaceModal) app.chain.renderIvSurfaceModal();
 }
 
   closeIvSurfaceModal(){

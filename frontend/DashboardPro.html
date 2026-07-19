@@ -107,7 +107,7 @@
      #iv-surface-content on every render/live tick (via
      _rerenderChainPanels in chain-views.js), so this modal is always
      current the moment it's opened. -->
-<div id="iv-surface-modal" class="oc-modal">
+<div id="iv-surface-modal" class="oc-modal" onclick="if(event.target===this) closeIvSurfaceModal()">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
       <span class="oc-modal-title">📉 IV Surface</span>

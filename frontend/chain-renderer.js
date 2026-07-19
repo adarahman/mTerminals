@@ -1063,46 +1063,19 @@ ChainView.prototype._rerenderChainPanels = function() {
   }
 
   // ── 6. IV Surface ─────────────────────────────────────────────────────────
+  // Refresh the compact alerts card (same builder used on initial render),
+  // not the full per-strike table — that lives only in the modal, refreshed
+  // separately by renderIvSurfaceModal(). This used to rebuild the full
+  // table inline here, which duplicated the modal's content on the main
+  // dashboard and wasted space; fixed to match how Greeks refreshes above.
   const ivSurfEl = document.querySelector('#sec-iv .section-card');
   if(ivSurfEl){
-    const atmIdx=chain.findIndex(r=>r.atm||r.strike===atm);
-    let ivRows=[];
-    if(atmIdx>=0){const st=Math.max(0,atmIdx-3),en=Math.min(chain.length,atmIdx+4);ivRows=chain.slice(st,en);}
-    else{ivRows=chain.slice(0,6);}
-    const maxIV=Math.max(...ivRows.map(r=>Math.max(r.ceIV||0,r.peIV||0)),1);
-    const barMaxWidth=160;
-    let ivHtml='<div style="display:flex;flex-direction:column;gap:4px;">';
-    ivRows.forEach(r=>{
-      const ia=r.atm||r.strike===atm;
-      const ceIV=r.ceIV||0,peIV=r.peIV||0;
-      const ceW=Math.max((ceIV/maxIV)*barMaxWidth,4);
-      const peW=Math.max((peIV/maxIV)*barMaxWidth,4);
-      ivHtml+=`<div style="display:grid;grid-template-columns:1fr 80px 1fr;align-items:center;gap:0;padding:3px 6px;${ia?'background:rgba(18,184,134,0.08);border-radius:4px;':''}">
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;">
-          <span style="font-size:9px;font-family:var(--mono);color:var(--red);font-weight:600;white-space:nowrap;">${fmtN(ceIV,2)}%</span>
-          <div style="height:8px;border-radius:3px 0 0 3px;background:var(--red);width:${ceW}px;min-width:3px;flex-shrink:0;"></div>
-        </div>
-        <div style="text-align:center;padding:0 4px;">
-          <span style="font-family:var(--mono);font-size:10px;font-weight:${ia?700:400};color:${ia?'var(--green)':'var(--txt3)'};">${fmtI(r.strike)}${ia?' ★':''}</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:flex-start;gap:5px;">
-          <div style="height:8px;border-radius:0 3px 3px 0;background:var(--green);width:${peW}px;min-width:3px;flex-shrink:0;"></div>
-          <span style="font-size:9px;font-family:var(--mono);color:var(--green);font-weight:600;white-space:nowrap;">${fmtN(peIV,2)}%</span>
-        </div>
-      </div>`;
-    });
-    const minIV=Math.min(...ivRows.map(r=>Math.min(r.ceIV||0,r.peIV||0)));
-    ivHtml+=`</div><div style="font-size:11px;color:var(--txt3);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap;">
-      <span>Skew <strong style="color:var(--amber);">${fmtN(_data.atmSkew,2)}%</strong> at ATM</span>
-      <span>Max IV <strong style="color:var(--red);">${fmtN(maxIV,2)}%</strong></span>
-      <span>Min IV <strong style="color:var(--green);">${fmtN(minIV,2)}%</strong></span>
-    </div>`;
-    const hdr3=ivSurfEl.querySelector('.section-header');
-    ivSurfEl.innerHTML='';
-    if(hdr3) ivSurfEl.appendChild(hdr3);
-    const ivDiv=document.createElement('div');
-    ivDiv.innerHTML=ivHtml;
-    while(ivDiv.firstChild) ivSurfEl.appendChild(ivDiv.firstChild);
+    const freshIvAlerts = app.chain.buildIvAlertsHtml(_data, chain, atm);
+    if(ivSurfEl.dataset.lastHtml !== freshIvAlerts){
+      ivSurfEl.outerHTML = freshIvAlerts;
+      const fresh = document.querySelector('#sec-iv .section-card');
+      if(fresh) fresh.dataset.lastHtml = freshIvAlerts;
+    }
   }
 
   // ── 7. Greeks & GEX panels ───────────────────────────────────────────────
