@@ -251,6 +251,7 @@ class PriceChartEngine {
 
         <div class="pc-win-bar" id="pc-win-bar">
           ${PRICE_CHART_WINDOWS.map(winBtn).join('')}
+          <button class="pc-btn pc-reset-btn" id="pc-reset-zoom" title="Reset zoom/pan to the default view">Reset</button>
           <span class="pc-spacer"></span>
           <span class="pc-footnote" id="pc-vwap-footnote">VWAP unavailable — this symbol's feed doesn't carry a volume field yet.</span>
         </div>
@@ -367,6 +368,15 @@ class PriceChartEngine {
           this.render();
         };
       });
+    }
+
+    const resetZoomBtn = $i('pc-reset-zoom');
+    if(resetZoomBtn){
+      resetZoomBtn.onclick = () => {
+        this._zoomStart = null; this._zoomEnd = null;
+        if(winBar) winBar.querySelectorAll('.pc-win-btn').forEach(x => x.classList.remove('pc-active'));
+        this.render();
+      };
     }
 
     // ── Zoom (wheel) / pan (drag) / reset (double-click) ──
@@ -765,7 +775,7 @@ class PriceChartEngine {
     // consecutive sessions sit directly back-to-back, same as any real
     // trading platform's chart. Anything bigger than ~4 candle-widths
     // (min 20 min) counts as "not trading hours" and gets collapsed.
-    const GAP_THRESHOLD = Math.max(cfg.bucketMs * 4, 20 * 60 * 1000);
+    const GAP_THRESHOLD = Math.max(cfg.bucketMs * 1.5, 20 * 60 * 1000);
     const GAP_CAP = 0;
     // Treat the window's own start/end as points in the same map as the
     // candles — this is what makes pre-market dead space (windowStart up

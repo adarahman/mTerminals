@@ -1,0 +1,102 @@
+/* ════════════════════════════════════════════════════════════════════
+   PRICE CHART — standalone page shell
+   Only the header/app-frame lives here. The chart panel itself
+   (.pc-panel/.pc-toolbar/.pc-btn/...) is already styled by styles.css —
+   price-chart.js's DOM is unchanged from the embedded version, so it's
+   just re-parented into a bare page instead of into #dashboard.
+   Requires theme.css loaded first, same as option-chain.css.
+   ════════════════════════════════════════════════════════════════════ */
+
+*{box-sizing:border-box;}
+html{font-size:16px;}
+body{
+  margin:0;
+  background:var(--bg-0,#0F1117);
+  color:var(--text-primary,#E9ECEF);
+  font-family:var(--font-sans,'Inter',sans-serif);
+  min-height:100vh;
+}
+
+.pcs-app{
+  max-width:1280px;
+  margin:0 auto;
+  padding:0 20px 20px;
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  box-sizing:border-box;
+}
+
+#dashboard{
+  flex:1 1 auto;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+#dashboard .pc-panel{
+  height:auto;
+  flex:1 1 auto;
+  min-height:0;
+}
+
+#pc-order-panel{ display:none; }
+
+.pcs-head{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:18px 2px 14px;
+  border-bottom:1px solid var(--border,rgba(255,255,255,0.08));
+  margin-bottom:16px;
+  flex-wrap:wrap;
+}
+
+.pcs-back{
+  background:var(--bg-2,#1E2028);
+  border:1px solid var(--border,rgba(255,255,255,0.08));
+  color:var(--text-primary,#E9ECEF);
+  border-radius:8px;
+  padding:0 14px;
+  height:34px;
+  font-size:13px;
+  font-weight:500;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  gap:6px;
+}
+.pcs-back:hover{ background:var(--bg-3,#262A34); }
+
+.pcs-head-text{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+}
+.pcs-symbol{
+  font-family:var(--font-display,'Space Grotesk',sans-serif);
+  font-size:14px;
+  font-weight:600;
+  color:var(--text-secondary,#ADB5BD);
+  letter-spacing:.03em;
+}
+.pcs-spot{
+  font-family:var(--mono,'JetBrains Mono',monospace);
+  font-size:22px;
+  font-weight:700;
+}
+.pcs-chg{ font-size:13px; font-weight:600; }
+.pcs-chg.pc-pos{ color:var(--green,#26A69A); }
+.pcs-chg.pc-neg{ color:var(--red,#EF5350); }
+
+.pcs-conn{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:11px;
+  color:var(--text-tertiary,#6C757D);
+}
+.pcs-conn-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--red,#EF5350);
+}
+.pcs-conn-dot.pcs-live{ background:var(--green,#26A69A); }

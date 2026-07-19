@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="utilities.css">
-<link rel="stylesheet" href="pc-order-panel.css">
+<link rel="stylesheet" href="PriceChart/pc-order-panel.css">
 <style>
   /* Greeks/GEX modal body — the OI Dashboard modal's panel wraps a full
      iframe (.oc-modal-iframe fills the panel edge-to-edge by design), but
@@ -144,7 +144,7 @@
   <button class="sec-btn" onclick="secJump('sec-iv')"><span>📉</span>IV Surface</button>
   <button class="sec-btn sec-btn-simulator" onclick="secJump('sec-simulator')"><span>&#127970;</span>Simulator</button>
   <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
-  <button class="sec-btn" id="option-chain-btn" onclick="window.open('option-chain.html','_blank')" title="Open the redesigned option chain in a new tab"><span>📊</span>Chain</button>
+  <button class="sec-btn" id="option-chain-btn" onclick="window.open('OptionChain/option-chain.html','_blank')" title="Open the redesigned option chain in a new tab"><span>📊</span>Chain</button>
   <button class="sec-btn" id="oi-dashboard-btn" onclick="openOIDashboardModal()" title="Open OI dashboard"><span>📈</span>OI Dash</button>
   <button class="sec-btn" id="greeks-dashboard-btn" onclick="openGreeksModal()" title="Open full Greeks & GEX table"><span>Δ</span>Greeks</button>
   <button class="sec-btn" id="fiidii-dashboard-btn" onclick="openFiiDiiModal()" title="Open full FII/DII/Pro/Retail participant OI table"><span>🏦</span>FII/DII</button>
@@ -249,15 +249,15 @@
 <script src="event-bus.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="chart-legend.js"></script>
-<script src="chart-data.js"></script>
-<script src="chart-renderer.js"></script>
-<script src="indicator-engine.js"></script>
-<script src="interaction-controller.js"></script>
-<script src="history-loader.js"></script>
-<script src="price-chart.js"></script>
+<script src="PriceChart/chart-data.js"></script>
+<script src="PriceChart/chart-renderer.js"></script>
+<script src="PriceChart/indicator-engine.js"></script>
+<script src="PriceChart/interaction-controller.js"></script>
+<script src="PriceChart/history-loader.js"></script>
+<script src="PriceChart/price-chart.js"></script>
 <script src="formatters.js"></script>
 <script src="dom-utils.js"></script>
-<script src="chain-helpers.js"></script>
+<script src="OptionChain/chain-helpers.js"></script>
 <!-- chain-views.js split (Phase 2 chain-view decomposition) into 7 files.
      chain-view.js must load FIRST — it declares the ChainDenseView/
      RightPanelView/ChainView classes that the other 6 attach methods to
@@ -266,13 +266,13 @@
      (whose App constructor does `new ChainDenseView()` / `new ChainView()`
      and expects every prototype method already attached). See each
      chain-*.js file's own header comment for what it holds. -->
-<script src="chain-view.js"></script>
-<script src="chain-template.js"></script>
-<script src="chain-renderer.js"></script>
-<script src="chain-depth.js"></script>
-<script src="chain-greeks.js"></script>
-<script src="chain-sync.js"></script>
-<script src="chain-utils.js"></script>
+<script src="OptionChain/chain-view.js"></script>
+<script src="OptionChain/chain-template.js"></script>
+<script src="OptionChain/chain-renderer.js"></script>
+<script src="OptionChain/chain-depth.js"></script>
+<script src="OptionChain/chain-greeks.js"></script>
+<script src="OptionChain/chain-sync.js"></script>
+<script src="OptionChain/chain-utils.js"></script>
 <!-- Phase 3 rendering/logic split: chain-view-models.js (pure business
      logic — row/strike-detail view-model builders) and chain-templates.js
      (pure HTML templates consuming those view models) replace the inline
@@ -282,8 +282,8 @@
      nothing here depends on chain-view.js's class declarations having run
      first — but they must load before chain-renderer.js/chain-depth.js,
      whose methods call into them at render time. -->
-<script src="chain-view-models.js"></script>
-<script src="chain-templates.js"></script>
+<script src="OptionChain/chain-view-models.js"></script>
+<script src="OptionChain/chain-templates.js"></script>
 <script src="panels-views.js"></script>
 <script src="ws-manager.js"></script>
 <script src="market-store.js"></script>

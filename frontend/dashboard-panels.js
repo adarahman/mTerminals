@@ -28,45 +28,53 @@
 // ============================================================
 
 // ── 1. Price Chart ──
-// Wraps the standalone `priceChart` module (price-chart.js). That file
-// isn't touched by this refactor — this panel only gives its two known
-// entry points (ensureMounted/hydrateRange, previously called ad hoc from
-// dashboard.js's DOMContentLoaded listener) a lifecycle home.
+// The full PriceChartEngine (price-chart.js) no longer loads on this
+// page at all — it's moved to the standalone price-chart.html tab (see
+// that file + price-chart-standalone.js), same split as OptionChainPanel
+// already has with option-chain.html. This page only shows the compact
+// "Price" snapshot card (ChainView.buildPriceSnapshotHtml, rendered as
+// part of the normal dashboard template) plus a "Full Chart →" link.
+//
+// What this panel DOES still own: broadcasting every tick's spot/symbol
+// over BroadcastChannel('pc-live-sync') so a price-chart.html tab open
+// in another window stays live, and answering that tab's
+// 'pc-request-snapshot' request on open so it isn't blank until the next
+// tick. This is the same request/reply shape option-chain.js already
+// uses on 'oc-live-sync' — except, unlike that channel (see
+// chain-view.js's commented-out _initBroadcast()), this one is actually
+// wired end to end.
 class PriceChartPanel extends Panel {
-  constructor() { super('priceChart'); }
+  constructor() {
+    super('priceChart');
+    this._chan = null;
+    this._lastTick = null;
+  }
 
   init() {
     super.init();
-    if (typeof priceChart === 'undefined' || !priceChart) return;
-    priceChart.ensureMounted();
-    // Backfill from the last few minutes of history before the WS starts
-    // pushing live ticks — fire-and-forget, same as the original
-    // DOMContentLoaded call (see dashboard.js history: hydrateRange()
-    // no-ops safely if a live tick wins the race or the endpoint errors).
-    priceChart.hydrateRange(priceChart.settings.range);
+    if (!('BroadcastChannel' in window)) return;
+    this._chan = new BroadcastChannel('pc-live-sync');
+    this._chan.addEventListener('message', (e) => {
+      const msg = e.data;
+      if (msg && msg.type === 'pc-request-snapshot' && this._lastTick) {
+        this._chan.postMessage(this._lastTick);
+      }
+    });
   }
 
-  refresh(data) {
-    // price-chart.js drives its own updates from live WS ticks
-    // internally — nothing in the pre-PanelManager code ever called an
-    // explicit "refresh the chart" entry point, so this stays a guarded
-    // no-op unless/until price-chart.js exposes one.
-    if (typeof priceChart !== 'undefined' && priceChart && typeof priceChart.refresh === 'function') {
-      priceChart.refresh(data);
-    }
-  }
-
-  resize() {
-    if (typeof priceChart !== 'undefined' && priceChart && typeof priceChart.resize === 'function') {
-      priceChart.resize();
-    }
+  // Called from DataService.updateDashboard() on every tick — replaces
+  // the old direct `priceChart.addTick(...)` call now that the chart
+  // engine doesn't live on this page. Keeps the last tick around so a
+  // price-chart.html tab opened later gets an immediate reply instead of
+  // waiting for the next live tick.
+  pushTick(spot, symbol, spotChange, spotChgPct) {
+    this._lastTick = { spot, symbol, spotChange, spotChgPct, t: Date.now() };
+    if (this._chan) this._chan.postMessage(this._lastTick);
   }
 
   destroy() {
     super.destroy();
-    if (typeof priceChart !== 'undefined' && priceChart && typeof priceChart.destroy === 'function') {
-      priceChart.destroy();
-    }
+    if (this._chan) { this._chan.close(); this._chan = null; }
   }
 }
 

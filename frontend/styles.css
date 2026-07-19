@@ -1148,6 +1148,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 }
 .pc-win-btn:hover{ background:#2B2E3A; color:var(--text-primary); }
 .pc-win-btn.pc-active{ background:var(--info-strong); color:#fff; }
+.pc-win-bar .pc-reset-btn{ margin-left:6px; }
 .pc-win-bar .pc-footnote{ margin-top:0; }
 
 /* ══════════════════════════════════════════════════════════════════════

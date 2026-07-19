@@ -94,7 +94,15 @@ class ChartRenderer {
     const y0 = yMin - padY, y1 = yMax + padY;
 
     // Build time map with gap compression
-    const GAP_THRESHOLD = Math.max(rangeConfig.bucketMs * 4, 20 * 60 * 1000);
+    // 1.5x the bar width is enough headroom above normal bar-to-bar
+    // spacing (including intraday's continuous 9:15-15:30 session) but
+    // well under a weekend/holiday gap — e.g. for '1d' bars (bucketMs =
+    // 1 day) this is 1.5 days, comfortably below a ~2.75-day Fri-close to
+    // Mon-open weekend gap, so it actually gets flagged and collapsed.
+    // The old 4x multiplier gave daily bars a 4-day threshold, which a
+    // normal weekend gap never crossed, leaving real (uncompressed) dead
+    // space between Friday's and Monday's candles.
+    const GAP_THRESHOLD = Math.max(rangeConfig.bucketMs * 1.5, 20 * 60 * 1000);
     const GAP_CAP = 0;
     const mapPoints = series.slice();
     if (mapPoints.length && zoomState.windowStart < mapPoints[0].t) {

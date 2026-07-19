@@ -97,14 +97,19 @@ class DataService {
   // state (_selectedExpiry) off one payload.
   applyExpirySelection(AppState.wsState, _selectedExpiry);
 
-  // Feed the live price chart from this same tick's spot value. Client-side
-  // timestamp (not a backend one) since no timestamp field exists on the
+  // Feed the live price chart from this same tick's spot value. The
+  // chart engine itself (price-chart.js) no longer loads on this page —
+  // it lives on the standalone price-chart.html tab now — so this just
+  // broadcasts the tick over BroadcastChannel('pc-live-sync') via
+  // PriceChartPanel; that tab's own price-chart-standalone.js calls
+  // priceChart.addTick() on the receiving end using the same client-side
+  // timestamp approach as before (no timestamp field exists on the
   // payload today — fine for a live scrolling chart, just not a true
-  // exchange-timestamped tape.
+  // exchange-timestamped tape).
   //
-  // VWAP intentionally NOT computed for the index spot chart: NIFTY/etc.
-  // are computed composite index levels, not traded instruments — they
-  // have no volume or traded value of their own. allIndices' Value/Volume
+  // VWAP intentionally NOT sent for the index spot chart: NIFTY/etc. are
+  // computed composite index levels, not traded instruments — they have
+  // no volume or traded value of their own. allIndices' Value/Volume
   // fields are the SUM across the index's individual constituent stocks
   // (Reliance, HDFC Bank, ...), so Value/Volume is really "average traded
   // price across those constituent shares" — a real number, just not the
@@ -113,7 +118,12 @@ class DataService {
   // wanted later, it needs to come from NIFTY FUTURES turnover/volume
   // (see fetch_nifty_futures in market_api.py) or SmartAPI's own volume
   // field on the index token, not this basket aggregate.
-  if(AppState.wsState.spot != null) priceChart.addTick(AppState.wsState.spot, Date.now(), null);
+  if(AppState.wsState.spot != null) {
+    panelManager.get('priceChart').pushTick(
+      AppState.wsState.spot, AppState.wsState.symbol,
+      AppState.wsState.spotChange, AppState.wsState.spotChgPct
+    );
+  }
 
   // Drive the native Option Chain table/right panel straight off this same
   // tick — no separate WebSocket, no postMessage relay, no iframe.
@@ -173,10 +183,6 @@ class DataService {
     if (notYetBuilt || symbolChanged) {
       this.lastRenderedSymbol = AppState.wsState.symbol || this.lastRenderedSymbol;
       parseAndRender(JSON.stringify(AppState.wsState));
-      // parseAndRender() just replaced #dashboard's entire innerHTML, which
-      // wipes out the price-chart panel since it lives inside #dashboard —
-      // remount it into the freshly-rebuilt container right here.
-      if (window.priceChart) priceChart.render();
       if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
       return;
     }
@@ -187,10 +193,6 @@ class DataService {
     // Decision Engine box + top-bar spot/badge/DTE strip are cheap to patch
     // in place too, so they stay live without rebuilding their containers.
     if (window.patchTopBarAndDecision) patchTopBarAndDecision(AppState.wsState);
-    // Live price chart — cheap redraw onto the existing canvas surface
-    // (sizeCanvasIfChanged only resets it when the on-screen size changed),
-    // so this rides the same per-frame coalescing as the other panels above.
-    if (window.priceChart) priceChart.render();
     // Paper trading panel — lives outside #dashboard (self-mounted, see
     // bottom of file), so it's never touched by the rebuild above and just
     // needs its own cheap patch-in-place call here, same pattern as the

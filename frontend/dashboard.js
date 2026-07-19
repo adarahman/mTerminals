@@ -276,11 +276,11 @@ Object.defineProperty(window, '_oiFrameLoaded', {
 
 window.addEventListener('load', updateStickyOffsets);
 window.addEventListener('resize', updateStickyOffsets);
-// Panel-level resize hooks (Phase 4) — most of the six panels no-op this;
-// PriceChartPanel forwards to priceChart.resize() when that exists. Kept
-// as a separate listener rather than folded into updateStickyOffsets
-// above so a panel's resize concern stays owned by its panel, not by
-// UiControls.
+// Panel-level resize hooks (Phase 4) — most of the six panels no-op this
+// (including PriceChartPanel now that its chart engine lives on
+// price-chart.html instead of this page). Kept as a separate listener
+// rather than folded into updateStickyOffsets above so a panel's resize
+// concern stays owned by its panel, not by UiControls.
 window.addEventListener('resize', () => panelManager.resizeAll());
 
 // ── INIT ──
@@ -309,11 +309,10 @@ document.addEventListener('DOMContentLoaded', function(){
 window.addEventListener('DOMContentLoaded', function(){
   const lbl = $i('ws-url-label');
   if(lbl) lbl.textContent = _wsUrl;
-  // Was: priceChart.ensureMounted(); priceChart.hydrateRange(priceChart.settings.range);
-  // Now owned by PriceChartPanel.init() (dashboard-panels.js) — same two
-  // calls, same order, same fire-and-forget hydrateRange() behavior.
-  // Every other registered panel's init() is a no-op today, so this is
-  // behavior-identical to the two direct calls it replaces.
+  // priceChart.ensureMounted()/hydrateRange() no longer happen on this
+  // page — they moved to price-chart-standalone.js's boot(), which runs
+  // on the standalone price-chart.html tab instead. PriceChartPanel.init()
+  // here now just opens the BroadcastChannel that feeds that tab.
   panelManager.initAll();
   connectWebSocket();
 });

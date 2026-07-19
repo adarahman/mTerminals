@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Price Chart — Live</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- theme.css/styles.css/utilities.css are shared dashboard-wide assets that
+     stayed at the frontend root when the chart engine moved into
+     PriceChart/ — hence ../ here, while pc-order-panel.css and
+     price-chart-standalone.css (chart-specific) live right next to this
+     file and need no prefix. -->
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../utilities.css">
+<link rel="stylesheet" href="pc-order-panel.css">
+<link rel="stylesheet" href="price-chart-standalone.css">
+</head>
+<body>
+
+<div class="pcs-app">
+
+  <!-- price-chart.js's own panel shows OHLC-of-visible-candles (small,
+       fine print) and a faint symbol watermark, but no prominent live
+       spot number — this header is the only place that shows, so it
+       stays (unlike the main dashboard's topbar, which already had it). -->
+  <header class="pcs-head">
+    <button class="pcs-back" id="pcsBack" title="Back to dashboard">← Dashboard</button>
+    <div class="pcs-head-text">
+      <span class="pcs-symbol" id="pcsSymbol">—</span>
+      <span class="pcs-spot" id="pcsSpot">—</span>
+      <span class="pcs-chg" id="pcsChg"></span>
+    </div>
+    <div class="pcs-conn">
+      <span class="pcs-conn-dot" id="pcsConnDot"></span>
+      <span id="pcsConnLabel">Connecting…</span>
+    </div>
+  </header>
+
+  <!-- priceChart.ensureMounted() (price-chart.js) finds #dashboard and
+       inserts its panel as the first child here — same contract the
+       embedded version already relies on, so price-chart.js itself is
+       untouched. See price-chart-standalone.js's boot(). -->
+  <div id="dashboard"></div>
+
+</div>
+
+<!-- Shared root-level scripts (app-state.js, event-bus.js, dom-utils.js,
+     formatters.js, ws-manager.js, market-store.js) load via ../ — same
+     reasoning as the stylesheet paths above. dom-utils.js/formatters.js
+     must come before ws-manager.js: WSManager.connect() calls the global
+     err() on socket init failure, and price-chart-standalone.js's header
+     readout calls fmtI(). Everything after that is chart-specific and
+     lives right here in PriceChart/, so no path prefix. The 'Back to
+     dashboard' button and /api/history fetch inside price-chart.js both
+     use paths that resolve correctly regardless of this page's own folder
+     (DashboardPro.html is a sibling one level up via the back button's
+     '../DashboardPro.html' logic below; /api/history is a same-origin
+     absolute path unaffected by this file's location). -->
+<script src="../app-state.js"></script>
+<script src="../event-bus.js"></script>
+<script src="../dom-utils.js"></script>
+<script src="../formatters.js"></script>
+<script src="../ws-manager.js"></script>
+<script src="../market-store.js"></script>
+<script src="chart-data.js"></script>
+<script src="chart-renderer.js"></script>
+<script src="indicator-engine.js"></script>
+<script src="interaction-controller.js"></script>
+<script src="history-loader.js"></script>
+<script src="price-chart.js"></script>
+<script src="price-chart-standalone.js"></script>
+</body>
+</html>
