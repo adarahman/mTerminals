@@ -378,7 +378,7 @@ class PriceChartEngine {
       canvas._pcZoomWired = true;
       canvas.style.cursor = 'grab';
 
-      canvas.onwheel = (e) => {
+      canvas.addEventListener('wheel', (e) => {
         const rc = this._lastRenderCtx;
         if(!rc) return;
         e.preventDefault();
@@ -398,7 +398,7 @@ class PriceChartEngine {
         if(newEnd > rc.dataMaxT){ newEnd = rc.dataMaxT; newStart = newEnd - newSpan; }
         this._zoomStart = newStart; this._zoomEnd = newEnd;
         this.render();
-      };
+      }, { passive: false });
 
       canvas.onmousedown = (e) => {
         const rc = this._lastRenderCtx;
