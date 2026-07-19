@@ -34,8 +34,10 @@
 <div id="oi-dashboard-modal" class="oc-modal">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
-      <span class="oc-modal-title">📈 OI Dashboard</span>
-      <button id="oi-modal-close" onclick="closeOIDashboardModal()" title="Close (Esc)">✕ Close</button>
+      <div class="oc-modal-id">
+        <button id="oi-modal-close" class="oc-modal-back" onclick="closeOIDashboardModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">📈 OI Dashboard</span>
+      </div>
     </div>
     <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Dashboard"></iframe>
   </div>
@@ -56,14 +58,16 @@
 <div id="greeks-dashboard-modal" class="oc-modal">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
-      <span class="oc-modal-title">Δ Greeks &amp; Net GEX</span>
+      <div class="oc-modal-id">
+        <button id="greeks-modal-close" class="oc-modal-back" onclick="closeGreeksModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">Δ Greeks &amp; Net GEX</span>
+      </div>
       <div class="tab-group" id="grk-tabs">
         <div class="tab-btn active-grk" onclick="switchGrkTab('delta',this)">Δ</div>
         <div class="tab-btn" onclick="switchGrkTab('gamma',this)">Γ</div>
         <div class="tab-btn" onclick="switchGrkTab('theta',this)">Θ</div>
         <div class="tab-btn" onclick="switchGrkTab('vega',this)">Vega</div>
       </div>
-      <button id="greeks-modal-close" onclick="closeGreeksModal()" title="Close (Esc)">✕ Close</button>
     </div>
     <div class="greeks-modal-body">
       <!-- Single strike-indexed table: Greeks (CE/PE, tab-selected) and
@@ -89,8 +93,10 @@
 <div id="fiidii-dashboard-modal" class="oc-modal">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
-      <span class="oc-modal-title">🏦 FII / DII / Pro / Retail Participant OI</span>
-      <button id="fiidii-modal-close" onclick="closeFiiDiiModal()" title="Close (Esc)">✕ Close</button>
+      <div class="oc-modal-id">
+        <button id="fiidii-modal-close" class="oc-modal-back" onclick="closeFiiDiiModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🏦 FII / DII / Pro / Retail Participant OI</span>
+      </div>
     </div>
     <div class="greeks-modal-body">
       <div id="fiidii-modal-content"></div>
@@ -111,8 +117,10 @@
 <div id="iv-surface-modal" class="oc-modal" onclick="if(event.target===this) closeIvSurfaceModal()">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
-      <span class="oc-modal-title">📉 IV Surface</span>
-      <button id="iv-surface-modal-close" onclick="closeIvSurfaceModal()" title="Close (Esc)">✕ Close</button>
+      <div class="oc-modal-id">
+        <button id="iv-surface-modal-close" class="oc-modal-back" onclick="closeIvSurfaceModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">📉 IV Surface</span>
+      </div>
     </div>
     <div class="greeks-modal-body">
       <div id="iv-surface-content"></div>

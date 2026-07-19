@@ -778,19 +778,33 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 .oc-modal-title{
   font-size:0.8625rem;font-weight:700;color:var(--text-primary);letter-spacing:.02em;
 }
-#oc-modal-close{
-  font-size:0.7906rem;font-weight:700;
-  padding:5px 12px;
-  border-radius:16px;
-  border:1.5px solid rgba(250,82,82,0.40);
-  background:rgba(250,82,82,0.10);
-  color:var(--neg);
-  cursor:pointer;
-  transition:all .2s ease;
+/* Left-corner back button, replacing the old top-right "✕ Close" button
+   on all 4 modals (OI Dashboard / Greeks-GEX / FII-DII / IV Surface) —
+   matches option-chain.html's .oc-back pattern (circular arrow button
+   next to the title) instead of a right-aligned red close pill.
+   NOTE: the previous #oc-modal-close / #oc-modal-close:hover rules below
+   this comment used to target an id ("oc-modal-close") that none of the
+   actual buttons in DashboardPro.html ever had (they used
+   oi-modal-close / greeks-modal-close / fiidii-modal-close /
+   iv-surface-modal-close instead), so that styling was already dead —
+   removed rather than left orphaned now that the markup changes too. */
+.oc-modal-id{
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
-#oc-modal-close:hover{
-  background:rgba(250,82,82,0.20);
-  border-color:var(--neg);
+.oc-modal-back{
+  width:28px;height:28px;border-radius:50%;
+  background:var(--bg-2);border:1px solid var(--border);
+  color:var(--text-secondary);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,color .15s,transform .1s;
+  flex-shrink:0;
+}
+.oc-modal-back:hover{
+  border-color:var(--info);
+  color:var(--text-primary);
+  transform:translateX(-2px);
 }
 .oc-modal-iframe{
   flex:1 1 auto;
