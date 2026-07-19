@@ -1,5 +1,4 @@
 import math
-import math
 import os
 import sys
 import argparse
@@ -8,15 +7,15 @@ import pandas as pd
 import time
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from engine import build_engine_result
 from oi_analysis import (
     build_oi_history, compute_dte,
     read_last_json_snapshot, append_json_history,
 )
-from engine import build_engine_result
-
 from smartapi_pipeline_adapter import (
     fetch_option_chain_wide,
     fetch_futures_wide,
+    fetch_all_pills_and_vix_batched,
     fetch_vix_smartapi,
     get_available_expiries,
     fetch_ticker_payload_smartapi,
@@ -410,6 +409,14 @@ def main():
             # hits NSE once every DF_IDX_TTL_SECONDS; other ticks get the
             # cached DataFrame back instantly.
             fut_idx = ex.submit(_fetch_all_indices_cached)
+            # Batched replacement for 6 separate ltpData calls (each
+            # throttled at 1.0s globally -> ~6s/tick) with 2 getMarketData
+            # calls (~0.35s each). Submitted here so it overlaps with the
+            # chain/futures/idx fetches above instead of adding wall-clock
+            # time; .result() below blocks only this thread until it's
+            # ready, then the three wrapper calls just read the cache.
+            fut_batch = ex.submit(fetch_all_pills_and_vix_batched)
+            fut_batch.result()
             # Ticker pills (NIFTY/BANKNIFTY/MIDCPNIFTY/FINNIFTY) — now pure
             # SmartAPI REST via fetch_ticker_payload_smartapi(), independent
             # of df_idx entirely. Unconditional every tick, same reasoning

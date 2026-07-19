@@ -401,50 +401,61 @@ def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
 # Gap #2 continued: not in smartapi_client.py's INDEX_TOKENS. Verified
 # directly against the live scrip master (2026-07-14):
 #   token=99926017, tradingsymbol="India VIX", exch_seg=NSE
-_VIX_TOKEN = "99926017"
 _VIX_TRADINGSYMBOL = "India VIX"
+_VIX_TOKEN = "99926017"
+_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
+
+# Cache for the batched fetch each tick — populated once by
+# fetch_all_pills_and_vix_batched(), then read by the three thin wrapper
+# functions below so existing callers (ThreadPoolExecutor submissions in
+# option_chain_json.py) don't need to change at all.
+_BATCH_CACHE: dict = {}
+
+
+def fetch_all_pills_and_vix_batched():
+    """Replaces 6 separate ltpData calls (each throttled at 1.0s globally)
+    with 2 batched getMarketData calls (0.35s each) — NIFTY/BANKNIFTY/
+    MIDCPNIFTY/FINNIFTY/India VIX on NSE in one call, SENSEX on BSE in a
+    second call. Was costing ~6s/tick in pure rate-limit wait; now ~0.7s.
+    Populates _BATCH_CACHE; call this ONCE per tick before the three
+    wrapper functions below."""
+    from smartapi_client import INDEX_TOKENS, get_batch_quotes
+
+    nse_pairs = [
+        (sym, INDEX_TOKENS[sym]["token"])
+        for sym in _TICKER_SYMBOLS
+        if sym in INDEX_TOKENS
+    ]
+    nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
+
+    nse_quotes = get_batch_quotes("NSE", nse_pairs, mode="FULL")
+
+    sensex_info = INDEX_TOKENS.get("SENSEX")
+    bse_quotes = {}
+    if sensex_info:
+        bse_quotes = get_batch_quotes(
+            "BSE", [("SENSEX", sensex_info["token"])], mode="FULL"
+        )
+
+    _BATCH_CACHE.clear()
+    _BATCH_CACHE.update(nse_quotes)
+    _BATCH_CACHE.update(bse_quotes)
 
 
 def fetch_vix_smartapi() -> tuple[float | None, float]:
-    """Replacement for market_api.get_unified_market_data()'s VIX pair.
-    (Its third return, ticker_payload, is discarded by option_chain_json.py
-    anyway — rebuilt from df_idx separately — so only these two matter.)"""
-    from smartapi_client import _session
-    result = _session.call("ltpData", "NSE", _VIX_TRADINGSYMBOL, _VIX_TOKEN)
-    if not result.get("status"):
-        print(f"[smartapi_pipeline_adapter] VIX ltpData failed: {result}")
+    """Now reads from _BATCH_CACHE (populated by
+    fetch_all_pills_and_vix_batched()) instead of its own ltpData call."""
+    d = _BATCH_CACHE.get(_VIX_TRADINGSYMBOL)
+    if not d:
+        print("[smartapi_pipeline_adapter] VIX missing from batch cache")
         return None, 0.0
-    d = result["data"]
     ltp = safe_float(d.get("ltp"))
     close = safe_float(d.get("close"))
     chg_pct = round((ltp - close) / close * 100.0, 2) if close else 0.0
     return (ltp if ltp else None), chg_pct
 
 
-# ── SmartAPI-sourced ticker-strip pills ──────────────────────────────────
-# Replacement for market_api.build_ticker_payload_from_df_idx(), which
-# derives NIFTY/BANKNIFTY/MIDCPNIFTY/FINNIFTY pill data as a byproduct of
-# fetch_all_indices()'s NSE equity-stock-indices call (see that function's
-# docstring — "instead of a second /api/allIndices round-trip"). That
-# byproduct relationship means ticker pills currently go blank if the NSE
-# call fails/times out, and can't update faster than df_idx's own cadence.
-#
-# This calls smartapi_client.get_index_quote() per symbol instead — pure
-# SmartAPI REST, independent of df_idx entirely. Trade-off: it does NOT
-# carry Volume/Value (get_index_quote's underlying ltpData call doesn't
-# return them, same limitation NSE's own /api/allIndices has for index-
-# level rows) — option_chain_json.py's Volume/Value merge into
-# all_indices still reads df_idx separately for that, unchanged.
-_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
-
-
 def _index_quote_to_ticker_entry(symbol: str, quote: dict | None) -> dict | None:
-    """Reshape smartapi_client.get_index_quote()'s {"ltp","open","high",
-    "low","close"} into the {"Symbol","BackendSymbol","Last Price",
-    "% Change","Change","Prev Close"} shape build_ticker_payload_from_df_idx()
-    produces, so option_chain_json.py's downstream consumers (dashboard.js's
-    renderIndexTicker(), the Volume/Value merge keyed on "Symbol") don't
-    need to change at all."""
     if not quote:
         return None
     ltp, close = quote.get("ltp"), quote.get("close")
@@ -461,29 +472,25 @@ def _index_quote_to_ticker_entry(symbol: str, quote: dict | None) -> dict | None
 
 
 def fetch_ticker_payload_smartapi(symbols=None) -> list:
-    """SmartAPI-only replacement for build_ticker_payload_from_df_idx(df_idx).
-    Fires get_index_quote() for each ticker symbol in parallel — same
-    ThreadPoolExecutor pattern option_chain_json.py's main() already uses
-    for its other concurrent fetches. A single symbol failing doesn't blank
-    the whole strip (unlike the old df_idx-empty -> [] behavior)."""
+    """Now reads from _BATCH_CACHE instead of firing one ltpData call per
+    symbol via ThreadPoolExecutor."""
     symbols = symbols or _TICKER_SYMBOLS
     payload = []
-    with ThreadPoolExecutor(max_workers=len(symbols)) as ex:
-        futures = {ex.submit(get_index_quote, sym): sym for sym in symbols}
-        for fut in futures:
-            sym = futures[fut]
-            try:
-                entry = _index_quote_to_ticker_entry(sym, fut.result())
-            except Exception as e:
-                print(f"[fetch_ticker_payload_smartapi] {sym} failed: {e}")
-                continue
-            if entry:
-                payload.append(entry)
+    for sym in symbols:
+        d = _BATCH_CACHE.get(sym)
+        entry = _index_quote_to_ticker_entry(sym, {
+            "ltp": safe_float(d.get("ltp")),
+            "close": safe_float(d.get("close")),
+        }) if d else None
+        if entry:
+            payload.append(entry)
     return payload
 
 
 def fetch_sensex_ticker_smartapi():
-    """Replacement for market_api.fetch_bse_index_quote('SENSEX') — same
-    output shape, sourced via SmartAPI's INDEX_TOKENS instead of BSE's
-    getScripHeaderData endpoint."""
-    return _index_quote_to_ticker_entry("SENSEX", get_index_quote("SENSEX"))
+    d = _BATCH_CACHE.get("SENSEX")
+    quote = {
+        "ltp": safe_float(d.get("ltp")),
+        "close": safe_float(d.get("close")),
+    } if d else None
+    return _index_quote_to_ticker_entry("SENSEX", quote)
