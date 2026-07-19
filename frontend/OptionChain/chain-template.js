@@ -89,6 +89,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY', d.fnoSymbols)}</select>
       <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
       ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}% (${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)})</span>`:''}
+      <span id="topbar-chart-icon" class="chart-icon" title="Open price chart" onclick="window.open('PriceChart/price-chart.html?symbol=${encodeURIComponent(d.symbol||'NIFTY')}','_blank')">📈</span>
       ${renderIndexTicker(d)}
     </div>
     <div class="expiry-strip">

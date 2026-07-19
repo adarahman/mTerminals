@@ -72,7 +72,8 @@
     store = new MarketStore();
     store.on('change', onStateChange);
 
-    wsManager = new WSManager(`ws://${location.host}/ws`);
+    const _symParam = new URLSearchParams(location.search).get('symbol');
+    wsManager = new WSManager(`ws://${location.host}/ws` + (_symParam ? `?symbol=${encodeURIComponent(_symParam)}` : ''));
     wsManager.on('open', () => setConnLabel(true));
     wsManager.on('close', () => setConnLabel(false));
     wsManager.on('message', (raw) => store.ingest(raw));

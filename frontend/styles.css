@@ -1337,3 +1337,16 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 #pt-live-confirm-yes{background:var(--neg);}
 #pt-live-confirm-yes:hover{background:#c0392b;}
 #pt-live-confirm-no{background:var(--bg-2); border:1px solid var(--border) !important; color:var(--text-primary) !important;}
+
+.chart-icon {
+  cursor: pointer;
+  font-size: 14px;
+  margin-left: 4px;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  user-select: none;
+}
+.chart-icon:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
