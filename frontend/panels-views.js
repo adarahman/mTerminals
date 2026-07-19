@@ -84,7 +84,7 @@ class OiFlowView {
   buildOiFlowSummaryHtml(chain, atm, velByStrike){
   if(!chain || !chain.length){
     return `
-  <div class="section-card algn-card" id="oi-flow-summary-card" style="min-width:0;">
+  <div class="section-card" id="oi-flow-summary-card" style="min-width:0;">
     <div class="section-header"><span class="section-title">📈 OI Flow Snapshot</span></div>
     <div class="dd-empty">Awaiting chain data…</div>
   </div>`;
@@ -101,7 +101,7 @@ class OiFlowView {
   const pcr = totalPe/(totalCe||1);
 
   return `
-  <div class="section-card algn-card" id="oi-flow-summary-card" style="min-width:0;">
+  <div class="section-card" id="oi-flow-summary-card" style="min-width:0;">
     <div class="section-header">
       <span class="section-title">📈 OI Flow Snapshot</span>
       <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openOIDashboardModal('butterfly')">Butterfly View →</button>
