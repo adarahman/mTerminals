@@ -262,6 +262,15 @@ def _build_bid_ask_map(df_clean):
                 # parse_option_chain_response).
                 "ceChg": _r(row.get("CE_Change", 0), 2),
                 "peChg": _r(row.get("PE_Change", 0), 2),
+                # Percent version of the same change — smartapi_pipeline_
+                # adapter.py's get_atm_chain_wide() populates CE_pChange/
+                # PE_pChange (from SmartAPI's percentChange field) right
+                # alongside CE_Change/PE_Change, but this map was only ever
+                # reading the absolute side — so the frontend's %chg
+                # readout (option-chain.js's ltpChgStr) had no field to
+                # read and silently omitted the percentage on every row.
+                "cePChg": _r(row.get("CE_pChange", 0), 2),
+                "pePChg": _r(row.get("PE_pChange", 0), 2),
                 # Top-of-book size (NSE's buyQuantity1/sellQuantity1).
                 "ceBidQty": _to_int(row.get("CE_BidQty", 0)),
                 "ceAskQty": _to_int(row.get("CE_AskQty", 0)),
@@ -298,6 +307,7 @@ def _build_chain_rows(master, atm_strike, bid_ask_map):
             "ceBid":    ba.get("ceBid", 0.0),
             "ceAsk":    ba.get("ceAsk", 0.0),
             "ceChg":    ba.get("ceChg", 0.0),
+            "cePChg":   ba.get("cePChg", 0.0),
             "ceBidQty": ba.get("ceBidQty", 0),
             "ceAskQty": ba.get("ceAskQty", 0),
             "ceTotalBidQty": ba.get("ceTotalBidQty", 0),
@@ -311,6 +321,7 @@ def _build_chain_rows(master, atm_strike, bid_ask_map):
             "peBid":    ba.get("peBid", 0.0),
             "peAsk":    ba.get("peAsk", 0.0),
             "peChg":    ba.get("peChg", 0.0),
+            "pePChg":   ba.get("pePChg", 0.0),
             "peBidQty": ba.get("peBidQty", 0),
             "peAskQty": ba.get("peAskQty", 0),
             "peTotalBidQty": ba.get("peTotalBidQty", 0),

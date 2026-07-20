@@ -14,6 +14,22 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
     const chainArr = payload.chain || [];
     const expiryKey = payload.expiry || "";
     const velLookup = buildVelocityLookup(payload);
+    // Full 5/15/30m trend, independent of which single window this
+    // dashboard's own toggle (velocityWindowMin) currently has selected.
+    // The standalone option-chain.html tab's OI-velocity sparkline
+    // (velBars()) and its 5m/15m/30m summary row both need all three
+    // windows at once — previously nothing built this, so `velTrend` was
+    // undefined on every broadcast row and the tab rendered 0 for every
+    // strike no matter how much OI had actually moved.
+    const velTrendByStrike = {};
+    [5, 15, 30].forEach((w, i) => {
+      const winBlock = (payload.oiVelocity || []).find((b) => b.window === w);
+      (winBlock && winBlock.rows || []).forEach((r) => {
+        const entry = velTrendByStrike[r.strike] || (velTrendByStrike[r.strike] = { ce: [0, 0, 0], pe: [0, 0, 0] });
+        entry.ce[i] = r.ceDOI || 0;
+        entry.pe[i] = r.peDOI || 0;
+      });
+    });
     // Resolved ATM strike, same helper used everywhere else in this file
     // (IV surface, GEX table, etc.) to fall back past a possibly-unset
     // per-row `.atm` flag — see activeAtm() in dashboard.js for the
@@ -29,10 +45,26 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
       totalPeOi += r.peOI || 0;
     });
 
+    // payload.greeks is a separate array (one entry per strike: cDelta/
+    // cGamma/cTheta/cVega, pDelta/pGamma/pTheta/pVega — see
+    // chain-view-models.js's buildStrikeDetailViewModel, which joins the
+    // same array by strike for the main dashboard's detail panel). The
+    // main dashboard's own rendering path reads that array directly and
+    // never needed it merged onto ce/pe here — but chain-sync.js's
+    // broadcast to the standalone option-chain.html tab only ever sends
+    // `rows` (this function's output), not payload.greeks. Without the
+    // join below, every ce/pe leg on the standalone tab has no
+    // delta/gamma/theta/vega field at all, so its Greeks row renders
+    // "—" for every value on every strike, live data or not.
+    const greeksByStrike = {};
+    (payload.greeks || []).forEach((g) => { greeksByStrike[g.strike] = g; });
+
     const rows = chainArr.map((row) => {
       const rowKey = expiryKey + "_" + row.strike;
       const vel = velLookup[row.strike] || {};
+      const trend = velTrendByStrike[row.strike] || { ce: [0, 0, 0], pe: [0, 0, 0] };
       const prev = this.prevSnapshot[rowKey] || {};
+      const g = greeksByStrike[row.strike] || {};
 
       const ceIvChg = prev.ceIV != null && row.ceIV != null ? +(row.ceIV - prev.ceIV).toFixed(2) : null;
       const peIvChg = prev.peIV != null && row.peIV != null ? +(row.peIV - prev.peIV).toFixed(2) : null;
@@ -44,18 +76,20 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
       const ce = {
         iv: row.ceIV, ivChg: ceIvChg, vol: row.ceVol, volChg: row.ceVolChg,
         volPct: row.ceVol ? (((row.ceOI || 0) / row.ceVol) * 100).toFixed(1) : null,
-        ltp: row.ceLTP, chg: ceLtpChg, oi: row.ceOI, oiChg: row.ceChgOI,
-        oiVel: vel.ceVel, volVel: ceVolVel, signal: row.ceSignal,
+        ltp: row.ceLTP, chg: ceLtpChg, chgPct: row.cePChg, oi: row.ceOI, oiChg: row.ceChgOI,
+        oiVel: vel.ceVel, velTrend: trend.ce, volVel: ceVolVel, signal: row.ceSignal,
         bid: row.ceBid, bidQty: row.ceBidQty, ask: row.ceAsk, askQty: row.ceAskQty,
         totalBidQty: row.ceTotalBidQty, totalAskQty: row.ceTotalAskQty,
+        delta: g.cDelta, gamma: g.cGamma, theta: g.cTheta, vega: g.cVega,
       };
       const pe = {
         iv: row.peIV, ivChg: peIvChg, vol: row.peVol, volChg: row.peVolChg,
         volPct: row.peVol ? (((row.peOI || 0) / row.peVol) * 100).toFixed(1) : null,
-        ltp: row.peLTP, chg: peLtpChg, oi: row.peOI, oiChg: row.peChgOI,
-        oiVel: vel.peVel, volVel: peVolVel, signal: row.peSignal,
+        ltp: row.peLTP, chg: peLtpChg, chgPct: row.pePChg, oi: row.peOI, oiChg: row.peChgOI,
+        oiVel: vel.peVel, velTrend: trend.pe, volVel: peVolVel, signal: row.peSignal,
         bid: row.peBid, bidQty: row.peBidQty, ask: row.peAsk, askQty: row.peAskQty,
         totalBidQty: row.peTotalBidQty, totalAskQty: row.peTotalAskQty,
+        delta: g.pDelta, gamma: g.pGamma, theta: g.pTheta, vega: g.pVega,
       };
 
       let pcr = ce.oi && pe.oi ? pe.oi / Math.max(ce.oi, 1) : null;

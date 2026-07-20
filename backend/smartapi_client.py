@@ -709,10 +709,13 @@ def get_index_quotes_batch(symbols):
         quotes_by_token = get_batch_quotes(
             exchange, [(sym, token) for sym, token in pairs], mode="OHLC"
         )
-        # get_batch_quotes keys by tradingSymbol as Angel returns it, which
-        # for indices is the plain symbol name we already passed in.
+        # get_batch_quotes now keys its return dict by str(symbolToken) —
+        # NOT by tradingSymbol (see its own docstring/comment at the
+        # results[] assignment). Look up by token here, not by the plain
+        # symbol name we passed in for indices; a stale symbol-keyed
+        # lookup here would silently miss every entry.
         for sym, token in pairs:
-            d = quotes_by_token.get(sym)
+            d = quotes_by_token.get(str(token))
             if not d:
                 logger.warning(
                     f"[smartapi_client] get_index_quotes_batch: no row returned for {sym}"
@@ -870,7 +873,14 @@ def get_full_option_chain(underlying, expiry_ddmmmyyyy, strikes, exchange="NFO")
     quotes = get_batch_quotes(exchange, pairs, mode="FULL")
     rows = []
     for strike_int, opt_type, token, tradingsymbol in meta:
-        q = quotes.get(tradingsymbol) or quotes.get(token)
+        # get_batch_quotes keys its return dict by str(symbolToken), not
+        # tradingsymbol. `token` here is already a str straight from
+        # _scrip_indexes (ScripMaster's own token field), so str(token) is
+        # a no-op for the common case — wrapping it explicitly rather than
+        # relying on that type match holding by coincidence, and dropping
+        # the stale quotes.get(tradingsymbol) attempt, which can no longer
+        # match anything.
+        q = quotes.get(str(token))
         if not q:
             continue
         rows.append({
@@ -962,7 +972,12 @@ def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
 
         fetched = response.get("data", {}).get("fetched", [])
         for row in fetched:
-            results[row.get("tradingSymbol", row.get("symbolToken"))] = row
+            # Keyed by token (str), not tradingSymbol — token is the
+            # exchange-canonical, collision-proof identifier present on
+            # both this response and the ScripMaster file. Keying by the
+            # tradingSymbol string instead risks a lookup mismatch if the
+            # two sources ever disagree on formatting.
+            results[str(row.get("symbolToken"))] = row
 
     return results
 
@@ -1018,7 +1033,17 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
 
     rows = []
     for (strike_val, opt_type), info in strike_lookup.items():
-        q = quotes.get(info["tradingsymbol"])
+        # get_batch_quotes keys its return dict by str(symbolToken), not
+        # tradingsymbol — see the results[] assignment inside
+        # get_batch_quotes() itself. This lookup fed a stale symbol key
+        # and would silently drop every row here, which is especially
+        # bad for this function specifically: ws_server_live.py's
+        # _resolve_chain_tokens() calls get_atm_chain() to build the
+        # entire SmartAPI feed's token_meta, so an empty/near-empty
+        # `rows` here means the live tick feed fails to start (or starts
+        # with far fewer legs than it should) rather than just one
+        # quote-fetch quietly returning less data.
+        q = quotes.get(str(info["token"]))
         if not q:
             continue
         rows.append({

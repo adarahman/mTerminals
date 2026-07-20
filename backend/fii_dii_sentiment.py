@@ -67,7 +67,8 @@ from typing import Optional
 
 import pandas as pd
 
-from nse_eod_fetch import DATA_DIR, is_trading_day
+import nse_eod_fetch
+from nse_eod_fetch import is_trading_day
 
 _DATASET = "fao_participant_oi"
 
@@ -117,7 +118,7 @@ def _num(row: pd.Series, col: str) -> float:
 
 
 def _file_path_for(d: date) -> str:
-    return os.path.join(DATA_DIR, _DATASET, f"{_DATASET}_{d.strftime('%Y%m%d')}.parquet")
+    return os.path.join(nse_eod_fetch.DATA_DIR, _DATASET, f"{_DATASET}_{d.strftime('%Y%m%d')}.parquet")
 
 
 def _load_participant_oi(d: date) -> Optional[pd.DataFrame]:
@@ -136,16 +137,32 @@ def _load_participant_oi(d: date) -> Optional[pd.DataFrame]:
             print(f"[fii_dii_sentiment] Failed reading {path}: {e}")
             df = None
 
-    _FILE_CACHE[key] = df
+    # Only cache hits. A miss might just mean this date's EOD file hasn't
+    # been published/written yet (most likely for `d` == today) -- caching
+    # that None would permanently hide the file once it does land later
+    # the same process lifetime. Real misses (holidays, permanent gaps)
+    # cost one cheap os.path.exists() re-check per call, which is fine.
+    if df is not None:
+        _FILE_CACHE[key] = df
     return df
 
 
-def _find_latest_before(target: date, max_lookback_days: int = 10) -> Optional[date]:
-    """Most recent calendar date strictly before `target` that has a
-    participant-OI file on disk. Walks backwards day by day (skipping
-    obvious non-trading days) rather than assuming a fixed T-1 offset,
-    since holidays/weekends/late publications all shift the real answer."""
-    cursor = target - timedelta(days=1)
+def _find_latest_before(
+    target: date, max_lookback_days: int = 10, include_target: bool = False
+) -> Optional[date]:
+    """Most recent calendar date with a participant-OI file on disk, strictly
+    before `target` by default. Walks backwards day by day (skipping obvious
+    non-trading days) rather than assuming a fixed T-1 offset, since
+    holidays/weekends/late publications all shift the real answer.
+
+    include_target=True also allows `target`'s own date to be returned.
+    This is still lookahead-safe: the file for `target` physically cannot
+    exist on disk until nse_eod_fetch.py writes it, which only happens
+    after that day's close. So once it's there, it's real published data,
+    not a peek ahead -- there's no reason to keep ignoring it until the
+    *next* day just because `target` was "today" when this was called.
+    """
+    cursor = target if include_target else target - timedelta(days=1)
     checked = 0
     while checked < max_lookback_days:
         if is_trading_day(datetime(cursor.year, cursor.month, cursor.day)):
@@ -241,7 +258,7 @@ def get_feature_for_trading_day(dt) -> dict:
     docstring for the exact contract. Returns {} if nothing usable yet."""
     target = dt.date() if isinstance(dt, datetime) else dt
 
-    source_date = _find_latest_before(target)
+    source_date = _find_latest_before(target, include_target=True)
     if source_date is None:
         return {}
 
@@ -299,7 +316,7 @@ def get_report_for_trading_day(dt) -> dict:
     flat ML feature row."""
     target = dt.date() if isinstance(dt, datetime) else dt
 
-    source_date = _find_latest_before(target)
+    source_date = _find_latest_before(target, include_target=True)
     if source_date is None:
         return {"available": False}
 

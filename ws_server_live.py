@@ -12,6 +12,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "backend"))
 
 from nse_eod_fetch import fetch_all_eod, is_trading_day
+from fii_dii_sentiment import get_report_for_trading_day
+from nse_fii_dii_flow_fetch import record_today_flow, get_flow_series
 
 import numpy as np
 import orjson
@@ -34,6 +36,7 @@ from smartapi_client import (
     place_order as smartapi_place_order,
     get_order_book as smartapi_get_order_book,
     get_funds as smartapi_get_funds,
+    get_batch_quotes as smartapi_get_batch_quotes,
     INDEX_TOKENS,
 )
 from smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
@@ -154,13 +157,22 @@ print(
     flush=True,
 )
 
-# Top-bar ticker strip shows these four, always in this order (see
+# Top-bar ticker strip shows these five, always in this order (see
 # dashboard.js INDEX_TICKER_ORDER — keep the two lists in sync). The
 # currently-active SYMBOL's own quote already comes for free on every
 # regular tick (payload["spot"]/["spotChange"]/["spotChgPct"]), so this
-# loop only needs to fetch the OTHER three.
-INDEX_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "SENSEX"]
+# loop only needs to fetch the OTHER symbols — VIX is never the active
+# SYMBOL, so it's always fetched here.
+INDEX_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "SENSEX", "INDIA VIX"]
 _BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
+
+# VIX isn't in INDEX_TOKENS (auto-built from ScripMaster rows where
+# instrumenttype == 'AMXIDX' — VIX doesn't carry that type), so it's
+# pinned manually, same as smartapi_pipeline_adapter.py's _VIX_TOKEN.
+# Re-verify against a fresh ScripMaster dump if quotes ever go stale/empty;
+# nothing here will warn you if Angel reassigns the token.
+_VIX_TRADINGSYMBOL = "India VIX"   # SmartAPI's own tradingsymbol string
+_VIX_TOKEN = "99926017"            # exch_seg=NSE, verified against live ScripMaster 2026-07-14
 
 CONNECTED = set()
 LAST_PAYLOAD = None
@@ -200,6 +212,7 @@ _LAST_KNOWN_LEG_PRICES: dict[str, float] = {}
 _LAST_PORTFOLIO_BROADCAST_TS = 0.0
 EOD_TRIGGER_TIME = dtime(15, 45)  # run shortly after NSE cash market close (15:30)
 _EOD_DONE_DATE = None             # tracks which date's EOD job already ran
+_LAST_SESSION_DATE = None         # tracks which date's SmartAPI OI baseline is currently active
 
 # ── Live trading configuration ──────────────────────────────────────────
 # Master switch — OFF by default. Must be explicitly set to actually place
@@ -362,6 +375,22 @@ def _eod_task_done(task: asyncio.Task):
         traceback.print_exception(type(exc), exc, exc.__traceback__)
     else:
         print("[eod] fetch_all_eod completed successfully", flush=True)
+
+
+def _flow_task_done(task: asyncio.Task):
+    """Surface exceptions from the fire-and-forget FII/DII flow fetch task
+    (see nse_fii_dii_flow_fetch.record_today_flow), same rationale as
+    _eod_task_done above."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        import traceback
+        print(f"[flow] FAILED: {exc!r}", flush=True)
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+        return
+    ok = task.result()
+    print(f"[flow] record_today_flow {'succeeded' if ok else 'returned False (no data yet)'}", flush=True)
 
 
 async def ws_handler(request):
@@ -671,6 +700,364 @@ async def broadcast(message):
         if isinstance(result, Exception):
             print(f"[ws] Error broadcasting: {result}")
             CONNECTED.discard(ws)
+
+
+# ============================================================================
+# nse-derivatives-dashboard.html BRIDGE
+# ----------------------------------------------------------------------------
+# Reshapes data this process ALREADY fetches (LAST_PAYLOAD, INDEX_QUOTES,
+# market_api, fii_dii_sentiment) into the {quotes, skew, sectors, ratio, oi}
+# shape nse-derivatives-dashboard.html's window.updateDashboard() expects —
+# so that dashboard can run off ws_server_live.py alone, without also
+# starting institutional_derivative/server.js (which would log into the same
+# Angel One account a second time).
+#
+# Served on its own route (/dashboard-relay), separate from /ws, since /ws's
+# clients speak DashboardPro.html's full/delta/indexQuotes/funds envelope —
+# a different, unrelated protocol. nse-derivatives-dashboard.html's
+# RELAY_URL needs to point at ws://<host>:5500/dashboard-relay instead of
+# ws://localhost:8081 (server.js's port) for this to be used.
+# ============================================================================
+
+BRIDGE_CONNECTED = set()
+
+# Same six-symbol grouping server.js's WATCHLIST.sectors used, keyed by real
+# NSE trading symbols (not display names) since that's what market_api's
+# FNO_STOCK_INDEX rows key on.
+SECTOR_MAP = {
+    'IT':      ['INFY', 'TCS'],
+    'BANKING': ['HDFCBANK', 'ICICIBANK'],
+    'AUTO':    ['MARUTI', 'M&M'],
+    'ENERGY':  ['RELIANCE', 'ONGC'],
+    'METALS':  ['TATASTEEL', 'JSWSTEEL'],
+    'PHARMA':  ['SUNPHARMA', 'DRREDDY'],
+}
+
+_BRIDGE_SECTORS_TTL = 20   # seconds — matches market_api's README "20s-cached" note
+_BRIDGE_OI_TTL = 6 * 3600  # seconds — participant OI is EOD data, refreshing hourly is plenty
+_BRIDGE_FLOW_TTL = 6 * 3600  # same rationale — cash-market flow is also EOD data
+
+_bridge_sectors_cache = {"sectors": [], "fetchedAt": 0.0}
+_bridge_oi_cache = {"ratio": None, "oi": None, "fetchedAt": 0.0}
+_bridge_flow_cache = {"flow": None, "fetchedAt": 0.0}
+
+_BRIDGE_FUTURES_TTL = 5  # seconds — REST call, keep well under Angel's rate-limit floor
+
+_bridge_futures_cache = {"quote": None, "fetchedAt": 0.0}
+
+
+def _fetch_bridge_futures_sync():
+    """Blocking — run via asyncio.to_thread. Reuses smartapi_pipeline_adapter's
+    already-correct REST-based futures LTP (fetch_futures_wide), rather than
+    the WebSocket TickAggregator's futLtp/futVwap placeholder fields, which
+    are never actually emitted (see the no-op branch in _on_smartapi_message)."""
+    try:
+        from smartapi_pipeline_adapter import fetch_futures_wide
+        df = fetch_futures_wide(SYMBOL)
+    except Exception as e:
+        print(f"[bridge] fetch_futures_wide FAILED: {e}", flush=True)
+        return None
+    if df is None or df.empty:
+        print(f"[bridge] fetch_futures_wide returned EMPTY for {SYMBOL} "
+              f"(no FUTIDX contract resolved, or get_batch_quotes had no row "
+              f"for it) — futures tile will stay hidden until this succeeds",
+              flush=True)
+        return None
+
+    row = df.iloc[0]
+    ltp = row["LTP"]
+    chg = row.get("Change")
+    pct = row.get("PctChange")
+    if ltp is None:
+        print(f"[bridge] fetch_futures_wide returned a row for {SYMBOL} "
+              f"but LTP is None: {row.to_dict()}", flush=True)
+        return None
+    return {
+        "label": "NIFTY FUT (CUR)" if SYMBOL == "NIFTY" else f"{SYMBOL} FUT (CUR)",
+        "val": f"{ltp:,.2f}",
+        "chg": f"{'+' if (chg or 0) >= 0 else ''}{chg:.2f}" if chg is not None else "—",
+        "pct": f"{'+' if (pct or 0) >= 0 else ''}{pct:.2f}%" if pct is not None else "—",
+        "dir": "up" if (chg or 0) >= 0 else "down",
+    }
+
+
+async def _refresh_bridge_futures():
+    now = time.monotonic()
+    if now - _bridge_futures_cache["fetchedAt"] < _BRIDGE_FUTURES_TTL:
+        return
+    quote = await asyncio.to_thread(_fetch_bridge_futures_sync)
+    if quote is not None:
+        _bridge_futures_cache["quote"] = quote
+        _bridge_futures_cache["fetchedAt"] = now
+        print(f"[bridge] futures quote refreshed: {quote}", flush=True)
+    else:
+        # Still stamp fetchedAt so a persistently-failing symbol doesn't
+        # retry every 2s (bridge_loop's cadence) — respects the TTL even
+        # on failure, same as a successful fetch would.
+        _bridge_futures_cache["fetchedAt"] = now
+
+
+def _build_bridge_quotes():
+    """spot/spotChange/spotChgPct for the active symbol (LAST_PAYLOAD) plus
+    the other three ticker pills (INDEX_QUOTES) -> the {label,val,chg,pct,dir}
+    list nse-derivatives-dashboard.html's renderQuotes() expects — same
+    field names server.js's buildLivePayload() used, so this is a drop-in
+    replacement for that function's output, not a new shape."""
+    quotes = []
+
+    if LAST_PAYLOAD:
+        spot = LAST_PAYLOAD.get("spot")
+        chg = LAST_PAYLOAD.get("spotChange")
+        pct = LAST_PAYLOAD.get("spotChgPct")
+        if spot is not None:
+            quotes.append({
+                "label": LAST_PAYLOAD.get("symbol") or SYMBOL,
+                "val": f"{spot:,.2f}",
+                "chg": f"{'+' if (chg or 0) >= 0 else ''}{chg:.2f}" if chg is not None else "—",
+                "pct": f"{'+' if (pct or 0) >= 0 else ''}{pct:.2f}%" if pct is not None else "—",
+                "dir": "up" if (chg or 0) >= 0 else "down",
+            })
+
+    for label, q in INDEX_QUOTES.items():
+        spot = q.get("spot")
+        if spot is None:
+            continue
+        chg = q.get("spotChange") or 0
+        pct = q.get("spotChgPct") or 0
+        quotes.append({
+            "label": label,
+            "val": f"{spot:,.2f}",
+            "chg": f"{'+' if chg >= 0 else ''}{chg:.2f}",
+            "pct": f"{'+' if pct >= 0 else ''}{pct:.2f}%",
+            "dir": "up" if chg >= 0 else "down",
+        })
+
+    if _bridge_futures_cache["quote"] is not None:
+        quotes.append(_bridge_futures_cache["quote"])
+
+    return quotes
+
+
+def _build_bridge_skew(greeks_rows):
+    """[[strikeOffset0to1, ivPct], ...] for drawSkew(). greeks_rows is
+    LAST_PAYLOAD["greeks"] (mTerminals_json.py's _greeks_rows_from_table
+    output) — each row has 'strike' and 'iv' (already engine.py's real
+    Black-Scholes IV, not the raw chain's LTP/OI-only rows)."""
+    if not greeks_rows:
+        return []
+
+    strikes = [
+        (row["strike"], float(row["iv"]))
+        for row in greeks_rows
+        if row.get("iv") is not None
+    ]
+    if not strikes:
+        return []
+
+    strikes.sort(key=lambda r: r[0])
+    n = len(strikes)
+    return [[i / max(n - 1, 1), iv] for i, (_, iv) in enumerate(strikes)]
+
+
+def _fetch_bridge_sectors_sync():
+    """Blocking — run via asyncio.to_thread. Pulls every F&O stock's live
+    %Change via market_api.fetch_all_indices([FNO_STOCK_INDEX]) (same call
+    the README's Top Drivers/Draggers note describes) and groups the ones
+    in SECTOR_MAP into the {name,tag,cls,stocks:[{n,v,dir}]} shape
+    renderSectors() expects. Buildup tag (Long Buildup/Short Covering/etc)
+    needs OI-change classification this doesn't have — left as '—', same
+    caveat server.js's version carried."""
+    try:
+        rows = market_api.fetch_all_indices([market_api.FNO_STOCK_INDEX])
+    except Exception as e:
+        print(f"[bridge] fetch_all_indices FAILED: {e}", flush=True)
+        return []
+
+    by_symbol = {}
+    for row in rows.to_dict("records"):
+        sym = row.get("Symbol")
+        if sym:
+            by_symbol[sym] = row
+
+    sectors = []
+    for name, symbols in SECTOR_MAP.items():
+        stocks = []
+        for sym in symbols:
+            row = by_symbol.get(sym)
+            if row is None:
+                stocks.append({"n": sym, "v": "—", "dir": "flat"})
+                continue
+            pct = row.get("% Change")
+            try:
+                pct = float(pct)
+            except (TypeError, ValueError):
+                pct = 0.0
+            stocks.append({
+                "n": sym,
+                "v": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
+                "dir": "up" if pct >= 0 else "down",
+            })
+        sectors.append({"name": name, "tag": "—", "cls": "tag-neutral", "stocks": stocks})
+
+    return sectors
+
+
+def _fetch_bridge_oi_sync():
+    """Blocking — run via asyncio.to_thread. fii_dii_sentiment.py already
+    reads the EOD parquet nse_eod_fetch.py's engine_loop-triggered fetch
+    writes — no new network call here, just reshaping into server.js's
+    {ratio, oi:[{name,pct,color,trend,dir}]} shape."""
+    try:
+        report = get_report_for_trading_day(datetime.now())
+    except Exception as e:
+        print(f"[bridge] get_report_for_trading_day FAILED: {e}", flush=True)
+        return None, None
+
+    if not report.get("available"):
+        return None, None
+
+    participants = report["participants"]
+    colors = {"fii": "var(--violet)", "pro": "var(--amber)", "retail": "var(--grey)", "dii": "var(--green)"}
+    totals = {}
+    for key in ("fii", "pro", "retail", "dii"):
+        raw = participants[key]["raw"]
+        totals[key] = raw.get("total_long_contracts", 0.0) + raw.get("total_short_contracts", 0.0)
+    total_all = sum(totals.values()) or 1.0
+
+    oi = []
+    for key in ("fii", "pro", "retail", "dii"):
+        derived = participants[key]["derived"]
+        oi.append({
+            "name": key.upper(),
+            "pct": round(totals[key] / total_all * 1000) / 10,
+            "color": colors[key],
+            "trend": "LONG BUILD" if derived["index_fut_net"] >= 0 else "SHORT BUILD",
+            "dir": "up" if derived["index_fut_net"] >= 0 else "down",
+        })
+
+    fii_raw = participants["fii"]["raw"]
+    fii_long = fii_raw.get("future_index_long", 0.0)
+    fii_short = fii_raw.get("future_index_short", 0.0)
+    ratio = round(fii_long / (fii_long + fii_short) * 1000) / 10 if (fii_long + fii_short) else None
+
+    return ratio, oi
+
+
+def _fetch_bridge_flow_sync():
+    """Blocking — run via asyncio.to_thread. Reads the local flow-history
+    CSV that nse_fii_dii_flow_fetch.record_today_flow() (fired from the
+    EOD trigger, see engine_loop) maintains — no network call here, same
+    shape contract as _fetch_bridge_oi_sync above."""
+    try:
+        series = get_flow_series(30)
+    except Exception as e:
+        print(f"[bridge] get_flow_series FAILED: {e}", flush=True)
+        return None
+
+    if not series.get("fii") or not series.get("dii"):
+        return None
+
+    return series
+
+
+async def _refresh_bridge_flow():
+    now = time.monotonic()
+    if now - _bridge_flow_cache["fetchedAt"] < _BRIDGE_FLOW_TTL:
+        return
+    flow = await asyncio.to_thread(_fetch_bridge_flow_sync)
+    if flow is not None:
+        _bridge_flow_cache["flow"] = flow
+        _bridge_flow_cache["fetchedAt"] = now
+
+
+async def _refresh_bridge_sectors():
+    now = time.monotonic()
+    if now - _bridge_sectors_cache["fetchedAt"] < _BRIDGE_SECTORS_TTL:
+        return
+    sectors = await asyncio.to_thread(_fetch_bridge_sectors_sync)
+    if sectors:
+        _bridge_sectors_cache["sectors"] = sectors
+        _bridge_sectors_cache["fetchedAt"] = now
+
+
+async def _refresh_bridge_oi():
+    now = time.monotonic()
+    if now - _bridge_oi_cache["fetchedAt"] < _BRIDGE_OI_TTL:
+        return
+    ratio, oi = await asyncio.to_thread(_fetch_bridge_oi_sync)
+    if oi is not None:
+        _bridge_oi_cache["ratio"] = ratio
+        _bridge_oi_cache["oi"] = oi
+        _bridge_oi_cache["fetchedAt"] = now
+
+
+async def broadcast_bridge(payload):
+    if not BRIDGE_CONNECTED:
+        return
+    msg_str = orjson.dumps(payload, default=_json_default).decode()
+    clients = list(BRIDGE_CONNECTED)
+    results = await asyncio.gather(
+        *(ws.send_str(msg_str) for ws in clients),
+        return_exceptions=True,
+    )
+    for ws, result in zip(clients, results):
+        if isinstance(result, Exception):
+            print(f"[bridge] Error broadcasting: {result}")
+            BRIDGE_CONNECTED.discard(ws)
+
+
+async def bridge_ws_handler(request):
+    """WS endpoint for nse-derivatives-dashboard.html. Sends one full
+    {quotes, skew, sectors, ratio, oi} snapshot on connect (so the UI isn't
+    blank while waiting for the next tick), then relies on bridge_loop()
+    for live updates."""
+    ws = web.WebSocketResponse(heartbeat=20)
+    await ws.prepare(request)
+    BRIDGE_CONNECTED.add(ws)
+    print(f"[bridge] dashboard connected. Total: {len(BRIDGE_CONNECTED)}", flush=True)
+
+    try:
+        snapshot = {
+            "quotes": _build_bridge_quotes(),
+            "skew": _build_bridge_skew((LAST_PAYLOAD or {}).get("greeks")),
+            "sectors": _bridge_sectors_cache["sectors"],
+            "ratio": _bridge_oi_cache["ratio"],
+            "oi": _bridge_oi_cache["oi"],
+            "flow": _bridge_flow_cache["flow"],
+        }
+        await ws.send_str(orjson.dumps(snapshot, default=_json_default).decode())
+
+        async for _msg in ws:
+            pass  # this bridge is broadcast-only; incoming messages are ignored
+    finally:
+        BRIDGE_CONNECTED.discard(ws)
+        print(f"[bridge] dashboard disconnected. Total: {len(BRIDGE_CONNECTED)}", flush=True)
+
+    return ws
+
+
+async def bridge_loop():
+    """Runs independently of engine_loop()/the primary tick cadence. quotes
+    + skew are free (already-fetched LAST_PAYLOAD/INDEX_QUOTES, no network
+    call) so they push every 2s; sectors/oi are real NSE round-trips gated
+    by their own TTLs above, so this loop can poll frequently without
+    hammering NSE — _refresh_bridge_sectors()/_refresh_bridge_oi() no-op
+    until their TTL elapses."""
+    while True:
+        if BRIDGE_CONNECTED:
+            await _refresh_bridge_sectors()
+            await _refresh_bridge_oi()
+            await _refresh_bridge_flow()
+            await _refresh_bridge_futures()
+            await broadcast_bridge({
+                "quotes": _build_bridge_quotes(),
+                "skew": _build_bridge_skew((LAST_PAYLOAD or {}).get("greeks")),
+                "sectors": _bridge_sectors_cache["sectors"],
+                "ratio": _bridge_oi_cache["ratio"],
+                "oi": _bridge_oi_cache["oi"],
+                "flow": _bridge_flow_cache["flow"],
+            })
+        await asyncio.sleep(2)
 
 
 def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, strict_expiry=None, no_virtual_oi=None):
@@ -1241,13 +1628,17 @@ def fetch_nse_index_quotes_sync():
     unlike the old fetch_index_quote_sync() this needs no _PIPELINE_LOCK
     and can't interfere with the primary --symbol tick.
 
-    Returns {"NIFTY": {...}, "BANKNIFTY": {...}, ...} keyed by the same
-    backend symbol names INDEX_TICKER_SYMBOLS uses (market_api.INDEX_RENAME
-    already does NSE's raw "NIFTY 50"/"NIFTY BANK"/... -> "NIFTY"/
-    "BANKNIFTY"/... renaming before this ever sees it).
+    Returns {"NIFTY": {...}, "BANKNIFTY": {...}, ..., "INDIA VIX": {...}}
+    keyed by the same backend symbol names INDEX_TICKER_SYMBOLS uses
+    (market_api.INDEX_RENAME already does NSE's raw "NIFTY 50"/"NIFTY
+    BANK"/... -> "NIFTY"/"BANKNIFTY"/... renaming before this ever sees
+    it). VIX comes back from get_unified_market_data()'s own first two
+    return values (vix_value, vix_pchange) — it used to be discarded here
+    via "_, _, ticker_payload = ...", even though the call already fetches
+    it every time.
     """
     try:
-        _, _, ticker_payload = market_api.get_unified_market_data()
+        vix_value, vix_pchange, ticker_payload = market_api.get_unified_market_data()
     except Exception as e:
         print(f"[index-quote] get_unified_market_data FAILED: {e}", flush=True)
         return {}
@@ -1257,6 +1648,12 @@ def fetch_nse_index_quotes_sync():
         quote = _map_market_api_quote(entry)
         if sym and quote is not None:
             out[sym] = quote
+    if vix_value is not None:
+        out["INDIA VIX"] = {
+            "spot": vix_value,
+            "spotChange": None,   # get_unified_market_data() gives % change only
+            "spotChgPct": vix_pchange,
+        }
     return out
 
 
@@ -1275,22 +1672,109 @@ def fetch_bse_index_quote_sync(symbol):
     return _map_market_api_quote(entry)
 
 
+def _map_smartapi_quote(row):
+    """Normalize a SmartAPI getMarketData row ({"ltp","netChange",
+    "percentChange",...}) into the same {"spot","spotChange","spotChgPct"}
+    shape _map_market_api_quote() produces, so index_quote_loop() and
+    dashboard.js's indexQuotes handler don't care which source served a
+    given pill."""
+    if not row:
+        return None
+    return {
+        "spot":       safe_float_smartapi(row.get("ltp")),
+        "spotChange": safe_float_smartapi(row.get("netChange")),
+        "spotChgPct": safe_float_smartapi(row.get("percentChange")),
+    }
+
+
+def safe_float_smartapi(val):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_index_quotes_smartapi_sync():
+    """SmartAPI batched alternative to fetch_nse_index_quotes_sync() +
+    fetch_bse_index_quote_sync(): ONE getMarketData call for every NSE
+    ticker symbol (NIFTY/BANKNIFTY/MIDCPNIFTY/India VIX together) and ONE
+    more for SENSEX on BSE — two REST calls total, each governed by
+    getMarketData's 0.35s min-interval floor, well inside the
+    INDEX_QUOTE_SECONDS (default 20s) cadence this is called on. This is
+    NOT the per-symbol ltpData pattern that tripped Angel's rate limit on
+    2026-07-17 — that incident is exactly why batching via getMarketData
+    is used here instead.
+
+    get_batch_quotes() returns rows keyed by str(symbolToken), NOT by the
+    tradingsymbol/index name passed in — so results here MUST be re-keyed
+    back to symbol via the same (symbol, token) pairs list used to build
+    the request. Skipping this re-keying step silently returns nothing for
+    every symbol (no exception) — this bit VIX once already, see
+    smartapi_pipeline_adapter.py's fetch_all_pills_and_vix_batched().
+
+    Returns {"NIFTY": {...}, ..., "INDIA VIX": {...}, "SENSEX": {...}},
+    same shape/keys as the market_api path, so index_quote_loop() can use
+    either source interchangeably.
+    """
+    out = {}
+
+    nse_symbols = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY"]
+    nse_pairs = [(s, INDEX_TOKENS[s]["token"]) for s in nse_symbols if s in INDEX_TOKENS]
+    nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
+
+    try:
+        nse_raw = smartapi_get_batch_quotes("NSE", nse_pairs, mode="FULL")
+    except Exception as e:
+        print(f"[index-quote] smartapi NSE batch FAILED: {e}", flush=True)
+        nse_raw = {}
+
+    for sym, token in nse_pairs:
+        row = nse_raw.get(str(token))
+        quote = _map_smartapi_quote(row)
+        if quote is not None:
+            out_key = "INDIA VIX" if sym == _VIX_TRADINGSYMBOL else sym
+            out[out_key] = quote
+        elif not row:
+            print(f"[index-quote] smartapi: no row for {sym} (check token/session)", flush=True)
+
+    if "SENSEX" in INDEX_TOKENS:
+        bse_pairs = [("SENSEX", INDEX_TOKENS["SENSEX"]["token"])]
+        try:
+            bse_raw = smartapi_get_batch_quotes("BSE", bse_pairs, mode="FULL")
+        except Exception as e:
+            print(f"[index-quote] smartapi BSE batch FAILED: {e}", flush=True)
+            bse_raw = {}
+        row = bse_raw.get(str(bse_pairs[0][1]))
+        quote = _map_smartapi_quote(row)
+        if quote is not None:
+            out["SENSEX"] = quote
+        elif not row:
+            print("[index-quote] smartapi: no row for SENSEX (check token/session)", flush=True)
+
+    return out
+
+
 async def index_quote_loop():
-    """Keeps INDEX_QUOTES fresh for the ticker strip's three non-active
-    symbols and pushes them to connected clients as
-    {"type": "indexQuotes", "payload": {...}} — dashboard.js's generic
-    message handler already merges any unrecognized `type` as
-    `_wsState[type] = payload` (see updateDashboard()), which is exactly the
-    d.indexQuotes shape renderIndexTicker() reads. The active SYMBOL is
-    skipped here since its quote already rides along on every regular tick.
+    """Keeps INDEX_QUOTES fresh for the ticker strip's non-active symbols
+    (now five: NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX/INDIA VIX) and pushes
+    them to connected clients as {"type": "indexQuotes", "payload": {...}}
+    — dashboard.js's generic message handler already merges any
+    unrecognized `type` as `_wsState[type] = payload` (see
+    updateDashboard()), which is exactly the d.indexQuotes shape
+    renderIndexTicker() reads. The active SYMBOL is skipped here since its
+    quote already rides along on every regular tick. VIX is never the
+    active SYMBOL, so it's always fetched.
 
     Runs on its own --index-quote-seconds cadence (default 20s, independent
-    of --poll-seconds). NSE symbols are fetched with ONE
-    fetch_nse_index_quotes_sync() call regardless of how many of them are
-    "others" this run (1-3 symbols, same one HTTP round-trip); BSE symbols
-    still need one fetch_bse_index_quote_sync() call each since BSE has no
-    all-indices equivalent. Neither touches option_chain_json's globals, so
-    unlike the old version this loop no longer needs _PIPELINE_LOCK or
+    of --poll-seconds). Tries the SmartAPI batched path first (two
+    getMarketData calls total — one NSE, one BSE — well under Angel's
+    per-second cap; see fetch_index_quotes_smartapi_sync()'s docstring for
+    why this is safe unlike the 2026-07-17 per-symbol ltpData incident),
+    and falls back to market_api's NSE/BSE scrape for any symbol SmartAPI
+    didn't return — covering --no-smartapi mode, a dropped/expired
+    SmartAPI session, or a single symbol missing from the batch response.
+    Neither path touches option_chain_json's globals, so unlike the old
+    fetch_index_quote_sync() this loop needs no _PIPELINE_LOCK or
     serialization against the primary tick. A single slow/failed symbol
     only skips that symbol's pill for this pass; it doesn't stall the
     others or the primary tick.
@@ -1305,14 +1789,25 @@ async def index_quote_loop():
     while True:
         updates = {}
 
-        if nse_others:
+        if USE_SMARTAPI:
+            smartapi_quotes = await asyncio.to_thread(fetch_index_quotes_smartapi_sync)
+            for sym in others:
+                quote = smartapi_quotes.get(sym)
+                if quote is not None:
+                    updates[sym] = quote
+
+        missing = [s for s in others if s not in updates]
+        missing_nse = [s for s in missing if s not in _BSE_SYMBOLS]
+        missing_bse = [s for s in missing if s in _BSE_SYMBOLS]
+
+        if missing_nse:
             nse_quotes = await asyncio.to_thread(fetch_nse_index_quotes_sync)
-            for sym in nse_others:
+            for sym in missing_nse:
                 quote = nse_quotes.get(sym)
                 if quote is not None:
                     updates[sym] = quote
 
-        for sym in bse_others:
+        for sym in missing_bse:
             quote = await asyncio.to_thread(fetch_bse_index_quote_sync, sym)
             if quote is not None:
                 updates[sym] = quote
@@ -1416,11 +1911,22 @@ async def _post_to_node(payload: dict):
 
 
 async def engine_loop():
-    global LAST_PAYLOAD, _LAST_SENT, _EOD_DONE_DATE
+    global LAST_PAYLOAD, _LAST_SENT, _EOD_DONE_DATE, _LAST_SESSION_DATE
     while True:
         tick_start = time.monotonic()
 
         now = datetime.now()
+
+        # New trading day → reset the SmartAPI aggregator's OI session
+        # baselines so yesterday's session-open OI doesn't leak into
+        # today's changeinOpenInterest. Same per-day-flag pattern as
+        # _EOD_DONE_DATE below.
+        if _LAST_SESSION_DATE != now.date():
+            _LAST_SESSION_DATE = now.date()
+            if _smartapi_aggregator is not None:
+                _smartapi_aggregator.reset_session()
+                print(f"[smartapi] Reset OI session baseline for new trading day {now.date()}", flush=True)
+
         if (
             is_trading_day(now)
             and now.time() >= EOD_TRIGGER_TIME
@@ -1431,12 +1937,56 @@ async def engine_loop():
             eod_task = asyncio.create_task(asyncio.to_thread(fetch_all_eod, now, True))  # save=True
             eod_task.add_done_callback(_eod_task_done)
 
+            # Cash-market FII/DII net flow (₹Cr) — separate NSE endpoint from
+            # fao_participant_oi above, so it's its own task/callback: a
+            # failure here shouldn't be conflated with (or block) the
+            # participant-OI EOD fetch's own success/failure reporting.
+            flow_task = asyncio.create_task(asyncio.to_thread(record_today_flow))
+            flow_task.add_done_callback(_flow_task_done)
+
         async with _PIPELINE_LOCK:
             payload = await asyncio.to_thread(run_pipeline_once)
         pipeline_elapsed = time.monotonic() - tick_start
 
         if payload is not None:
             LAST_PAYLOAD = payload
+
+            # Feed NSE's authoritative changeinOpenInterest into the
+            # SmartAPI aggregator's OI baselines every cycle (not just at
+            # feed startup — start_smartapi_feed() runs concurrently with
+            # this loop via asyncio.to_thread, so there's no guaranteed
+            # ordering). seed_session_baseline() only fills tokens without
+            # an existing baseline, so calling this every cycle is safe —
+            # it just closes the gap for whichever tokens ticked before
+            # NSE data was available.
+            #
+            # Guard against r[oi_field] == 0: NSE's parse_option_chain_
+            # response() (market_api.py) returns None for a strike/side it
+            # has no quote for (edge-of-chain strikes missing CE or PE),
+            # and mTerminals_json.py's _to_int() silently maps that None
+            # to 0 — indistinguishable here from a genuinely zero-OI
+            # contract. Seeding a baseline of 0 from a FALSE zero would
+            # stick for the rest of the session (setdefault won't
+            # overwrite it later) and make that token's DOI read as its
+            # full OI instead of the true change. Skipping it here just
+            # leaves on_tick()'s own bootstrap-on-first-tick fallback to
+            # establish that token's baseline instead — self-correcting,
+            # never wrong the way a false zero would be.
+            if _smartapi_aggregator is not None:
+                baselines = {}
+                nse_rows_by_strike = {r["strike"]: r for r in payload.get("chain", [])}
+                for token, meta in _smartapi_aggregator.token_meta.items():
+                    if meta.get("option_type") not in ("CE", "PE"):
+                        continue
+                    r = nse_rows_by_strike.get(meta["strike"])
+                    if not r:
+                        continue
+                    oi_field = "ceOI" if meta["option_type"] == "CE" else "peOI"
+                    chg_field = "ceChgOI" if meta["option_type"] == "CE" else "peChgOI"
+                    if oi_field in r and chg_field in r and r[oi_field] != 0:
+                        baselines[token] = r[oi_field] - r[chg_field]
+                if baselines:
+                    _smartapi_aggregator.seed_session_baseline(baselines)
 
             if not USE_DELTA or _LAST_SENT is None:
                 await broadcast({"type": "full", "payload": payload})
@@ -1696,6 +2246,7 @@ async def lot_sizes_handler(request):
 async def main():
     app = web.Application(middlewares=[no_cache_middleware])
     app.router.add_get('/ws', ws_handler)
+    app.router.add_get('/bridge', bridge_ws_handler)
     app.router.add_get('/api/spot-history', spot_history_handler)
     app.router.add_get('/api/history', history_handler)
     app.router.add_get('/api/lot-sizes', lot_sizes_handler)
@@ -1726,6 +2277,7 @@ async def main():
 
     try:
         asyncio.create_task(index_quote_loop())
+        asyncio.create_task(bridge_loop())
         # No funds_loop() task here anymore — funds polling starts/stops
         # live via the {"type":"toggle_live_mode",...} WS message (see
         # ws_handler + start_funds_polling()/stop_funds_polling() above),

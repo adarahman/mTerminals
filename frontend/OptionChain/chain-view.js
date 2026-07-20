@@ -55,7 +55,7 @@ class ChainDenseView {
     this.lastPayload = null;
     this.lastRows = null;
     this.lastGreeks = [];
-    // this._initBroadcast();
+    this._initBroadcast();
   }
 }
 
@@ -113,7 +113,7 @@ class ChainView {
   _chainRange = range;
   _centerChainOnATM = true;
 
-  ['range-tabs-chain','range-tabs-side'].forEach(gid => {
+  ['range-tabs-chain','range-tabs-side','range-tabs-grk','range-tabs-iv'].forEach(gid => {
     const g = document.getElementById(gid);
     if(!g) return;
     g.querySelectorAll('.tab-btn').forEach(b => {
@@ -135,6 +135,18 @@ class ChainView {
   }
 
   if(_data) _rerenderChainPanels();
+
+  // Push the new range to the option-chain tab right away — everything
+  // inside this page (Greeks/FII-DII/IV-Surface modals, dense table if
+  // present) already reads the shared _chainRange global via
+  // getFilteredChain()/filterRowsByRange(), so this button is already
+  // "global" to those. The standalone option-chain.html tab is a
+  // separate window though, so it only finds out via BroadcastChannel —
+  // and would otherwise have to wait for the next live tick to hear
+  // about it via refreshView()'s regular broadcast.
+  if (app.chainDense && app.chainDense.lastPayload) {
+    app.chainDense._broadcastToOptionChainTab(app.chainDense.lastPayload);
+  }
 }
 
   switchVelTab(win, el) {

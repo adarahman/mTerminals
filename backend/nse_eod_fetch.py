@@ -31,8 +31,6 @@ import requests
 
 from pathlib import Path
 
-from pathlib import Path
-
 logger = logging.getLogger(__name__)
 
 # Where normalized EOD datasets get persisted. Override via
@@ -276,9 +274,15 @@ def fetch_all_eod(
     save: bool = False,
     out_dir: Optional[Path] = None,
     skip_non_trading_days: bool = True,
+    session: Optional[requests.Session] = None,
 ) -> dict:
     """Convenience entry point: fetch + normalize all three datasets in one
     NSE session. Call this once from engine.py's EOD job.
+
+    Pass an existing warm NSE session via `session=` to reuse it (see module
+    docstring) — a session created here is only closed if this function
+    created it; a caller-supplied session is left open for the caller to
+    manage.
 
     Returns a dict of DataFrames, keyed by dataset name. Missing/failed
     fetches map to None rather than raising, so a single bad endpoint
@@ -290,13 +294,15 @@ def fetch_all_eod(
         logger.info("%s is not an NSE trading day - skipping EOD fetch", date_obj.strftime("%Y-%m-%d"))
         return {"fao_participant_oi": None, "fao_participant_vol": None, "combine_oi": None}
 
-    session = _new_session()
+    own_session = session is None
+    session = session or _new_session()
     try:
         participant_oi = fetch_participant_oi(date_obj, session=session)
         participant_vol = fetch_participant_vol(date_obj, session=session)
         combine_oi = fetch_combine_oi(date_obj, session=session)
     finally:
-        session.close()
+        if own_session:
+            session.close()
 
     normalized = {
         "fao_participant_oi": normalize_participant_df(participant_oi) if participant_oi is not None else None,

@@ -495,30 +495,50 @@ ChainView.prototype.renderDashboard = function(d) {
     
     </div>
 
-    <!-- RIGHT: Vol/OI Velocity + Strike Detail, sits next to the simulator -->
+    <!-- RIGHT: Vol/OI Velocity + Strike Detail, sits next to the simulator.
+         Collapsed by default — the Institutional Activity Crux card on the
+         main dashboard (buildInstitutionalActivitySummaryCard, in
+         panels-views.js) is the always-visible summary of this same data;
+         these full near/far-band tables only explode open when its
+         "Strike Detail →" button calls expandStrikeDetail(). -->
     <div id="sec-simulator-detail" class="sim-wrap" style="min-width:0;">
       <div class="sim-body" style="padding:14px 14px;">
 
-        <!-- Vol/OI Velocity Breakdown -->
-        <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Vol/OI Velocity by Strike (Block Detection)</div>
-        <div class="sim-controls" style="grid-template-columns:1fr;margin-bottom:10px;">
-          ${renderSimRangeRow(velControl)}
-        </div>
-        <div class="sim-vol-grid" id="sim-vol-grid"></div>
-
-        <!-- Strike Table -->
-        <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:14px;">Strike Detail</div>
-        <div class="sim-table-wrap">
-          <div style="display:grid;grid-template-columns:70px 1fr 54px 54px 1fr;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg1);">
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Strike</span>
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Open Interest</span>
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">IV</span>
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Net Delta</span>
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Institutional Activity</span>
+        <div id="sec-simulator-detail-placeholder" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Vol/OI Velocity &amp; Strike Detail</div>
+            <div style="font-size:11px;color:var(--txt3);">Collapsed — open via the Institutional Activity Crux card's "Strike Detail →" link above.</div>
           </div>
-          <div id="sim-strike-table"></div>
+          <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="expandStrikeDetail()">Expand →</button>
         </div>
 
+        <div id="sec-simulator-detail-body" style="display:none;">
+
+          <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:4px;">
+            <button class="sec-btn" style="padding:3px 8px;font-size:10px;" onclick="collapseStrikeDetail()">Collapse ↑</button>
+          </div>
+
+          <!-- Vol/OI Velocity Breakdown -->
+          <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Vol/OI Velocity by Strike (Block Detection)</div>
+          <div class="sim-controls" style="grid-template-columns:1fr;margin-bottom:10px;">
+            ${renderSimRangeRow(velControl)}
+          </div>
+          <div class="sim-vol-grid" id="sim-vol-grid"></div>
+
+          <!-- Strike Table -->
+          <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:14px;">Strike Detail</div>
+          <div class="sim-table-wrap">
+            <div style="display:grid;grid-template-columns:70px 1fr 54px 54px 1fr;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg1);">
+              <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Strike</span>
+              <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Open Interest</span>
+              <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">IV</span>
+              <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Net Delta</span>
+              <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Institutional Activity</span>
+            </div>
+            <div id="sim-strike-table"></div>
+          </div>
+
+        </div>
       </div>
     </div>
 
@@ -1021,6 +1041,25 @@ ChainView.prototype._rerenderChainPanels = function() {
     </div>`;
   }
 
+  // 3b. Option Chain Snapshot card (main-dashboard OI/Chg OI/dOI/Volume
+  // summary). This was previously only ever built once, inside the full
+  // renderDashboard() rebuild (buildChainSummaryHtml(d) at the top of this
+  // file) — never on a WS tick or expiry switch — so it went stale and
+  // silently drifted from the OI Flow Snapshot card below (which *does*
+  // refresh every tick), even though both read the exact same
+  // getFilteredChain(_data) source. Same fix as oi-flow-summary-card /
+  // greeks-alerts-card / atm-greeks-card just below: outerHTML-diff it in
+  // here too, so all four summary cards stay in lockstep tick-to-tick.
+  const chainSummaryEl = document.getElementById('chain-summary-card');
+  if (chainSummaryEl) {
+    const freshChainSummary = app.chain.buildChainSummaryHtml(_data);
+    if (chainSummaryEl.dataset.lastHtml !== freshChainSummary) {
+      chainSummaryEl.outerHTML = freshChainSummary;
+      const fresh = document.getElementById('chain-summary-card');
+      if (fresh) fresh.dataset.lastHtml = freshChainSummary;
+    }
+  }
+
   // 4. OI Flow Snapshot card (compact — full butterfly table now lives in
   // the OI Dashboard's Butterfly tab, see buildOiFlowSummaryHtml()).
   const oiFlowSummaryEl = document.getElementById("oi-flow-summary-card");
@@ -1059,6 +1098,20 @@ ChainView.prototype._rerenderChainPanels = function() {
       atmGreeksEl.outerHTML = freshAtmGreeks;
       const fresh = document.getElementById("atm-greeks-card");
       if(fresh) fresh.dataset.lastHtml = freshAtmGreeks;
+    }
+  }
+
+  // 4c. Institutional Activity Crux — same outerHTML-diff treatment; without
+  // this it would only ever refresh on a full renderDashboard() rebuild,
+  // same staleness gap the chain-summary/OI-flow/Greeks cards above it were
+  // fixed for.
+  const instActivityEl = document.getElementById("inst-activity-summary-card");
+  if(instActivityEl){
+    const freshInstActivity = app.exec.buildInstitutionalActivitySummaryCard(_data);
+    if(instActivityEl.dataset.lastHtml !== freshInstActivity){
+      instActivityEl.outerHTML = freshInstActivity;
+      const fresh = document.getElementById("inst-activity-summary-card");
+      if(fresh) fresh.dataset.lastHtml = freshInstActivity;
     }
   }
 

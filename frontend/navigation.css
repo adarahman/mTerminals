@@ -1,0 +1,514 @@
+/* navigation.css
+   Top bar (index ticker, symbol/spot readout, badges, strategy/expiry
+   dropdowns), the vertical section-nav rail and its tab/toggle buttons,
+   the PCR toggle, the control sidebar, and the sticky refresh / option-
+   chain / OI-dashboard nav buttons. Split out of styles.css (Phase 7 CSS
+   architecture reorg) — no selector, visual, or HTML changes. */
+
+/* ── INDEX TICKER STRIP ──
+   Now lives inline inside .top-bar-left, to the right of the big active-
+   symbol spot readout, instead of its own separate sticky row above
+   .sec-nav — one less stacked bar taking up vertical space. Order in the
+   DOM (set by dashboard.js, always NIFTY → BANKNIFTY → MIDCPNIFTY →
+   SENSEX) is what pins NIFTY first; this CSS doesn't reorder anything
+   based on .active. */
+
+.index-ticker{
+  display:flex;gap:8px;flex-wrap:nowrap;
+  align-items:center;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+
+.index-ticker::-webkit-scrollbar{display:none;}
+
+.idx-pill{
+  display:flex;align-items:center;gap:8px;
+  background:#15171c;
+  border:2px solid transparent;
+  border-radius:999px;
+  padding:6px 14px;
+  cursor:pointer;
+  flex-shrink:0;
+  box-shadow:0 2px 8px rgba(0,0,0,0.16);
+  transition:border-color .15s ease, transform .1s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+
+.idx-pill:hover{transform:translateY(-1px);}
+
+.idx-pill.active{border-color:var(--info);}
+
+/* highlights the currently-connected symbol; position stays fixed */
+
+.idx-pill-sym{font-family:var(--font-display);font-size:0.8625rem;font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;}
+
+.idx-pill-val{font-size:0.9344rem;font-weight:600;color:#fff;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:6ch;text-align:right;display:inline-block;}
+
+.idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:0.8625rem;font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
+
+.idx-pill-chg.up{color:#20C997;}
+
+.idx-pill-chg.down{color:#FF6B6B;}
+
+.idx-pill-chg.na{color:#6C757D;font-weight:500;}
+
+.idx-pill-vix{border-color:rgba(255,212,59,0.35);}
+
+/* ── TOP BAR ── */
+
+.top-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  margin-bottom:6px;
+  flex-wrap:nowrap;
+  gap:6px;
+  min-height:44px;
+  position:sticky;
+  top:var(--topbar-top, 10px);
+  z-index:997;
+  backdrop-filter:blur(12px);
+  background:rgba(22,24,29,0.95);
+  box-shadow:0 2px 12px rgba(0,0,0,0.30);
+}
+
+/* ── STRATEGY DROPDOWNS ── */
+
+#strat-select:focus,#strat-strike-select:focus{
+  outline:none;
+  border-color:var(--info);
+  box-shadow:0 0 0 2px rgba(51,154,240,0.25);
+}
+
+#strat-select,#strat-strike-select{
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1l5 5 5-5" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
+}
+
+/* ── EXPIRY DROPDOWN STRIP ── */
+
+.expiry-strip{
+  display:flex;align-items:center;gap:6px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:20px;
+  overflow:visible;
+  flex-shrink:0;
+  padding:4px 10px 4px 4px;
+}
+
+.expiry-pill{
+  display:flex;flex-direction:column;align-items:center;
+  padding:4px 8px;
+  gap:1px;
+}
+
+.expiry-pill-label{
+  font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);
+  text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;
+}
+
+.expiry-pill-val{
+  font-size:0.7906rem;font-weight:700;color:var(--text-primary);
+  font-family:var(--font-mono);white-space:nowrap;
+}
+
+.dte-val{color:var(--warn);}
+
+/* Expiry dropdown, relocated from the old horizontal .sec-nav into the
+   top-bar's DTE pill slot (see #expirySelect in DashboardPro.html — it's
+   moved here via JS on each top-bar re-render, not rebuilt, so its
+   selection state/option list survive live ticks). Styled to sit flush
+   inside the same pill the DTE readout lives in. */
+
+#expirySelect{
+  font-family:var(--font-mono);font-size:0.8625rem;font-weight:700;color:var(--text-primary);
+  background:transparent;border:none;outline:none;cursor:pointer;
+  -webkit-appearance:none;appearance:none;
+  padding:0 14px 0 0;
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
+  background-repeat:no-repeat;background-position:right center;
+}
+
+#expirySelect:focus{color:var(--info);}
+
+.time-val{color:var(--info);font-size:0.8625rem;}
+
+.expiry-divider{width:1px;height:28px;background:var(--border);flex-shrink:0;}
+
+/* Top-bar Profit & Fund pills (see renderFundPillHtml() in chain-views.js)
+   — reuse .expiry-pill's layout, just clickable (opens #pt-panel) and
+   with a low-fund warning state so "should I square off?" is answerable
+   without opening the Paper Trading panel first. */
+
+.pt-topbar-pill{cursor:pointer;border-radius:8px;transition:background .15s ease;}
+
+.pt-topbar-pill:hover{background:rgba(255,255,255,0.06);}
+
+.pt-topbar-pill-warn{
+  background:rgba(250,82,82,0.12);
+  border:1px solid rgba(250,82,82,0.35);
+  animation:pt-fund-pulse 2s ease-in-out infinite;
+}
+
+.top-bar-left{
+  display:flex;align-items:center;
+  gap:14px;
+  flex-wrap:nowrap;
+  min-width:0; /* lets .index-ticker's own overflow-x scroll instead of pushing the bar wider */
+}
+
+.top-bar-left .index-ticker{
+  padding-left:14px;
+  border-left:1px solid var(--border);
+}
+
+.symbol{font-family:var(--font-display);font-size:0.9344rem;font-weight:700;color:var(--text-tertiary);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;}
+
+/* .symbol is also reused on the top-bar's symbol <select> (picking a
+   value switches the active index/stock — see onSymbolPicked() in
+   dashboard.js). As a bare <select> it inherited .symbol's small
+   13px label size with no cursor/caret affordance, so it read as tiny
+   static text buried next to the spot price instead of a control.
+   Sized up and given the same SVG-caret treatment as #expirySelect
+   above for a consistent "this is a dropdown" cue. */
+
+.symbol-select{
+  font-size:1.0781rem;
+  color:var(--info);
+  background:#15171c;
+  border:2px solid var(--info);
+  border-radius:999px;
+  outline:none;
+  cursor:pointer;
+  -webkit-appearance:none;
+  appearance:none;
+  padding:6px 22px 6px 14px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.16);
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
+  background-repeat:no-repeat;
+  background-position:right 14px center;
+}
+
+.spot{font-size:1.8687rem;font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
+
+.spot.bearish{color:var(--neg);}
+
+.badges{display:flex;gap:4px;flex-wrap:nowrap;align-items:center;}
+
+.badge{
+  font-size:0.8625rem;font-weight:500;
+  padding:2px 8px;border-radius:20px;
+  font-family:var(--font-sans);letter-spacing:0.01em;
+  white-space:nowrap;flex-shrink:0;
+}
+
+.badge-bull{background:rgba(18,184,134,0.12);color:var(--pos);border:1px solid rgba(18,184,134,0.25);}
+
+.badge-bear{background:rgba(250,82,82,0.12);color:var(--neg);border:1px solid rgba(250,82,82,0.25);}
+
+.badge-neutral{background:var(--bg-2);color:var(--text-secondary);border:1px solid var(--border);}
+
+.badge-info{background:rgba(51,154,240,0.12);color:var(--info);border:1px solid rgba(51,154,240,0.25);}
+
+.spot-line{margin:16px 0;padding:12px;text-align:center;background:rgba(61,139,253,.08);border-radius:var(--radius-md);font-size:1.0781rem;font-weight:700;}
+
+/* ── TABS ── */
+
+.tab-group{display:flex;gap:4px;}
+
+.tab-btn{
+  font-size:0.7906rem;font-weight:500;padding:4px 11px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border);
+  background:var(--bg-2);color:var(--text-tertiary);
+  cursor:pointer;transition:all 0.15s;
+}
+
+.tab-btn:hover{border-color:var(--info);color:var(--info);}
+
+.tab-btn.active-vel{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
+
+.tab-btn.active-grk{background:rgba(245,159,0,0.12);color:var(--warn);border-color:rgba(245,159,0,0.3);}
+
+.tab-btn.active-range{background:rgba(18,184,134,0.12);color:var(--pos);border-color:rgba(18,184,134,0.3);}
+
+.tab-btn.active-oif{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
+
+/* ── PCR TOGGLE ── */
+
+.pcr-toggle{
+  font-size:0.8625rem;font-weight:500;padding:3px 10px;
+  border-radius:var(--radius-sm);border:1px solid var(--border);
+  background:var(--bg-2);color:var(--text-tertiary);cursor:pointer;
+  display:flex;align-items:center;gap:5px;transition:all 0.15s;
+}
+
+.pcr-toggle:hover{border-color:var(--info);color:var(--info);}
+
+.pcr-toggle.on{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
+
+/* ── VERTICAL SECTION NAV (left rail) ──
+   Was a horizontal pill row above .top-bar; now a fixed vertical stripe
+   docked to the left edge of the viewport so it's reachable from any
+   scroll position without competing for width with the top-bar/ticker.
+   #sec-nav-bar keeps its id so dashboard.js's secJump()/active-class
+   query selector (`#sec-nav-bar .sec-btn`) needs no changes. */
+
+.sec-nav{
+  display:flex;flex-direction:column;gap:6px;
+  padding:14px 10px;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  align-items:stretch;
+  position:fixed;
+  left:10px;top:10px;bottom:10px;
+  width:72px;
+  z-index:999;
+  box-shadow:0 4px 20px rgba(0,0,0,0.40);
+  overflow-y:auto;
+  backdrop-filter:blur(12px);
+  background:rgba(22,24,29,0.93);
+}
+
+.sec-nav-label{
+  font-family:var(--font-display);
+  font-size:0.7188rem;font-weight:700;color:var(--text-tertiary);
+  text-transform:uppercase;letter-spacing:.08em;
+  white-space:nowrap;
+  padding:4px 6px;
+  background:var(--bg-2);
+  border-radius:6px;
+  text-align:center;
+  margin-bottom:4px;
+}
+
+.sec-btn{
+  font-family:var(--font-display);
+  font-size:0.7906rem;font-weight:600;padding:10px 6px;
+  border-radius:10px;border:1.5px solid var(--border);
+  background:var(--bg-2);color:var(--text-secondary);
+  cursor:pointer;transition:all 0.25s ease;
+  white-space:normal;word-break:break-word;
+  position:relative;
+  box-shadow:0 1px 3px rgba(0,0,0,0.04);
+  letter-spacing:0.2px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  text-align:center;
+  line-height:1.15;
+}
+
+.sec-btn span{font-size:1.15rem;line-height:1;}
+
+/* "Range Vel" is a two-word label crammed into the same 72px rail width
+   as one-word buttons like "Chain" — inheriting .sec-btn's word-break:
+   break-word let the browser split it mid-word (e.g. "Ra/nge/Vel"),
+   which read as near-vertical stacked letters. Force wraps to only ever
+   happen at the space between "Range" and "Vel" instead. */
+
+#ctrl-sidebar-toggle-btn{
+  word-break:normal;
+  overflow-wrap:normal;
+  font-size:0.7188rem;
+}
+
+.sec-btn:hover{
+  border-color:var(--info);
+  color:var(--info);
+  background:rgba(51,154,240,0.10);
+  transform:translateX(2px);
+  box-shadow:0 4px 12px rgba(51,154,240,0.18);
+}
+
+.sec-btn.active{
+  background:linear-gradient(135deg, rgba(51,154,240,0.20), rgba(51,154,240,0.08));
+  color:var(--info);
+  border-color:var(--info);
+  font-weight:700;
+  box-shadow:0 2px 16px rgba(51,154,240,0.25);
+}
+
+.sec-btn.active::after{
+  content:'';
+  position:absolute;
+  left:-13px;
+  top:25%;
+  bottom:25%;
+  width:3px;
+  background:var(--info);
+  border-radius:3px;
+}
+
+.sec-btn-risk.active{
+  background:linear-gradient(135deg, rgba(250,82,82,0.20), rgba(250,82,82,0.08));
+  color:var(--neg);
+  border-color:var(--neg);
+  box-shadow:0 2px 16px rgba(250,82,82,0.25);
+}
+
+.sec-btn-risk.active::after{
+  background:var(--neg);
+}
+
+.sec-btn-strats.active{
+  background:linear-gradient(135deg, rgba(18,184,134,0.20), rgba(18,184,134,0.08));
+  color:var(--pos);
+  border-color:var(--pos);
+  box-shadow:0 2px 16px rgba(18,184,134,0.25);
+}
+
+.sec-btn-strats.active::after{
+  background:var(--pos);
+}
+
+.sec-btn-decision.active{
+  background:linear-gradient(135deg, rgba(245,159,0,0.20), rgba(245,159,0,0.08));
+  color:var(--warn);
+  border-color:var(--warn);
+  box-shadow:0 2px 16px rgba(245,159,0,0.25);
+}
+
+.sec-btn-decision.active::after{
+  background:var(--warn);
+}
+
+/* ── CONTROL SIDEBAR (ATM range + velocity window) ──
+   Replaces the old .sec-sidebar jump rail — removed as redundant, since
+   #sec-nav-bar already provides the same section jumps. This instead
+   surfaces the two controls that actually needed to be reachable from
+   anywhere: _chainRange (ATM strike range) and _velWin (OI/Vol velocity
+   window). Both already fan out dashboard-wide — getFilteredChain() (used
+   by the chain table, OI Flow, IV surface, Greeks) reads _chainRange, and
+   every oiVelocity lookup (chain table, right analytics panel, OI Flow
+   velocity) reads _velWin — so this panel just needs to drive
+   switchChainRange()/switchVelTab(), same as the inline copies inside the
+   chain section header. The toggle button that used to live inside this
+   fixed wrapper has been relocated into the left #sec-nav-bar rail (see
+   "Range/Vel" sec-btn); this wrapper now holds only the flyout panel,
+   which dashboard.js positions dynamically (left/top set inline in
+   toggleControlSidebar()) right next to that button instead of the old
+   fixed top-right slot, so it no longer opens somewhere unrelated /
+   partially off-screen. The panel now stacks its two groups vertically
+   (Vel Window row, then ATM Range row) and expands open via max-height —
+   it used to be a single wide horizontal row that expanded via max-width,
+   which meant it stretched sideways over the chain table's columns
+   instead of dropping down compactly. */
+
+.ctrl-sidebar{
+  position:fixed;
+  z-index:1000;
+}
+
+.ctrl-sidebar-panel{
+  background:rgba(22,24,29,0.95);
+  border:1px solid var(--border);
+  border-radius:12px;
+  max-height:0;
+  overflow:hidden;
+  opacity:0;
+  padding:0;
+  box-shadow:0 4px 20px rgba(0,0,0,0.40);
+  backdrop-filter:blur(12px);
+  display:flex;flex-direction:column;align-items:flex-start;gap:8px;
+  white-space:nowrap;
+  transition:max-height .22s ease, opacity .18s ease, padding .22s ease;
+}
+
+.ctrl-sidebar.open .ctrl-sidebar-panel{
+  max-height:160px;
+  opacity:1;
+  padding:8px 10px;
+}
+
+.ctrl-sidebar-group{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+
+.ctrl-sidebar-group-label{
+  font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:0;
+}
+
+.ctrl-sidebar-group .tab-group{flex-direction:row;gap:4px;}
+
+.ctrl-sidebar-group .tab-btn{text-align:center;padding:4px 8px;}
+
+.ctrl-sidebar-divider{width:100%;height:1px;background:var(--border);flex-shrink:0;}
+
+/* Narrow viewports used to hide this sidebar and fall back to inline
+   chain-header range/velocity tabs; those inline tabs have been removed
+   (single global control now), so the sidebar stays visible here too. */
+
+/* NOTE: the old "RANGE TOGGLE NAV" block (.range-nav / .range-btn /
+   .reload-btn / .meta) lived here and is gone — those classes had no
+   remaining references anywhere in the file (checked static markup,
+   JS-generated template strings, and commented-out HTML). Removed as
+   dead weight during the layout cleanup pass. */
+
+/* ── STICKY REFRESH BUTTON ── */
+
+#sticky-refresh-btn{
+  font-size:0.8625rem;font-weight:700;
+  padding:5px 14px;
+  border-radius:20px;
+  border:1.5px solid rgba(51,154,240,0.40);
+  background:linear-gradient(135deg, rgba(51,154,240,0.15), rgba(51,154,240,0.05));
+  color:var(--info);
+  cursor:pointer;
+  transition:all 0.25s ease;
+  white-space:nowrap;
+  box-shadow:0 1px 4px rgba(51,154,240,0.10);
+  font-family:var(--font-sans);
+}
+
+#sticky-refresh-btn:hover{
+  background:linear-gradient(135deg, rgba(51,154,240,0.25), rgba(51,154,240,0.10));
+  border-color:var(--info);
+  transform:translateY(-2px);
+  box-shadow:0 4px 16px rgba(51,154,240,0.25);
+}
+
+#sticky-refresh-btn.running{
+  border-color:rgba(245,159,0,0.5);
+  background:rgba(245,159,0,0.12);
+  color:var(--warn);
+  animation:spin-pulse 1.2s linear infinite;
+}
+
+/* ── OPTION CHAIN / OI DASHBOARD NAV BUTTONS ──
+   Now regular members of the vertical .sec-nav rail (they inherit .sec-btn's
+   flex-column icon+label layout); these ID rules just tint them so they
+   stay visually distinct from the plain section-jump buttons. */
+
+#option-chain-btn{
+  border-color:rgba(245,159,0,0.40);
+  background:linear-gradient(135deg, rgba(245,159,0,0.15), rgba(245,159,0,0.05));
+  color:var(--warn);
+  box-shadow:0 1px 4px rgba(245,159,0,0.10);
+}
+
+#option-chain-btn:hover{
+  background:linear-gradient(135deg, rgba(245,159,0,0.25), rgba(245,159,0,0.10));
+  border-color:var(--warn);
+  box-shadow:0 4px 16px rgba(245,159,0,0.25);
+}
+
+#oi-dashboard-btn{
+  border-color:rgba(51,154,240,0.40);
+  background:linear-gradient(135deg, rgba(51,154,240,0.15), rgba(51,154,240,0.05));
+  color:var(--info);
+  box-shadow:0 1px 4px rgba(51,154,240,0.10);
+}
+
+#oi-dashboard-btn:hover{
+  background:linear-gradient(135deg, rgba(51,154,240,0.25), rgba(51,154,240,0.10));
+  border-color:var(--info);
+  box-shadow:0 4px 16px rgba(51,154,240,0.25);
+}
+
+.sec-btn-simulator{color:var(--info);}
+
+.sec-btn-simulator.active{background:rgba(51,154,240,.12);color:var(--info);}
+
+.sec-btn-simulator.active::after{background:var(--info);}

@@ -1,0 +1,24 @@
+/* animations.css
+   All @keyframes definitions used across the dashboard (fund-warning
+   pulse, refresh-button spin, gamma-trap pulse, toast slide-in, live-mode
+   pulse). The rules that reference these animations (animation: ...)
+   stay in their component files (panels.css / navigation.css); only the
+   @keyframes declarations themselves live here. Split out of styles.css
+   (Phase 7 CSS architecture reorg) — no selector, visual, or HTML
+   changes. Load this file before the others so the keyframes are defined
+   by the time a component rule references them (keyframe declarations
+   are hoisted by the CSS engine regardless of link order, but keeping it
+   early keeps source order intuitive). */
+
+@keyframes pt-fund-pulse{
+  0%,100%{background:rgba(250,82,82,0.12);}
+  50%{background:rgba(250,82,82,0.22);}
+}
+
+@keyframes spin-pulse{0%{opacity:1;}50%{opacity:.5;}100%{opacity:1;}}
+
+@keyframes trap-pulse{0%,100%{box-shadow:0 0 0 0 rgba(250,82,82,0.0);}50%{box-shadow:0 0 0 5px rgba(250,82,82,0.18);}}
+
+@keyframes pt-toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+@keyframes pt-mode-pulse{0%,100%{opacity:1;}50%{opacity:.65;}}

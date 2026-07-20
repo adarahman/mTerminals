@@ -53,6 +53,11 @@
   // variable), not window._ocRequestExpiry — nothing outside this IIFE
   // ever needs to read it.
   let _ocRequestExpiry = null;
+  // Same idea, for the ATM range toggle group — set by initLiveSync()
+  // when the BroadcastChannel is open. Lets a click on THIS tab's
+  // ±3/±5/±10/All buttons propagate out as the new global range instead
+  // of only ever filtering this tab's own local copy.
+  let _ocRequestRange = null;
 
   // Figures below are RAW absolute numbers (contracts / shares) — the
   // same units chain-views.js's mapPayloadToRows() produces for ce.oi,
@@ -189,19 +194,38 @@
   // -2..+2 bullish/bearish scale, then averaged; legs that openly
   // disagree (one bullish, one bearish) collapse to "mixed" since that's
   // a genuine conflict, not an in-between reading.
-  const SIGNAL_RANK = {
-    "strong-bearish": -2, "bearish": -1, "neutral": 0, "mixed": 0,
-    "bullish": 1, "strong-bullish": 2,
-  };
+  // Backend signal strings are OI-behavior phrases — "Long Buildup",
+  // "Short Buildup", "Short Covering", "Writing", "Unwinding", "Buying"
+  // (see ce_signal/pe_signal in mTerminals_json.py) — never the
+  // "bullish"/"bearish"/"mixed" vocabulary this file's badge()/
+  // SIGNAL_LABEL work with. ceBias/peBias/compositeSignal below mirror
+  // chain-helpers.js's ceBias/peBias/combinedSignal (the logic the main
+  // dashboard already uses correctly) so this tab classifies the same
+  // real strings instead of comparing them against keys they can never
+  // match — which is why every strike previously fell through to
+  // "neutral" regardless of actual OI activity.
+  function ceBias(s) {
+    if (!s) return 0;
+    s = String(s).toLowerCase();
+    if (s.includes("writing") || s.includes("short build")) return -1;
+    if (s.includes("unwind") || s.includes("cover")) return 1;
+    return 0;
+  }
+  function peBias(s) {
+    if (!s) return 0;
+    s = String(s).toLowerCase();
+    if (s.includes("writing") || s.includes("short build") || s.includes("buying") || s.includes("long build")) return 1;
+    if (s.includes("unwind") || s.includes("cover")) return -1;
+    return 0;
+  }
   function compositeSignal(ceSig, peSig) {
-    const c = SIGNAL_RANK[ceSig] ?? 0;
-    const p = SIGNAL_RANK[peSig] ?? 0;
-    if ((c > 0 && p < 0) || (c < 0 && p > 0)) return "mixed";
-    const avg = (c + p) / 2;
-    if (avg >= 1.5) return "strong-bullish";
-    if (avg >= 0.5) return "bullish";
-    if (avg <= -1.5) return "strong-bearish";
-    if (avg <= -0.5) return "bearish";
+    const cb = ceBias(ceSig), pb = peBias(peSig);
+    if (cb > 0 && pb > 0) return "strong-bullish";
+    if (cb < 0 && pb < 0) return "strong-bearish";
+    if (cb !== 0 && pb !== 0) return "mixed";
+    const sum = cb + pb;
+    if (sum > 0) return "bullish";
+    if (sum < 0) return "bearish";
     return "neutral";
   }
 
@@ -239,13 +263,16 @@
   }
 
   // ── ROW RENDER ──
-  function buildRowHtml(r) {
-    const maxOi = Math.max(r.ce.oi, r.pe.oi, 1);
+  // maxOi is passed in from renderRows() (the max CE/PE OI across every
+  // VISIBLE row) — it used to be Math.max(r.ce.oi, r.pe.oi, 1), i.e. only
+  // that one row's own two legs, which meant every row's larger leg
+  // always filled ~100% of its bar regardless of its actual size versus
+  // other strikes (a 3.55L OI bar rendered the same length as a 97.6K
+  // one). Scaling every row against one shared max makes bar length
+  // finally mean something comparable across the whole table.
+  function buildRowHtml(r, maxOi, maxChg) {
     const cePct = Math.min(100, (r.ce.oi / maxOi) * 100);
     const pePct = Math.min(100, (r.pe.oi / maxOi) * 100);
-    const gaugeCe = Math.min(100, (r.ce.oi / (r.ce.oi + r.pe.oi || 1)) * 100);
-    const gaugePe = 100 - gaugeCe;
-    const maxChg = Math.max(Math.abs(r.ce.oiChg || 0), Math.abs(r.pe.oiChg || 0), 1);
     const ceChgPct = Math.min(100, (Math.abs(r.ce.oiChg || 0) / maxChg) * 100);
     const peChgPct = Math.min(100, (Math.abs(r.pe.oiChg || 0) / maxChg) * 100);
     const ceOiValCls = ceOiCls(r.ce.oi);
@@ -277,10 +304,6 @@
       </td>
       <td class="oc-strike-cell" onclick="event.stopPropagation();window.ocOpenDepth(${r.strike})" title="Click for Bid/Ask depth">
         <span class="oc-strike-val">${r.strike}${ceVsPeDivergence(r.ce.chg, r.pe.chg) ? `<i class="oc-strike-div ${ceVsPeDivergence(r.ce.chg, r.pe.chg)}" title="${ceVsPeDivergence(r.ce.chg, r.pe.chg) === 'div-red' ? 'CE up / PE down' : 'CE down / PE up'}"></i>` : ""}</span>
-        <div class="oc-strike-gauge">
-          <div class="oc-strike-gauge-pe" style="width:${gaugePe}%;"></div>
-          <div class="oc-strike-gauge-ce" style="width:${gaugeCe}%;"></div>
-        </div>
         <span class="oc-strike-pcr">PCR <b>${r.pcr}</b> <span class="${signClass(parseFloat(r.pcrChg))}">${r.pcrChg}</span></span>
       </td>
       <td class="oc-oi-cell">
@@ -326,6 +349,15 @@
     </tr>`;
   }
 
+  // Reflects state.range onto the ±3/±5/±10/All buttons — pulled out so
+  // both a local click AND an incoming remote range change (from the
+  // dashboard or another tab) can put the toggle group in the right
+  // visual state without duplicating this each time.
+  function syncRangeButtons() {
+    $("ocRangeGroup").dataset.active = state.range;
+    $("ocRangeGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", +b.dataset.val === state.range));
+  }
+
   function visibleRows() {
     if (state.range >= 9999) return state.rows;
     const atmIdx = state.rows.findIndex((r) => r.isAtm);
@@ -337,9 +369,15 @@
   function renderHeader() {
     $("ocSpot").textContent = state.spot.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const chgEl = $("ocSpotChg");
-    const up = state.spotChg >= 0;
-    chgEl.textContent = `${up ? "+" : ""}${state.spotChg.toFixed(2)} (${up ? "+" : ""}${state.spotChgPct.toFixed(2)}%)`;
-    chgEl.className = "oc-spot-chg" + (up ? "" : " down");
+    // Sign computed separately per value — previously one `up` flag came
+    // from spotChg alone and got applied to spotChgPct's "+" prefix too,
+    // so any tick where the two disagreed in sign (or spotChg was stuck,
+    // see chain-sync.js's field-name fix) rendered a literal "+-0.59%":
+    // the forced "+" glued onto the negative number's own "-".
+    const chgUp = state.spotChg >= 0;
+    const pctUp = state.spotChgPct >= 0;
+    chgEl.textContent = `${chgUp ? "+" : ""}${state.spotChg.toFixed(2)} (${pctUp ? "+" : ""}${state.spotChgPct.toFixed(2)}%)`;
+    chgEl.className = "oc-spot-chg" + (chgUp ? "" : " down");
     document.querySelector("#ocSymbol").childNodes[0].nodeValue = state.symbol + " ";
 
     const sel = $("ocExpiry");
@@ -463,6 +501,10 @@
     const tbody = $("ocBody");
     const rows = visibleRows();
     const wantKeys = new Set(rows.map((r) => String(r.strike)));
+    // Shared across every row in this render so OI bar length is
+    // comparable strike-to-strike (see buildRowHtml's comment).
+    const maxOi = rows.reduce((m, r) => Math.max(m, r.ce.oi || 0, r.pe.oi || 0), 1);
+    const maxChg = rows.reduce((m, r) => Math.max(m, Math.abs(r.ce.oiChg || 0), Math.abs(r.pe.oiChg || 0)), 1);
 
     // Drop rows that scrolled out of the visible range (or window shrank).
     for (const [key, entry] of _rowCache) {
@@ -475,7 +517,7 @@
     let afterEl = null; // cursor: last correctly-positioned node so far
     rows.forEach((r) => {
       const key = String(r.strike);
-      const mainHtml = buildRowHtml(r);
+      const mainHtml = buildRowHtml(r, maxOi, maxChg);
       const greekHtml = state.greeksOpen ? buildGreekRowHtml(r) : null;
       let entry = _rowCache.get(key);
 
@@ -560,7 +602,7 @@
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div>
-          <div style="color:var(--call);font-weight:700;font-size:12px;margin-bottom:8px;">CALL · ${SIGNAL_LABEL[r.ce.signal] || "—"}</div>
+          <div style="color:var(--call);font-weight:700;font-size:12px;margin-bottom:8px;">CALL · ${r.ce.signal || "Neutral"}</div>
           <div style="font-family:var(--mono);font-size:12.5px;line-height:2;color:var(--text-2);">
             LTP <b style="color:var(--text);">${fmtNum(r.ce.ltp)}</b><br>
             IV <b style="color:var(--text);">${fmtNum(r.ce.iv)}%</b><br>
@@ -569,7 +611,7 @@
           </div>
         </div>
         <div>
-          <div style="color:var(--put);font-weight:700;font-size:12px;margin-bottom:8px;">PUT · ${SIGNAL_LABEL[r.pe.signal] || "—"}</div>
+          <div style="color:var(--put);font-weight:700;font-size:12px;margin-bottom:8px;">PUT · ${r.pe.signal || "Neutral"}</div>
           <div style="font-family:var(--mono);font-size:12.5px;line-height:2;color:var(--text-2);">
             LTP <b style="color:var(--text);">${fmtNum(r.pe.ltp)}</b><br>
             IV <b style="color:var(--text);">${fmtNum(r.pe.iv)}%</b><br>
@@ -602,10 +644,16 @@
       const btn = e.target.closest("button");
       if (!btn) return;
       state.range = +btn.dataset.val;
-      $("ocRangeGroup").dataset.active = state.range;
-      $("ocRangeGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      syncRangeButtons();
       renderSummary();
       renderRows();
+      // Make this tab's choice the new GLOBAL range, not just a local
+      // filter: ask the dashboard tab to run it through the real
+      // sidebar range path (mirrors the ocExpiry change handler above).
+      // Every other table — main-dashboard modals included — reads the
+      // same shared range, so this is what makes one button apply
+      // everywhere instead of each surface keeping its own copy.
+      if (_ocRequestRange) _ocRequestRange(state.range);
     });
 
     $("ocVelGroup").addEventListener("click", (e) => {
@@ -640,7 +688,7 @@
     });
 
     // set initial toggle button active states
-    $("ocRangeGroup").querySelector(`button[data-val="${state.range}"]`)?.classList.add("active");
+    syncRangeButtons();
     $("ocVelGroup").querySelector(`button[data-val="${state.velWin}"]`)?.classList.add("active");
   }
 
@@ -712,6 +760,13 @@
     if (msg.spotChgPct != null) state.spotChgPct = msg.spotChgPct;
     if (msg.expiry) state.expiry = msg.expiry;
     if (msg.expiryDates) state.expiryDates = msg.expiryDates;
+    // Adopt the global range if it changed elsewhere (dashboard sidebar,
+    // or another open tab) — keeps this tab's toggle group truthful
+    // instead of silently drifting from what every other table shows.
+    if (msg.range != null && msg.range !== state.range) {
+      state.range = msg.range;
+      syncRangeButtons();
+    }
     renderAll();
   }
 
@@ -734,6 +789,9 @@
       // outside this IIFE ever needs to read it.
       _ocRequestExpiry = (expiry) => {
         chan.postMessage({ type: "oc-request-expiry", expiry });
+      };
+      _ocRequestRange = (range) => {
+        chan.postMessage({ type: "oc-request-range", range });
       };
     }
     // Fallback path: this page was opened via window.open() from the

@@ -30,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from smartapi_client import (
     _load_scrip_master,
+    _scrip_indexes,
     get_index_quote,
     get_spot_quote,
     get_batch_quotes,
@@ -256,25 +257,44 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
     interval = _get_strike_interval(underlying)
     strikes = {atm + (i * interval) for i in range(-strikes_around_atm, strikes_around_atm + 1)}
 
-    data = _load_scrip_master()
-    strike_lookup = {}
-    for row in data:
-        if not (row.get("exch_seg") == exchange
-                and row.get("name") == underlying.upper()
-                and row.get("expiry") == expiry_smart):
-            continue
-        try:
-            strike_val = int(round(float(row["strike"]) / 100))
-        except (KeyError, ValueError, TypeError):
-            continue
-        symbol = row.get("symbol", "")
-        opt_type = "CE" if symbol.endswith("CE") else "PE" if symbol.endswith("PE") else None
-        if opt_type and strike_val in strikes:
-            strike_lookup[(strike_val, opt_type)] = {"token": row["token"], "tradingsymbol": symbol}
+    # _load_scrip_master() ensures the ScripMaster is loaded and
+    # _scrip_indexes is populated (idempotent — no-op if already loaded
+    # this process). The actual per-strike lookup below then goes through
+    # the pre-built O(1) chain index instead of a raw linear scan over
+    # the full ScripMaster list (up to ~165k rows) on every single tick,
+    # once per expiry chain requested. That linear scan was the reason
+    # per-tick pipeline time rose ~1s after the ScripMaster refresh grew
+    # the file ~12% larger — get_atm_chain() already used this same index
+    # for exactly this reason; fetch_option_chain_wide() just hadn't been
+    # updated to use it.
+    _load_scrip_master()
+    chain_map = _scrip_indexes["chain"].get((exchange, underlying.upper(), expiry_smart), {})
+    strike_lookup = {
+        (strike_val, opt_type): info
+        for (strike_val, opt_type), info in chain_map.items()
+        if strike_val in strikes
+    }
 
     if not strike_lookup:
         print(f"[smartapi_pipeline_adapter] no contracts resolved for {underlying} {expiry_dash}")
         return pd.DataFrame()
+
+    # ── ScripMaster CE/PE parity sanity check ──────────────────────────
+    # A healthy option chain has one CE and one PE per strike. If the
+    # local ScripMaster cache is stale/incomplete (e.g. a partial/corrupted
+    # download, or a save that raced a process restart), one side can go
+    # missing for a specific strike while the other survives — the exact
+    # failure mode that caused PE OI/LTP/Volume to silently export as 0
+    # for one strike while CE at the same strike worked fine. This check
+    # surfaces that mismatch immediately instead of requiring a multi-hour
+    # debugging session to trace back through the whole pipeline.
+    ce_count = sum(1 for (_, side) in strike_lookup if side == "CE")
+    pe_count = sum(1 for (_, side) in strike_lookup if side == "PE")
+    if ce_count != pe_count:
+        print(f"[smartapi_pipeline_adapter] WARNING: CE/PE contract count mismatch for "
+              f"{underlying} {expiry_dash} — CE={ce_count} PE={pe_count}. "
+              f"ScripMaster cache may be stale/incomplete; consider deleting the local "
+              f"cache file to force a fresh download.")
 
     pairs = [(info["tradingsymbol"], info["token"]) for info in strike_lookup.values()]
     quotes = get_batch_quotes(exchange, pairs, mode="FULL")  # raw dicts, depth included
@@ -283,7 +303,16 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
 
     by_strike: dict[float, dict] = {}
     for (strike_val, side), info in strike_lookup.items():
-        q = quotes.get(info["tradingsymbol"])
+        # ── ROOT CAUSE FIX ──
+        # Quotes must be keyed/looked-up by TOKEN, not by tradingsymbol
+        # string. get_batch_quotes() stores each quote under the live
+        # API response's own tradingSymbol field, while `info["tradingsymbol"]`
+        # here comes from the ScripMaster file's `symbol` field — two
+        # different sources of truth for the same string, with no
+        # normalization between them. Token is the exchange-canonical,
+        # collision-proof identifier and is present on both sides, so
+        # keying on it removes the mismatch risk entirely.
+        q = quotes.get(str(info["token"]))
         if not q:
             continue
 
@@ -366,7 +395,7 @@ def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
         return pd.DataFrame()
 
     quotes = get_batch_quotes(exchange, [(fut["symbol"], fut["token"])], mode="FULL")
-    q = quotes.get(fut["symbol"])
+    q = quotes.get(str(fut["token"]))
     if not q:
         return pd.DataFrame()
 
@@ -428,18 +457,23 @@ def fetch_all_pills_and_vix_batched():
     ]
     nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
 
-    nse_quotes = get_batch_quotes("NSE", nse_pairs, mode="FULL")
+    nse_by_token = get_batch_quotes("NSE", nse_pairs, mode="FULL")
 
     sensex_info = INDEX_TOKENS.get("SENSEX")
-    bse_quotes = {}
-    if sensex_info:
-        bse_quotes = get_batch_quotes(
-            "BSE", [("SENSEX", sensex_info["token"])], mode="FULL"
-        )
+    bse_pairs = [("SENSEX", sensex_info["token"])] if sensex_info else []
+    bse_by_token = get_batch_quotes("BSE", bse_pairs, mode="FULL") if bse_pairs else {}
 
+    # get_batch_quotes keys its return dict by token (str(symbolToken)),
+    # not by the tradingsymbol string we requested with — re-key here by
+    # symbol so the three wrapper functions below (which look up by
+    # symbol name, e.g. "India VIX", "NIFTY", "SENSEX") can actually find
+    # their entries. Without this, every lookup silently misses: VIX logs
+    # it, the ticker-strip wrappers just return None with no warning.
     _BATCH_CACHE.clear()
-    _BATCH_CACHE.update(nse_quotes)
-    _BATCH_CACHE.update(bse_quotes)
+    for sym, token in nse_pairs + bse_pairs:
+        row = nse_by_token.get(str(token)) or bse_by_token.get(str(token))
+        if row:
+            _BATCH_CACHE[sym] = row
 
 
 def fetch_vix_smartapi() -> tuple[float | None, float]:
