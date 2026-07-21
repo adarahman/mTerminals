@@ -73,7 +73,7 @@ _parser.add_argument("--host", default="localhost")
 _parser.add_argument("--port", type=int, default=8765)
 _parser.add_argument("--http-port", type=int, default=5500, help="HTTP static file server port")
 _parser.add_argument("--relay", action="store_true", help="Enable Node relay posting (off by default)")
-_parser.add_argument("--no-extra-chains", action="store_true", help="Disable multi-expiry chains for faster performance")
+_parser.add_argument("--extra-chains", action="store_true", dest="extra_chains", help="Enable multi-expiry NEAR/MONTHLY chains (slower; off by default)")
 _parser.add_argument("--strict-expiry", action="store_true", help="Don't auto-resolve to different expiry if requested expiry has no data")
 _parser.add_argument("--no-virtual-oi", action="store_true", help="Disable VirtualOI model inference for faster performance")
 _parser.add_argument("--no-delta", action="store_true", help="Always broadcast full payloads instead of deltas")
@@ -714,8 +714,10 @@ def switch_symbol(new_symbol, new_expiry=None):
     symbols out of a single process."""
     global SYMBOL, EXPIRY, LAST_PAYLOAD, _LAST_SENT
     new_symbol = new_symbol.strip().upper()
-    if new_symbol == SYMBOL and new_expiry is None:
-        return  # already on this symbol, nothing to do
+    if new_symbol == SYMBOL and (new_expiry is None or new_expiry == EXPIRY):
+        return  # already on this symbol+expiry, nothing to do
+    # if new_symbol == SYMBOL and new_expiry is None:
+    #     return  # already on this symbol, nothing to do
     print(f"[ws] symbol switch requested: {SYMBOL} -> {new_symbol}", flush=True)
     SYMBOL = new_symbol
     EXPIRY = new_expiry
@@ -766,11 +768,18 @@ async def _smartapi_sync_and_broadcast(message):
     bookkeeping honest about what clients actually have on screen.
 
     If the expiry doesn't match (feed is streaming a different expiry than
-    what's displayed), the merge is skipped but the tick is still broadcast
-    as before — existing clients only apply it if their own rendered chain
-    has a matching row (see dashboard.js's applyDelta), so this is safe,
-    just without the LAST_PAYLOAD/_LAST_SENT consistency benefit for that
-    edge case."""
+    what's displayed), the chain portion of the delta is stripped before
+    broadcasting — it must NOT reach clients. applyDelta() on the client
+    (market-store.js) merges keyed chain rows by strike alone, with no
+    concept of expiry; strikes overlap heavily across expiries (e.g. 24000,
+    24100, ...), so a stale-expiry row would get stamped straight onto the
+    currently-displayed expiry's row for that strike, corrupting LTP/OI in
+    the UI. This window opens right after an expiry switch — switch_symbol()
+    clears LAST_PAYLOAD/EXPIRY immediately, but _switch_smartapi_symbol_
+    blocking()'s background unsubscribe hasn't finished yet, so the feed can
+    still emit a few ticks for the old expiry before it's cut off. Spot
+    (handled separately below) isn't tied to an expiry, so it's unaffected
+    and still broadcasts every time."""
     try:
         payload = message.get("payload") if isinstance(message, dict) else None
         chain_delta = (payload or {}).get("chain") if isinstance(payload, dict) else None
@@ -782,6 +791,15 @@ async def _smartapi_sync_and_broadcast(message):
                     _apply_smartapi_rows_to_chain_list(LAST_PAYLOAD.get("chain"), changed_rows)
                 if isinstance(_LAST_SENT, dict):
                     _apply_smartapi_rows_to_chain_list(_LAST_SENT.get("chain"), changed_rows)
+            elif changed_rows:
+                # Mismatch: this stale-expiry chain delta must not reach
+                # clients at all. Broadcast a copy of the message with
+                # "chain" removed from its payload, rather than mutating
+                # the original message in place — TickAggregator (the
+                # caller) may hold onto/reuse the dict internally, and this
+                # function has no visibility into that.
+                stripped_payload = {k: v for k, v in payload.items() if k != "chain"}
+                message = {**message, "payload": stripped_payload}
 
         # Spot isn't tied to any expiry (unlike the chain rows above), so no
         # expiry-match gate is needed here — just carry it into both
@@ -1202,7 +1220,7 @@ def run_pipeline_once():
     # Remap global runtime variables inside our new option_chain_json engine
     _configure_pipeline_globals(
         SYMBOL, EXPIRY,
-        no_extra_chains=ARGS.no_extra_chains,
+        no_extra_chains=not ARGS.extra_chains,
         strict_expiry=ARGS.strict_expiry,
         no_virtual_oi=ARGS.no_virtual_oi,
     )

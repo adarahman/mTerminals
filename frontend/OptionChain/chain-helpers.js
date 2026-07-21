@@ -358,104 +358,6 @@ function activeAtm(d){
   return d.atm||0;
 }
 
-function applyExpirySelection(d, selectedExpiry){
-  if(!d) return;
-  d._primaryExpiry = d._primaryExpiry || d.expiry || '';
-  d._activeExpiry = selectedExpiry || d._primaryExpiry;
-  if(!selectedExpiry || selectedExpiry === d._primaryExpiry){
-    // Switching back to the primary expiry (or first render). Restore the
-    // primary values that got overwritten below the last time a non-primary
-    // expiry was selected — these _primary* backups were being written but
-    // never read back, so d.chain/d.atm/d.oiVelocity/etc used to stay
-    // stuck on the last-selected expiry's data even after switching back.
-    if(d._primaryChain      !== undefined) d.chain      = d._primaryChain;
-    if(d._primaryGreeks     !== undefined) d.greeks     = d._primaryGreeks;
-    if(d._primaryAtm        !== undefined) d.atm        = d._primaryAtm;
-    if(d._primaryDte        !== undefined) d.dte        = d._primaryDte;
-    if(d._primaryCeWall     !== undefined) d.ceWall     = d._primaryCeWall;
-    if(d._primaryPeWall     !== undefined) d.peWall     = d._primaryPeWall;
-    if(d._primaryMaxPain    !== undefined) d.maxPain    = d._primaryMaxPain;
-    if(d._primaryPCR        !== undefined) d.totalPCR   = d._primaryPCR;
-    if(d._primaryCallPremium!== undefined) d.callPremium= d._primaryCallPremium;
-    if(d._primaryPutPremium !== undefined) d.putPremium = d._primaryPutPremium;
-    if(d._primaryAtmIV      !== undefined) d.atmIV      = d._primaryAtmIV;
-    if(d._primaryAtmDelta   !== undefined) d.atmDelta   = d._primaryAtmDelta;
-    if(d._primaryAtmGamma   !== undefined) d.atmGamma   = d._primaryAtmGamma;
-    if(d._primaryAtmTheta   !== undefined) d.atmTheta   = d._primaryAtmTheta;
-    if(d._primaryAtmVega    !== undefined) d.atmVega    = d._primaryAtmVega;
-    if(d._primaryOiVelocity !== undefined) d.oiVelocity = d._primaryOiVelocity;
-    return;
-  }
-
-  const chainStore = d.chains || {};
-  const metaStore = d.chainMeta || {};
-  const cached = _expiryViewCache[selectedExpiry] || {};
-  const selectedChainSrc = chainStore[selectedExpiry] || cached.chain;
-  if(!selectedChainSrc || !selectedChainSrc.length) return;
-  const selectedMeta = metaStore[selectedExpiry] || cached.meta || {};
-  // IMPORTANT: never hand out the same array/row objects that live in
-  // d.chains[selectedExpiry] / _expiryViewCache. d.chain gets mutated
-  // in place by applyDelta() on every live WS tick (Object.assign on
-  // matching-strike rows) — deltas only ever carry the primary/near
-  // expiry's ticks, so if d.chain aliased the cached array, those
-  // primary-expiry field patches would silently bleed into this
-  // expiry's cached rows (by matching strike number) and corrupt the
-  // cache until the next 'full' resync. Clone so d.chain is a
-  // disposable working copy every time.
-  const selectedChain = selectedChainSrc.map(row => Object.assign({}, row));
-  _expiryViewCache[selectedExpiry] = { chain: selectedChainSrc, meta: selectedMeta };
-
-  // Only back up primary values the FIRST time we swap away from the
-  // primary expiry in a given payload lifetime (the || guards) — repeated
-  // ticks while a non-primary expiry stays selected must not clobber the
-  // backup with the already-swapped-in values.
-  d._primaryChain       = d._primaryChain       || d.chain;
-  d._primaryGreeks       = d._primaryGreeks     || d.greeks;
-  d._primaryAtm         = d._primaryAtm         || d.atm;
-  d._primaryDte         = d._primaryDte         || d.dte;
-  d._primaryCeWall      = d._primaryCeWall      || d.ceWall;
-  d._primaryPeWall      = d._primaryPeWall      || d.peWall;
-  d._primaryMaxPain     = d._primaryMaxPain     || d.maxPain;
-  d._primaryPCR         = d._primaryPCR         || d.totalPCR;
-  d._primaryCallPremium = d._primaryCallPremium || d.callPremium;
-  d._primaryPutPremium  = d._primaryPutPremium  || d.putPremium;
-  d._primaryAtmIV       = d._primaryAtmIV       || d.atmIV;
-  d._primaryAtmDelta    = d._primaryAtmDelta    || d.atmDelta;
-  d._primaryAtmGamma    = d._primaryAtmGamma    || d.atmGamma;
-  d._primaryAtmTheta    = d._primaryAtmTheta    || d.atmTheta;
-  d._primaryAtmVega     = d._primaryAtmVega     || d.atmVega;
-  d._primaryOiVelocity  = d._primaryOiVelocity  || d.oiVelocity;
-
-  d.chain = selectedChain;
-  const meta = selectedMeta;
-  d.expiry = selectedExpiry;
-  if(meta.greeks      != null) d.greeks      = meta.greeks;
-  if(meta.atm         != null) d.atm         = meta.atm;
-  if(meta.dte         != null) d.dte         = meta.dte;
-  if(meta.ceWall      != null) d.ceWall      = meta.ceWall;
-  if(meta.peWall      != null) d.peWall      = meta.peWall;
-  if(meta.maxPain     != null) d.maxPain     = meta.maxPain;
-  if(meta.totalPCR    != null) d.totalPCR    = meta.totalPCR;
-  if(meta.straddle    != null){ d.callPremium = meta.straddle/2; d.putPremium = meta.straddle/2; }
-  if(meta.callPremium != null) d.callPremium = meta.callPremium;
-  if(meta.putPremium  != null) d.putPremium  = meta.putPremium;
-  if(meta.atmIV       != null) d.atmIV       = meta.atmIV;
-  if(meta.atmDelta    != null) d.atmDelta    = meta.atmDelta;
-  if(meta.atmGamma    != null) d.atmGamma    = meta.atmGamma;
-  if(meta.atmTheta    != null) d.atmTheta    = meta.atmTheta;
-  if(meta.atmVega     != null) d.atmVega     = meta.atmVega;
-  // ── OI VELOCITY ──
-  // d.oiVelocity was never swapped per expiry before this fix, so every
-  // OI-Vel view (butterfly "OI Vel" tab, Greeks/GEX panel, right-panel
-  // totals) kept showing the PRIMARY expiry's velocity numbers no matter
-  // which expiry was selected. This requires the backend to actually send
-  // per-expiry velocity data in chainMeta[expiry].oiVelocity — if it
-  // doesn't, this falls back to leaving the primary expiry's velocity in
-  // place (same as before) rather than showing wrong/blank data.
-  if(meta.oiVelocity  != null) d.oiVelocity  = meta.oiVelocity;
-  if(!d.atm) d.atm = activeAtm(d);
-}
-
 function getFilteredChain(d){
   const chainAll=(d&&d.chain)||[];
   if(_chainRange===9999) return chainAll;
@@ -523,3 +425,84 @@ function _legPnl(leg, underlyingAtExpiry, lotSize){
   else if(type==='FUT') payoff = S - K - ltp;
   return dir * payoff * lots * lotSize;
 }
+
+// Restored 2026-07-21: dropped during Phase 6 chain-views.js -> OptionChain/
+// split, causing "applyExpirySelection is not defined" ReferenceErrors on
+// every live tick (see data-service.js updateDashboard). Body pulled from
+// commit 7a692d3, last known-good version. Depends on _expiryViewCache
+// (defined via Object.defineProperty on window in dashboard.js) and
+// activeAtm() (already in this file) — both resolved at call time, so
+// script load order is fine as long as dashboard.js has parsed before the
+// first live WS tick, which it always will (synchronous script tags).
+function applyExpirySelection(d, selectedExpiry){
+  if(!d) return;
+  d._primaryExpiry = d._primaryExpiry || d.expiry || '';
+  d._activeExpiry = selectedExpiry || d._primaryExpiry;
+  if(!selectedExpiry || selectedExpiry === d._primaryExpiry){
+    if(d._primaryChain      !== undefined) d.chain      = d._primaryChain;
+    if(d._primaryGreeks     !== undefined) d.greeks     = d._primaryGreeks;
+    if(d._primaryAtm        !== undefined) d.atm        = d._primaryAtm;
+    if(d._primaryDte        !== undefined) d.dte        = d._primaryDte;
+    if(d._primaryCeWall     !== undefined) d.ceWall     = d._primaryCeWall;
+    if(d._primaryPeWall     !== undefined) d.peWall     = d._primaryPeWall;
+    if(d._primaryMaxPain    !== undefined) d.maxPain    = d._primaryMaxPain;
+    if(d._primaryPCR        !== undefined) d.totalPCR   = d._primaryPCR;
+    if(d._primaryCallPremium!== undefined) d.callPremium= d._primaryCallPremium;
+    if(d._primaryPutPremium !== undefined) d.putPremium = d._primaryPutPremium;
+    if(d._primaryAtmIV      !== undefined) d.atmIV      = d._primaryAtmIV;
+    if(d._primaryAtmDelta   !== undefined) d.atmDelta   = d._primaryAtmDelta;
+    if(d._primaryAtmGamma   !== undefined) d.atmGamma   = d._primaryAtmGamma;
+    if(d._primaryAtmTheta   !== undefined) d.atmTheta   = d._primaryAtmTheta;
+    if(d._primaryAtmVega    !== undefined) d.atmVega    = d._primaryAtmVega;
+    if(d._primaryOiVelocity !== undefined) d.oiVelocity = d._primaryOiVelocity;
+    return;
+  }
+
+  const chainStore = d.chains || {};
+  const metaStore = d.chainMeta || {};
+  const cached = _expiryViewCache[selectedExpiry] || {};
+  const selectedChainSrc = chainStore[selectedExpiry] || cached.chain;
+  if(!selectedChainSrc || !selectedChainSrc.length) return;
+  const selectedMeta = metaStore[selectedExpiry] || cached.meta || {};
+  const selectedChain = selectedChainSrc.map(row => Object.assign({}, row));
+  _expiryViewCache[selectedExpiry] = { chain: selectedChainSrc, meta: selectedMeta };
+
+  d._primaryChain       = d._primaryChain       || d.chain;
+  d._primaryGreeks       = d._primaryGreeks     || d.greeks;
+  d._primaryAtm         = d._primaryAtm         || d.atm;
+  d._primaryDte         = d._primaryDte         || d.dte;
+  d._primaryCeWall      = d._primaryCeWall      || d.ceWall;
+  d._primaryPeWall      = d._primaryPeWall      || d.peWall;
+  d._primaryMaxPain     = d._primaryMaxPain     || d.maxPain;
+  d._primaryPCR         = d._primaryPCR         || d.totalPCR;
+  d._primaryCallPremium = d._primaryCallPremium || d.callPremium;
+  d._primaryPutPremium  = d._primaryPutPremium  || d.putPremium;
+  d._primaryAtmIV       = d._primaryAtmIV       || d.atmIV;
+  d._primaryAtmDelta    = d._primaryAtmDelta    || d.atmDelta;
+  d._primaryAtmGamma    = d._primaryAtmGamma    || d.atmGamma;
+  d._primaryAtmTheta    = d._primaryAtmTheta    || d.atmTheta;
+  d._primaryAtmVega     = d._primaryAtmVega     || d.atmVega;
+  d._primaryOiVelocity  = d._primaryOiVelocity  || d.oiVelocity;
+
+  d.chain = selectedChain;
+  const meta = selectedMeta;
+  d.expiry = selectedExpiry;
+  if(meta.greeks      != null) d.greeks      = meta.greeks;
+  if(meta.atm         != null) d.atm         = meta.atm;
+  if(meta.dte         != null) d.dte         = meta.dte;
+  if(meta.ceWall      != null) d.ceWall      = meta.ceWall;
+  if(meta.peWall      != null) d.peWall      = meta.peWall;
+  if(meta.maxPain     != null) d.maxPain     = meta.maxPain;
+  if(meta.totalPCR    != null) d.totalPCR    = meta.totalPCR;
+  if(meta.straddle    != null){ d.callPremium = meta.straddle/2; d.putPremium = meta.straddle/2; }
+  if(meta.callPremium != null) d.callPremium = meta.callPremium;
+  if(meta.putPremium  != null) d.putPremium  = meta.putPremium;
+  if(meta.atmIV       != null) d.atmIV       = meta.atmIV;
+  if(meta.atmDelta    != null) d.atmDelta    = meta.atmDelta;
+  if(meta.atmGamma    != null) d.atmGamma    = meta.atmGamma;
+  if(meta.atmTheta    != null) d.atmTheta    = meta.atmTheta;
+  if(meta.atmVega     != null) d.atmVega     = meta.atmVega;
+  if(meta.oiVelocity  != null) d.oiVelocity  = meta.oiVelocity;
+  if(!d.atm) d.atm = activeAtm(d);
+}
+window.applyExpirySelection = applyExpirySelection;

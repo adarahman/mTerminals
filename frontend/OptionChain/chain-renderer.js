@@ -51,6 +51,25 @@ ChainDenseView.prototype.renderExpiryOptions = function(payload) {
     const dates = (typeof sortExpiryDates === "function") ? sortExpiryDates(rawDates) : rawDates;
     const chainStore = payload.chains || {};
     const activeExpiry = payload.expiry || "";
+
+    // A click just fired onExpiryChange and pinned the select to the expiry
+    // the user picked (see ChainView.prototype.onExpiryChange), but the
+    // connection swap hasn't resolved yet. Until this payload's own expiry
+    // actually matches that pick — proof the new connection has landed —
+    // don't let a stale/racing payload.expiry (old connection's tail ticks,
+    // or a delta that never carries "expiry" at all and falls back to "")
+    // stomp the dropdown back. Once it matches, the switch is confirmed and
+    // the pending marker is cleared so normal syncing resumes.
+    const pending = sel.dataset.pendingExpiry;
+    if (pending) {
+      if (activeExpiry && activeExpiry === pending) {
+        delete sel.dataset.pendingExpiry;
+      } else {
+        if (sel.value !== pending) sel.value = pending;
+        return;
+      }
+    }
+
     const key = dates.join("|");
     if (sel.dataset.optionsKey !== key) {
       sel.innerHTML = dates.map((dt) => {
@@ -59,7 +78,7 @@ ChainDenseView.prototype.renderExpiryOptions = function(payload) {
         return `<option value="${dt}"${dt === activeExpiry ? " selected" : ""}>${bullet}${dt}</option>`;
       }).join("");
       sel.dataset.optionsKey = key;
-    } else if (sel.value !== activeExpiry) {
+    } else if (activeExpiry && sel.value !== activeExpiry) {
       sel.value = activeExpiry;
     }
 };
@@ -111,10 +130,11 @@ ChainDenseView.prototype.refreshView = function(payload) {
     this._broadcastToOptionChainTab(payload);
 
     if (!document.getElementById("tbody")) return; // dense chain markup not on this page
-    // payload is expected to already reflect the globally-selected expiry —
-    // callers (updateDashboard's WS tick handler, and renderDashboard for
-    // paste/file loads) run it through applyExpirySelection(payload,
-    // _selectedExpiry) first, so there's no separate override step here.
+    // payload is expected to already reflect the connection's expiry — the
+    // server only ever resolves one expiry's chain per connection (see
+    // NO_EXTRA_CHAINS in ws_server_live.py), and onExpiryChange reconnects
+    // with ?expiry=... rather than swapping expiries out of this payload
+    // locally, so there's no separate override step here.
     updateHeader(payload);
     const _visRows = filterRowsByRange(window._lastRows);
     // ── FIXED-HEIGHT CHAIN BOX ──
@@ -215,12 +235,6 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
 
 ChainView.prototype.renderDashboard = function(d) {
   _data=d;
-  // Reset any expiry-switch overrides when fresh JSON is loaded
-  delete _data._activeExpiry; delete _data._overrideAtm;
-  delete _data._overrideCeWall; delete _data._overridePeWall;
-  delete _data._overrideMaxPain; delete _data._overridePCR;
-  delete _data._overrideStraddle; delete _data._overrideAtmIV;
-  applyExpirySelection(_data, _selectedExpiry);
   const atm=activeAtm(d);
   const greeksAll=d.greeks||[];
   const straddle=(d.callPremium||0)+(d.putPremium||0);
@@ -317,10 +331,11 @@ ChainView.prototype.renderDashboard = function(d) {
   {
     const simCtx = d.ctx || {};
     const greeksData = d.greeks || [];
-    // Prefer the per-expiry fields (d.spot/d.atm/d.atmIV) that applyExpirySelection
-    // actually updates on expiry switch — d.ctx is a static top-level payload
-    // field that's never touched when the expiry changes, so reading it here
-    // pinned the whole simulator to whatever expiry loaded first.
+    // Prefer the per-expiry fields (d.spot/d.atm/d.atmIV), which reflect
+    // whichever expiry this connection is resolved to — d.ctx is a static
+    // top-level payload field that never changes with the expiry, so
+    // reading it here pinned the whole simulator to whatever expiry loaded
+    // first.
     const spot = d.spot || simCtx.spot || 0;
     const atmStrike = d.atm || simCtx.atm || 0;
     const step = greeksData.length > 1 ? (greeksData[1].strike - greeksData[0].strike) : 50;
@@ -770,80 +785,42 @@ ChainView.prototype.renderIvSurfaceModal = function() {
 };
 
 ChainView.prototype.onExpiryChange = function(selectedExpiry) {
-  if(!_data) return;
-  const activeExpiry = _data._primaryExpiry || _data.expiry || '';
-  const chainStore   = _data.chains    || {};
-  const metaStore    = _data.chainMeta || {};
+  if(!_data || !selectedExpiry) return;
+  const activeExpiry = _data.expiry || '';
+  if(selectedExpiry === activeExpiry) return; // already showing this expiry, nothing to do
 
-  if(selectedExpiry === activeExpiry){
-    _selectedExpiry = null;
-    // Restore all primary data
-    _data.expiry     = activeExpiry;
-    _data._activeExpiry = activeExpiry;
-    _data.chain      = _data._primaryChain   || _data.chain;
-    _data.greeks     = _data._primaryGreeks  || _data.greeks;
-    _data.atm        = _data._primaryAtm     || _data.atm;
-    _data.dte        = _data._primaryDte     || _data.dte;
-    _data.ceWall     = _data._primaryCeWall  || _data.ceWall;
-    _data.peWall     = _data._primaryPeWall  || _data.peWall;
-    _data.maxPain    = _data._primaryMaxPain || _data.maxPain;
-    _data.totalPCR   = _data._primaryPCR     || _data.totalPCR;
-    _data.callPremium= _data._primaryCallPremium || _data.callPremium;
-    _data.putPremium = _data._primaryPutPremium  || _data.putPremium;
-    _data.atmIV      = _data._primaryAtmIV   || _data.atmIV;
-    _data.atmDelta   = _data._primaryAtmDelta ?? _data.atmDelta;
-    _data.atmGamma   = _data._primaryAtmGamma ?? _data.atmGamma;
-    _data.atmTheta   = _data._primaryAtmTheta ?? _data.atmTheta;
-    _data.atmVega    = _data._primaryAtmVega  ?? _data.atmVega;
-  } else if(chainStore[selectedExpiry] || (_expiryViewCache[selectedExpiry] && _expiryViewCache[selectedExpiry].chain)){
-    _selectedExpiry = selectedExpiry;
-    _data._activeExpiry = selectedExpiry;
-    // Stash primary values on first switch so we can restore later
-    if(!_data._primaryChain){
-      _data._primaryChain       = _data.chain;
-      _data._primaryGreeks      = _data.greeks;
-      _data._primaryAtm         = _data.atm;
-      _data._primaryDte         = _data.dte;
-      _data._primaryCeWall      = _data.ceWall;
-      _data._primaryPeWall      = _data.peWall;
-      _data._primaryMaxPain     = _data.maxPain;
-      _data._primaryPCR         = _data.totalPCR;
-      _data._primaryCallPremium = _data.callPremium;
-      _data._primaryPutPremium  = _data.putPremium;
-      _data._primaryAtmIV       = _data.atmIV;
-      _data._primaryAtmDelta    = _data.atmDelta;
-      _data._primaryAtmGamma    = _data.atmGamma;
-      _data._primaryAtmTheta    = _data.atmTheta;
-      _data._primaryAtmVega     = _data.atmVega;
-    }
-    _data.expiry = selectedExpiry;
-    const cached = _expiryViewCache[selectedExpiry] || {};
-    _data.chain = chainStore[selectedExpiry] || cached.chain;
-    const meta  = metaStore[selectedExpiry] || cached.meta || {};
-    _expiryViewCache[selectedExpiry] = { chain: _data.chain, meta };
-    if(meta.greeks      != null) _data.greeks      = meta.greeks;
-    if(meta.atm         != null) _data.atm          = meta.atm;
-    if(meta.dte         != null) _data.dte          = meta.dte;
-    if(meta.ceWall      != null) _data.ceWall       = meta.ceWall;
-    if(meta.peWall      != null) _data.peWall       = meta.peWall;
-    if(meta.maxPain     != null) _data.maxPain      = meta.maxPain;
-    if(meta.totalPCR    != null) _data.totalPCR     = meta.totalPCR;
-    if(meta.straddle    != null){ _data.callPremium = meta.straddle/2; _data.putPremium = meta.straddle/2; }
-    if(meta.callPremium != null) _data.callPremium  = meta.callPremium;
-    if(meta.putPremium  != null) _data.putPremium   = meta.putPremium;
-    if(meta.atmIV       != null) _data.atmIV        = meta.atmIV;
-    if(meta.atmDelta    != null) _data.atmDelta     = meta.atmDelta;
-    if(meta.atmGamma    != null) _data.atmGamma     = meta.atmGamma;
-    if(meta.atmTheta    != null) _data.atmTheta     = meta.atmTheta;
-    if(meta.atmVega     != null) _data.atmVega      = meta.atmVega;
-    if(!_data.atm) _data.atm = activeAtm(_data);
+  // ── PIN THE DROPDOWN TO THE USER'S PICK ──
+  // The <select> already shows selectedExpiry the instant the browser fires
+  // this onchange — that's native behavior, free. The problem is everything
+  // AFTER this point: _data still holds the OLD expiry until the new
+  // connection's first "full" payload lands, and anything that re-renders
+  // the dropdown off stale _data.expiry in that window (a race with an
+  // in-flight tick from the old connection, or a delta payload that never
+  // carries an "expiry" field) stomps the user's visible selection back to
+  // the old value even though the data underneath is already moving to the
+  // new expiry. Tagging the node with a pending marker + value lets
+  // renderExpiryOptions (below) recognize "this is the expiry we're
+  // mid-switch to" and keep deferring to it instead of payload.expiry until
+  // the real payload actually confirms the switch.
+  const sel = (typeof getExpirySelectNode === 'function') ? getExpirySelectNode() : null;
+  if (sel) {
+    sel.value = selectedExpiry;
+    sel.dataset.pendingExpiry = selectedExpiry;
   }
-  // Re-render every chain-derived panel
-  _rerenderChainPanels();
-  // Single expiry control drives everything, including the native Option
-  // Chain table — refresh it immediately instead of waiting for the next
-  // WebSocket tick.
-  app.chainDense.refreshView(_data);
+
+  // Single-expiry-per-connection model: the server only ever fetches/builds
+  // the ONE expiry's chain a client is connected with (NO_EXTRA_CHAINS
+  // defaults on in ws_server_live.py now), so there's no second expiry's
+  // chain/chainMeta sitting in the payload to splice in locally any more.
+  // Reconnecting with ?expiry=... re-points the whole backend pipeline at
+  // the new expiry (ws_handler -> switch_symbol -> _resolve_chain_tokens);
+  // the resulting "full" snapshot on the new connection is what actually
+  // repaints every chain-derived panel, same as any other WS full/delta
+  // handling in updateDashboard's tick handler.
+  const base = (_wsUrl || '').split('?')[0];
+  const params = new URLSearchParams((_wsUrl || '').split('?')[1] || '');
+  params.set('expiry', selectedExpiry);
+  connectWebSocket(`${base}?${params.toString()}`);
 };
 
 ChainView.prototype._rerenderChainPanels = function() {
