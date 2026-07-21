@@ -46,3 +46,4 @@ profile.out
 backend/_scrip_master_cache.json
 backend/_scrip_master_cache.json
 backend/_scrip_master_cache.json
+backend/nse_fii_dii_flow_history.csv
