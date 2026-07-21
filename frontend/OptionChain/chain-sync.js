@@ -9,18 +9,26 @@
 // ============================================================
 
   // ── BROADCAST SYNC to the standalone option-chain.html tab ──
-  // option-chain.js already listens on a BroadcastChannel('oc-live-sync')
-  // and posts {type:'oc-request-snapshot'} on load and
-  // {type:'oc-request-expiry', expiry} when its dropdown changes — but
-  // nothing on this side ever opened that channel, so both messages went
-  // nowhere: the tab stayed on demo data and its expiry dropdown looked
-  // inert. This opens the same channel and answers both message types.
-ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
-    if (!AppState.ocChan) return;   // was: if (!window._ocChan) return;
-    AppState.ocChan.postMessage({   // was: window._ocChan.postMessage({
-      rows: this.lastRows, symbol: payload.symbol, spot: payload.spot,
-    });
-    AppState.ocChan.addEventListener("message", (e) => { 
+  // option-chain.js listens on a BroadcastChannel('oc-live-sync') and
+  // posts {type:'oc-request-snapshot'} on load,
+  // {type:'oc-request-expiry', expiry} when its dropdown changes, and
+  // {type:'oc-request-range', range} when its own ±3/±5/±10/All buttons
+  // change — but nothing on this side ever opened that channel (the
+  // constructor call was commented out), so every message went nowhere:
+  // the tab stayed on 5 rows of demo data forever. With only 5 demo
+  // strikes, ±3/±5/±10/All all render the exact same visible rows, which
+  // is why the tab's own range button looked broken — it was actually
+  // never receiving real data to filter in the first place.
+  //
+  // _initBroadcast() opens the channel once (from the ChainDenseView
+  // constructor) and wires the message listener once — the old code
+  // re-added a listener inside _broadcastToOptionChainTab itself, which
+  // would have leaked a duplicate listener on every single tick had the
+  // channel ever actually been open.
+ChainDenseView.prototype._initBroadcast = function() {
+    if (!("BroadcastChannel" in window)) return;
+    this._ocChan = new BroadcastChannel("oc-live-sync");
+    this._ocChan.addEventListener("message", (e) => {
       const msg = e.data;
       if (!msg) return;
       if (msg.type === "oc-request-snapshot") {
@@ -30,6 +38,13 @@ ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
         // the global #expirySelect uses) — it updates _data and then
         // itself calls refreshView(), which re-broadcasts below.
         if (window.onExpiryChange) window.onExpiryChange(msg.expiry);
+      } else if (msg.type === "oc-request-range") {
+        // Same idea for range: drive it through the real sidebar range
+        // path so _chainRange (the one global every in-page table/modal
+        // already reads via getFilteredChain()/filterRowsByRange()) stays
+        // the single source of truth, instead of the tab keeping its own
+        // disconnected copy.
+        if (window.switchChainRange) window.switchChainRange(msg.range);
       }
     });
 };
@@ -38,7 +53,19 @@ ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
     if (!this._ocChan) return;
     this._ocChan.postMessage({
       rows: this.lastRows, symbol: payload.symbol, spot: payload.spot,
-      spotChg: payload.spotChg, spotChgPct: payload.spotChgPct,
+      // payload's actual field is "spotChange" (see mTerminals_json.py's
+      // export) — this used to read payload.spotChg, which never exists,
+      // so the standalone tab's state.spotChg was always undefined on
+      // every broadcast and applyLivePayload's `if (msg.spotChg != null)`
+      // guard silently kept it frozen at its initial demo value forever.
+      // spotChgPct's name already matched end-to-end, so only the
+      // absolute change was ever stuck, not the percent.
+      spotChg: payload.spotChange, spotChgPct: payload.spotChgPct,
       expiry: payload.expiry, expiryDates: payload.expiryDates,
+      // The global ATM range, so the tab's own toggle group reflects
+      // whatever every other table on the main dashboard is showing —
+      // this is what makes the range control "global" rather than each
+      // surface keeping its own independent filter.
+      range: (typeof _chainRange !== "undefined" ? _chainRange : 3),
     });
 };

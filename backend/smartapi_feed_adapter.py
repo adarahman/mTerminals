@@ -61,12 +61,24 @@ class TickAggregator:
         # separate from _buffer since a spot tick isn't a per-strike chain
         # row and has no "strike" to key on.
         self._spot_buffer = None
-        # Persistent per-token caches (survive across flushes, unlike
-        # _buffer) — needed to compute real ceDOI/peDOI (OI delta) and
-        # ceVolChg/peVolChg (volume delta) per tick. Separate from _buffer
-        # because a leg that hasn't ticked in a while still needs its
-        # last-known OI/volume as the baseline the next time it does.
-        self._prev_oi = {}
+        # _session_open_oi: token -> OI baseline, FIXED for the trading
+        # day (or until reset_session() runs). "Chng in OI" is measured
+        # against the SESSION baseline, not the previous tick — this
+        # replaces the old self._prev_oi, which recomputed the baseline
+        # every tick and turned ceDOI/peDOI into a one-tick delta instead
+        # of a true day-over-day change (wrong magnitude, occasional sign
+        # flips depending on tick-to-tick noise). Seeded from NSE's own
+        # changeinOpenInterest via seed_session_baseline(); falls back to
+        # "first tick establishes it" in on_tick() if nothing seeded it
+        # yet.
+        self._session_open_oi = {}
+        # Persistent per-token cache (survives across flushes, unlike
+        # _buffer) — needed to compute real ceVolChg/peVolChg (volume
+        # delta) per tick. Separate from _buffer because a leg that hasn't
+        # ticked in a while still needs its last-known volume as the
+        # baseline the next time it does. Volume delta is correctly a
+        # tick-to-tick quantity (unlike OI change), so this one is fine
+        # as-is.
         self._prev_vol = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -76,13 +88,39 @@ class TickAggregator:
         """Swaps in a new strike/token mapping (e.g. after a symbol switch)
         without tearing down the aggregator or its flush thread. Any
         buffered rows for the OLD symbol are dropped, since they'd be
-        stale/meaningless once the chain being displayed has changed."""
+        stale/meaningless once the chain being displayed has changed.
+
+        _session_open_oi is intentionally NOT cleared here — a symbol/
+        expiry switch mid-day isn't a new trading session, and the new
+        token set has no baselines yet anyway (on_tick()'s bootstrap
+        fallback + the next engine_loop() seeding cycle will fill them
+        in). Call reset_session() explicitly for an actual new-day
+        rollover instead."""
         with self._lock:
             self.token_meta = new_token_meta
             self._buffer.clear()
             self._spot_buffer = None
-            self._prev_oi.clear()
             self._prev_vol.clear()
+
+    def seed_session_baseline(self, baselines):
+        """baselines: dict {token: baseline_oi}. Call once per engine_loop()
+        cycle using OI figures derived from a source with correct
+        day-over-day change (NSE's own changeinOpenInterest):
+            baseline_oi = current_oi - nse_reported_chg_oi
+        Only fills tokens that don't already have a baseline (setdefault),
+        so it's safe to call repeatedly across cycles without clobbering
+        deltas already accumulating against a good baseline — this just
+        closes the gap for tokens that ticked before NSE data arrived."""
+        with self._lock:
+            for token, base_oi in baselines.items():
+                self._session_open_oi.setdefault(token, base_oi)
+
+    def reset_session(self):
+        """Call at actual trading-day rollover (see ws_server_live.py's
+        engine_loop() _LAST_SESSION_DATE check) — NOT on ordinary
+        symbol/expiry switches within the same day."""
+        with self._lock:
+            self._session_open_oi.clear()
 
     def on_tick(self, tick):
         """Pass directly: SmartTickStream(on_tick=aggregator.on_tick).
@@ -132,11 +170,19 @@ class TickAggregator:
             row = self._buffer.setdefault(strike, {"strike": strike})
 
             if new_oi is not None:
-                prev_oi = self._prev_oi.get(token)
                 row[f"{prefix}OI"] = new_oi
-                if prev_oi is not None:
-                    row[f"{prefix}DOI"] = new_oi - prev_oi   # OI delta — matches chain-views.js's row.ceDOI/peDOI
-                self._prev_oi[token] = new_oi
+                baseline = self._session_open_oi.get(token)
+                if baseline is None:
+                    # No seeded baseline yet (feed started mid-stream
+                    # before engine_loop()'s first seeding cycle ran, or
+                    # this is a genuinely new token from a symbol switch).
+                    # Bootstrap on this tick — DOI reads 0 here and
+                    # correctly onward, which under-reports the true
+                    # change until the next seeding cycle rather than
+                    # showing noise or the wrong quantity entirely.
+                    self._session_open_oi[token] = new_oi
+                    baseline = new_oi
+                row[f"{prefix}DOI"] = new_oi - baseline   # OI delta vs SESSION baseline — matches chain-views.js's row.ceDOI/peDOI
             # else: leave ceOI/peOI untouched rather than writing None over
             # a previously-good value — a stray non-OI-carrying packet
             # shouldn't blank out the last known OI.

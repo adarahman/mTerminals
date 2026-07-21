@@ -447,10 +447,13 @@ ChainView.prototype.renderDashboard = function(d) {
 
   </div>
 
-  <!-- HALF WIDTH ROW: Institutional F&O Simulator (left) + Risk dashboard (right) -->
-  <div class="sim-risk-half-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;align-items:start;">
-
-  <div id="sec-simulator" class="sim-wrap" style="min-width:0;">
+  <!-- Institutional F&O Simulator — now full-width on its own row; it
+       used to share a 1fr/1fr grid with the Strike Detail expand panel,
+       which cramped both the GEX chart and the Vol/OI Velocity/Strike
+       Detail tables into half the available width. The detail panel now
+       gets its own full-width row directly below (see #sec-simulator-detail
+       further down) instead of sitting beside the simulator. -->
+  <div id="sec-simulator" class="sim-wrap" style="min-width:0;margin-bottom:10px;">
 
       <div class="sim-header">
         <div class="sim-title">Institutional F&amp;O Simulator</div>
@@ -507,12 +510,33 @@ ChainView.prototype.renderDashboard = function(d) {
         </div>
 
       </div>
-    
-    </div>
 
-    <!-- RIGHT: Vol/OI Velocity + Strike Detail, sits next to the simulator -->
-    <div id="sec-simulator-detail" class="sim-wrap" style="min-width:0;">
-      <div class="sim-body" style="padding:14px 14px;">
+  </div>
+
+  <!-- Strike Detail expand panel — Vol/OI Velocity + Strike Detail tables.
+       Now a full-width row directly below the simulator instead of a
+       cramped half-width column beside it. Still collapsed by default —
+       the Institutional Activity Crux card on the main dashboard
+       (buildInstitutionalActivitySummaryCard, in panels-views.js) is the
+       always-visible summary of this same data; this full near/far-band
+       report only opens when its "Strike Detail →" button calls
+       expandStrikeDetail(). -->
+  <div id="sec-simulator-detail" class="sim-wrap" style="min-width:0;margin-bottom:10px;">
+    <div class="sim-body" style="padding:14px 14px;">
+
+      <div id="sec-simulator-detail-placeholder" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Vol/OI Velocity &amp; Strike Detail</div>
+          <div style="font-size:11px;color:var(--txt3);">Collapsed — open via the Institutional Activity Crux card's "Strike Detail →" link above.</div>
+        </div>
+        <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="expandStrikeDetail()">Expand →</button>
+      </div>
+
+      <div id="sec-simulator-detail-body" style="display:none;">
+
+        <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:4px;">
+          <button class="sec-btn" style="padding:3px 8px;font-size:10px;" onclick="collapseStrikeDetail()">Collapse ↑</button>
+        </div>
 
         <!-- Vol/OI Velocity Breakdown -->
         <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Vol/OI Velocity by Strike (Block Detection)</div>
@@ -536,9 +560,7 @@ ChainView.prototype.renderDashboard = function(d) {
 
       </div>
     </div>
-
-    </div>
-    <!-- close half-width row: Simulator | Vol/OI + Strike Detail -->
+  </div>
   `;
   }
   }
@@ -998,6 +1020,25 @@ ChainView.prototype._rerenderChainPanels = function() {
     </div>`;
   }
 
+  // 3b. Option Chain Snapshot card (main-dashboard OI/Chg OI/dOI/Volume
+  // summary). This was previously only ever built once, inside the full
+  // renderDashboard() rebuild (buildChainSummaryHtml(d) at the top of this
+  // file) — never on a WS tick or expiry switch — so it went stale and
+  // silently drifted from the OI Flow Snapshot card below (which *does*
+  // refresh every tick), even though both read the exact same
+  // getFilteredChain(_data) source. Same fix as oi-flow-summary-card /
+  // greeks-alerts-card / atm-greeks-card just below: outerHTML-diff it in
+  // here too, so all four summary cards stay in lockstep tick-to-tick.
+  const chainSummaryEl = document.getElementById('chain-summary-card');
+  if (chainSummaryEl) {
+    const freshChainSummary = app.chain.buildChainSummaryHtml(_data);
+    if (chainSummaryEl.dataset.lastHtml !== freshChainSummary) {
+      chainSummaryEl.outerHTML = freshChainSummary;
+      const fresh = document.getElementById('chain-summary-card');
+      if (fresh) fresh.dataset.lastHtml = freshChainSummary;
+    }
+  }
+
   // 4. OI Flow Snapshot card (compact — full butterfly table now lives in
   // the OI Dashboard's Butterfly tab, see buildOiFlowSummaryHtml()).
   const oiFlowSummaryEl = document.getElementById("oi-flow-summary-card");
@@ -1036,6 +1077,20 @@ ChainView.prototype._rerenderChainPanels = function() {
       atmGreeksEl.outerHTML = freshAtmGreeks;
       const fresh = document.getElementById("atm-greeks-card");
       if(fresh) fresh.dataset.lastHtml = freshAtmGreeks;
+    }
+  }
+
+  // 4c. Institutional Activity Crux — same outerHTML-diff treatment; without
+  // this it would only ever refresh on a full renderDashboard() rebuild,
+  // same staleness gap the chain-summary/OI-flow/Greeks cards above it were
+  // fixed for.
+  const instActivityEl = document.getElementById("inst-activity-summary-card");
+  if(instActivityEl){
+    const freshInstActivity = app.exec.buildInstitutionalActivitySummaryCard(_data);
+    if(instActivityEl.dataset.lastHtml !== freshInstActivity){
+      instActivityEl.outerHTML = freshInstActivity;
+      const fresh = document.getElementById("inst-activity-summary-card");
+      if(fresh) fresh.dataset.lastHtml = freshInstActivity;
     }
   }
 

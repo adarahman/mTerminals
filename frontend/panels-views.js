@@ -1,3 +1,105 @@
+// ── Institutional Activity band thresholds ──────────────────────────────
+// Used by SimulatorView's Strike Detail table + Vol/OI Velocity bars, and
+// by ExecView's Institutional Activity Crux summary card below, so every
+// view of this data agrees on where the near/far line sits and how each
+// band is scored.
+//
+// Near-ATM strikes carry naturally heavier OI/volume (retail chop lives
+// here), so calling one "institutional" needs a bigger OI standout vs.
+// the pack and tighter turnover — but the outright Vol/OI ratio needed to
+// flag a "block" print can be lower, since a fast ratio change close to
+// spot is itself a meaningful tell on its own.
+// Far strikes (beyond the near band) are thin by default, so a smaller OI
+// standout already means something — but thin books also see occasional
+// one-off retail clip-ins, so the ratio value needed to call a print a
+// "block" is raised to filter those out.
+const INST_NEAR_BAND_STRIKES = 10; // ATM ± this many strike steps = "near"
+const INST_THRESHOLDS = {
+  near: { oiMult: 1.75, volRatioMax: 40, blockVal: 1.2 },
+  far:  { oiMult: 1.2,  volRatioMax: 55, blockVal: 1.8 },
+};
+
+// Which band a strike falls in, given the ATM strike and the chain's
+// strike step (e.g. 50 for NIFTY). Shared so the table, the bars, and the
+// crux card can never drift out of sync on where "near" ends.
+function instBandFor(strike, atm, step) {
+  const s = step > 0 ? step : 50;
+  const stepIdx = Math.round(Math.abs(strike - atm) / s);
+  return stepIdx <= INST_NEAR_BAND_STRIKES ? 'near' : 'far';
+}
+
+// ── Strike Detail panel expand/collapse (main dashboard) ────────────────
+// The Vol/OI Velocity + Strike Detail tables (rendered by SimulatorView
+// into #sim-vol-grid / #sim-strike-table, markup in chain-renderer.js's
+// buildSimulatorHtml) used to always sit open on the main dashboard next
+// to the Institutional Simulator. That duplicated the Institutional
+// Activity Crux card above it and ate a lot of vertical space on every
+// load. Now the panel starts collapsed (see #sec-simulator-detail-body's
+// inline display:none in chain-renderer.js) and only the crux card's
+// "Strike Detail →" button opens it — this pair of functions does that
+// open/close and re-renders the tables on open so the first paint is
+// current.
+function expandStrikeDetail() {
+  var body = document.getElementById('sec-simulator-detail-body');
+  var placeholder = document.getElementById('sec-simulator-detail-placeholder');
+  if (body) body.style.display = '';
+  if (placeholder) placeholder.style.display = 'none';
+  // #sim-vol-grid / #sim-strike-table stay in the DOM (just hidden) while
+  // collapsed, so ticks keep refreshing them in the background — but force
+  // one fresh render on open anyway so the first paint the user sees isn't
+  // waiting on the next WS tick or slider move.
+  try { if (typeof simInit === 'function') simInit(); } catch (e) { /* non-fatal */ }
+  var target = document.getElementById('sec-simulator-detail');
+  if (typeof secJump === 'function') { secJump('sec-simulator-detail'); }
+  else if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+
+function collapseStrikeDetail() {
+  var body = document.getElementById('sec-simulator-detail-body');
+  var placeholder = document.getElementById('sec-simulator-detail-placeholder');
+  if (body) body.style.display = 'none';
+  if (placeholder) placeholder.style.display = '';
+}
+  // ── Full Chain inline focus mode (Executive panel) ───────────────────────
+// "Full Chain →" used to window.open() the standalone option-chain.html in
+// a new tab. Now it's the same pattern as expandStrikeDetail()/
+// collapseStrikeDetail() above: nothing else on the page gets hidden —
+// a full-width iframe loading the *same* option-chain.html just gets
+// inserted right after the button's own card and shown/hidden on toggle,
+// so the chain itself never has two divergent implementations to keep
+// in sync.
+let _fullChainOpen = false;
+
+function toggleFullChainFocus() {
+  const btn = document.getElementById('full-chain-toggle-btn');
+  if (!btn) return;
+
+  _fullChainOpen = !_fullChainOpen;
+
+  const ownCard = document.getElementById('chain-summary-card')
+    || btn.closest('.exec-card')
+    || document.getElementById('exec-section-wrap');
+  let frameWrap = document.getElementById('full-chain-frame-wrap');
+
+  if (_fullChainOpen) {
+    if (!frameWrap) {
+      frameWrap = document.createElement('div');
+      frameWrap.id = 'full-chain-frame-wrap';
+      frameWrap.style.cssText = 'width:100%;height:80vh;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-top:8px;';
+      frameWrap.innerHTML = '<iframe src="OptionChain/option-chain.html" style="width:100%;height:100%;border:0;"></iframe>';
+      // #chain-summary-card holds the button itself — inserting right
+      // after it keeps the button on top and puts the full chain detail
+      // directly below it, regardless of what class the card carries.
+      ownCard.insertAdjacentElement('afterend', frameWrap);
+    }
+    frameWrap.style.display = '';
+    btn.textContent = '← Collapse';
+    requestAnimationFrame(() => frameWrap.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  } else {
+    if (frameWrap) frameWrap.style.display = 'none';
+    btn.textContent = 'Full Chain →';
+  }
+}
 class OiFlowView {
   constructor() {
     this.oiFlowMode = 'oi';
@@ -95,10 +197,12 @@ class OiFlowView {
   const pcrAtm = ceAtm>0 ? (peAtm/ceAtm) : 0;
   const pcrAtmClr = pcrAtm>1?'var(--green)':pcrAtm<1?'var(--red)':'var(--txt3)';
 
-  const totalCe = chain.reduce((s,r)=>s+(r.ceOI||0),0);
-  const totalPe = chain.reduce((s,r)=>s+(r.peOI||0),0);
-  const oiTotal = totalCe+totalPe || 1;
-  const pcr = totalPe/(totalCe||1);
+  // Total PE/CE OI + PCR across the visible chain is intentionally NOT
+  // recomputed here — it's the exact same aggregate the Option Chain
+  // Snapshot card's "OI SUMMARY" block already shows (same getFilteredChain()
+  // source), so showing it a second time here was a straight duplicate, not
+  // an independent read. This card now sticks to what it uniquely adds: the
+  // ATM strike's own OI split, and which strike is building the most.
 
   return `
   <div class="section-card" id="oi-flow-summary-card" style="min-width:0;">
@@ -107,17 +211,6 @@ class OiFlowView {
       <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openOIDashboardModal('butterfly')">Butterfly View →</button>
     </div>
     <div style="padding:10px 2px 4px;">
-      <div style="height:6px;border-radius:999px;overflow:hidden;display:flex;background:var(--bg2);margin-bottom:8px;">
-        <div style="width:${(totalPe/oiTotal)*100}%;background:linear-gradient(90deg,var(--green),transparent);"></div>
-        <div style="width:${(totalCe/oiTotal)*100}%;background:linear-gradient(90deg,transparent,var(--red));"></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:13px;font-weight:700;flex-wrap:wrap;margin-bottom:10px;">
-        <span style="color:var(--green);">${fmtK(totalPe)}</span>
-        <span style="font-size:9px;color:var(--txt3);font-weight:400;">PE</span>
-        <span style="background:rgba(245,166,35,.15);color:var(--amber);padding:2px 8px;border-radius:999px;font-size:11px;">PCR ${fmtN(pcr,2)}</span>
-        <span style="font-size:9px;color:var(--txt3);font-weight:400;">CE</span>
-        <span style="color:var(--red);">${fmtK(totalCe)}</span>
-      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
           <div style="font-size:9px;color:var(--txt3);letter-spacing:.04em;margin-bottom:4px;">ATM ${fmtI(atmRow.strike)}</div>
@@ -219,8 +312,99 @@ class ExecView {
      main-dashboard real estate on every rebuild — same treatment Greeks/
      GEX already got. This card is just the composite read + a link out. -->
 ${buildFiiDiiSummaryCard(d)}
+${this.buildInstitutionalActivitySummaryCard(d)}
 </div>
 `;}
+
+  // ── INSTITUTIONAL ACTIVITY CRUX (main dashboard card) ──
+  // Same "always-visible read, full detail lives elsewhere" pattern as
+  // buildFiiDiiSummaryCard() above: the Strike Detail table (Simulator
+  // panel) only ever windows to the 10 strikes nearest ATM, so a flagged
+  // strike outside that window was previously invisible anywhere on the
+  // main dashboard. This card scans the FULL visible chain — near and far
+  // band alike, using the exact same instBandFor()/INST_THRESHOLDS logic
+  // the table and Vol/OI bars use — and rolls it up into one glanceable
+  // summary: how many strikes are flagged in each band, which side (CE/PE)
+  // the flagged strikes lean toward, and the single strongest signal.
+  buildInstitutionalActivitySummaryCard(d){
+  const chain = d.chain || [];
+  const greeksData = d.greeks || [];
+  const ratios = d.volOiRatios || {};
+  const atm = d.atm || (d.ctx && d.ctx.atm) || 0;
+  const step = greeksData.length > 1 ? (greeksData[1].strike - greeksData[0].strike) : 50;
+
+  if(!chain.length || !atm){
+    return `
+  <div class="exec-card" id="inst-activity-summary-card" style="grid-column:1/-1;">
+    <div class="exec-title">🏛️ Institutional Activity Crux</div>
+    <div class="dd-empty">Awaiting chain data…</div>
+  </div>`;
+  }
+
+  // Median OI here is computed across the FULL chain, not the table's
+  // 10-nearest-strikes window, so the crux reflects the whole book.
+  const oiTotals = chain.map(r => (r.ceOI||0) + (r.peOI||0)).sort((a,b) => a-b);
+  const medianOI = oiTotals.length ? oiTotals[Math.floor(oiTotals.length/2)] : 0;
+
+  const flagged = [];
+  chain.forEach(r => {
+    const rawRatio = ratios[String(r.strike)];
+    if(!rawRatio) return; // missing data never counts as institutional
+    const totalOI = (r.ceOI||0) + (r.peOI||0);
+    const volRatio = totalOI > 0 ? ((rawRatio.ce||0) + (rawRatio.pe||0)) / 2 : 0;
+    const band = instBandFor(r.strike, atm, step);
+    const th = INST_THRESHOLDS[band];
+    if(!(totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax)) return;
+    const oiDominant = (r.ceOI||0) >= (r.peOI||0) ? 'CE' : 'PE';
+    // Strength is scored relative to each band's own bar, so a far-band
+    // strike that just clears its (lower) bar doesn't automatically
+    // outrank a near-band strike clearing its (higher) bar decisively.
+    const strength = totalOI / (medianOI * th.oiMult);
+    flagged.push({ strike: r.strike, band, oiDominant, totalOI, volRatio, strength });
+  });
+
+  const nearCount = flagged.filter(f => f.band==='near').length;
+  const farCount  = flagged.filter(f => f.band==='far').length;
+  const ceCount   = flagged.filter(f => f.oiDominant==='CE').length;
+  const peCount   = flagged.filter(f => f.oiDominant==='PE').length;
+
+  let biasLabel = 'Balanced', biasColor = 'var(--txt3)';
+  if(ceCount > peCount){ biasLabel = 'CE-heavy (bearish tilt)'; biasColor = 'var(--red)'; }
+  else if(peCount > ceCount){ biasLabel = 'PE-heavy (bullish tilt)'; biasColor = 'var(--green)'; }
+
+  const top = flagged.slice().sort((a,b) => b.strength - a.strength)[0];
+
+  return `
+  <div class="exec-card" id="inst-activity-summary-card" style="grid-column:1/-1;">
+    <div class="exec-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+      <span>🏛️ Institutional Activity Crux <span style="font-weight:400;color:var(--txt3);font-size:0.75em;">— ATM ±${INST_NEAR_BAND_STRIKES} strikes = near band</span></span>
+      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="expandStrikeDetail()" title="Open the full Vol/OI Velocity + Strike Detail tables">Strike Detail →</button>
+    </div>
+    ${flagged.length===0 ? `
+    <div class="dd-empty">No strikes currently clear the institutional threshold.</div>
+    ` : `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+      <span style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:rgba(255,255,255,0.03);border-left:2px solid var(--blue);border-radius:4px;font-size:11px;">
+        <strong style="color:var(--txt2);">NEAR</strong>
+        <span style="color:var(--txt);">${nearCount} flagged</span>
+      </span>
+      <span style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:rgba(255,255,255,0.03);border-left:2px solid var(--amber);border-radius:4px;font-size:11px;">
+        <strong style="color:var(--txt2);">FAR</strong>
+        <span style="color:var(--txt);">${farCount} flagged</span>
+      </span>
+      <span style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:rgba(255,255,255,0.03);border-left:2px solid ${biasColor};border-radius:4px;font-size:11px;">
+        <strong style="color:var(--txt2);">BIAS</strong>
+        <span style="color:${biasColor};">${biasLabel}</span>
+      </span>
+    </div>
+    ${top ? `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--txt2);">
+      Strongest signal: <strong style="color:${top.oiDominant==='CE'?'var(--red)':'var(--green)'};">${fmtI(top.strike)} ${top.oiDominant}</strong>
+      <span style="color:var(--txt3);">(${top.band} band · OI ${fmtK(top.totalOI)} · turnover ${fmtN(top.volRatio,1)}%)</span>
+    </div>` : ''}
+    `}
+  </div>`;
+}
 
   // ── FII / DII CRUX SUMMARY (main dashboard card) ──
   // Same alert-card visual language as ChainView.buildGreeksAlertsHtml():
@@ -1136,6 +1320,7 @@ class SimulatorView {
   if (!el) return;
   var ratios = this.simState.volOiRatios || {};
   var atm = this.simState.atm;
+  var step = this.simState.step || 50;
 
   // Same per-strike OI lookup used by the Strike Detail table below, so
   // the ratio bars up here and the OI figures down there always agree.
@@ -1144,29 +1329,31 @@ class SimulatorView {
     oiByStrike[r.strike] = { ce: r.ceOI || 0, pe: r.peOI || 0 };
   });
 
-  var sorted = gexData.slice().sort(function(a, b) {
-    return Math.abs(a.strike - atm) - Math.abs(b.strike - atm);
-  });
-  var near = sorted.slice(0, 8);
+  // ── Near (ATM ±INST_NEAR_BAND_STRIKES) vs Far band, rendered as two
+  // separately-scored sections instead of one flat "8 nearest strikes"
+  // pool. Each band keeps its own bar-height scaling (maxCE/maxPE) and its
+  // own INST_THRESHOLDS.blockVal, since a "block" print reads differently
+  // close to spot vs out in the wings — see the INST_THRESHOLDS comment
+  // above the OiFlowView class for the rationale.
+  function buildPool(strikes) {
+    var ceRows = strikes.map(function(g) {
+      var r = ratios[String(g.strike)] || { ce: 0 };
+      var oi = (oiByStrike[g.strike] || {}).ce || 0;
+      return { strike: g.strike, val: (r.ce || 0) * simVel, oi: oi };
+    }).sort(function(a, b) { return b.val - a.val; });
 
-  var ceRows = near.map(function(g) {
-    var r = ratios[String(g.strike)] || { ce: 0 };
-    var oi = (oiByStrike[g.strike] || {}).ce || 0;
-    return { strike: g.strike, val: (r.ce || 0) * simVel, oi: oi };
-  }).sort(function(a, b) { return b.val - a.val; });
+    var peRows = strikes.map(function(g) {
+      var r = ratios[String(g.strike)] || { pe: 0 };
+      var oi = (oiByStrike[g.strike] || {}).pe || 0;
+      return { strike: g.strike, val: (r.pe || 0) * simVel, oi: oi };
+    }).sort(function(a, b) { return b.val - a.val; });
 
-  var peRows = near.map(function(g) {
-    var r = ratios[String(g.strike)] || { pe: 0 };
-    var oi = (oiByStrike[g.strike] || {}).pe || 0;
-    return { strike: g.strike, val: (r.pe || 0) * simVel, oi: oi };
-  }).sort(function(a, b) { return b.val - a.val; });
+    return { ceRows: ceRows, peRows: peRows };
+  }
 
-  var maxCE = Math.max.apply(null, ceRows.map(function(r) { return r.val; }).concat([0.01]));
-  var maxPE = Math.max.apply(null, peRows.map(function(r) { return r.val; }).concat([0.01]));
-
-  function barRow(strike, val, max, color, oi) {
+  function barRow(strike, val, max, color, oi, band) {
     var pct = Math.min(Math.round((val / max) * 100), 100);
-    var isBlock = val > 1.5;
+    var isBlock = val > INST_THRESHOLDS[band].blockVal;
     return '<div class="sim-vol-bar-row">' +
       '<span class="sim-vol-bar-label" style="color:var(--txt2);">' + fmtI(strike) + '</span>' +
       '<div class="sim-vol-bar-track"><div class="sim-vol-bar-fill" style="width:' + pct + '%;background:' + color + ';"></div></div>' +
@@ -1175,21 +1362,41 @@ class SimulatorView {
       '</div>';
   }
 
-  var ceHtml = '<div class="sim-vol-card"><div class="sim-vol-card-title" style="color:var(--red);">CE Vol/OI Ratio</div>';
-  ceRows.slice(0, 5).forEach(function(r) { ceHtml += barRow(r.strike, r.val, maxCE, 'var(--red)', r.oi); });
-  ceHtml += '</div>';
+  function buildSection(label, strikes, band) {
+    if (!strikes.length) return '';
+    var pool = buildPool(strikes);
+    var maxCE = Math.max.apply(null, pool.ceRows.map(function(r) { return r.val; }).concat([0.01]));
+    var maxPE = Math.max.apply(null, pool.peRows.map(function(r) { return r.val; }).concat([0.01]));
+    var n = band === 'near' ? 5 : 4; // far band gets a slightly tighter top-N so it doesn't dwarf near
 
-  var peHtml = '<div class="sim-vol-card"><div class="sim-vol-card-title" style="color:var(--green);">PE Vol/OI Ratio</div>';
-  peRows.slice(0, 5).forEach(function(r) { peHtml += barRow(r.strike, r.val, maxPE, 'var(--green)', r.oi); });
-  peHtml += '</div>';
+    var ceHtml = '<div class="sim-vol-card"><div class="sim-vol-card-title" style="color:var(--red);">CE Vol/OI Ratio</div>';
+    pool.ceRows.slice(0, n).forEach(function(r) { ceHtml += barRow(r.strike, r.val, maxCE, 'var(--red)', r.oi, band); });
+    ceHtml += '</div>';
 
-  setHtmlIfChanged(el, ceHtml + peHtml);
+    var peHtml = '<div class="sim-vol-card"><div class="sim-vol-card-title" style="color:var(--green);">PE Vol/OI Ratio</div>';
+    pool.peRows.slice(0, n).forEach(function(r) { peHtml += barRow(r.strike, r.val, maxPE, 'var(--green)', r.oi, band); });
+    peHtml += '</div>';
+
+    return '<div class="sim-vol-band-section" style="margin-bottom:10px;width:100%;grid-column:1/-1;">' +
+      '<div style="font-size:9px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">' + label + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;width:100%;">' + ceHtml + peHtml + '</div>' +
+      '</div>';
+  }
+
+  var nearStrikes = gexData.filter(function(g) { return instBandFor(g.strike, atm, step) === 'near'; });
+  var farStrikes  = gexData.filter(function(g) { return instBandFor(g.strike, atm, step) === 'far'; });
+
+  var html = buildSection('Near ATM (\u00B1' + INST_NEAR_BAND_STRIKES + ' strikes)', nearStrikes, 'near') +
+             buildSection('Far Strikes (beyond \u00B1' + INST_NEAR_BAND_STRIKES + ')', farStrikes, 'far');
+
+  setHtmlIfChanged(el, html || '<div style="padding:8px;color:var(--txt3);font-size:11px;">No strike data available.</div>');
 }
 
   simRenderTable(gexData, simSpot, simIV) {
   var el = document.getElementById('sim-strike-table');
   if (!el) return;
   var atm = this.simState.atm;
+  var step = this.simState.step || 50;
   var ratios = this.simState.volOiRatios || {};
   // Real per-strike open interest lives on the chain rows (ceOI/peOI), not
   // on volOiRatios (which only carries ce_vol/pe_vol — traded volume — plus
@@ -1200,56 +1407,70 @@ class SimulatorView {
     oiByStrike[r.strike] = { ce: r.ceOI || 0, pe: r.peOI || 0 };
   });
 
-  var sorted = gexData.slice().sort(function(a, b) {
-    return Math.abs(a.strike - atm) - Math.abs(b.strike - atm);
-  });
-  var near = sorted.slice(0, 10);
-  near.sort(function(a, b) { return b.strike - a.strike; });
+  // ── Near (ATM ±INST_NEAR_BAND_STRIKES) and Far strikes are now rendered
+  // as two separately-scored sections rather than one flat "10 nearest"
+  // window. This does two things the old single window couldn't:
+  //   1. Far-band strikes actually show up at all (previously the table
+  //      only ever displayed the 10 strikes closest to ATM, so a flagged
+  //      strike further out was invisible here even though the crux card
+  //      already scans the full chain for it).
+  //   2. Each band's "Institutional Accumulation" call is judged against
+  //      its OWN median OI, not one median blended across both — near-ATM
+  //      strikes carry naturally heavier OI, so blending would either make
+  //      near-band flags too easy or far-band flags nearly impossible.
+  var nearAll = gexData.filter(function(g) { return instBandFor(g.strike, atm, step) === 'near'; });
+  var farAll  = gexData.filter(function(g) { return instBandFor(g.strike, atm, step) === 'far'; });
 
-  // "Institutional" should mean "large resting size relative to the other
-  // strikes on screen right now" — a flat magic number (previously 5000)
-  // is off by orders of magnitude vs. real OI (tens of thousands to
-  // millions), so it was true for almost every strike regardless of actual
-  // positioning. Use the median totalOI across the visible strikes instead,
-  // so the label actually discriminates within whatever data is loaded.
-  var oiTotals = near.map(function(g) {
-    var s = oiByStrike[g.strike] || { ce: 0, pe: 0 };
-    return s.ce + s.pe;
-  }).sort(function(a, b) { return a - b; });
-  var midIdx = Math.floor(oiTotals.length / 2);
-  var medianOI = oiTotals.length ? oiTotals[midIdx] : 0;
+  nearAll.sort(function(a, b) { return b.strike - a.strike; });
+  // Far band can span the whole rest of the chain — cap to the 12 strikes
+  // with the largest resting OI so the far section stays a scan, not a
+  // scroll, then present those in strike order.
+  var farRanked = farAll.slice().sort(function(a, b) {
+    var oa = oiByStrike[a.strike] || { ce: 0, pe: 0 };
+    var ob = oiByStrike[b.strike] || { ce: 0, pe: 0 };
+    return (ob.ce + ob.pe) - (oa.ce + oa.pe);
+  }).slice(0, 12);
+  farRanked.sort(function(a, b) { return b.strike - a.strike; });
 
-  var html = '';
-  near.forEach(function(g) {
+  function medianOIOf(rows) {
+    var totals = rows.map(function(g) {
+      var s = oiByStrike[g.strike] || { ce: 0, pe: 0 };
+      return s.ce + s.pe;
+    }).sort(function(a, b) { return a - b; });
+    return totals.length ? totals[Math.floor(totals.length / 2)] : 0;
+  }
+
+  var nearMedianOI = medianOIOf(nearAll);
+  var farMedianOI  = medianOIOf(farAll);
+
+  function rowHtml(g, band, medianOI) {
     var isAtm = g.strike === atm;
     var rawRatio = ratios[String(g.strike)];
     var hasRatioData = !!rawRatio;
     var ratio = rawRatio || { ce: 0, pe: 0, ce_vol: 0, pe_vol: 0 };
-    var ceVol = ratio.ce_vol || 0;
-    var peVol = ratio.pe_vol || 0;
-    var totalVol = ceVol + peVol;
     var oiSplit = oiByStrike[g.strike] || { ce: 0, pe: 0 };
     var totalOI = oiSplit.ce + oiSplit.pe;
     var volRatio = totalOI > 0 ? ((ratio.ce || 0) + (ratio.pe || 0)) / 2 : 0;
     // volRatio is on the same scale as the CE/PE Vol/OI Ratio panel above
     // (roughly 0-100+, "volume as % of OI"), not a 0-1 fraction. Large
-    // resting size (OI well above the pack's median) plus low turnover
-    // (< half of OI traded today) reads as institutional accumulation;
-    // if we never received a ratio for this strike, that's missing data,
-    // not a "0% turnover" reading, so it must not default into the
-    // institutional branch.
-    var isInst = hasRatioData && totalOI > medianOI * 1.5 && volRatio < 50;
+    // resting size (OI well above this band's own median, by a
+    // band-specific margin) plus low-enough turnover (also band-specific)
+    // reads as institutional accumulation; if we never received a ratio
+    // for this strike, that's missing data, not a "0% turnover" reading,
+    // so it must not default into the institutional branch.
+    var th = INST_THRESHOLDS[band];
+    var isInst = hasRatioData && totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax;
     var actLabel = !hasRatioData ? 'No Data' : (isInst ? 'Institutional Accumulation' : 'Retail Flow');
     var netDelta = Math.abs((g.cDelta || 0) - Math.abs(g.pDelta || 0));
 
     var oiDominant = oiSplit.ce >= oiSplit.pe ? 'CE' : 'PE';
     var oiDomClr = oiDominant === 'CE' ? 'var(--red)' : 'var(--green)';
 
-    html += '<div class="sim-table-row' + (isAtm ? ' atm-row' : '') + '" style="font-size:11px;">' +
+    return '<div class="sim-table-row' + (isAtm ? ' atm-row' : '') + '" style="font-size:11px;">' +
       '<span style="font-family:var(--mono);font-weight:' + (isAtm ? 700 : 400) + ';color:' + (isAtm ? 'var(--txt)' : 'var(--txt2)') + ';">' + fmtI(g.strike) + '</span>' +
       '<span style="color:var(--txt2);font-family:var(--mono);white-space:nowrap;">' +
         fmtK(totalOI) + ' ' +
-        '<span style="font-size:9px;color:' + oiDomClr + ';">(' + oiDominant + ' ' + fmtK(oiDominant === 'CE' ? oiSplit.ce : oiSplit.pe) + ')</span>' +
+        '<span style="font-size:11px;color:' + oiDomClr + ';">(' + oiDominant + ' ' + fmtK(oiDominant === 'CE' ? oiSplit.ce : oiSplit.pe) + ')</span>' +
       '</span>' +
       '<span style="text-align:right;color:var(--amber);font-family:var(--mono);">' + fmtN(g.iv || simIV, 1) + '%</span>' +
       '<span style="text-align:right;font-family:var(--mono);color:var(--txt);">' + fmtN(netDelta, 2) + '</span>' +
@@ -1258,7 +1479,18 @@ class SimulatorView {
         '<span style="color:' + (isInst ? 'var(--green)' : 'var(--txt3)') + ';">' + actLabel + '</span>' +
       '</span>' +
     '</div>';
-  });
+  }
+
+  function sectionHtml(label, rows, band, medianOI) {
+    if (!rows.length) return '';
+    var body = rows.map(function(g) { return rowHtml(g, band, medianOI); }).join('');
+    return '<div class="sim-strike-band-section" style="margin-bottom:10px;">' +
+      '<div style="font-size:9px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;padding:4px 10px;">' + label + '</div>' +
+      body + '</div>';
+  }
+
+  var html = sectionHtml('Near ATM (\u00B1' + INST_NEAR_BAND_STRIKES + ' strikes)', nearAll, 'near', nearMedianOI) +
+             sectionHtml('Far Strikes (beyond \u00B1' + INST_NEAR_BAND_STRIKES + ', top 12 by OI)', farRanked, 'far', farMedianOI);
 
   setHtmlIfChanged(el, html || '<div style="padding:12px;color:var(--txt3);font-size:11px;">No strike data available.</div>');
 }
