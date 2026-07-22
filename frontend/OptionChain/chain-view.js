@@ -111,7 +111,7 @@ class ChainView {
 
   switchChainRange(range, el) {
   _chainRange = range;
-  _centerChainOnATM = true;
+  this.centerChainOnATM = true;
 
   ['range-tabs-chain','range-tabs-side','range-tabs-grk','range-tabs-iv'].forEach(gid => {
     const g = document.getElementById(gid);
