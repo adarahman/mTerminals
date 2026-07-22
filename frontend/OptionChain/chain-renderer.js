@@ -548,12 +548,15 @@ ChainView.prototype.renderDashboard = function(d) {
         <!-- Strike Table -->
         <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:14px;">Strike Detail</div>
         <div class="sim-table-wrap">
-          <div style="display:grid;grid-template-columns:70px 1fr 54px 54px 1fr;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg1);">
+          <div style="display:grid;grid-template-columns:64px 46px minmax(160px,1.4fr) 80px 50px 56px 100px minmax(140px,1fr);column-gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg1);">
             <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Strike</span>
+            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Dist</span>
             <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Open Interest</span>
+            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">&Delta;OI Today</span>
             <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">IV</span>
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Net Delta</span>
-            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Institutional Activity</span>
+            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;text-align:right;">Delta</span>
+            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Smart Money</span>
+            <span style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;">Market Structure</span>
           </div>
           <div id="sim-strike-table"></div>
         </div>
@@ -981,7 +984,7 @@ ChainView.prototype._rerenderChainPanels = function() {
       </div>
       <div class="arp-row"><span class="arp-key">Net OI</span><div class="arp-val"><span class="arp-num" style="color:${arpClr(netOI)};">${netOI>=0?'+':''}${fmtK(netOI)}</span><div class="arp-bar" style="width:${arpBarW(netOI,netAbsMax)}px;background:${arpClr(netOI)};"></div></div></div>
       <div class="arp-row"><span class="arp-key">Chg OI</span><div class="arp-val"><span class="arp-num" style="color:${arpClr(netDOI)};">${netDOI>=0?'+':''}${fmtK(netDOI)}</span><div class="arp-bar" style="width:${arpBarW(netDOI,netAbsMax)}px;background:${arpClr(netDOI)};"></div></div></div>
-      <div class="arp-row"><span class="arp-key">Vel OI</span><div class="arp-val"><span class="arp-num" style="color:${arpClr(netVel)};">${netVel>=0?'+':''}${fmtK(netVel)}</span><div class="arp-bar" style="width:${arpBarW(netVel,netAbsMax)}px;background:${arpClr(netVel)};"></div></div></div>
+      <div class="arp-row"><span class="arp-key">Vel OI</span><div class="arp-val"><span class="arp-num" style="color:${arpClr(netVel)};">${netVel==null||isNaN(netVel)?'—':(netVel>=0?'+':'')+fmtK(netVel)}</span><div class="arp-bar" style="width:${arpBarW(netVel,netAbsMax)}px;background:${arpClr(netVel)};"></div></div></div>
       <div style="padding-top:5px;margin-top:4px;border-top:1px solid var(--border);">
         <div style="margin-bottom:6px;">
           <div style="display:flex;justify-content:space-between;font-size:8px;font-family:var(--mono);margin-bottom:2px;">

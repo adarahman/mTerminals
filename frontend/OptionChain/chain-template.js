@@ -393,6 +393,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   <div class="section-card" id="chain-summary-card">
     <div class="section-header">
       <span class="section-title">📊 Option Chain Snapshot</span>
+      <span style="font-size:10px;color:var(--txt3);margin-left:6px;">${(() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All strikes':'±'+rng+' strikes'; })()}</span>
       <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="window.open('OptionChain/option-chain.html','_blank')">Full Chain →</button>
     </div>
     <div style="display:grid;grid-template-columns:1.15fr 1.15fr 1fr 1fr;gap:16px;padding:10px 2px 4px;">

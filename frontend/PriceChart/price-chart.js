@@ -82,7 +82,11 @@ class PriceChartEngine {
   constructor(){
     this.mounted = false;
     this.settings = this._loadSettings();
-    this._resizeBound = () => this.render();
+    this._resizeDebounceTimer = null;
+    this._resizeBound = () => {
+      clearTimeout(this._resizeDebounceTimer);
+      this._resizeDebounceTimer = setTimeout(() => this.render(), 100);
+    };
     
     // Initialize component modules
     this.chartData = new ChartData(50000);
@@ -94,6 +98,15 @@ class PriceChartEngine {
     this._zoomStart = null;
     this._zoomEnd = null;
     this._lastHydratedSymbol = null;
+    
+    // Render cache to avoid recalculating expensive operations
+    this._renderCache = {
+      tmap: null,
+      seriesHash: null,
+      windowStart: null,
+      windowEnd: null,
+      range: null
+    };
     
     // Interaction controller (initialized later when canvas is available)
     this.interactionController = null;
@@ -244,8 +257,8 @@ class PriceChartEngine {
 
         <div class="pc-chart-wrap">
           <div class="pc-watermark" id="pc-watermark">—</div>
-          <canvas id="price-chart-canvas" style="width:100%;display:block;" height="220"></canvas>
-          <canvas id="price-chart-volume-canvas" style="width:100%;display:block;" height="48"></canvas>
+          <canvas id="price-chart-canvas" style="width:100%;display:block;" height="800"></canvas>
+          <canvas id="price-chart-volume-canvas" style="width:100%;display:block;" height="120"></canvas>
           ${this._orderPanelHtml()}
         </div>
 
@@ -310,15 +323,15 @@ class PriceChartEngine {
       fieldSelect.onchange = () => { this.settings.ohlcField = fieldSelect.value; this._saveSettings(); this.render(); };
     }
     panel.querySelectorAll('.pc-type-btn').forEach(b=>{
-      b.onclick = () => { this.settings.type = b.dataset.type; this._zoomStart = this._zoomEnd = null; this._saveSettings(); this._refreshToolbarState(); this.render(true); };
+      b.onclick = () => { this.settings.type = b.dataset.type; this._zoomStart = this._zoomEnd = null; this.indicatorEngine._clearCache(); this._saveSettings(); this._refreshToolbarState(); this.render(true); };
     });
     const smaToggle = $i('pc-sma-toggle'), smaPeriod = $i('pc-sma-period');
     const emaToggle = $i('pc-ema-toggle'), emaPeriod = $i('pc-ema-period');
     const vwapToggle = $i('pc-vwap-toggle');
     const gridToggle = $i('pc-grid-toggle');
     const lineColor = $i('pc-line-color');
-    const syncSma = () => { this.settings.smaPeriods = smaToggle.checked ? [parseInt(smaPeriod.value,10)||20] : []; this._saveSettings(); this.render(); };
-    const syncEma = () => { this.settings.emaPeriods = emaToggle.checked ? [parseInt(emaPeriod.value,10)||9] : []; this._saveSettings(); this.render(); };
+    const syncSma = () => { this.settings.smaPeriods = smaToggle.checked ? [parseInt(smaPeriod.value,10)||20] : []; this.indicatorEngine._clearCache(); this._saveSettings(); this.render(); };
+    const syncEma = () => { this.settings.emaPeriods = emaToggle.checked ? [parseInt(emaPeriod.value,10)||9] : []; this.indicatorEngine._clearCache(); this._saveSettings(); this.render(); };
     if(smaToggle){ smaToggle.onchange = syncSma; smaPeriod.onchange = syncSma; }
     if(emaToggle){ emaToggle.onchange = syncEma; emaPeriod.onchange = syncEma; }
     if(vwapToggle) vwapToggle.onchange = () => { this.settings.showVwap = vwapToggle.checked; this._saveSettings(); this.render(); };
@@ -457,11 +470,17 @@ class PriceChartEngine {
       // frame so fast mouse movement doesn't queue up a redraw backlog.
       canvas.onmousemove = (e) => {
         const rect = canvas.getBoundingClientRect();
-        this._hover = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-        if(this._hoverRaf) return;
-        this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        // Only trigger render if position actually changed
+        if(!this._hover || this._hover.x !== x || this._hover.y !== y){
+          this._hover = { x, y };
+          if(this._hoverRaf) return;
+          this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
+        }
       };
       canvas.onmouseleave = () => {
+        if(!this._hover) return; // Already cleared
         this._hover = null;
         if(this._hoverRaf) return;
         this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
@@ -637,8 +656,14 @@ class PriceChartEngine {
     this.ensureMounted();
     const canvas = document.getElementById('price-chart-canvas');
     if(!canvas) return;
-
+    
+    // Early return if no data
     const lastTick = this.chartData.getLastTick();
+    if(!lastTick){
+      this._syncOrderPanel(null);
+      return;
+    }
+
     this._syncOrderPanel(lastTick);
     const watermarkEl = $i('pc-watermark');
     const symEl = $i('pc-ohlc-sym');
@@ -653,13 +678,16 @@ class PriceChartEngine {
     // candle history.
     if(symText && symText !== this._lastHydratedSymbol){
       this._lastHydratedSymbol = symText;
+      this._renderCache.tmap = null; // Invalidate cache on symbol change
+      this.indicatorEngine._clearCache(); // Clear indicator cache on symbol change
+      this.chartData.clearForSymbolChange(symText); // Free memory for old symbol
       this.hydrateRange(this.settings.range);
     }
 
 
     const visible = this._visibleTicks();
     if(!visible.length){
-      const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(160, canvas.parentElement.clientHeight);
+      const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(800, canvas.parentElement.clientHeight);
       const ctx = sizeCanvasIfChanged(canvas, W0, H0);
       ctx.clearRect(0,0,W0,H0);
       this._renderOhlcReadout(null, null);
@@ -680,7 +708,7 @@ class PriceChartEngine {
       vwap: this.settings.vwapColor,
     };
 
-    const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(160, canvas.parentElement.clientHeight);
+    const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(800, canvas.parentElement.clientHeight);
     const ctx = sizeCanvasIfChanged(canvas, W0, H0);
     const W = W0, H = H0;
     const PAD = { l: 54, r: 12, t: 12, b: 22 };
@@ -783,10 +811,19 @@ class PriceChartEngine {
     // before 09:15 open) collapse exactly like an overnight gap does,
     // instead of only compressing gaps *between* candles and leaving the
     // leading/trailing edges as raw uncompressed real time.
-    const mapPoints = series.slice();
-    if(mapPoints.length && windowStart < mapPoints[0].t) mapPoints.unshift({ t: windowStart });
-    if(mapPoints.length && windowEnd > mapPoints[mapPoints.length - 1].t) mapPoints.push({ t: windowEnd });
-    const tmap = this._buildTimeMap(mapPoints, GAP_THRESHOLD, GAP_CAP);
+    
+    // Cache time map to avoid rebuilding on every render
+    const seriesHash = series.length + ':' + series[0]?.t + ':' + series[series.length-1]?.t + ':' + windowStart + ':' + windowEnd;
+    let tmap = this._renderCache.tmap;
+    if(!tmap || this._renderCache.seriesHash !== seriesHash || this._renderCache.range !== this.settings.range){
+      const mapPoints = series.slice();
+      if(mapPoints.length && windowStart < mapPoints[0].t) mapPoints.unshift({ t: windowStart });
+      if(mapPoints.length && windowEnd > mapPoints[mapPoints.length - 1].t) mapPoints.push({ t: windowEnd });
+      tmap = this._buildTimeMap(mapPoints, GAP_THRESHOLD, GAP_CAP);
+      this._renderCache.tmap = tmap;
+      this._renderCache.seriesHash = seriesHash;
+      this._renderCache.range = this.settings.range;
+    }
     const vWindowStart = tmap.toVirtual(windowStart);
     const vWindowEnd = tmap.toVirtual(windowEnd);
     const vSpan = Math.max(1, vWindowEnd - vWindowStart);

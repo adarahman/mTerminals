@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DERIV://TERMINAL — NSE F&O Desk</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --void:#090b0e;
+    --panel:#10141a;
+    --panel-raise:#151a22;
+    --line:#232b36;
+    --line-soft:#1a2029;
+    --text:#dde4ec;
+    --dim:#5f6b7c;
+    --dimmer:#3d4552;
+    --green:#33c98f;
+    --green-dim:#1d5c46;
+    --red:#ff5d64;
+    --red-dim:#5c2528;
+    --amber:#e7b04e;
+    --violet:#9585f8;
+    --grey:#7c8798;
+    --focus:#4fb0ff;
+  }
+
+  *{box-sizing:border-box; margin:0; padding:0;}
+
+  body{
+    background:
+      radial-gradient(ellipse 1200px 600px at 50% -10%, #101825 0%, transparent 60%),
+      var(--void);
+    color:var(--text);
+    font-family:'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-size:13px;
+    padding:18px;
+    min-height:100vh;
+    letter-spacing:0.01em;
+  }
+
+  .term{
+    max-width:1400px;
+    margin:0 auto;
+    border:1px solid var(--line);
+    border-radius:4px;
+    overflow:hidden;
+    background:var(--void);
+  }
+
+  /* ===== HEADER / TICKER STRIP ===== */
+  .strip{
+    display:flex;
+    align-items:stretch;
+    background:linear-gradient(180deg,#12161d,#0d1116);
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+  }
+  .strip-brand{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 16px;
+    border-right:1px solid var(--line);
+    white-space:nowrap;
+  }
+  .dot-live{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--green);
+    box-shadow:0 0 8px var(--green);
+    animation:pulse 1.8s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce){ .dot-live{animation:none;} }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .brand-name{font-weight:800; font-size:13px; letter-spacing:.06em; color:var(--text);}
+  .brand-sub{font-size:10px; color:var(--dim); letter-spacing:.08em;}
+
+  .quotes{
+    display:flex;
+    flex:1;
+    flex-wrap:wrap;
+  }
+  .quote{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:2px;
+    padding:8px 20px;
+    border-right:1px solid var(--line-soft);
+    min-width:150px;
+  }
+  .quote-label{font-size:10px; color:var(--dim); letter-spacing:.08em;}
+  .quote-val{font-size:16px; font-weight:700;}
+  .quote-chg{font-size:11px; font-weight:600; display:flex; gap:4px; align-items:center;}
+  .up{color:var(--green);} .down{color:var(--red);} .flat{color:var(--dim);}
+
+  .strip-clock{
+    display:flex; flex-direction:column; justify-content:center; align-items:flex-end;
+    padding:8px 16px; gap:2px; margin-left:auto;
+  }
+  .clock-time{font-size:15px; font-weight:700; color:var(--amber); font-variant-numeric:tabular-nums;}
+  .clock-label{font-size:10px; color:var(--dim); letter-spacing:.08em;}
+
+  /* ===== GRID ===== */
+  .grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:1px;
+    background:var(--line);
+  }
+  .panel{
+    background:var(--panel);
+    padding:14px 16px 16px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    min-width:0;
+  }
+  .panel-head{
+    display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:1px solid var(--line-soft);
+    padding-bottom:8px;
+  }
+  .panel-title{font-size:11px; font-weight:700; letter-spacing:.1em; color:var(--dim);}
+  .panel-meta{font-size:10px; color:var(--dimmer);}
+
+  /* --- FII/DII flow --- */
+  .flow-body{display:flex; gap:14px; align-items:flex-end;}
+  .flow-chart{flex:1; height:150px;}
+  .flow-legend{display:flex; flex-direction:column; gap:10px; min-width:110px; padding-top:4px;}
+  .legend-item{display:flex; flex-direction:column; gap:2px;}
+  .legend-key{display:flex; align-items:center; gap:6px; font-size:10px; color:var(--dim); letter-spacing:.05em;}
+  .swatch{width:9px; height:9px; border-radius:2px;}
+  .legend-val{font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;}
+
+  /* --- ratio gauge --- */
+  .gauge-wrap{display:flex; flex-direction:column; gap:10px; justify-content:center; flex:1;}
+  .gauge-scale{display:flex; justify-content:space-between; font-size:9px; color:var(--dimmer); margin-top:2px;}
+  .gauge-readout{display:flex; align-items:baseline; gap:10px;}
+  .gauge-pct{font-size:28px; font-weight:800; color:var(--amber);}
+  .gauge-bias{font-size:12px; font-weight:700; color:var(--red); letter-spacing:.03em;}
+  .gauge-sub{font-size:10px; color:var(--dim);}
+
+  /* --- ASCII block bar (shared: ratio gauge + OI participation) --- */
+  .ascii-bar{
+    font-family:'JetBrains Mono', monospace;
+    font-size:15px;
+    letter-spacing:0;
+    white-space:pre;
+    line-height:1;
+  }
+  .ascii-bar .fill{color:var(--amber);}
+  .ascii-bar .void{color:var(--line);}
+  .ascii-bar.small{font-size:12px;}
+
+  /* --- skew curve --- */
+  .skew-svg{width:100%; height:170px;}
+  .skew-readout{display:flex; gap:22px; font-size:10px; color:var(--dim); flex-wrap:wrap;}
+  .skew-readout b{color:var(--text); font-size:12px;}
+
+  /* --- OI breakdown --- */
+  .oi-rows{display:flex; flex-direction:column; gap:12px; flex:1; justify-content:center;}
+  .oi-row{display:grid; grid-template-columns:60px 1fr 96px; align-items:center; gap:10px;}
+  .oi-name{font-size:11px; color:var(--dim); letter-spacing:.05em; font-weight:600;}
+  .oi-trend{font-size:9px; font-weight:700; letter-spacing:.05em; text-align:right; white-space:nowrap;}
+
+  /* --- heatmap --- */
+  .heat-panel{grid-column:1 / -1; background:var(--panel);}
+  .heat-grid{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:10px;
+  }
+  .sector{
+    border:1px solid var(--line-soft);
+    border-radius:4px;
+    background:var(--panel-raise);
+    overflow:hidden;
+  }
+  .sector-head{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:7px 10px; border-bottom:1px solid var(--line-soft);
+    font-size:10px; font-weight:700; letter-spacing:.07em;
+  }
+  .sector-tag{padding:1px 6px; border-radius:2px; font-size:9px; font-weight:700; letter-spacing:.05em;}
+  .tag-long{background:var(--green-dim); color:var(--green);}
+  .tag-short{background:var(--red-dim); color:var(--red);}
+  .tag-cover{background:#3a3316; color:var(--amber);}
+  .tag-liq{background:#2a2f38; color:var(--grey);}
+  .tag-neutral{background:#22262e; color:var(--dim);}
+  .sector-body{display:grid; grid-template-columns:1fr 1fr;}
+  .stock{
+    padding:9px 10px; display:flex; flex-direction:column; gap:3px;
+    border-right:1px solid var(--line-soft);
+  }
+  .stock:last-child{border-right:none;}
+  .stock-name{font-size:10px; color:var(--dim); letter-spacing:.04em;}
+  .stock-chg{font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;}
+
+  .foot{
+    padding:8px 16px; display:flex; justify-content:space-between;
+    font-size:10px; color:var(--dimmer); border-top:1px solid var(--line);
+    background:var(--void); flex-wrap:wrap; gap:6px;
+  }
+
+  @media (max-width:880px){
+    .grid{grid-template-columns:1fr;}
+    .heat-grid{grid-template-columns:1fr 1fr;}
+    .flow-body{flex-direction:column;}
+  }
+  @media (max-width:520px){
+    .heat-grid{grid-template-columns:1fr;}
+    .sector-body{grid-template-columns:1fr 1fr;}
+  }
+
+  :focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+</style>
+</head>
+<body>
+
+<div class="term">
+
+  <!-- HEADER STRIP -->
+  <div class="strip">
+    <div class="strip-brand">
+      <span class="dot-live" aria-hidden="true"></span>
+      <div>
+        <div class="brand-name">DERIV://TERMINAL</div>
+        <div class="brand-sub">NSE F&amp;O DESK</div>
+      </div>
+    </div>
+    <div class="quotes" id="quotes"><!-- filled by JS --></div>
+    <div class="strip-clock">
+      <div class="clock-time" id="clock">--:--:--</div>
+      <div class="clock-label">IST · LIVE</div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="grid">
+
+    <!-- FII / DII FLOW -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">FII / DII NET FLOW — 30D</span>
+        <span class="panel-meta">₹ CRORE</span>
+      </div>
+      <div class="flow-body">
+        <div class="flow-chart"><canvas id="flowCanvas"></canvas></div>
+        <div class="flow-legend">
+          <div class="legend-item">
+            <span class="legend-key"><span class="swatch" style="background:var(--violet)"></span>FII (FUT)</span>
+            <span class="legend-val" id="legendFii">--</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-key"><span class="swatch" style="background:var(--grey)"></span>DII</span>
+            <span class="legend-val" id="legendDii">--</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-key">NET (30D)</span>
+            <span class="legend-val" id="legendNet">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LONG SHORT RATIO -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">FII INDEX LONG-SHORT RATIO</span>
+        <span class="panel-meta">FUTURES</span>
+      </div>
+      <div class="gauge-wrap">
+        <div class="gauge-readout">
+          <span class="gauge-pct">38.4%</span>
+          <span class="gauge-bias">MODERATE BEARISH BIAS</span>
+        </div>
+        <div class="ascii-bar" id="ratioBar"></div>
+        <div class="gauge-scale"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
+        <div class="gauge-sub">20D avg 41.2% · long share of FII futures OI, trending lower</div>
+      </div>
+    </div>
+
+    <!-- IV SKEW -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">NIFTY IV SKEW — WEEKLY EXPIRY</span>
+        <span class="panel-meta">%IV</span>
+      </div>
+      <svg class="skew-svg" viewBox="0 0 400 170" preserveAspectRatio="none" id="skewSvg"></svg>
+      <div class="skew-readout">
+        <span>ATM IV <b>12.8%</b></span>
+        <span>25Δ PUT <b>15.1%</b></span>
+        <span>25Δ CALL <b>11.6%</b></span>
+        <span>SKEW <b class="down">PUT-RICH</b></span>
+      </div>
+    </div>
+
+    <!-- OI BREAKDOWN -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">PARTICIPANT OI — INDEX FUTURES</span>
+        <span class="panel-meta">% OF TOTAL</span>
+      </div>
+      <div class="oi-rows" id="oiRows"><!-- filled by JS --></div>
+    </div>
+
+    <!-- SECTOR HEATMAP -->
+    <div class="panel heat-panel">
+      <div class="panel-head">
+        <span class="panel-title">F&amp;O SECTOR BUILDUP HEATMAP</span>
+        <span class="panel-meta">SESSION Δ%</span>
+      </div>
+      <div class="heat-grid" id="heatGrid"><!-- filled by JS --></div>
+    </div>
+
+  </div>
+
+  <div class="foot">
+    <span>SAMPLE DATA — WIRE TO YOUR BROKER/DATA FEED FOR LIVE VALUES</span>
+    <span id="footStamp">SNAPSHOT —</span>
+  </div>
+</div>
+
+<script>
+// ============ DATA (mock — swap with a live feed) ============
+const quotesData = [
+  {label:'NIFTY 50', val:'24,850.25', chg:'+104.50', pct:'+0.42%', dir:'up'},
+  {label:'BANK NIFTY', val:'52,120.10', chg:'-45.20', pct:'-0.09%', dir:'down'},
+  {label:'INDIA VIX', val:'13.15', chg:'-0.34', pct:'-2.52%', dir:'down'},
+  {label:'NIFTY FUT (CUR)', val:'24,868.70', chg:'+18.45', pct:'+0.07%', dir:'up'},
+];
+
+let flowSeries = { // 30 sessions, ₹ Cr
+  fii: [-1200,-800,300,-1500,-2200,-900,-600,400,-1800,-2600,-1100,-500,700,-1900,-3100,-2400,-1600,-800,300,-2100,-2800,-1300,-700,200,-1500,-2900,-3400,-2000,-1200,-3412],
+  dii: [900,1100,600,1400,1800,1200,500,300,1600,2000,1500,800,400,1700,2400,2100,1300,700,200,1900,2500,1400,600,300,1700,2600,2900,2200,1600,2187]
+};
+
+let oiData = [
+  {name:'FII', pct:42, color:'var(--violet)', trend:'SHORT BUILD', dir:'down'},
+  {name:'PRO', pct:21, color:'var(--amber)', trend:'LONG BUILD', dir:'up'},
+  {name:'CLIENT', pct:27, color:'var(--grey)', trend:'NEUTRAL', dir:'flat'},
+  {name:'DII', pct:10, color:'var(--green)', trend:'ACCUMULATING', dir:'up'},
+];
+
+let sectors = [
+  {name:'IT', tag:'LONG BUILDUP', cls:'tag-long', stocks:[
+    {n:'INFOSYS', v:'+2.4%', dir:'up'}, {n:'TCS', v:'+1.8%', dir:'up'}]},
+  {name:'BANKING', tag:'SHORT BUILDUP', cls:'tag-short', stocks:[
+    {n:'HDFC BANK', v:'-1.2%', dir:'down'}, {n:'ICICI BANK', v:'-0.8%', dir:'down'}]},
+  {name:'AUTO', tag:'SHORT COVERING', cls:'tag-cover', stocks:[
+    {n:'MARUTI', v:'+1.5%', dir:'up'}, {n:'M&M', v:'+0.9%', dir:'up'}]},
+  {name:'ENERGY', tag:'LONG LIQUIDATION', cls:'tag-liq', stocks:[
+    {n:'RELIANCE', v:'-0.5%', dir:'down'}, {n:'ONGC', v:'-1.1%', dir:'down'}]},
+  {name:'METALS', tag:'LONG BUILDUP', cls:'tag-long', stocks:[
+    {n:'TATA STEEL', v:'+3.1%', dir:'up'}, {n:'JSW STEEL', v:'+2.6%', dir:'up'}]},
+  {name:'PHARMA', tag:'NEUTRAL', cls:'tag-neutral', stocks:[
+    {n:'SUN PHARMA', v:'+0.1%', dir:'up'}, {n:'DR REDDY', v:'-0.2%', dir:'down'}]},
+];
+
+// ============ HELPER: terminal-style block bar ============
+// pct: 0-100, blocks: total character width, color: css color for filled portion
+function blockBar(pct, blocks = 20, color = null, showPct = true){
+  const filled = Math.max(0, Math.min(blocks, Math.round((pct/100) * blocks)));
+  const empty = blocks - filled;
+  const fillColor = color ? `style="color:${color}"` : '';
+  const label = showPct ? ` ${pct.toFixed(1)}%` : '';
+  return `[<span class="fill" ${fillColor}>${'▓'.repeat(filled)}</span><span class="void">${'░'.repeat(empty)}</span>]${label}`;
+}
+
+// ============ RENDER: quotes ============
+// quotesByLabel persists across partial payloads so a feed that only sends
+// a subset of symbols (e.g. NIFTY 50 + BANK NIFTY) never wipes out symbols
+// it temporarily omitted (e.g. INDIA VIX, NIFTY FUT) -- those just hold
+// their last known value instead of disappearing.
+//
+// LABEL_ALIASES: your relay/broker feed may not send back the exact same
+// label string used in quotesData below (e.g. Angel One's raw symbol is
+// "NIFTY", not "NIFTY 50"). Without normalizing, a mismatched label creates
+// a duplicate tile instead of updating the existing one. Add any other
+// raw feed symbol names you see in the console here -> canonical label.
+const LABEL_ALIASES = {
+  'NIFTY': 'NIFTY 50',
+  'NIFTY50': 'NIFTY 50',
+  'NIFTY 50 INDEX': 'NIFTY 50',
+  'BANKNIFTY': 'BANK NIFTY',
+  'NIFTY BANK': 'BANK NIFTY',
+  'INDIAVIX': 'INDIA VIX',
+  'INDIA VIX INDEX': 'INDIA VIX',
+  'NIFTYFUT': 'NIFTY FUT (CUR)',
+  'NIFTY FUT': 'NIFTY FUT (CUR)',
+  'NIFTY-FUT': 'NIFTY FUT (CUR)',
+};
+function normalizeLabel(label){
+  return LABEL_ALIASES[label] || label;
+}
+let quotesByLabel = {};
+function renderQuotes(data){
+  data.forEach(q => {
+    const canonical = normalizeLabel(q.label);
+    quotesByLabel[canonical] = { ...q, label: canonical };
+  });
+  const merged = Object.values(quotesByLabel);
+  document.getElementById('quotes').innerHTML = merged.map(q => `
+    <div class="quote">
+      <span class="quote-label">${q.label}</span>
+      <span class="quote-val">${q.val}</span>
+      <span class="quote-chg ${q.dir}">${q.dir==='up'?'▲':'▼'} ${q.chg} (${q.pct})</span>
+    </div>
+  `).join('');
+}
+
+// ============ RENDER: long-short ratio (ASCII bar) ============
+function renderRatioBar(pct){
+  document.getElementById('ratioBar').innerHTML = blockBar(pct, 24, null, false);
+}
+
+// ============ RENDER: OI breakdown (ASCII bars) ============
+function renderOI(data){
+  document.getElementById('oiRows').innerHTML = data.map(o => `
+    <div class="oi-row">
+      <span class="oi-name">${o.name}</span>
+      <span class="ascii-bar small">${blockBar(o.pct, 16, o.color)}</span>
+      <span class="oi-trend ${o.dir}">${o.trend}</span>
+    </div>
+  `).join('');
+}
+
+// ============ RENDER: heatmap ============
+function renderSectors(data){
+  document.getElementById('heatGrid').innerHTML = data.map(s => `
+    <div class="sector">
+      <div class="sector-head">
+        <span>${s.name}</span>
+        <span class="sector-tag ${s.cls}">${s.tag}</span>
+      </div>
+      <div class="sector-body">
+        ${s.stocks.map(st => `
+          <div class="stock">
+            <span class="stock-name">${st.n}</span>
+            <span class="stock-chg ${st.dir}">${st.v}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+renderQuotes(quotesData);
+renderRatioBar(38.4);
+renderOI(oiData);
+renderSectors(sectors);
+
+// ============ RENDER: FII/DII flow legend (right-side totals) ============
+function fmtCr(n){
+  const sign = n >= 0 ? '+' : '-';
+  return sign + Math.abs(Math.round(n)).toLocaleString('en-IN');
+}
+function renderFlowLegend(){
+  const fiiLatest = flowSeries.fii[flowSeries.fii.length - 1];
+  const diiLatest = flowSeries.dii[flowSeries.dii.length - 1];
+  const net = fiiLatest + diiLatest;
+
+  const fiiEl = document.getElementById('legendFii');
+  const diiEl = document.getElementById('legendDii');
+  const netEl = document.getElementById('legendNet');
+
+  fiiEl.textContent = fmtCr(fiiLatest);
+  fiiEl.className = 'legend-val ' + (fiiLatest >= 0 ? 'up' : 'down');
+
+  diiEl.textContent = fmtCr(diiLatest);
+  diiEl.className = 'legend-val ' + (diiLatest >= 0 ? 'up' : 'down');
+
+  netEl.textContent = fmtCr(net);
+  netEl.className = 'legend-val ' + (net >= 0 ? 'up' : 'down');
+}
+
+// ============ CHART: FII/DII flow (canvas bars) ============
+function drawFlow(){
+  const canvas = document.getElementById('flowCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+  ctx.clearRect(0,0,W,H);
+
+  const n = flowSeries.fii.length;
+  const all = [...flowSeries.fii, ...flowSeries.dii];
+  const max = Math.max(...all), min = Math.min(...all);
+  const range = Math.max(Math.abs(max), Math.abs(min));
+  const zeroY = H/2;
+  const barW = (W / n) * 0.34;
+  const gap = (W / n);
+
+  // zero line
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(W, zeroY); ctx.stroke();
+
+  const violet = getComputedStyle(document.documentElement).getPropertyValue('--violet').trim();
+  const grey = getComputedStyle(document.documentElement).getPropertyValue('--grey').trim();
+
+  for(let i=0;i<n;i++){
+    const x = i*gap + gap*0.16;
+    const fiiVal = flowSeries.fii[i];
+    const diiVal = flowSeries.dii[i];
+    const fiiH = (Math.abs(fiiVal)/range) * (H/2 - 6);
+    const diiH = (Math.abs(diiVal)/range) * (H/2 - 6);
+
+    ctx.fillStyle = violet;
+    if(fiiVal >= 0) ctx.fillRect(x, zeroY - fiiH, barW, fiiH);
+    else ctx.fillRect(x, zeroY, barW, fiiH);
+
+    ctx.fillStyle = grey;
+    const x2 = x + barW + 2;
+    if(diiVal >= 0) ctx.fillRect(x2, zeroY - diiH, barW, diiH);
+    else ctx.fillRect(x2, zeroY, barW, diiH);
+  }
+}
+
+// ============ CHART: IV skew smile (SVG) ============
+let skewPoints = [
+  [0,17.2],[0.15,15.9],[0.3,15.1],[0.45,13.9],[0.5,12.8],
+  [0.55,12.2],[0.65,11.6],[0.8,11.4],[1,11.9]
+];
+
+function drawSkew(points = skewPoints){
+  // Guard: a feed payload with an empty/invalid skew array would otherwise
+  // produce a path with no leading "M", which SVG rejects outright.
+  if (!Array.isArray(points) || points.length < 2) {
+    console.warn('[dashboard] skew payload had < 2 points, keeping previous skew curve');
+    points = skewPoints;
+  }
+  const svg = document.getElementById('skewSvg');
+  const W = 400, H = 170, pad = 24;
+  // points: strike offset (delta-like) vs IV
+  const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]);
+  const minY = Math.min(...ys)-1, maxY = Math.max(...ys)+1;
+  const toX = x => pad + x*(W-pad*2);
+  const toY = y => H-pad - ((y-minY)/(maxY-minY))*(H-pad*2);
+
+  let path = points.map((p,i)=> (i===0?'M':'L') + toX(p[0]).toFixed(1) + ',' + toY(p[1]).toFixed(1)).join(' ');
+  const areaPath = path + ` L${toX(1).toFixed(1)},${(H-pad)} L${toX(0).toFixed(1)},${(H-pad)} Z`;
+
+  const atmX = toX(0.5);
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="skewFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#9585f8" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#9585f8" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <line x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}" stroke="#232b36" stroke-width="1"/>
+    <line x1="${atmX}" y1="${pad}" x2="${atmX}" y2="${H-pad}" stroke="#232b36" stroke-width="1" stroke-dasharray="3,3"/>
+    <path d="${areaPath}" fill="url(#skewFill)"/>
+    <path d="${path}" fill="none" stroke="#9585f8" stroke-width="2"/>
+    ${points.map(p=>`<circle cx="${toX(p[0]).toFixed(1)}" cy="${toY(p[1]).toFixed(1)}" r="2.5" fill="#dde4ec"/>`).join('')}
+    <text x="${pad}" y="${pad-8}" fill="#5f6b7c" font-size="9" font-family="JetBrains Mono, monospace">PUT WING</text>
+    <text x="${W-pad-52}" y="${pad-8}" fill="#5f6b7c" font-size="9" font-family="JetBrains Mono, monospace">CALL WING</text>
+    <text x="${atmX-10}" y="${H-8}" fill="#5f6b7c" font-size="9" font-family="JetBrains Mono, monospace">ATM</text>
+  `;
+}
+
+// ============ CLOCK ============
+function tickClock(){
+  const now = new Date();
+  const ist = new Date(now.toLocaleString('en-US', {timeZone:'Asia/Kolkata'}));
+  const hh = String(ist.getHours()).padStart(2,'0');
+  const mm = String(ist.getMinutes()).padStart(2,'0');
+  const ss = String(ist.getSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+  document.getElementById('footStamp').textContent = 'SNAPSHOT — ' + ist.toDateString();
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+drawFlow();
+renderFlowLegend();
+drawSkew();
+window.addEventListener('resize', drawFlow);
+
+// ==========================================================================
+// LIVE DATA PIPELINE
+// --------------------------------------------------------------------------
+// Call window.updateDashboard(payload) from your feed handler (websocket
+// onmessage, polling fetch, broker SDK callback, etc). Any subset of keys
+// may be sent — only the sections present in the payload are re-rendered,
+// so you can push high-frequency updates (e.g. quotes every tick) separately
+// from slower ones (e.g. sector heatmap every minute).
+//
+// Expected shape (all keys optional):
+// {
+//   quotes:  [ {label,val,chg,pct,dir:'up'|'down'}, ... ],
+//   flow:    { fii:[...30 nums], dii:[...30 nums] },   // Rs Cr, 30 sessions
+//   ratio:   38.4,                                       // FII long-share %
+//   oi:      [ {name,pct,color,trend,dir:'up'|'down'|'flat'}, ... ],  // trend = bias label e.g. 'SHORT BUILD'
+//   skew:    [ [strikeOffset0to1, ivPct], ... ],
+//   sectors: [ {name,tag,cls,stocks:[{n,v,dir}]}, ... ]
+// }
+// --------------------------------------------------------------------------
+window.updateDashboard = function(payload = {}){
+  if (payload.quotes)  {
+    renderQuotes(payload.quotes);
+    const gotLabels = payload.quotes.map(q => normalizeLabel(q.label));
+    ['INDIA VIX','NIFTY FUT (CUR)'].forEach(expected => {
+      if (!gotLabels.includes(expected)) {
+        console.warn(`[dashboard] "${expected}" missing from this quotes payload -- relay/feed isn't sending it, holding last known value`);
+      }
+    });
+  }
+  if (payload.flow)    { flowSeries = payload.flow; drawFlow(); renderFlowLegend(); }
+  if (typeof payload.ratio === 'number') renderRatioBar(payload.ratio);
+  if (payload.oi)      { oiData = payload.oi; renderOI(oiData); }
+  if (payload.skew)    {
+    if (Array.isArray(payload.skew) && payload.skew.length >= 2) {
+      skewPoints = payload.skew;
+    } else {
+      console.warn('[dashboard] skew payload had < 2 points, ignoring -- keeping previous curve');
+    }
+    drawSkew(skewPoints);
+  }
+  if (payload.sectors) { sectors = payload.sectors; renderSectors(sectors); }
+};
+
+// Example (uncomment and point at your feed):
+// const ws = new WebSocket('wss://your-feed-endpoint');
+// ws.onmessage = (evt) => window.updateDashboard(JSON.parse(evt.data));
+//
+// Or polling:
+// setInterval(async () => {
+//   const res = await fetch('/api/fno-snapshot');
+//   window.updateDashboard(await res.json());
+// }, 5000);
+
+// ==========================================================================
+// LIVE CONNECTION — Angel One relay (see relay/server.js)
+// --------------------------------------------------------------------------
+// This connects to the local relay process, NOT to Angel One directly —
+// the browser can't send the custom auth headers Angel One's socket
+// requires. The relay holds that connection and re-publishes plain JSON
+// here. Quotes + sector heatmap arrive live (tick by tick); ratio + OI
+// arrive once the relay's NSE EOD fetch completes (typically evenings).
+// --------------------------------------------------------------------------
+const RELAY_URL = 'ws://localhost:5500/bridge';
+// const RELAY_URL = 'ws://localhost:8000/ws';
+
+function connectRelay(){
+  const sock = new WebSocket(RELAY_URL);
+  sock.onopen = () => console.log('[dashboard] connected to relay');
+  sock.onmessage = (evt) => {
+    try { window.updateDashboard(JSON.parse(evt.data)); }
+    catch(e){ console.error('[dashboard] bad payload', e); }
+  };
+  sock.onclose = () => {
+    console.log('[dashboard] relay disconnected, retrying in 5s');
+    setTimeout(connectRelay, 5000);
+  };
+  sock.onerror = () => sock.close();
+}
+connectRelay();
+</script>
+
+</body>
+</html>

@@ -42,7 +42,7 @@
     expiry: "24-JUL-2026",
     expiryDates: ["24-JUL-2026", "31-JUL-2026", "07-AUG-2026"],
     rows: [],
-    range: 3,
+    range: 10,
     velWin: 5,
     greeksOpen: false,
     selectedStrike: null,
@@ -354,6 +354,15 @@
 
   function renderSummary() {
     const rows = visibleRows();
+
+    // ── RANGE BADGE ── every summary card was aggregating over
+    // visibleRows() (ATM ± state.range) with no on-card indication of
+    // what that range actually was — a ±3 read and a ±10 read look
+    // identical at a glance even though the totals mean very different
+    // things. Stamp the current range onto every card via a shared class
+    // instead of hand-wiring four separate ids.
+    const rangeLabel = state.range >= 9999 ? "All strikes" : `±${state.range}`;
+    document.querySelectorAll(".oc-range-badge").forEach((el) => { el.textContent = rangeLabel; });
 
     // ── OI summary ──
     const totalCe = rows.reduce((s, r) => s + r.ce.oi, 0);
@@ -712,6 +721,18 @@
     if (msg.spotChgPct != null) state.spotChgPct = msg.spotChgPct;
     if (msg.expiry) state.expiry = msg.expiry;
     if (msg.expiryDates) state.expiryDates = msg.expiryDates;
+    // Keep this tab's range in sync with the main dashboard's sidebar
+    // toggle — chain-sync.js has always sent this field, but nothing
+    // here ever read it, so the two views could silently show different
+    // ATM ranges with no indication either was out of sync.
+    if (msg.range != null && msg.range !== state.range) {
+      state.range = msg.range;
+      const activeBtn = $("ocRangeGroup").querySelector(`button[data-val="${msg.range}"]`);
+      if (activeBtn) {
+        $("ocRangeGroup").dataset.active = msg.range;
+        $("ocRangeGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === activeBtn));
+      }
+    }
     renderAll();
   }
 

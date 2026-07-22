@@ -27,6 +27,34 @@
 // which call into it. See DashboardPro.html script order.
 // ============================================================
 
+// NEW: institutional combined-OI-bar row — one bar whose length is total
+// OI (already computed onto vm.oiBar as a %), with an overlay segment at
+// the bar's tip for today's ΔOI: a dashed white stripe for a build-up,
+// a hollow amber outline for unwinding — same track, so the comparison
+// stays meaningful across strikes instead of two separate numbers. Plus
+// the smart-money dot/label. Self-contained gradient string here (not
+// chain-utils.js's tickFill) since this file only does pure
+// interpolation — no shared helper needed for a single fixed pattern.
+function oiCombinedBarHtml(leg) {
+  const b = leg.oiBar;
+  if (!b) return '';
+  const rightOffset = (100 - parseFloat(b.barPct)).toFixed(1);
+  const chgClr = b.chgDir === 'inc' ? '#22c55e' : b.chgDir === 'dec' ? 'var(--oc-amber)' : 'var(--text-faint)';
+  return `
+        <div style="margin:6px 0 3px;">
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-faint);margin-bottom:2px;">
+            <span>OI <strong style="color:${leg.color};">${b.oiText}</strong></span>
+            <span style="color:${chgClr};">${b.oiChgText}</span>
+          </div>
+          <div style="position:relative;height:7px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden;">
+            <div style="position:absolute;left:0;top:0;bottom:0;width:${b.barPct}%;background:${leg.color};opacity:0.55;border-radius:3px;"></div>
+            ${b.chgDir === 'inc' ? `<div style="position:absolute;top:0;bottom:0;right:${rightOffset}%;width:${b.chgPct}%;background-image:repeating-linear-gradient(90deg,#fff 0px,#fff 2px,transparent 2px,transparent 4px);opacity:0.9;"></div>` : ''}
+            ${b.chgDir === 'dec' ? `<div style="position:absolute;top:0;bottom:0;right:${rightOffset}%;width:${b.chgPct}%;border:1px solid var(--oc-amber);box-sizing:border-box;border-radius:2px;"></div>` : ''}
+          </div>
+        </div>
+        <div style="font-size:9px;color:${b.smartMoneyColor};">${b.smartMoneyDot} ${b.smartMoneyLabel}</div>`;
+}
+
 // ── The expanded per-strike summary panel ──
 function renderStrikeDetailTemplate(vm) {
   const legBlockHtml = (leg) => `
@@ -35,6 +63,7 @@ function renderStrikeDetailTemplate(vm) {
           <div>Bid <strong>${leg.bidStr}</strong> &nbsp;/&nbsp; Ask <strong>${leg.askStr}</strong></div>
           ${leg.hasGreeks ? `<div>&Delta; <strong>${leg.deltaText}</strong> &nbsp;&Gamma;&times;10&#8308; <strong>${leg.gammaText}</strong> &nbsp;&Theta; <strong>${leg.thetaText}</strong> &nbsp;Vega <strong>${leg.vegaText}</strong></div>` : ''}
           <div>Signal <strong class="sp ${leg.signalClass}">${leg.signalLabel}</strong></div>
+          ${oiCombinedBarHtml(leg)}
         </div>`;
   return `
       <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding:8px 12px;font-size:10.5px;color:var(--text-faint);line-height:1.6;">

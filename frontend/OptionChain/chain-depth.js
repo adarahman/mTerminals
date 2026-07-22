@@ -45,7 +45,7 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
         iv: row.ceIV, ivChg: ceIvChg, vol: row.ceVol, volChg: row.ceVolChg,
         volPct: row.ceVol ? (((row.ceOI || 0) / row.ceVol) * 100).toFixed(1) : null,
         ltp: row.ceLTP, chg: ceLtpChg, oi: row.ceOI, oiChg: row.ceChgOI,
-        oiVel: vel.ceVel, volVel: ceVolVel, signal: row.ceSignal,
+        oiVel: vel.ceVel, velTrend: vel.ceTrend, volVel: ceVolVel, signal: row.ceSignal,
         bid: row.ceBid, bidQty: row.ceBidQty, ask: row.ceAsk, askQty: row.ceAskQty,
         totalBidQty: row.ceTotalBidQty, totalAskQty: row.ceTotalAskQty,
       };
@@ -53,7 +53,7 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
         iv: row.peIV, ivChg: peIvChg, vol: row.peVol, volChg: row.peVolChg,
         volPct: row.peVol ? (((row.peOI || 0) / row.peVol) * 100).toFixed(1) : null,
         ltp: row.peLTP, chg: peLtpChg, oi: row.peOI, oiChg: row.peChgOI,
-        oiVel: vel.peVel, volVel: peVolVel, signal: row.peSignal,
+        oiVel: vel.peVel, velTrend: vel.peTrend, volVel: peVolVel, signal: row.peSignal,
         bid: row.peBid, bidQty: row.peBidQty, ask: row.peAsk, askQty: row.peAskQty,
         totalBidQty: row.peTotalBidQty, totalAskQty: row.peTotalAskQty,
       };
@@ -100,7 +100,15 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
 // (chain-templates.js). This method is kept as a thin wrapper — same
 // signature, same return value — for any existing caller.
 ChainDenseView.prototype.buildStrikeDetailHtml = function(r, g) {
-    return renderStrikeDetailTemplate(buildStrikeDetailViewModel(r, g));
+    // No caller today passes maxOI (dead/legacy entry point — see
+    // chain-view-models.js/chain-renderer.js comments: the live path is
+    // buildRowsHtml -> buildChainRowViewModel -> buildStrikeDetailViewModel,
+    // which already has the visible range's maxOI on hand). Fall back to
+    // this single row's own larger leg so the new combined-OI-bar still
+    // has something sane to size against if this wrapper is ever called
+    // directly.
+    const maxOI = Math.max(r.ce.oi || 0, r.pe.oi || 0, 1);
+    return renderStrikeDetailTemplate(buildStrikeDetailViewModel(r, g, maxOI));
 };
 
 ChainDenseView.prototype.filterRowsByRange = function(rows) {
@@ -113,10 +121,39 @@ ChainDenseView.prototype.filterRowsByRange = function(rows) {
 
 ChainDenseView.prototype.buildVelocityLookup = function(payload) {
     const lookup = {};
-    const win = (payload.oiVelocity || []).find((w) => w.window === this.velocityWindowMin);
-    if (win && win.rows) {
-      win.rows.forEach((r) => { lookup[r.strike] = { ceVel: r.ceDOI, peVel: r.peDOI }; });
+    const windows = payload.oiVelocity || [];
+
+    // Active-window scalar — unchanged from before. This is what the main
+    // dashboard's own OI-velocity column / right-panel sum reads (via
+    // row.ce.oiVel / row.pe.oiVel), and it always reflects whichever single
+    // 5m/15m/30m window the sidebar toggle currently has selected.
+    const activeWin = windows.find((w) => w.window === this.velocityWindowMin);
+    if (activeWin && activeWin.rows) {
+      activeWin.rows.forEach((r) => {
+        lookup[r.strike] = lookup[r.strike] || {};
+        lookup[r.strike].ceVel = r.ceDOI;
+        lookup[r.strike].peVel = r.peDOI;
+      });
     }
+
+    // All-windows trend arrays, fixed [5m, 15m, 30m] order. Feeds
+    // row.ce.velTrend / row.pe.velTrend, consumed by the standalone
+    // Option Chain tab's tri-bar velocity sparkline (option-chain.js's
+    // velBars()), which needs all three windows at once rather than just
+    // whichever one is currently active on the main dashboard.
+    const TREND_WINDOWS = [5, 15, 30];
+    TREND_WINDOWS.forEach((winMin, idx) => {
+      const wBlock = windows.find((w) => w.window === winMin);
+      if (!wBlock || !wBlock.rows) return;
+      wBlock.rows.forEach((r) => {
+        lookup[r.strike] = lookup[r.strike] || {};
+        if (!lookup[r.strike].ceTrend) lookup[r.strike].ceTrend = [null, null, null];
+        if (!lookup[r.strike].peTrend) lookup[r.strike].peTrend = [null, null, null];
+        lookup[r.strike].ceTrend[idx] = r.ceDOI;
+        lookup[r.strike].peTrend[idx] = r.peDOI;
+      });
+    });
+
     return lookup;
 };
 

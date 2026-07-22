@@ -30,7 +30,11 @@ from smartapi_pipeline_adapter import (
 # therefore a second _session singleton) even though it's the same file on
 # disk, causing two independent logins to race each other on startup.
 
-from market_api import fetch_all_indices
+from market_api import (
+    fetch_all_indices,
+    fetch_option_chain, parse_option_chain_response,
+    fetch_bse_json_options,
+)
 from expiry_manager import make_expiry_manager
 
 # ─── df_idx TTL cache ────────────────────────────────────────────────
@@ -167,6 +171,17 @@ NO_VIRTUAL_OI  = _args.no_virtual_oi
 # --no-smartapi, where 50 was intended.
 STRIKES_EACH_SIDE = 10
 
+# Whether the base option-chain fetch itself uses SmartAPI REST or falls
+# back to market_api.py's NSE/BSE-native REST. Standalone default is True;
+# ws_server_live.py overwrites this post-import (option_chain_json.
+# USE_SMARTAPI = ...) based on --no-smartapi. Previously --no-smartapi only
+# disabled the websocket overlay and index_quote_loop's batched ticker
+# quotes — _fetch_and_parse() below still called fetch_option_chain_wide()
+# (SmartAPI REST) unconditionally every POLL_SECONDS tick from startup,
+# which is what tripped Angel's getMarketData rate limit even with
+# --no-smartapi set. This flag closes that gap.
+USE_SMARTAPI = True
+
 print("\n=== LIGHTWEIGHT JSON OPTIONS PIPELINE INITIALIZATION ===")
 print(f"    Exchange: {EXCHANGE} | Symbol: {SYMBOL} | Expiry: {EXPIRY}")
 print(f"    Loop    : {'every ' + str(LOOP_INTERVAL) + ' min' if LOOP_INTERVAL > 0 else 'single run'}\n")
@@ -174,6 +189,31 @@ print(f"    Loop    : {'every ' + str(LOOP_INTERVAL) + ' min' if LOOP_INTERVAL >
 # =====================================================================
 # FETCH, PARSE & STRUCTURING
 # =====================================================================
+
+def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
+    """market_api.fetch_bse_json_options() normalised to match
+    fetch_option_chain_wide()'s column schema. Its raw columns differ
+    (Strike vs StrikePrice, no Expiry/Spot/Symbol, no *_PctChgOI/*_pChange/
+    *_BuyQty/*_SellQty) — this fills the gap. PctChgOI/pChange/BuyQty/
+    SellQty aren't available from this BSE endpoint at all, so they're
+    zeroed rather than guessed; anything downstream reading those fields
+    for SENSEX/BANKEX under --no-smartapi will see 0, not real data.
+    """
+    scrip_cd = "2" if symbol.upper() == "BANKEX" else "1"  # 1=SENSEX, 2=BANKEX
+    expiry_bse = expiry_dash.replace("-", " ")  # "02-Jul-2026" -> "02 Jul 2026"
+    df, spot = fetch_bse_json_options(expiry_bse, scrip_cd=scrip_cd)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.rename(columns={"Strike": "StrikePrice"})
+    df["Expiry"] = expiry_dash
+    df["Spot"] = spot
+    df["Symbol"] = symbol
+    for side in ("CE", "PE"):
+        for col in (f"{side}_PctChgOI", f"{side}_pChange", f"{side}_BuyQty", f"{side}_SellQty"):
+            if col not in df.columns:
+                df[col] = 0
+    return df
+
 
 def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
     if exchange == "BSE":
@@ -184,9 +224,19 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         # output columns (StrikePrice/Expiry/Spot/Symbol/CE_*/PE_*) this
         # branch used to hand-build via the Strike->StrikePrice rename
         # below, now produced natively.
-        df = fetch_option_chain_wide(symbol, expiry, exchange="BFO")
-        if df.empty:
-            raise RuntimeError(f"SmartAPI BFO chain fetch empty for {symbol} {expiry}")
+        if USE_SMARTAPI:
+            df = fetch_option_chain_wide(symbol, expiry, exchange="BFO")
+            if df.empty:
+                raise RuntimeError(f"SmartAPI BFO chain fetch empty for {symbol} {expiry}")
+        else:
+            # NSE-native path never covers BSE, so this is market_api.py's
+            # own BSE scrape, normalised to the same column schema
+            # fetch_option_chain_wide() produces (StrikePrice/Expiry/Spot/
+            # Symbol/CE_*/PE_*) so downstream (build_master_table_nse etc.)
+            # doesn't need to know which source it came from.
+            df = _fetch_bse_chain_no_smartapi(symbol, expiry)
+            if df.empty:
+                raise RuntimeError(f"NSE-fallback BFO chain fetch empty for {symbol} {expiry}")
         spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0
         expiry_dates = _generate_bse_expiry_series(symbol)
         return df, spot, expiry_dates
@@ -203,9 +253,14 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
                 raise RuntimeError(f"No future expiries available for {symbol}")
             resolved = future[0]
             print(f"[Expiry] '{expiry}' unavailable → selected: '{resolved}'")
-        df = fetch_option_chain_wide(symbol, resolved)
+
+        if USE_SMARTAPI:
+            df = fetch_option_chain_wide(symbol, resolved, strikes_around_atm=STRIKES_EACH_SIDE)
+        else:
+            payload = fetch_option_chain(symbol, resolved)
+            df = parse_option_chain_response(payload, resolved)
         if df.empty:
-            raise RuntimeError(f"SmartAPI chain fetch empty for {symbol} {resolved}")
+            raise RuntimeError(f"{'SmartAPI' if USE_SMARTAPI else 'NSE'} chain fetch empty for {symbol} {resolved}")
         spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0
         return df, spot, resolved, expiry_dates
 

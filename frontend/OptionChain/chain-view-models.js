@@ -49,12 +49,13 @@ function buildChainRowLegViewModel(leg, oiFillPct, oiTotalSharePct) {
     ltpRaw: leg.ltp != null ? leg.ltp : null,
     ltpDelta: sign(leg.chg),
     ltpClass: dirClass(leg.chg),
-    velText: sign(leg.oiVel != null ? fmt(leg.oiVel) : null),
+    // velText: sign(leg.oiVel != null ? fmt(leg.oiVel) : null),
+    velText: sign(leg.oiVel != null ? leg.oiVel : null),
     velSub: oiTotalSharePct,
     velClass: dirClass(leg.oiVel),
     oiFillPct,
     oiText: fmt(leg.oi),
-    oiDelta: sign(leg.oiChg != null ? fmt(leg.oiChg) : null),
+    oiDelta: sign(leg.oiChg != null ? leg.oiChg : null),
     oiDeltaClass: dirClass(leg.oiChg),
   };
 }
@@ -80,12 +81,44 @@ function buildChainRowViewModel(r, g, maxOI, selectedDepthStrike) {
     pcrDeltaClass: dirClass(parseFloat(r.pcrChg)),
     signalCls: cs.cls,
     signalLabel: cs.label,
-    detail: buildStrikeDetailViewModel(r, g),
+    detail: buildStrikeDetailViewModel(r, g, maxOI),
+  };
+}
+
+// ── NEW (institutional strike-detail redesign, not part of the Phase 3
+// code-motion split above): a leg is flagged "Institution" when its OI
+// is a large share of the visible range's biggest single-leg OI, vs
+// "Retail" otherwise. Tunable heuristic — same style as
+// GREEKS_ALERT_THETA_PCT in chain-greeks.js — not a value the backend
+// sends explicitly.
+const SMART_MONEY_OI_SHARE = 0.30; // leg.oi / maxOI at/above this => "Institution"
+
+// ── NEW: combined-OI-bar view model for one leg — one bar whose full
+// length is the leg's total OI (relative to maxOI across the visible
+// range), with an overlay segment for today's ΔOI: a filled segment at
+// the bar's tip for a build-up, a hollow/outlined segment for unwinding.
+// Mirrors the "Key Innovation" bar from the institutional design spec
+// (single bar instead of separate "54.3L (+33.3L)" text).
+function buildOiCombinedBarViewModel(leg, maxOI) {
+  const oi = leg.oi || 0;
+  const oiChg = leg.oiChg || 0;
+  const barPct = maxOI > 0 ? Math.min(100, (oi / maxOI) * 100) : 0;
+  const chgPct = maxOI > 0 ? Math.min(barPct, (Math.abs(oiChg) / maxOI) * 100) : 0;
+  const isInstitution = maxOI > 0 && oi >= maxOI * SMART_MONEY_OI_SHARE;
+  return {
+    oiText: fmt(oi),
+    oiChgText: sign(oiChg != null ? fmt(oiChg) : null),
+    barPct: barPct.toFixed(1),
+    chgPct: chgPct.toFixed(1),
+    chgDir: oiChg > 0 ? 'inc' : oiChg < 0 ? 'dec' : 'flat',
+    smartMoneyLabel: isInstitution ? 'Institution' : 'Retail',
+    smartMoneyDot: isInstitution ? '●' : '○',
+    smartMoneyColor: isInstitution ? 'var(--oc-cyan, #22d3ee)' : 'var(--text-faint)',
   };
 }
 
 // ── One CE or PE leg's display data for the per-strike detail panel ──
-function buildStrikeDetailLegViewModel(leg, g, side, hasGreeks) {
+function buildStrikeDetailLegViewModel(leg, g, side, hasGreeks, maxOI) {
   const delta = side === 'ce' ? g.cDelta : g.pDelta;
   const gamma = side === 'ce' ? g.cGamma : g.pGamma;
   const theta = side === 'ce' ? g.cTheta : g.pTheta;
@@ -102,20 +135,25 @@ function buildStrikeDetailLegViewModel(leg, g, side, hasGreeks) {
     vegaText: fmtN(vega, 2),
     signalLabel: leg.signal || '—',
     signalClass: spClass(leg.signal),
+    // NEW: institutional combined-OI-bar + smart-money badge fields.
+    oiBar: buildOiCombinedBarViewModel(leg, maxOI),
   };
 }
 
 // ── The expanded per-strike summary panel (Bid/Ask, Greeks, Net GEX,
 // per-leg signal) shown when a dense-chain row is clicked. Moved verbatim
 // (as calculations) from the body of the old
-// ChainDenseView.prototype.buildStrikeDetailHtml.
-function buildStrikeDetailViewModel(r, g) {
+// ChainDenseView.prototype.buildStrikeDetailHtml, plus the NEW
+// institutional combined-OI-bar / smart-money fields above (maxOI is the
+// only new input, threaded down from buildChainRowViewModel's caller —
+// same maxOI already used for the collapsed row's oiFillPct).
+function buildStrikeDetailViewModel(r, g, maxOI) {
   const hasGreeks = g.cDelta != null;
   return {
     strike: r.strike,
     hasGreeks,
-    ce: buildStrikeDetailLegViewModel(r.ce, g, 'ce', hasGreeks),
-    pe: buildStrikeDetailLegViewModel(r.pe, g, 'pe', hasGreeks),
+    ce: buildStrikeDetailLegViewModel(r.ce, g, 'ce', hasGreeks, maxOI),
+    pe: buildStrikeDetailLegViewModel(r.pe, g, 'pe', hasGreeks, maxOI),
     netGEXText: fmtN(g.netGEX, 3) + 'B',
     netGEXColor: (g.netGEX || 0) >= 0 ? 'var(--ce)' : 'var(--pe)',
   };

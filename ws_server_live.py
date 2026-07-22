@@ -141,6 +141,7 @@ PORTFOLIO_POLL_SECONDS = ARGS.portfolio_poll_seconds
 USE_SMARTAPI         = not ARGS.no_smartapi
 STRIKES_EACH_SIDE    = ARGS.strikes_each_side if ARGS.strikes_each_side is not None else (10 if USE_SMARTAPI else 50)
 option_chain_json.STRIKES_EACH_SIDE = STRIKES_EACH_SIDE
+option_chain_json.USE_SMARTAPI = USE_SMARTAPI
 
 print(
     f"[feed] chain source: SmartAPI REST (via option_chain_json.py/smartapi_pipeline_adapter.py), "
@@ -1669,7 +1670,8 @@ def fetch_nse_index_quotes_sync():
     it every time.
     """
     try:
-        vix_value, vix_pchange, ticker_payload = market_api.get_unified_market_data()
+        df_idx = option_chain_json._fetch_all_indices_cached()
+        vix_value, vix_pchange, ticker_payload = market_api.get_unified_market_data(df_idx)
     except Exception as e:
         print(f"[index-quote] get_unified_market_data FAILED: {e}", flush=True)
         return {}

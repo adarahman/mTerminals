@@ -5,8 +5,39 @@
 // ============================================================
 
 class IndicatorEngine {
+  constructor() {
+    this._cache = new Map(); // Cache for indicator calculations
+    this._MAX_CACHE_SIZE = 50; // Limit cache entries to prevent unbounded growth
+  }
+
+  _getCacheKey(type, values, period, extra = '') {
+    // Create a hash-like key from the data
+    const len = values.length;
+    const first = values[0]?.toFixed(2) || '0';
+    const last = values[len - 1]?.toFixed(2) || '0';
+    return `${type}:${period}:${len}:${first}:${last}:${extra}`;
+  }
+
+  _clearCache() {
+    this._cache.clear();
+  }
+
+  _pruneCache() {
+    if (this._cache.size > this._MAX_CACHE_SIZE) {
+      // Remove oldest entries (first half)
+      const entries = Array.from(this._cache.entries());
+      this._cache.clear();
+      entries.slice(Math.floor(entries.length / 2)).forEach(([k, v]) => this._cache.set(k, v));
+    }
+  }
+
   // Simple Moving Average
   sma(values, period) {
+    const cacheKey = this._getCacheKey('sma', values, period);
+    if (this._cache.has(cacheKey)) {
+      return this._cache.get(cacheKey);
+    }
+
     const out = new Array(values.length).fill(null);
     if (period <= 1 || values.length < period) return out;
     let sum = 0;
@@ -15,11 +46,19 @@ class IndicatorEngine {
       if (i >= period) sum -= values[i - period];
       if (i >= period - 1) out[i] = sum / period;
     }
+    
+    this._cache.set(cacheKey, out);
+    this._pruneCache();
     return out;
   }
 
   // Exponential Moving Average
   ema(values, period) {
+    const cacheKey = this._getCacheKey('ema', values, period);
+    if (this._cache.has(cacheKey)) {
+      return this._cache.get(cacheKey);
+    }
+
     const out = new Array(values.length).fill(null);
     if (period <= 1 || values.length < period) return out;
     const k = 2 / (period + 1);
@@ -29,6 +68,9 @@ class IndicatorEngine {
       prev = values[i] * k + prev * (1 - k);
       out[i] = prev;
     }
+    
+    this._cache.set(cacheKey, out);
+    this._pruneCache();
     return out;
   }
 

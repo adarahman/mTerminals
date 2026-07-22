@@ -44,7 +44,7 @@ let _selectedDepthStrike = null;
 
 class ChainDenseView {
   constructor() {
-    this.currentRange = "3";
+    this.currentRange = "10";
     this.velocityWindowMin = 5;
     this.prevSnapshot = {};
     // Previously ad-hoc window._lastPayload/_lastRows/_lastGreeks globals —
@@ -70,7 +70,7 @@ class ChainView {
     this.velWin = 5;
     this.centerChainOnATM = true;
     this.grkView = 'delta';
-    this.chainRange = 3;
+    this.chainRange = 10;
     this.greeksVisible = false;
     this.pcrVisible = false;
     this.selStrike = null;

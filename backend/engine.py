@@ -50,7 +50,7 @@ import pandas as pd
 from scipy.special import ndtr
 
 from oi_analysis import build_master_table_nse, classify_buildup, signal_strength
-from oi_analysis import get_strike_step, get_oi_velocity
+from oi_analysis import get_strike_step, get_oi_velocity, append_json_history
 from mTerminals_json import fmt_k as _fmt_k
 
 
@@ -1401,6 +1401,33 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     # ── OI velocity (5/15/30-min windows, from the accumulated parquet
     # history — see oi_analysis.get_oi_velocity) ───────────────────────────
     vel_df = get_oi_velocity(df_clean, symbol, expiry, windows=(5, 15, 30), lot_size=lot_size)
+
+    # ── RECORD THIS TICK INTO THE VELOCITY HISTORY LOG ──
+    # get_oi_velocity() above reads _HISTORY_MEM (oi_analysis.py's
+    # in-memory, parquet-backed accumulating log) looking for a snapshot
+    # old enough to diff against for each window. But nothing was ever
+    # calling append_json_history() to grow that log tick-to-tick —
+    # _record_oi_snapshot() (mTerminals_json.py) writes into a completely
+    # separate, unrelated in-memory structure (_OI_SNAPSHOTS_MEM) that only
+    # _compute_vol_changes() reads. So _HISTORY_MEM stayed frozen at
+    # whatever was loaded from oi_history_log.parquet at process start (or
+    # empty, on a fresh install) for the entire life of the process, and
+    # vel_df above came back empty every single tick — which is what was
+    # showing up as OI Velocity / trend bars never populating on the
+    # frontend (Option Chain tab's tri-bar sparkline, dOI summary, Change
+    # OI chart on oi-dashboard.js). Appending here, AFTER this tick's
+    # vel_df has already been computed against the PRIOR history, means
+    # this tick's own numbers can't leak into their own delta — they only
+    # become available as "prior" state for future ticks, which is what
+    # actually builds up real time-lookback history over the next 5/15/30
+    # minutes of live ticks.
+    _hist_cols = ["StrikePrice", "CE_OI", "PE_OI", "CE_LTP", "PE_LTP"]
+    if all(c in df_clean.columns for c in _hist_cols):
+        history_snapshot = df_clean[_hist_cols].copy()
+        history_snapshot["Symbol"] = symbol
+        history_snapshot["Expiry"] = expiry
+        history_snapshot["snapshot_time"] = pd.Timestamp.now()
+        append_json_history(history_snapshot)
 
     # ── strategies / scenario P&L / risk meters / smart money ──────────────
     # AFTER:

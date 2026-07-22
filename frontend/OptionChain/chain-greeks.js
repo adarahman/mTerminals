@@ -88,7 +88,17 @@ ChainView.prototype.buildAtmGreeksHtml = function(d) {
   // columns — the Net GEX / Regime columns are always shown alongside.
 ChainView.prototype.renderGreeksGex = function(view) {
   const el=$i('grkgex-content');if(!el||!_data)return;
-  const grkStrikeSet=new Set(getFilteredChain(_data).map(c=>c.strike));
+  const filteredChain=getFilteredChain(_data);
+  const grkStrikeSet=new Set(filteredChain.map(c=>c.strike));
+  // IV lookup by strike, off the CHAIN row data (ceIV/peIV) rather than
+  // the greeks payload — the greeks array here only ever carried
+  // cDelta/pDelta/cGamma/... /netGEX, never a per-leg IV field, which is
+  // why g.cIV/g.pIV rendered as -/-. ceIV/peIV are the fields already
+  // confirmed live elsewhere (strike-detail panel, chain-depth.js's IV
+  // delta tracking, option-chain.js), so reuse those instead of
+  // depending on the backend adding a field to a different payload.
+  const chainByStrike={};
+  filteredChain.forEach(r=>{chainByStrike[r.strike]=r;});
   const greeks=(_data.greeks||[]).filter(g=>grkStrikeSet.has(g.strike));
   if(!greeks.length){el.innerHTML='<div style="font-size:12px;color:var(--txt3);padding:8px 0;">No Greeks/GEX data.</div>';return;}
   const atm=activeAtm(_data);
@@ -103,38 +113,43 @@ ChainView.prototype.renderGreeksGex = function(view) {
   const maxGrk=Math.max(...grkVals,0.0001);
   const gexVals=greeks.map(g=>Math.abs(g.netGEX||0));
   const maxGex=Math.max(...gexVals,0.0001);
-  // Bars shrunk vs the old 2-panel layout (was up to 40px) since each row
-  // now carries 4 data columns (CE/PE Greek + GEX + Regime) instead of 2.
-  const BAR_MAX=28;
+  // Track fills whatever width its column actually gets (flex), instead
+  // of a fixed pixel value — that's what was leaving a big empty gap
+  // after Net GEX (28% column) and a smaller one after CE/PE Delta (22%
+  // columns): the track never grew past 64px no matter how wide the <td>
+  // actually rendered. Now every bar uses its full column, so wider
+  // columns just get proportionally longer (more legible) bars instead
+  // of dead space.
   function miniBar(v,max,color,fmt){
-    const pct=Math.min(Math.abs(v)/max*BAR_MAX,BAR_MAX);
+    const pct=Math.min(Math.abs(v)/max*100,100);
     const clr=color||(v>=0?'var(--green)':'var(--red)');
-    return `<div style="display:flex;align-items:center;gap:5px;min-width:0;"><div style="width:${pct.toFixed(0)}px;height:8px;background:${clr};border-radius:3px;flex-shrink:0;"></div><span style="font-size:10px;font-weight:600;color:${clr};font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${fmt(v)}</span></div>`;
+    return `<div style="display:flex;align-items:center;gap:6px;width:100%;min-width:0;"><div style="position:relative;flex:1 1 auto;min-width:24px;height:8px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;"><div style="position:absolute;left:0;top:0;bottom:0;width:${pct.toFixed(1)}%;background:${clr};border-radius:3px;"></div></div><span style="flex-shrink:0;font-weight:600;color:${clr};font-family:var(--mono);white-space:nowrap;">${fmt(v)}</span></div>`;
   }
   const flipStrike=findGammaFlipStrike(greeks);
   const flipStrikeVal=flipStrike?flipStrike.strike:null;
   let h=`<table class="t"><thead><tr>
     <th style="text-align:center;width:64px;">Strike</th>
-    <th style="width:36px;">IV%</th>
+    <th style="width:64px;">IV% <small>CE/PE</small></th>
     <th style="text-align:left;width:22%;">CE ${f.label}</th>
     <th style="text-align:left;width:22%;">PE ${f.label}</th>
     <th style="text-align:left;padding-left:10px;width:28%;">Net GEX</th>
-    <th style="width:50px;text-align:center;transform:translateX(-8px);">Regime</th>
+    <th style="width:50px;text-align:center;">Regime</th>
   </tr></thead><tbody>`;
   greeks.forEach(g=>{
     const ia=g.strike===atm;const sc=ia?' atm-sc':'sc';
     const ceV=g[f.ceKey]||0;const peV=g[f.peKey]||0;const gexV=g.netGEX||0;
+    const cRow=chainByStrike[g.strike]||{};
     // Flip strike (regime transition row) gets a dashed top border as a
     // visual anchor — it now sits inline with delta/greek data too.
     const isFlip=flipStrikeVal!=null&&g.strike===flipStrikeVal;
     const rowStyle=isFlip?' style="border-top:1px dashed var(--txt3);"':'';
     h+=`<tr${rowStyle}>
       <td class="${sc}" style="white-space:nowrap;">${fmtI(g.strike)}${ia?' ★':''}</td>
-      <td style="color:var(--amber);">${fmtN(g.iv,2)}%</td>
+      <td style="white-space:nowrap;"><span style="color:var(--red);">${fmtN(cRow.ceIV,2)}</span> / <span style="color:var(--green);">${fmtN(cRow.peIV,2)}</span></td>
       <td>${miniBar(ceV,maxGrk,f.ceClr,f.fmt)}</td>
       <td>${miniBar(peV,maxGrk,f.peClr,f.fmt)}</td>
       <td style="padding-left:10px;">${miniBar(gexV,maxGex,gexV>=0?'var(--blue)':'var(--red)',v=>fmtN(v,3)+'B')}</td>
-      <td style="text-align:center;font-size:9px;color:${gexV>=0?'var(--blue)':'var(--red)'};font-weight:600;transform:translateX(-8px);">${gexV>=0?'Long':'Short'}</td>
+      <td style="text-align:center;color:${gexV>=0?'var(--blue)':'var(--red)'};font-weight:600;">${gexV>=0?'Long':'Short'}</td>
     </tr>`;
   });
   h+=`</tbody></table>`;

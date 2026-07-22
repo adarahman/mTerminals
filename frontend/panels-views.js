@@ -1404,7 +1404,7 @@ class SimulatorView {
   // ceVol+peVol under the "Open Interest" header, which is volume, not OI.
   var oiByStrike = {};
   ((_data && _data.chain) || []).forEach(function(r) {
-    oiByStrike[r.strike] = { ce: r.ceOI || 0, pe: r.peOI || 0 };
+    oiByStrike[r.strike] = { ce: r.ceOI || 0, pe: r.peOI || 0, ceChg: r.ceChgOI || 0, peChg: r.peChgOI || 0 };
   });
 
   // ── Near (ATM ±INST_NEAR_BAND_STRIKES) and Far strikes are now rendered
@@ -1440,10 +1440,130 @@ class SimulatorView {
     return totals.length ? totals[Math.floor(totals.length / 2)] : 0;
   }
 
+  // NEW (institutional strike-detail redesign): scaled against the rows
+  // actually rendered in each section (nearAll / farRanked), not the
+  // whole far band, so the bar comparison stays meaningful for what's on
+  // screen — same reasoning as maxOI in chain-view-models.js's
+  // buildOiCombinedBarViewModel for the dense-chain expand panel.
+  function maxOIOf(rows) {
+    var vals = rows.map(function(g) {
+      var s = oiByStrike[g.strike] || { ce: 0, pe: 0 };
+      return s.ce + s.pe;
+    }).concat([1]);
+    return Math.max.apply(null, vals);
+  }
+
   var nearMedianOI = medianOIOf(nearAll);
   var farMedianOI  = medianOIOf(farAll);
+  var nearMaxOI = maxOIOf(nearAll);
+  var farMaxOI  = maxOIOf(farRanked);
 
-  function rowHtml(g, band, medianOI) {
+  // NEW: Market Structure column — support/resistance reading per strike,
+  // ranked within its own band (same "own median/own pool" reasoning as
+  // medianOIOf/maxOIOf above). CE OI at strikes >= ATM reads as resistance
+  // building up above spot; PE OI at strikes <= ATM reads as support below
+  // it — standard OI-based support/resistance reading, not something the
+  // backend flags directly. Max Pain (from _data.maxPain, already computed
+  // upstream — see the Decision Engine card) always wins the label for its
+  // strike. Thresholds (1.3x / 0.8x median, chg > 50% of own OI for
+  // "fresh") are tunable heuristics, same style as INST_THRESHOLDS.
+  var maxPainStrike = (_data && _data.maxPain != null) ? Number(_data.maxPain) : null;
+
+  function median(vals) {
+    var s = vals.slice().sort(function(a, b) { return a - b; });
+    return s.length ? s[Math.floor(s.length / 2)] : 0;
+  }
+  
+    const MARKET_STRUCTURE = {
+      MAJOR_MULT: 1.30,      // Major support/resistance threshold
+      WEAK_MULT: 0.80,       // Weak support/resistance threshold
+      FRESH_CHG_MULT: 0.50   // Fresh writing if ΔOI > 50% of OI
+    };
+
+  function marketStructureLabels(rows) {
+    var labels = {};
+    var resPool = rows.filter(function(g) { return g.strike >= atm; })
+      .map(function(g) { var s = oiByStrike[g.strike] || {}; return { strike: g.strike, oi: s.ce || 0, chg: s.ceChg || 0 }; })
+      .sort(function(a, b) { return b.oi - a.oi; });
+    var supPool = rows.filter(function(g) { return g.strike <= atm; })
+      .map(function(g) { var s = oiByStrike[g.strike] || {}; return { strike: g.strike, oi: s.pe || 0, chg: s.peChg || 0 }; })
+      .sort(function(a, b) { return b.oi - a.oi; });
+    var resMedian = median(resPool.map(function(p) { return p.oi; }));
+    var supMedian = median(supPool.map(function(p) { return p.oi; }));
+
+    resPool.forEach(function(p, i) {
+      if (p.strike === maxPainStrike) { labels[p.strike] = { text: 'Max Pain', color: '#a855f7' }; return; }
+      if (p.oi <= 0) return;
+      if (i === 0) labels[p.strike] = { text: '\u2605 Major Resistance', color: '#dc2626' };
+      else if (i === 1 && p.oi > resMedian * MARKET_STRUCTURE.MAJOR_MULT) labels[p.strike] = { text: 'Resistance Building', color: 'var(--red)' };
+      else if (p.chg > p.oi * MARKET_STRUCTURE.FRESH_CHG_MULT && p.oi < resMedian * MARKET_STRUCTURE.MAJOR_MULT) labels[p.strike] = { text: 'Fresh Writing', color: 'var(--amber)' };
+      else if (p.oi > resMedian * MARKET_STRUCTURE.WEAK_MULT) labels[p.strike] = { text: 'Weak Resistance', color: 'var(--txt3)' };
+    });
+    supPool.forEach(function(p, i) {
+      if (labels[p.strike]) return; // Max Pain, or a resistance label at the shared ATM strike, already won
+      if (p.oi <= 0) return;
+      if (i === 0) labels[p.strike] = { text: '\u2605 Major Support', color: '#10b981' };
+      else if (i === 1 && p.oi > supMedian * MARKET_STRUCTURE.MAJOR_MULT) labels[p.strike] = { text: 'Support Building', color: 'var(--green)' };
+      else if (p.chg > p.oi * MARKET_STRUCTURE.FRESH_CHG_MULT && p.oi < supMedian * MARKET_STRUCTURE.MAJOR_MULT) labels[p.strike] = { text: 'PE Writing', color: 'var(--amber)' };
+      else if (p.oi > supMedian * MARKET_STRUCTURE.WEAK_MULT) labels[p.strike] = { text: 'Weak Support', color: 'var(--txt3)' };
+    });
+    return labels;
+  }
+
+  var nearStructure = marketStructureLabels(nearAll);
+  var farStructure  = marketStructureLabels(farRanked);
+
+  // NEW: single combined-OI bar (total OI length + a dashed/hollow overlay
+  // for the dominant leg's ΔOI). Redesigned per feedback: a solid filled
+  // bar in the leg's red/green read as a directional call, which OI size
+  // alone isn't — so the bar itself is now a dotted cyan track (matching
+  // the design spec's "Large OI: Bright Cyan" mapping), independent of
+  // which leg dominates; red/green stays reserved for the CE/PE text next
+  // to it. Dotted fill instead of solid reads lighter against the dark
+  // theme. Width is 100% of its cell (not a fixed px) so it fills
+  // whatever the Open Interest column gives it instead of floating in
+  // leftover space.
+  function oiBarHtml(totalOI, chgVal, maxOI) {
+    var CYAN = '#22d3ee';
+    var barPct = maxOI > 0 ? Math.min(100, (totalOI / maxOI) * 100) : 0;
+    var chgPct = maxOI > 0 ? Math.min(barPct, (Math.abs(chgVal) / maxOI) * 100) : 0;
+    var dir = chgVal > 0 ? 'inc' : chgVal < 0 ? 'dec' : 'flat';
+    var rightOffset = (100 - barPct).toFixed(1);
+    var overlay = dir === 'inc'
+      ? '<div style="position:absolute;top:0;bottom:0;right:' + rightOffset + '%;width:' + chgPct.toFixed(1) + '%;background-image:repeating-linear-gradient(90deg,#fff 0px,#fff 2px,transparent 2px,transparent 4px);opacity:0.9;"></div>'
+      : dir === 'dec'
+        ? '<div style="position:absolute;top:0;bottom:0;right:' + rightOffset + '%;width:' + chgPct.toFixed(1) + '%;border:1px dashed var(--amber);box-sizing:border-box;border-radius:2px;"></div>'
+        : '';
+    return '<div style="position:relative;height:7px;width:100%;border:1px dotted rgba(34,211,238,0.4);border-radius:3px;background:transparent;overflow:hidden;box-sizing:border-box;">' +
+      '<div style="position:absolute;left:0;top:0;bottom:0;width:' + barPct.toFixed(1) + '%;background-image:repeating-linear-gradient(90deg,' + CYAN + ' 0px,' + CYAN + ' 3px,transparent 3px,transparent 6px);opacity:0.9;"></div>' +
+      overlay +
+      '</div>';
+  }
+
+  // NEW: 5-level Smart Money badge, replacing the old binary
+  // Institutional Activity dot. isInst (big resting size relative to this
+  // band's own median, low turnover) already separates size from noise —
+  // this layer reads DIRECTION on top of that: growing size => ACC
+  // (accumulation), shrinking => DIST (distribution), big but flat today
+  // => HEDGE (parked, not fresh directional interest). Below the
+  // institutional-size bar, high turnover with little net OI change reads
+  // as ROLL (positions rolling strike/expiry, not new size). Everything
+  // else, or no ratio data at all, stays RETAIL. Same tunable-heuristic
+  // status as INST_THRESHOLDS — the backend doesn't send this label.
+  function smartMoneyBadge(hasRatioData, isInst, oiChgDominant, totalOI, volRatio, th) {
+    if (!hasRatioData) return { dot: '\u26AA', label: 'RETAIL', color: 'var(--txt3)' };
+    if (isInst) {
+      if (oiChgDominant > totalOI * 0.02) return { dot: '\uD83D\uDFE2', label: 'ACC', color: 'var(--green)' };
+      if (oiChgDominant < -totalOI * 0.02) return { dot: '\uD83D\uDD34', label: 'DIST', color: 'var(--red)' };
+      return { dot: '\uD83D\uDFE1', label: 'HEDGE', color: 'var(--amber)' };
+    }
+    if (volRatio >= th.volRatioMax && Math.abs(oiChgDominant) < totalOI * 0.05) {
+      return { dot: '\uD83D\uDD35', label: 'ROLL', color: '#3b82f6' };
+    }
+    return { dot: '\u26AA', label: 'RETAIL', color: 'var(--txt3)' };
+  }
+
+  function rowHtml(g, band, medianOI, maxOI, structure) {
     var isAtm = g.strike === atm;
     var rawRatio = ratios[String(g.strike)];
     var hasRatioData = !!rawRatio;
@@ -1460,37 +1580,47 @@ class SimulatorView {
     // so it must not default into the institutional branch.
     var th = INST_THRESHOLDS[band];
     var isInst = hasRatioData && totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax;
-    var actLabel = !hasRatioData ? 'No Data' : (isInst ? 'Institutional Accumulation' : 'Retail Flow');
     var netDelta = Math.abs((g.cDelta || 0) - Math.abs(g.pDelta || 0));
 
     var oiDominant = oiSplit.ce >= oiSplit.pe ? 'CE' : 'PE';
     var oiDomClr = oiDominant === 'CE' ? 'var(--red)' : 'var(--green)';
+    // NEW: the dominant leg's own ΔOI drives the bar's overlay segment,
+    // the ΔOI Today column, and the Smart Money direction read below.
+    var oiDomChg = oiDominant === 'CE' ? (oiSplit.ceChg || 0) : (oiSplit.peChg || 0);
+    var chgClr = oiDomChg > 0 ? 'var(--green)' : oiDomChg < 0 ? 'var(--amber)' : 'var(--txt3)';
+    var dist = g.strike - atm;
+    var distText = isAtm ? 'ATM' : (dist > 0 ? '+' + dist : String(dist));
+    var badge = smartMoneyBadge(hasRatioData, isInst, oiDomChg, totalOI, volRatio, th);
+    var struct = structure[g.strike];
 
-    return '<div class="sim-table-row' + (isAtm ? ' atm-row' : '') + '" style="font-size:11px;">' +
+    return '<div class="sim-table-row' + (isAtm ? ' atm-row' : '') + '" style="font-size:11px;display:grid;grid-template-columns:64px 46px minmax(160px,1.4fr) 80px 50px 56px 100px minmax(140px,1fr);align-items:center;column-gap:6px;">' +
       '<span style="font-family:var(--mono);font-weight:' + (isAtm ? 700 : 400) + ';color:' + (isAtm ? 'var(--txt)' : 'var(--txt2)') + ';">' + fmtI(g.strike) + '</span>' +
-      '<span style="color:var(--txt2);font-family:var(--mono);white-space:nowrap;">' +
-        fmtK(totalOI) + ' ' +
-        '<span style="font-size:11px;color:' + oiDomClr + ';">(' + oiDominant + ' ' + fmtK(oiDominant === 'CE' ? oiSplit.ce : oiSplit.pe) + ')</span>' +
+      '<span style="font-family:var(--mono);color:var(--txt3);">' + distText + '</span>' +
+      '<span style="display:flex;flex-direction:column;gap:3px;min-width:0;">' +
+        oiBarHtml(totalOI, oiDomChg, maxOI) +
+        '<span style="font-family:var(--mono);color:var(--txt2);white-space:nowrap;font-size:10.5px;">' + fmtK(totalOI) + ' <span style="color:' + oiDomClr + ';">(' + oiDominant + ' ' + fmtK(oiDominant === 'CE' ? oiSplit.ce : oiSplit.pe) + ')</span></span>' +
       '</span>' +
+      '<span style="font-family:var(--mono);color:' + chgClr + ';">' + (oiDomChg >= 0 ? '+' : '\u2212') + fmtK(Math.abs(oiDomChg)) + '</span>' +
       '<span style="text-align:right;color:var(--amber);font-family:var(--mono);">' + fmtN(g.iv || simIV, 1) + '%</span>' +
       '<span style="text-align:right;font-family:var(--mono);color:var(--txt);">' + fmtN(netDelta, 2) + '</span>' +
-      '<span style="text-align:right;display:flex;align-items:center;justify-content:flex-end;gap:4px;">' +
-        '<span class="sim-inst-dot ' + (isInst ? 'filled' : '') + '"></span>' +
-        '<span style="color:' + (isInst ? 'var(--green)' : 'var(--txt3)') + ';">' + actLabel + '</span>' +
+      '<span style="display:flex;align-items:center;gap:4px;white-space:nowrap;">' +
+        '<span>' + badge.dot + '</span>' +
+        '<span style="color:' + badge.color + ';font-weight:600;">' + badge.label + '</span>' +
       '</span>' +
+      '<span style="white-space:nowrap;color:' + (struct ? struct.color : 'var(--txt3)') + ';">' + (struct ? struct.text : '') + '</span>' +
     '</div>';
   }
 
-  function sectionHtml(label, rows, band, medianOI) {
+  function sectionHtml(label, rows, band, medianOI, maxOI, structure) {
     if (!rows.length) return '';
-    var body = rows.map(function(g) { return rowHtml(g, band, medianOI); }).join('');
+    var body = rows.map(function(g) { return rowHtml(g, band, medianOI, maxOI, structure); }).join('');
     return '<div class="sim-strike-band-section" style="margin-bottom:10px;">' +
       '<div style="font-size:9px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;padding:4px 10px;">' + label + '</div>' +
       body + '</div>';
   }
 
-  var html = sectionHtml('Near ATM (\u00B1' + INST_NEAR_BAND_STRIKES + ' strikes)', nearAll, 'near', nearMedianOI) +
-             sectionHtml('Far Strikes (beyond \u00B1' + INST_NEAR_BAND_STRIKES + ', top 12 by OI)', farRanked, 'far', farMedianOI);
+  var html = sectionHtml('Near ATM (\u00B1' + INST_NEAR_BAND_STRIKES + ' strikes)', nearAll, 'near', nearMedianOI, nearMaxOI, nearStructure) +
+             sectionHtml('Far Strikes (beyond \u00B1' + INST_NEAR_BAND_STRIKES + ', top 12 by OI)', farRanked, 'far', farMedianOI, farMaxOI, farStructure);
 
   setHtmlIfChanged(el, html || '<div style="padding:12px;color:var(--txt3);font-size:11px;">No strike data available.</div>');
 }

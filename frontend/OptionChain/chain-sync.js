@@ -51,8 +51,31 @@ ChainDenseView.prototype._initBroadcast = function() {
 
 ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
     if (!this._ocChan) return;
+
+    // ── ATTACH GREEKS ──
+    // mapPayloadToRows() (chain-depth.js) never merges Greeks onto a row's
+    // ce/pe leg — they stay in the separate payload.greeks array, keyed by
+    // strike, which is only ever looked up on the main-dashboard side (see
+    // buildRowsHtml's greeksByStrike in chain-renderer.js, used to feed
+    // buildChainRowViewModel/buildStrikeDetailViewModel). The standalone
+    // Option Chain tab's Greek row (buildGreekRowHtml in option-chain.js)
+    // reads leg.delta/gamma/theta/vega directly off r.ce/r.pe though, so
+    // without this merge those fields are always undefined on that tab no
+    // matter how fresh payload.greeks is. Built fresh here (not mutating
+    // this.lastRows in place) since that array is also read by the main
+    // dashboard's own render path, which has no use for these fields.
+    const greeksByStrike = {};
+    (payload.greeks || []).forEach((g) => { greeksByStrike[g.strike] = g; });
+    const rowsWithGreeks = (this.lastRows || []).map((r) => {
+      const g = greeksByStrike[r.strike] || {};
+      return Object.assign({}, r, {
+        ce: Object.assign({}, r.ce, { delta: g.cDelta, gamma: g.cGamma, theta: g.cTheta, vega: g.cVega }),
+        pe: Object.assign({}, r.pe, { delta: g.pDelta, gamma: g.pGamma, theta: g.pTheta, vega: g.pVega }),
+      });
+    });
+
     this._ocChan.postMessage({
-      rows: this.lastRows, symbol: payload.symbol, spot: payload.spot,
+      rows: rowsWithGreeks, symbol: payload.symbol, spot: payload.spot,
       // payload's actual field is "spotChange" (see mTerminals_json.py's
       // export) — this used to read payload.spotChg, which never exists,
       // so the standalone tab's state.spotChg was always undefined on

@@ -32,7 +32,7 @@
         <span>Expiry</span>
         <select id="ocExpiry"></select>
       </label>
-      <div class="oc-toggle-group" id="ocRangeGroup" data-active="3">
+      <div class="oc-toggle-group" id="ocRangeGroup" data-active="10">
         <span class="oc-toggle-label">Strikes</span>
         <button data-val="3">±3</button>
         <button data-val="5">±5</button>
@@ -55,7 +55,7 @@
   <div class="oc-summary">
 
     <div class="oc-sum-card">
-      <div class="oc-sum-title">OI summary</div>
+      <div class="oc-sum-title">OI summary <span class="oc-sum-title-sub oc-range-badge">±10</span></div>
       <div class="oc-skew-bar" id="ocSkewBar">
         <div class="oc-skew-fill oc-skew-fill-pe chg-green" id="ocSkewPe"></div>
         <div class="oc-skew-mid"></div>
@@ -72,7 +72,7 @@
     </div>
 
     <div class="oc-sum-card">
-      <div class="oc-sum-title">Chg OI summary</div>
+      <div class="oc-sum-title">Chg OI summary <span class="oc-sum-title-sub oc-range-badge">±10</span></div>
       <div class="oc-skew-bar" id="ocChgSkewBar">
         <div class="oc-skew-fill oc-skew-fill-pe chg-green" id="ocChgSkewPe"></div>
         <div class="oc-skew-mid"></div>
@@ -89,12 +89,12 @@
     </div>
 
     <div class="oc-sum-card">
-      <div class="oc-sum-title">dOI <span class="oc-sum-title-sub">5 · 15 · 30m</span></div>
+      <div class="oc-sum-title">dOI <span class="oc-sum-title-sub">5 · 15 · 30m</span> <span class="oc-sum-title-sub oc-range-badge">±10</span></div>
       <div class="oc-doi-grid" id="ocDoiGrid"><!-- 3 window columns injected, each with PE/CE values + net --></div>
     </div>
 
     <div class="oc-sum-card">
-      <div class="oc-sum-title">Volume <span class="oc-sum-title-sub">& Vol/OI</span></div>
+      <div class="oc-sum-title">Volume <span class="oc-sum-title-sub">& Vol/OI</span> <span class="oc-sum-title-sub oc-range-badge">±10</span></div>
       <div class="oc-vratio-rows" id="ocVRatio"><!-- CE/PE volume + ratio rows injected --></div>
     </div>
 

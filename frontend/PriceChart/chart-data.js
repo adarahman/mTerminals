@@ -8,8 +8,10 @@ class ChartData {
   constructor(maxTicks = 50000) {
     this.ticks = []; // {t: epoch ms, p: price, vw: vwap}
     this.MAX_TICKS = maxTicks;
+    this.MAX_TICK_AGE_MS = 7 * 24 * 60 * 60 * 1000; // Keep max 7 days of ticks
     this.historyBars = {}; // Cached OHLCV bars by symbol::range key
     this._hydratingRanges = new Set();
+    this._currentSymbol = null;
   }
 
   addTick(price, t, vwap) {
@@ -25,7 +27,23 @@ class ChartData {
       t = Math.max(now, last.t + 1);
     }
     this.ticks.push({ t, p: price, vw });
-    if (this.ticks.length > this.MAX_TICKS) this.ticks.shift();
+    
+    // Prune old ticks based on both count and age
+    this._pruneTicks(now);
+  }
+
+  _pruneTicks(now = Date.now()) {
+    // Remove ticks older than MAX_TICK_AGE_MS
+    const cutoff = now - this.MAX_TICK_AGE_MS;
+    const ageIdx = this.ticks.findIndex(tk => tk.t >= cutoff);
+    if (ageIdx > 0) {
+      this.ticks = this.ticks.slice(ageIdx);
+    }
+    
+    // Also enforce max count limit
+    if (this.ticks.length > this.MAX_TICKS) {
+      this.ticks = this.ticks.slice(this.ticks.length - this.MAX_TICKS);
+    }
   }
 
   // Cache key for historyBars - includes symbol to avoid cross-symbol contamination
@@ -102,5 +120,22 @@ class ChartData {
     this.ticks = [];
     this.historyBars = {};
     this._hydratingRanges.clear();
+    this._currentSymbol = null;
+  }
+
+  // Clear data when switching symbols to free memory
+  clearForSymbolChange(newSymbol) {
+    if (this._currentSymbol && this._currentSymbol !== newSymbol) {
+      // Clear history bars for old symbol
+      const oldPrefix = `${this._currentSymbol}::`;
+      Object.keys(this.historyBars).forEach(key => {
+        if (key.startsWith(oldPrefix)) {
+          delete this.historyBars[key];
+        }
+      });
+      // Clear ticks as they're for the old symbol
+      this.ticks = [];
+    }
+    this._currentSymbol = newSymbol;
   }
 }

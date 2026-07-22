@@ -1,0 +1,148 @@
+/* layout.css
+   Page-level scaffolding: root tokens/reset, base document styles, and the
+   grid/flex wrappers that arrange panels on the page (exec-grid, two-col/
+   three-col, levels-grid, the aligned OI-Flow/Greeks/GEX card grid, etc).
+   Split out of styles.css (Phase 7 CSS architecture reorg) — no selector,
+   visual, or HTML changes; load order relative to the other split files
+   does not matter for this file specifically, but it should load before
+   panels.css/tables.css since some of those rules nest under .algn-card
+   etc. defined here. */
+
+/* All color/radius/font tokens now come from theme.css, which MUST be
+   linked before this file:
+     <link rel="stylesheet" href="theme.css">
+     <link rel="stylesheet" href="styles.css">
+   Old names here mapped to theme.css as: --green/--red/--amber/--blue ->
+   --pos/--neg/--warn/--info, --green-dim/--red-dim/--blue-dim -> --pos-
+   strong/--neg-strong/--info-strong, --muted -> --text-muted, --bg0/1/2
+   -> --bg-0/1/2, --txt/2/3 -> --text-primary/secondary/tertiary, --mono/
+   --sans/--display -> --font-mono/--font-sans/--font-display. --radius
+   and --radius-sm/md/lg keep their names unchanged (values were already
+   identical in theme.css). Dark-only (no prefers-color-scheme override)
+   is unchanged and still guaranteed by theme.css not defining a light
+   variant. */
+
+:root {
+  /* All 122 font-size declarations in this file are genuine `rem` values
+     off a fixed 16px root (e.g. originally-13px text is now 0.9344rem,
+     already ~15% larger than authored — baked directly into the value).
+     --fs-scale is deliberately kept at 1 and html's font-size fixed at
+     16px: earlier this var also drove html{font-size}, which meant
+     browser-default UA styling on <select>/<button>/<input> (many of
+     which size their own padding/height in em off the root) grew too,
+     shifting layout alongside text instead of just the text. Keeping the
+     root fixed avoids that; to resize text further, edit the rem values
+     directly (or re-run the bake-in script with a new factor) rather than
+     touching this variable. This token is page-specific (not a shared
+     design-system concept), so it stays local rather than moving to
+     theme.css. */
+  --fs-scale: 1;
+}
+
+html{font-size:16px;}
+
+/* zoom:0.85 previously shrank the entire dashboard ~15% below its authored
+   sizes, which was the single biggest contributor to "everything reads too
+   small" — removed. Base size bumped 13px -> 14px on top of that. */
+
+body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primary);font-size:1.0062rem;line-height:1.5;}
+
+.db{padding:10px 20px 20px 90px;max-width:none;margin:0 auto;}
+
+/* NOTE: the old "METRICS GRID" block (.metrics-grid / .metric-card /
+   .metric-label / .metric-val / .metric-sub) lived here and is gone —
+   confirmed unused anywhere in the file. Removed during cleanup. */
+
+/* ── EXECUTIVE DASHBOARD ── */
+
+.exec-grid{
+  display:grid;
+  grid-template-columns:minmax(0,0.75fr) minmax(0,0.6fr) minmax(0,1.0fr);
+  gap:10px;
+  align-items:stretch;
+  margin-bottom:10px;
+}
+
+.dd-split{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;}
+
+.dd-col{min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.02);}
+
+.levels-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-bottom:18px;}
+
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;align-items:start;}
+
+/* OI Flow (4 data cols) + merged Greeks/GEX (6 data cols: Strike, IV%,
+   CE, PE, Net GEX, Regime) — the merged card gets extra width instead of
+   splitting evenly, since it carries more columns than OI Flow does. */
+
+.oi-grkgex-col{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    align-items:start;
+}
+
+/* ── ALIGNED GRID: OI Flow / Greeks / GEX ──
+   Strike is the shared axis across all three panels, so every part of the
+   layout that repeats per-strike (header, column-label row, body rows) is
+   pinned to identical heights across the three cards. Anything that isn't
+   per-strike data (extra controls, summary strips) lives outside this
+   fixed-height stack so it can't push one column's rows out of alignment
+   with the other two. */
+
+/* Fixed card height so all three panels stop growing with strike count —
+   same "N rows visible, rest scrolls" contract as the option chain table.
+   --algn-rows sets how many 24px strike-rows show before the panel body
+   scrolls; bump it in one place to resize all three cards together. */
+
+.algn-card{
+  --algn-rows: 10;
+  padding-bottom:0;
+  display:flex;
+  flex-direction:column;
+  height:calc(32px + 24px + (var(--algn-rows) * 24px) + 10px);
+  max-height:calc(32px + 24px + (var(--algn-rows) * 24px) + 10px);
+  overflow:hidden; /* the card itself never scrolls */
+}
+
+.algn-card .section-header{height:32px;margin-bottom:0;box-sizing:border-box;flex:0 0 auto;}
+
+.algn-colhead{display:grid;align-items:center;height:24px;box-sizing:border-box;
+  border-bottom:1px solid var(--border);background:var(--bg-2);
+  color:var(--text-tertiary);font-weight:500;font-size:0.8625rem;text-transform:uppercase;letter-spacing:.05em;
+  flex:0 0 auto; /* OI Flow's column head — fixed, sits above the scrolling rows */
+}
+
+/* The scrolling body — wraps oi-flow-body / grk-content / gex-content.
+   flex:1 + min-height:0 is the load-bearing pair: without min-height:0 the
+   rows push the fixed-height .algn-card taller instead of scrolling. */
+
+.algn-body{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+}
+
+.algn-card .t{margin:0;border-collapse:separate;border-spacing:0;width:100%;}
+
+/* Greeks/GEX have no separate .algn-colhead — their <thead> IS the column
+   head, so it sticks to the top of .algn-body instead. */
+
+.algn-card .t thead th{
+  height:24px;box-sizing:border-box;padding-top:0;padding-bottom:0;
+  position:sticky;top:0;z-index:4;background:var(--bg-2);
+}
+
+.algn-card .t tbody td{height:24px;box-sizing:border-box;padding-top:0;padding-bottom:0;}
+
+.algn-card .oi-bfly-wrap{height:24px;box-sizing:border-box;padding-top:0;padding-bottom:0;}
+
+/* Footer (top-movers strip / GEX total+regime) stays outside the scroll,
+   pinned to the bottom of the fixed-height card, same as .panel-head does
+   at the top — it's data-about-the-panel, not a per-strike row. */
+
+.algn-card .section-footer{flex:0 0 auto;margin-top:0;padding:8px 0 0;}

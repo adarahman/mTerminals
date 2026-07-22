@@ -1,230 +1,13 @@
-/* All color/radius/font tokens now come from theme.css, which MUST be
-   linked before this file:
-     <link rel="stylesheet" href="theme.css">
-     <link rel="stylesheet" href="styles.css">
-   Old names here mapped to theme.css as: --green/--red/--amber/--blue ->
-   --pos/--neg/--warn/--info, --green-dim/--red-dim/--blue-dim -> --pos-
-   strong/--neg-strong/--info-strong, --muted -> --text-muted, --bg0/1/2
-   -> --bg-0/1/2, --txt/2/3 -> --text-primary/secondary/tertiary, --mono/
-   --sans/--display -> --font-mono/--font-sans/--font-display. --radius
-   and --radius-sm/md/lg keep their names unchanged (values were already
-   identical in theme.css). Dark-only (no prefers-color-scheme override)
-   is unchanged and still guaranteed by theme.css not defining a light
-   variant. */
-:root {
-  /* All 122 font-size declarations in this file are genuine `rem` values
-     off a fixed 16px root (e.g. originally-13px text is now 0.9344rem,
-     already ~15% larger than authored — baked directly into the value).
-     --fs-scale is deliberately kept at 1 and html's font-size fixed at
-     16px: earlier this var also drove html{font-size}, which meant
-     browser-default UA styling on <select>/<button>/<input> (many of
-     which size their own padding/height in em off the root) grew too,
-     shifting layout alongside text instead of just the text. Keeping the
-     root fixed avoids that; to resize text further, edit the rem values
-     directly (or re-run the bake-in script with a new factor) rather than
-     touching this variable. This token is page-specific (not a shared
-     design-system concept), so it stays local rather than moving to
-     theme.css. */
-  --fs-scale: 1;
-}
-html{font-size:16px;}
+/* panels.css
+   Card/panel chrome and the componentry that lives inside panels: exec
+   cards, section cards, verdict box, badges/pills/signal chips, the
+   analytics summary strip (arp-*), loader, simulator panel, the Price
+   Chart panel, the Paper Trading panel/popover/toast/confirm-modal, and
+   the shared in-page modal chrome. Split out of styles.css (Phase 7 CSS
+   architecture reorg) — no selector, visual, or HTML changes. */
+
 *{box-sizing:border-box;margin:0;padding:0;}
-/* zoom:0.85 previously shrank the entire dashboard ~15% below its authored
-   sizes, which was the single biggest contributor to "everything reads too
-   small" — removed. Base size bumped 13px -> 14px on top of that. */
-body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primary);font-size:1.0062rem;line-height:1.5;}
-.db{padding:10px 20px 20px 90px;max-width:none;margin:0 auto;}
-@media (max-width:900px){
-  .db{padding-left:20px;} /* vertical rail collapses/overlays on narrow screens, see .sec-nav */
-}
 
-/* ── INDEX TICKER STRIP ──
-   Now lives inline inside .top-bar-left, to the right of the big active-
-   symbol spot readout, instead of its own separate sticky row above
-   .sec-nav — one less stacked bar taking up vertical space. Order in the
-   DOM (set by dashboard.js, always NIFTY → BANKNIFTY → MIDCPNIFTY →
-   SENSEX) is what pins NIFTY first; this CSS doesn't reorder anything
-   based on .active. */
-.index-ticker{
-  display:flex;gap:8px;flex-wrap:nowrap;
-  align-items:center;
-  overflow-x:auto;-webkit-overflow-scrolling:touch;
-  scrollbar-width:none;
-}
-.index-ticker::-webkit-scrollbar{display:none;}
-.idx-pill{
-  display:flex;align-items:center;gap:8px;
-  background:#15171c;
-  border:2px solid transparent;
-  border-radius:999px;
-  padding:6px 14px;
-  cursor:pointer;
-  flex-shrink:0;
-  box-shadow:0 2px 8px rgba(0,0,0,0.16);
-  transition:border-color .15s ease, transform .1s ease;
-  -webkit-tap-highlight-color:transparent;
-}
-.idx-pill:hover{transform:translateY(-1px);}
-.idx-pill.active{border-color:var(--info);} /* highlights the currently-connected symbol; position stays fixed */
-.idx-pill-sym{font-family:var(--font-display);font-size:0.8625rem;font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;}
-.idx-pill-val{font-size:0.9344rem;font-weight:600;color:#fff;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:6ch;text-align:right;display:inline-block;}
-.idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:0.8625rem;font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
-.idx-pill-chg.up{color:#20C997;}
-.idx-pill-chg.down{color:#FF6B6B;}
-.idx-pill-chg.na{color:#6C757D;font-weight:500;}
-.idx-pill-vix{border-color:rgba(255,212,59,0.35);}
-@media (max-width:1100px){
-  .index-ticker{max-width:340px;}
-}
-
-/* ── TOP BAR ── */
-.top-bar{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 16px;
-  background:var(--bg-1);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
-  margin-bottom:6px;
-  flex-wrap:nowrap;
-  gap:6px;
-  min-height:44px;
-  position:sticky;
-  top:var(--topbar-top, 10px);
-  z-index:997;
-  backdrop-filter:blur(12px);
-  background:rgba(22,24,29,0.95);
-  box-shadow:0 2px 12px rgba(0,0,0,0.30);
-}
-
-/* ── STRATEGY DROPDOWNS ── */
-#strat-select:focus,#strat-strike-select:focus{
-  outline:none;
-  border-color:var(--info);
-  box-shadow:0 0 0 2px rgba(51,154,240,0.25);
-}
-#strat-select,#strat-strike-select{
-  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1l5 5 5-5" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
-}
-
-/* ── EXPIRY DROPDOWN STRIP ── */
-.expiry-strip{
-  display:flex;align-items:center;gap:6px;
-  background:var(--bg-2);
-  border:1px solid var(--border);
-  border-radius:20px;
-  overflow:visible;
-  flex-shrink:0;
-  padding:4px 10px 4px 4px;
-}
-.expiry-pill{
-  display:flex;flex-direction:column;align-items:center;
-  padding:4px 8px;
-  gap:1px;
-}
-.expiry-pill-label{
-  font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);
-  text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;
-}
-.expiry-pill-val{
-  font-size:0.7906rem;font-weight:700;color:var(--text-primary);
-  font-family:var(--font-mono);white-space:nowrap;
-}
-.dte-val{color:var(--warn);}
-/* Expiry dropdown, relocated from the old horizontal .sec-nav into the
-   top-bar's DTE pill slot (see #expirySelect in DashboardPro.html — it's
-   moved here via JS on each top-bar re-render, not rebuilt, so its
-   selection state/option list survive live ticks). Styled to sit flush
-   inside the same pill the DTE readout lives in. */
-#expirySelect{
-  font-family:var(--font-mono);font-size:0.8625rem;font-weight:700;color:var(--text-primary);
-  background:transparent;border:none;outline:none;cursor:pointer;
-  -webkit-appearance:none;appearance:none;
-  padding:0 14px 0 0;
-  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
-  background-repeat:no-repeat;background-position:right center;
-}
-#expirySelect:focus{color:var(--info);}
-.time-val{color:var(--info);font-size:0.8625rem;}
-.expiry-divider{width:1px;height:28px;background:var(--border);flex-shrink:0;}
-/* Top-bar Profit & Fund pills (see renderFundPillHtml() in chain-views.js)
-   — reuse .expiry-pill's layout, just clickable (opens #pt-panel) and
-   with a low-fund warning state so "should I square off?" is answerable
-   without opening the Paper Trading panel first. */
-.pt-topbar-pill{cursor:pointer;border-radius:8px;transition:background .15s ease;}
-.pt-topbar-pill:hover{background:rgba(255,255,255,0.06);}
-.pt-topbar-pill-warn{
-  background:rgba(250,82,82,0.12);
-  border:1px solid rgba(250,82,82,0.35);
-  animation:pt-fund-pulse 2s ease-in-out infinite;
-}
-@keyframes pt-fund-pulse{
-  0%,100%{background:rgba(250,82,82,0.12);}
-  50%{background:rgba(250,82,82,0.22);}
-}
-.top-bar-left{
-  display:flex;align-items:center;
-  gap:14px;
-  flex-wrap:nowrap;
-  min-width:0; /* lets .index-ticker's own overflow-x scroll instead of pushing the bar wider */
-}
-.top-bar-left .index-ticker{
-  padding-left:14px;
-  border-left:1px solid var(--border);
-}
-.symbol{font-family:var(--font-display);font-size:0.9344rem;font-weight:700;color:var(--text-tertiary);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;}
-/* .symbol is also reused on the top-bar's symbol <select> (picking a
-   value switches the active index/stock — see onSymbolPicked() in
-   dashboard.js). As a bare <select> it inherited .symbol's small
-   13px label size with no cursor/caret affordance, so it read as tiny
-   static text buried next to the spot price instead of a control.
-   Sized up and given the same SVG-caret treatment as #expirySelect
-   above for a consistent "this is a dropdown" cue. */
-.symbol-select{
-  font-size:1.0781rem;
-  color:var(--info);
-  background:#15171c;
-  border:2px solid var(--info);
-  border-radius:999px;
-  outline:none;
-  cursor:pointer;
-  -webkit-appearance:none;
-  appearance:none;
-  padding:6px 22px 6px 14px;
-  box-shadow:0 2px 8px rgba(0,0,0,0.16);
-  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
-  background-repeat:no-repeat;
-  background-position:right 14px center;
-}
-.spot{font-size:1.8687rem;font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
-.spot.bearish{color:var(--neg);}
-.badges{display:flex;gap:4px;flex-wrap:nowrap;align-items:center;}
-.badge{
-  font-size:0.8625rem;font-weight:500;
-  padding:2px 8px;border-radius:20px;
-  font-family:var(--font-sans);letter-spacing:0.01em;
-  white-space:nowrap;flex-shrink:0;
-}
-.badge-bull{background:rgba(18,184,134,0.12);color:var(--pos);border:1px solid rgba(18,184,134,0.25);}
-.badge-bear{background:rgba(250,82,82,0.12);color:var(--neg);border:1px solid rgba(250,82,82,0.25);}
-.badge-neutral{background:var(--bg-2);color:var(--text-secondary);border:1px solid var(--border);}
-.badge-info{background:rgba(51,154,240,0.12);color:var(--info);border:1px solid rgba(51,154,240,0.25);}
-
-/* NOTE: the old "METRICS GRID" block (.metrics-grid / .metric-card /
-   .metric-label / .metric-val / .metric-sub) lived here and is gone —
-   confirmed unused anywhere in the file. Removed during cleanup. */
-
-/* ── EXECUTIVE DASHBOARD ── */
-.exec-grid{
-  display:grid;
-  grid-template-columns:minmax(0,0.75fr) minmax(0,0.6fr) minmax(0,1.0fr);
-  gap:10px;
-  align-items:stretch;
-  margin-bottom:10px;
-}
-@media (max-width:900px){
-  .exec-grid{grid-template-columns:1fr 1fr;}
-  .exec-grid .exec-card.c-movers{grid-column:1 / -1;}
-}
 .exec-card{
   background:var(--bg-1);
   border:1px solid var(--border);
@@ -235,84 +18,93 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   display:flex;
   flex-direction:column;
 }
+
 .exec-card::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
   background:var(--exec-accent, var(--bg-2));
 }
+
 .exec-card.c-green::before{background:var(--pos);}
+
 .exec-card.c-amber::before{background:var(--warn);}
+
 .exec-card.c-blue::before{background:var(--info);}
+
 .exec-card.c-red::before{background:var(--neg);}
+
 .exec-card.c-fiidii::before{background:var(--text-tertiary);}
+
 .exec-card.c-fiidii{margin-top:12px;}
+
 .exec-title{
   font-size:0.575rem;font-weight:700;letter-spacing:.08em;
   text-transform:uppercase;color:var(--text-tertiary);margin-bottom:8px;
 }
+
 .exec-badge{
   display:inline-block;padding:6px 16px;border-radius:30px;
   font-weight:700;font-size:1.2219rem;font-family:var(--font-mono);
 }
+
 .exec-badge.bull{background:rgba(18,184,134,0.15);color:var(--pos);border:1.5px solid rgba(18,184,134,0.35);}
+
 .exec-badge.bear{background:rgba(250,82,82,0.15);color:var(--neg);border:1.5px solid rgba(250,82,82,0.35);}
+
 .exec-badge.neutral{background:rgba(245,159,0,0.15);color:var(--warn);border:1.5px solid rgba(245,159,0,0.35);}
+
 .exec-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;}
+
 .exec-score{text-align:right;line-height:1;}
+
 .exec-score-num{font-size:2.1562rem;font-weight:700;font-family:var(--font-mono);}
+
 .exec-score-unit{font-size:1.0062rem;font-weight:500;}
+
 .exec-small{font-size:0.7906rem;color:var(--text-tertiary);margin-top:4px;letter-spacing:.08em;text-transform:uppercase;}
+
 .exec-target{display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid var(--border);font-size:0.7906rem;color:var(--text-secondary);}
+
 .exec-target strong{color:var(--text-primary);font-family:var(--font-mono);}
 
-/* ── TOP 3 DRIVERS / DRAGGERS (rendered as 3rd column of exec-grid) ── */
-.dd-subtitle{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;font-size:0.7906rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:8px 0 4px;}
-.dd-subtitle span:nth-child(3), .dd-subtitle span:nth-child(4){text-align:right;}
-.dd-subtitle.c-driver{color:var(--pos);}
-.dd-subtitle.c-dragger{color:var(--neg);}
-.dd-subtitle:first-child{margin-top:0;}
-.dd-split{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;}
-.dd-col{min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.02);}
-.dd-header-row{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;padding:4px 0 8px;font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.02em;}
-.dd-row{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;padding:4px 0;font-size:0.8625rem;}
-.dd-rank{color:var(--text-tertiary);font-family:var(--font-mono);font-size:0.8625rem;flex-shrink:0;}
-.dd-sym{font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.dd-pct{font-family:var(--font-mono);font-size:0.8625rem;text-align:right;flex-shrink:0;}
-.dd-pts{font-family:var(--font-mono);font-weight:700;font-size:0.8625rem;text-align:right;flex-shrink:0;}
-.dd-empty{font-size:0.7906rem;color:var(--text-tertiary);padding:3px 0;}
-
-/* ── FII/DII/Pro/Retail comparison table (rows=metrics, cols=participants) ── */
-.dd-tbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:0.8625rem;}
-.dd-tbl th,.dd-tbl td{padding:7px 10px;text-align:right;white-space:nowrap;}
-.dd-tbl th:first-child,.dd-tbl td:first-child{text-align:left;}
-.dd-tbl thead th{font-family:var(--font-mono);font-weight:700;font-size:0.8125rem;letter-spacing:.04em;border-bottom:1px solid var(--border);padding-bottom:8px;}
-.dd-tbl tbody td.dd-tbl-metric,.dd-tbl tbody th.dd-tbl-metric{color:var(--text-tertiary);font-size:0.8125rem;}
-.dd-tbl tbody tr{border-bottom:1px solid rgba(255,255,255,0.05);}
-.dd-tbl tbody tr:last-child{border-bottom:none;}
-.dd-tbl tbody tr:hover{background:rgba(255,255,255,0.02);}
-
 .dot{width:10px;height:10px;border-radius:50%;background:var(--warn);}
+
 .p-row{display:grid;grid-template-columns:82px 1fr 28px;gap:6px;align-items:center;margin:5px 0;}
-.levels-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-bottom:18px;}
+
 .level-card{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;}
+
 .level-row{display:grid;grid-template-columns:35px 1fr 90px;gap:10px;align-items:center;margin:8px 0;}
+
 .level-bar{height:8px;background:var(--bg-2);border-radius:5px;overflow:hidden;}
+
 .level-bar .green{height:100%;background:#16c784;}
+
 .level-bar .red{height:100%;background:#ff5b5b;}
-.spot-line{margin:16px 0;padding:12px;text-align:center;background:rgba(61,139,253,.08);border-radius:var(--radius-md);font-size:1.0781rem;font-weight:700;}
+
 .range-row,
 .prob-row{display:flex;justify-content:space-between;padding:8px 0;}
+
 .level-card hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
+
 .p-bar{height:7px;background:var(--bg-2);border-radius:6px;overflow:hidden;}
+
 .p-fill{height:100%;border-radius:6px;transition:width 0.4s ease;}
+
 .sig-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);}
+
 .sig-bull{color:var(--pos);font-weight:600;}
+
 .sig-bear{color:var(--neg);font-weight:600;}
+
 .sig-neutral{color:var(--warn);font-weight:600;}
+
 .story{font-size:0.8625rem;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;line-height:1.3;}
+
 .story:last-of-type{border-bottom:none;}
+
 .story strong{color:var(--text-primary);font-family:var(--font-mono);font-size:0.8625rem;white-space:nowrap;}
 
 /* ── VERDICT ── */
+
 .verdict-box{
   background:var(--bg-1);
   border:1px solid var(--border);
@@ -322,420 +114,80 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   margin-bottom:10px;
   display:flex;align-items:flex-start;gap:12px;
 }
+
 .verdict-box.bearish{border-left-color:var(--neg);}
+
 .verdict-box.neutral{border-left-color:var(--warn);}
+
 .verdict-icon{font-size:1.4375rem;line-height:1;margin-top:1px;flex-shrink:0;}
+
 .verdict-title{font-size:0.9344rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;}
+
 .verdict-detail{font-size:0.7906rem;color:var(--text-secondary);line-height:1.7;}
 
 /* ── SECTION CARDS ── */
+
 .section-card{
   background:var(--bg-1);
   border:1px solid var(--border);
   border-radius:var(--radius);
   padding:14px 16px;
 }
+
 .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+
 .section-title{
   font-size:0.8625rem;font-weight:600;
   color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.08em;
 }
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
-.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;align-items:start;}
-/* OI Flow (4 data cols) + merged Greeks/GEX (6 data cols: Strike, IV%,
-   CE, PE, Net GEX, Regime) — the merged card gets extra width instead of
-   splitting evenly, since it carries more columns than OI Flow does. */
-.oi-grkgex-col{
-    display:grid;
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:10px;
-    align-items:start;
-}
-/* ── ALIGNED GRID: OI Flow / Greeks / GEX ──
-   Strike is the shared axis across all three panels, so every part of the
-   layout that repeats per-strike (header, column-label row, body rows) is
-   pinned to identical heights across the three cards. Anything that isn't
-   per-strike data (extra controls, summary strips) lives outside this
-   fixed-height stack so it can't push one column's rows out of alignment
-   with the other two. */
-/* Fixed card height so all three panels stop growing with strike count —
-   same "N rows visible, rest scrolls" contract as the option chain table.
-   --algn-rows sets how many 24px strike-rows show before the panel body
-   scrolls; bump it in one place to resize all three cards together. */
-.algn-card{
-  --algn-rows: 10;
-  padding-bottom:0;
-  display:flex;
-  flex-direction:column;
-  height:calc(32px + 24px + (var(--algn-rows) * 24px) + 10px);
-  max-height:calc(32px + 24px + (var(--algn-rows) * 24px) + 10px);
-  overflow:hidden; /* the card itself never scrolls */
-}
-.algn-card .section-header{height:32px;margin-bottom:0;box-sizing:border-box;flex:0 0 auto;}
-.algn-colhead{display:grid;align-items:center;height:24px;box-sizing:border-box;
-  border-bottom:1px solid var(--border);background:var(--bg-2);
-  color:var(--text-tertiary);font-weight:500;font-size:0.8625rem;text-transform:uppercase;letter-spacing:.05em;
-  flex:0 0 auto; /* OI Flow's column head — fixed, sits above the scrolling rows */
-}
-/* The scrolling body — wraps oi-flow-body / grk-content / gex-content.
-   flex:1 + min-height:0 is the load-bearing pair: without min-height:0 the
-   rows push the fixed-height .algn-card taller instead of scrolling. */
-.algn-body{
-  flex:1 1 auto;
-  min-height:0;
-  overflow-y:auto;
-  overflow-x:hidden;
-  overscroll-behavior:contain;
-}
-.algn-card .t{margin:0;border-collapse:separate;border-spacing:0;width:100%;}
-/* Greeks/GEX have no separate .algn-colhead — their <thead> IS the column
-   head, so it sticks to the top of .algn-body instead. */
-.algn-card .t thead th{
-  height:24px;box-sizing:border-box;padding-top:0;padding-bottom:0;
-  position:sticky;top:0;z-index:4;background:var(--bg-2);
-}
-.algn-card .t tbody td{height:24px;box-sizing:border-box;padding-top:0;padding-bottom:0;}
-.algn-card .oi-bfly-wrap{height:24px;box-sizing:border-box;padding-top:0;padding-bottom:0;}
-/* Footer (top-movers strip / GEX total+regime) stays outside the scroll,
-   pinned to the bottom of the fixed-height card, same as .panel-head does
-   at the top — it's data-about-the-panel, not a per-strike row. */
-.algn-card .section-footer{flex:0 0 auto;margin-top:0;padding:8px 0 0;}
 
 .t{width:100%;font-size:0.7906rem;border-collapse:collapse;table-layout:fixed;}
-.t thead{background:var(--bg-2);}
-.t th{
-  color:var(--text-tertiary);font-weight:500;font-size:0.8625rem;
-  text-transform:uppercase;letter-spacing:0.05em;
-  padding:7px 5px;text-align:right;
-  border-bottom:1px solid var(--border);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.t th:first-child{text-align:left;padding-left:12px;}
-.t th:last-child{text-align:right;padding-right:12px;}
-.t td{padding:5px 5px;text-align:right;color:var(--text-primary);vertical-align:middle;overflow:hidden;max-width:0;}
-.t td.sc{
-  text-align:center;font-weight:600;font-size:0.8625rem;font-family:var(--font-mono);
-  background:var(--bg-2);color:var(--text-secondary);
-}
-.t td.atm{background:rgba(18,184,134,0.06);}
-.t td.atm-sc{
-  background:rgba(18,184,134,0.12);
-  font-weight:700;font-size:0.8625rem;font-family:var(--font-mono);
-  text-align:center;color:var(--pos);
-}
-.t tr:hover td{background:var(--bg-2);transition:background 0.1s;}
-.t tr:hover td.atm-sc{background:rgba(18,184,134,0.18);}
-.t tbody tr{border-bottom:1px solid var(--border);}
-.t tbody tr:last-child{border-bottom:none;}
 
 /* signal badges */
+
 .sp{font-size:0.8625rem;font-weight:500;padding:2px 7px;border-radius:20px;display:inline-block;white-space:nowrap;}
+
 .sp-lb{background:rgba(18,184,134,0.12);color:var(--pos);border:1px solid rgba(18,184,134,0.2);}
+
 .sp-sc{background:rgba(245,159,0,0.12);color:var(--warn);border:1px solid rgba(245,159,0,0.2);}
+
 .sp-sb{background:rgba(250,82,82,0.12);color:var(--neg);border:1px solid rgba(250,82,82,0.2);}
+
 .sp-n{background:var(--bg-2);color:var(--text-tertiary);border:1px solid var(--border);}
 
-/* ── OI BUTTERFLY BARS ── */
-/* Column widths bumped up from the original 30px/62px/30px/36px — those
-   were sized for the pre-bake-in 13px font and now clip/overlap at the
-   current ~15%-larger rem values (e.g. "95.3K" or a "1.22" PCR reading
-   no longer fit in 30px/36px and were spilling into the next column). */
-.oi-bfly-wrap{display:grid;grid-template-columns:48px 1fr 70px 1fr 52px 66px;align-items:center;gap:6px;padding:3px 2px;border-radius:4px;}
-.oi-bfly-head{grid-template-columns:48px 1fr 70px 1fr 52px 66px;padding:0 2px;gap:6px;}
-.oi-bfly-head span:nth-child(1){grid-column:1/3;text-align:right;color:var(--neg);}
-.oi-bfly-head span:nth-child(2){grid-column:3;text-align:center;}
-.oi-bfly-head span:nth-child(3){grid-column:4/6;text-align:left;color:var(--pos);}
-.oi-bfly-head span:nth-child(4){grid-column:6;text-align:right;}
-.oi-bfly-fig{font-family:var(--font-mono);font-size:0.8625rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.oi-bfly-ce-track{display:flex;justify-content:flex-end;overflow:hidden;min-width:0;}
-.oi-bfly-pe-track{display:flex;justify-content:flex-start;overflow:hidden;min-width:0;}
-.oi-ce-bar{background:var(--neg);border-radius:3px 0 0 3px;height:10px;}
-.oi-pe-bar{background:var(--pos);border-radius:0 3px 3px 0;height:10px;}
-.oi-bfly-strike{text-align:center;color:var(--text-tertiary);font-size:0.8625rem;font-family:var(--font-mono);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.oi-bfly-pcr{font-family:var(--font-mono);font-weight:600;font-size:0.8625rem;text-align:right;min-width:0;white-space:nowrap;overflow:visible;padding-left:4px;}
-
 /* ── IV ROW ── */
+
 .iv-row{display:flex;justify-content:space-between;align-items:center;font-size:0.8625rem;padding:6px 0;border-bottom:1px solid var(--border);}
+
 .iv-row:last-child{border-bottom:none;}
 
-/* ── TABS ── */
-.tab-group{display:flex;gap:4px;}
-.tab-btn{
-  font-size:0.7906rem;font-weight:500;padding:4px 11px;
-  border-radius:var(--radius-sm);
-  border:1px solid var(--border);
-  background:var(--bg-2);color:var(--text-tertiary);
-  cursor:pointer;transition:all 0.15s;
-}
-.tab-btn:hover{border-color:var(--info);color:var(--info);}
-.tab-btn.active-vel{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
-.tab-btn.active-grk{background:rgba(245,159,0,0.12);color:var(--warn);border-color:rgba(245,159,0,0.3);}
-.tab-btn.active-range{background:rgba(18,184,134,0.12);color:var(--pos);border-color:rgba(18,184,134,0.3);}
-.tab-btn.active-oif{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
-
 /* combined-signal pills */
+
 .sp-strongbull{background:rgba(18,184,134,0.18);color:var(--pos);border:1px solid rgba(18,184,134,0.35);font-weight:700;}
+
 .sp-bull{background:rgba(18,184,134,0.12);color:var(--pos);border:1px solid rgba(18,184,134,0.2);}
+
 .sp-strongbear{background:rgba(250,82,82,0.18);color:var(--neg);border:1px solid rgba(250,82,82,0.35);font-weight:700;}
+
 .sp-bear{background:rgba(250,82,82,0.12);color:var(--neg);border:1px solid rgba(250,82,82,0.2);}
+
 .sp-mixed{background:rgba(245,159,0,0.12);color:var(--warn);border:1px solid rgba(245,159,0,0.2);}
 
-/* ── PCR TOGGLE ── */
-.pcr-toggle{
-  font-size:0.8625rem;font-weight:500;padding:3px 10px;
-  border-radius:var(--radius-sm);border:1px solid var(--border);
-  background:var(--bg-2);color:var(--text-tertiary);cursor:pointer;
-  display:flex;align-items:center;gap:5px;transition:all 0.15s;
-}
-.pcr-toggle:hover{border-color:var(--info);color:var(--info);}
-.pcr-toggle.on{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
-
 /* ── IV PROGRESS BAR ── */
+
 .iv-prog{margin-bottom:10px;}
+
 .iv-prog-head{display:flex;justify-content:space-between;font-size:0.7906rem;margin-bottom:4px;}
+
 .iv-prog-track{height:6px;border-radius:3px;background:var(--bg-2);overflow:hidden;}
+
 .iv-prog-fill{height:100%;border-radius:3px;}
 
 /* ── SUMMARY FOOTER ── */
+
 .section-footer{display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);font-size:0.7906rem;color:var(--text-tertiary);flex-wrap:wrap;margin-top:8px;}
+
 .section-footer strong{color:var(--text-primary);}
-
-/* ── VERTICAL SECTION NAV (left rail) ──
-   Was a horizontal pill row above .top-bar; now a fixed vertical stripe
-   docked to the left edge of the viewport so it's reachable from any
-   scroll position without competing for width with the top-bar/ticker.
-   #sec-nav-bar keeps its id so dashboard.js's secJump()/active-class
-   query selector (`#sec-nav-bar .sec-btn`) needs no changes. */
-.sec-nav{
-  display:flex;flex-direction:column;gap:6px;
-  padding:14px 10px;
-  background:var(--bg-1);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
-  align-items:stretch;
-  position:fixed;
-  left:10px;top:10px;bottom:10px;
-  width:72px;
-  z-index:999;
-  box-shadow:0 4px 20px rgba(0,0,0,0.40);
-  overflow-y:auto;
-  backdrop-filter:blur(12px);
-  background:rgba(22,24,29,0.93);
-}
-@media (max-width:900px){
-  .sec-nav{
-    position:sticky;top:8px;bottom:auto;left:auto;
-    flex-direction:row;flex-wrap:wrap;width:auto;height:auto;
-    margin-bottom:6px;
-  }
-}
-.sec-nav-label{
-  font-family:var(--font-display);
-  font-size:0.7188rem;font-weight:700;color:var(--text-tertiary);
-  text-transform:uppercase;letter-spacing:.08em;
-  white-space:nowrap;
-  padding:4px 6px;
-  background:var(--bg-2);
-  border-radius:6px;
-  text-align:center;
-  margin-bottom:4px;
-}
-.sec-btn{
-  font-family:var(--font-display);
-  font-size:0.7906rem;font-weight:600;padding:10px 6px;
-  border-radius:10px;border:1.5px solid var(--border);
-  background:var(--bg-2);color:var(--text-secondary);
-  cursor:pointer;transition:all 0.25s ease;
-  white-space:normal;word-break:break-word;
-  position:relative;
-  box-shadow:0 1px 3px rgba(0,0,0,0.04);
-  letter-spacing:0.2px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
-  text-align:center;
-  line-height:1.15;
-}
-.sec-btn span{font-size:1.15rem;line-height:1;}
-/* "Range Vel" is a two-word label crammed into the same 72px rail width
-   as one-word buttons like "Chain" — inheriting .sec-btn's word-break:
-   break-word let the browser split it mid-word (e.g. "Ra/nge/Vel"),
-   which read as near-vertical stacked letters. Force wraps to only ever
-   happen at the space between "Range" and "Vel" instead. */
-#ctrl-sidebar-toggle-btn{
-  word-break:normal;
-  overflow-wrap:normal;
-  font-size:0.7188rem;
-}
-.sec-btn:hover{
-  border-color:var(--info);
-  color:var(--info);
-  background:rgba(51,154,240,0.10);
-  transform:translateX(2px);
-  box-shadow:0 4px 12px rgba(51,154,240,0.18);
-}
-.sec-btn.active{
-  background:linear-gradient(135deg, rgba(51,154,240,0.20), rgba(51,154,240,0.08));
-  color:var(--info);
-  border-color:var(--info);
-  font-weight:700;
-  box-shadow:0 2px 16px rgba(51,154,240,0.25);
-}
-.sec-btn.active::after{
-  content:'';
-  position:absolute;
-  left:-13px;
-  top:25%;
-  bottom:25%;
-  width:3px;
-  background:var(--info);
-  border-radius:3px;
-}
-@media (max-width:900px){
-  .sec-btn.active::after{left:25%;right:25%;top:auto;bottom:-3px;width:auto;height:3px;}
-}
-.sec-btn-risk.active{
-  background:linear-gradient(135deg, rgba(250,82,82,0.20), rgba(250,82,82,0.08));
-  color:var(--neg);
-  border-color:var(--neg);
-  box-shadow:0 2px 16px rgba(250,82,82,0.25);
-}
-.sec-btn-risk.active::after{
-  background:var(--neg);
-}
-.sec-btn-strats.active{
-  background:linear-gradient(135deg, rgba(18,184,134,0.20), rgba(18,184,134,0.08));
-  color:var(--pos);
-  border-color:var(--pos);
-  box-shadow:0 2px 16px rgba(18,184,134,0.25);
-}
-.sec-btn-strats.active::after{
-  background:var(--pos);
-}
-.sec-btn-decision.active{
-  background:linear-gradient(135deg, rgba(245,159,0,0.20), rgba(245,159,0,0.08));
-  color:var(--warn);
-  border-color:var(--warn);
-  box-shadow:0 2px 16px rgba(245,159,0,0.25);
-}
-.sec-btn-decision.active::after{
-  background:var(--warn);
-}
-
-/* ── CONTROL SIDEBAR (ATM range + velocity window) ──
-   Replaces the old .sec-sidebar jump rail — removed as redundant, since
-   #sec-nav-bar already provides the same section jumps. This instead
-   surfaces the two controls that actually needed to be reachable from
-   anywhere: _chainRange (ATM strike range) and _velWin (OI/Vol velocity
-   window). Both already fan out dashboard-wide — getFilteredChain() (used
-   by the chain table, OI Flow, IV surface, Greeks) reads _chainRange, and
-   every oiVelocity lookup (chain table, right analytics panel, OI Flow
-   velocity) reads _velWin — so this panel just needs to drive
-   switchChainRange()/switchVelTab(), same as the inline copies inside the
-   chain section header. The toggle button that used to live inside this
-   fixed wrapper has been relocated into the left #sec-nav-bar rail (see
-   "Range/Vel" sec-btn); this wrapper now holds only the flyout panel,
-   which dashboard.js positions dynamically (left/top set inline in
-   toggleControlSidebar()) right next to that button instead of the old
-   fixed top-right slot, so it no longer opens somewhere unrelated /
-   partially off-screen. The panel now stacks its two groups vertically
-   (Vel Window row, then ATM Range row) and expands open via max-height —
-   it used to be a single wide horizontal row that expanded via max-width,
-   which meant it stretched sideways over the chain table's columns
-   instead of dropping down compactly. */
-.ctrl-sidebar{
-  position:fixed;
-  z-index:1000;
-}
-.ctrl-sidebar-panel{
-  background:rgba(22,24,29,0.95);
-  border:1px solid var(--border);
-  border-radius:12px;
-  max-height:0;
-  overflow:hidden;
-  opacity:0;
-  padding:0;
-  box-shadow:0 4px 20px rgba(0,0,0,0.40);
-  backdrop-filter:blur(12px);
-  display:flex;flex-direction:column;align-items:flex-start;gap:8px;
-  white-space:nowrap;
-  transition:max-height .22s ease, opacity .18s ease, padding .22s ease;
-}
-.ctrl-sidebar.open .ctrl-sidebar-panel{
-  max-height:160px;
-  opacity:1;
-  padding:8px 10px;
-}
-.ctrl-sidebar-group{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-.ctrl-sidebar-group-label{
-  font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);
-  text-transform:uppercase;letter-spacing:.08em;margin-bottom:0;
-}
-.ctrl-sidebar-group .tab-group{flex-direction:row;gap:4px;}
-.ctrl-sidebar-group .tab-btn{text-align:center;padding:4px 8px;}
-.ctrl-sidebar-divider{width:100%;height:1px;background:var(--border);flex-shrink:0;}
-/* Narrow viewports used to hide this sidebar and fall back to inline
-   chain-header range/velocity tabs; those inline tabs have been removed
-   (single global control now), so the sidebar stays visible here too. */
-
-/* NOTE: the old "RANGE TOGGLE NAV" block (.range-nav / .range-btn /
-   .reload-btn / .meta) lived here and is gone — those classes had no
-   remaining references anywhere in the file (checked static markup,
-   JS-generated template strings, and commented-out HTML). Removed as
-   dead weight during the layout cleanup pass. */
-
-/* ── STICKY REFRESH BUTTON ── */
-#sticky-refresh-btn{
-  font-size:0.8625rem;font-weight:700;
-  padding:5px 14px;
-  border-radius:20px;
-  border:1.5px solid rgba(51,154,240,0.40);
-  background:linear-gradient(135deg, rgba(51,154,240,0.15), rgba(51,154,240,0.05));
-  color:var(--info);
-  cursor:pointer;
-  transition:all 0.25s ease;
-  white-space:nowrap;
-  box-shadow:0 1px 4px rgba(51,154,240,0.10);
-  font-family:var(--font-sans);
-}
-#sticky-refresh-btn:hover{
-  background:linear-gradient(135deg, rgba(51,154,240,0.25), rgba(51,154,240,0.10));
-  border-color:var(--info);
-  transform:translateY(-2px);
-  box-shadow:0 4px 16px rgba(51,154,240,0.25);
-}
-#sticky-refresh-btn.running{
-  border-color:rgba(245,159,0,0.5);
-  background:rgba(245,159,0,0.12);
-  color:var(--warn);
-  animation:spin-pulse 1.2s linear infinite;
-}
-@keyframes spin-pulse{0%{opacity:1;}50%{opacity:.5;}100%{opacity:1;}}
-
-/* ── OPTION CHAIN / OI DASHBOARD NAV BUTTONS ──
-   Now regular members of the vertical .sec-nav rail (they inherit .sec-btn's
-   flex-column icon+label layout); these ID rules just tint them so they
-   stay visually distinct from the plain section-jump buttons. */
-#option-chain-btn{
-  border-color:rgba(245,159,0,0.40);
-  background:linear-gradient(135deg, rgba(245,159,0,0.15), rgba(245,159,0,0.05));
-  color:var(--warn);
-  box-shadow:0 1px 4px rgba(245,159,0,0.10);
-}
-#option-chain-btn:hover{
-  background:linear-gradient(135deg, rgba(245,159,0,0.25), rgba(245,159,0,0.10));
-  border-color:var(--warn);
-  box-shadow:0 4px 16px rgba(245,159,0,0.25);
-}
-#oi-dashboard-btn{
-  border-color:rgba(51,154,240,0.40);
-  background:linear-gradient(135deg, rgba(51,154,240,0.15), rgba(51,154,240,0.05));
-  color:var(--info);
-  box-shadow:0 1px 4px rgba(51,154,240,0.10);
-}
-#oi-dashboard-btn:hover{
-  background:linear-gradient(135deg, rgba(51,154,240,0.25), rgba(51,154,240,0.10));
-  border-color:var(--info);
-  box-shadow:0 4px 16px rgba(51,154,240,0.25);
-}
 
 /* ── SHARED IN-PAGE MODAL CHROME (in-page, same tab) ──
    Generic overlay/panel/iframe styling, used only by the OI Dashboard
@@ -743,6 +195,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    before or after its in-dashboard table was removed — it now lives
    entirely at option-chain.html, one click away via the "Full Chain"
    button on the Option Chain Snapshot card. */
+
 .oc-modal{
   display:none;
   position:fixed;
@@ -751,11 +204,13 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   background:rgba(0,0,0,0.55);
   padding:2vh 2vw;
 }
+
 .oc-modal.open{
   display:flex;
   align-items:stretch;
   justify-content:center;
 }
+
 .oc-modal-panel{
   width:100%;
   max-width:1600px;
@@ -766,6 +221,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   overflow:hidden;
   box-shadow:0 20px 60px rgba(0,0,0,0.45);
 }
+
 .oc-modal-bar{
   display:flex;
   align-items:center;
@@ -775,48 +231,73 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
+
 .oc-modal-title{
   font-size:0.8625rem;font-weight:700;color:var(--text-primary);letter-spacing:.02em;
 }
-#oc-modal-close{
-  font-size:0.7906rem;font-weight:700;
-  padding:5px 12px;
-  border-radius:16px;
-  border:1.5px solid rgba(250,82,82,0.40);
-  background:rgba(250,82,82,0.10);
-  color:var(--neg);
-  cursor:pointer;
-  transition:all .2s ease;
+
+/* Left-corner back button, replacing the old top-right "✕ Close" button
+   on all 4 modals (OI Dashboard / Greeks-GEX / FII-DII / IV Surface) —
+   matches option-chain.html's .oc-back pattern (circular arrow button
+   next to the title) instead of a right-aligned red close pill.
+   NOTE: the previous #oc-modal-close / #oc-modal-close:hover rules here
+   used to target an id ("oc-modal-close") that none of the actual
+   buttons in DashboardPro.html ever had (they used oi-modal-close /
+   greeks-modal-close / fiidii-modal-close / iv-surface-modal-close
+   instead), so that styling was already dead — removed rather than
+   left orphaned now that the markup changes too. */
+.oc-modal-id{
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
-#oc-modal-close:hover{
-  background:rgba(250,82,82,0.20);
-  border-color:var(--neg);
+
+.oc-modal-back{
+  width:34px;height:34px;border-radius:50%;
+  background:var(--bg-2);border:1px solid var(--border);
+  color:var(--text-secondary);font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,color .15s,transform .1s;
+  flex-shrink:0;margin-top:2px;
 }
+
+.oc-modal-back:hover{
+  border-color:var(--info);
+  color:var(--text-primary);
+  transform:translateX(-2px);
+}
+
 .oc-modal-iframe{
   flex:1 1 auto;
   width:100%;
   border:none;
   background:#0b0e11;
 }
-@keyframes trap-pulse{0%,100%{box-shadow:0 0 0 0 rgba(250,82,82,0.0);}50%{box-shadow:0 0 0 5px rgba(250,82,82,0.18);}}
 
 /* ── ANALYTICS SUMMARY STRIP ──
    Generic key/value-with-bar row component. Now used by the Option Chain
    Snapshot card (see ChainView.chainSummaryBodyHtml in chain-views.js). */
+
 .arp-strip{
   background:var(--bg-2);border-radius:var(--radius-sm);
   padding:8px 10px;margin-bottom:10px;
   overflow:hidden;
 }
+
 .arp-row{
   display:grid;grid-template-columns:52px minmax(0,1fr);
   align-items:center;gap:6px;
   padding:3px 0;
 }
+
 .arp-row+.arp-row{border-top:1px solid var(--border);}
+
 .arp-key{font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;}
+
 .arp-val{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;overflow:hidden;min-width:0;}
+
 .arp-num{font-size:0.7906rem;font-weight:700;font-family:var(--font-mono);white-space:nowrap;flex-shrink:0;}
+
 .arp-bar{height:7px;border-radius:2px;flex-shrink:1;min-width:2px;max-width:72px;}
 
 /* ── OPTION CHAIN SNAPSHOT — 4-card summary ledger, ported from
@@ -826,22 +307,23 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    option-chain.css's call/put teal/red — i.e. Net (PE−CE) positive
    (PE+ / CE-) is green, negative (CE+ / PE-) is red, on every net/net-ish
    readout below (arp-sum-net, arp-doi-net). */
+
 .arp-summary-grid{
   display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;
 }
-@media (min-width:900px){
-  .arp-summary-grid{grid-template-columns:repeat(4,1fr);}
-}
+
 .arp-sum-card{
   background:var(--bg-2);border:1px solid var(--border);
   border-radius:var(--radius-sm);padding:9px 11px;
   display:flex;flex-direction:column;gap:7px;justify-content:center;
   min-height:70px;min-width:0;
 }
+
 .arp-sum-title{
   font-family:var(--font-display);font-weight:600;font-size:0.6875rem;color:var(--text-secondary);
   text-transform:uppercase;letter-spacing:.04em;
 }
+
 .arp-sum-title-sub{font-family:var(--font-mono);font-weight:500;color:var(--text-tertiary);text-transform:none;letter-spacing:0;margin-left:4px;}
 
 .arp-skew-bar{
@@ -849,16 +331,25 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   background:var(--bg-1);overflow:hidden;
   display:flex;align-items:center;
 }
+
 .arp-skew-fill{height:100%;transition:width .4s ease;}
+
 .arp-skew-fill-pe{background:linear-gradient(90deg,transparent,var(--pos));margin-left:auto;}
+
 .arp-skew-fill-ce{background:linear-gradient(90deg,var(--neg),transparent);}
+
 .arp-skew-mid{width:2px;height:14px;background:var(--warn);flex-shrink:0;box-shadow:0 0 6px var(--warn);}
 
 .arp-sum-readout{display:flex;align-items:baseline;gap:6px;white-space:nowrap;font-size:0;flex-wrap:wrap;}
+
 .arp-sum-num{font-family:var(--font-mono);font-weight:700;font-size:0.7813rem;}
+
 .arp-ce-c{color:var(--neg);}
+
 .arp-pe-c{color:var(--pos);}
+
 .arp-sum-vs{font-size:0.5938rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;}
+
 .arp-sum-pill{
   font-family:var(--font-mono);font-weight:700;font-size:0.6875rem;color:var(--warn);
   background:rgba(255,212,59,0.12);padding:2px 7px;border-radius:999px;
@@ -867,139 +358,222 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 /* Net readout — single signed PE−CE figure so the reader isn't left to
    subtract the two totals above themselves. Sign convention: PE+/CE-
    (net > 0) = green, CE+/PE- (net < 0) = red. */
+
 .arp-sum-net{
   font-family:var(--font-mono);font-size:0.6563rem;color:var(--text-tertiary);
   padding-top:2px;border-top:1px solid var(--border);
 }
+
 .arp-sum-net b{font-weight:700;}
+
 .arp-sum-net.up b{color:var(--pos);}
+
 .arp-sum-net.down b{color:var(--neg);}
 
 /* dOI card — one column per 5/15/30m window, PE value above the bars, CE
    below, bar height = magnitude relative to that window's larger leg. */
+
 .arp-doi-grid{display:flex;gap:8px;align-items:flex-end;height:auto;}
+
 .arp-doi-col{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;justify-content:flex-end;min-width:0;}
+
 .arp-doi-val{font-family:var(--font-mono);font-size:0.5938rem;font-weight:700;line-height:1.1;white-space:nowrap;}
+
 .arp-doi-val.pe{color:var(--pos);}
+
 .arp-doi-val.ce{color:var(--neg);}
+
 .arp-doi-bars{display:flex;flex-direction:column;gap:2px;align-items:center;flex:1;justify-content:flex-end;height:40px;}
+
 .arp-doi-bar{width:14px;border-radius:2px 2px 0 0;min-height:2px;}
+
 .arp-doi-bar.pe{background:var(--pos);}
+
 .arp-doi-bar.ce{background:var(--neg);}
+
 .arp-doi-lbl{font-family:var(--font-mono);font-size:0.5625rem;color:var(--text-tertiary);margin-top:1px;}
+
 .arp-doi-net{font-family:var(--font-mono);font-size:0.5938rem;font-weight:700;padding:1px 6px;border-radius:999px;margin-top:2px;white-space:nowrap;}
+
 .arp-doi-net.up{color:var(--pos);background:rgba(32,201,151,0.14);}
+
 .arp-doi-net.down{color:var(--neg);background:rgba(255,107,107,0.14);}
+
 .arp-doi-net.flat{color:var(--text-tertiary);background:var(--bg-1);}
 
 /* Volume + Vol/OI ratio card */
+
 .arp-vratio-rows{display:flex;flex-direction:column;gap:5px;}
+
 .arp-vratio-row{display:flex;align-items:center;gap:7px;}
+
 .arp-vratio-side{width:18px;font-family:var(--font-mono);font-size:0.625rem;font-weight:700;}
+
 .arp-vratio-num{font-family:var(--font-mono);font-size:0.6875rem;font-weight:600;min-width:42px;}
+
 .arp-vratio-track{flex:1;height:6px;border-radius:3px;background:var(--bg-1);overflow:hidden;}
+
 .arp-vratio-fill{height:100%;border-radius:3px;}
+
 .arp-vratio-fill.ce{background:var(--neg);}
+
 .arp-vratio-fill.pe{background:var(--pos);}
+
 .arp-vratio-val{font-family:var(--font-mono);font-size:0.6875rem;font-weight:700;color:var(--text-primary);min-width:32px;text-align:right;}
 
 /* ── LOADER ── */
+
 #loader{padding:32px 0;}
+
 .load-zone{
   border:2px dashed var(--border);border-radius:var(--radius);
   padding:32px 24px;text-align:center;margin-bottom:12px;
 }
+
 .load-title{font-size:1.0781rem;font-weight:600;color:var(--text-primary);margin-bottom:8px;}
+
 .load-sub{font-size:0.8625rem;color:var(--text-secondary);margin-bottom:20px;line-height:1.7;}
+
 .load-methods{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;}
+
 .load-btn{
   display:flex;flex-direction:column;align-items:center;gap:8px;
   padding:18px 12px;border:1px solid var(--border);
   border-radius:var(--radius);background:var(--bg-1);cursor:pointer;
   transition:all 0.15s;
 }
+
 .load-btn:hover{border-color:var(--info);background:var(--bg-2);}
+
 .load-btn i{font-size:1.725rem;color:var(--text-primary);}
+
 .load-btn span{font-size:0.8625rem;font-weight:500;color:var(--text-primary);}
+
 .load-btn small{font-size:0.8625rem;color:var(--text-tertiary);text-align:center;}
+
 #paste-area{
   width:100%;height:72px;font-size:0.7906rem;font-family:var(--font-mono);
   border:1px solid var(--border);border-radius:var(--radius-sm);
   padding:10px;background:var(--bg-2);color:var(--text-primary);resize:vertical;display:none;
 }
+
 #load-go{
   margin-top:8px;font-size:0.8625rem;padding:7px 22px;
   border-radius:var(--radius-sm);border:1px solid var(--info);
   background:rgba(51,154,240,0.1);color:var(--info);cursor:pointer;display:none;
 }
+
 #err-msg{font-size:0.7906rem;color:var(--neg);margin-top:8px;min-height:16px;}
-[id^="sec-"]{scroll-margin-top:var(--panel-top, 116px);}
 
 /* ── GENIUS ── */
+
 .mini-kv{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
+
 .mini-kv-lbl{font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px;}
+
 .mini-kv-val{font-size:1.15rem;font-weight:700;font-family:var(--font-mono);}
+
 .oi-flow-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:2px 0;}
+
 .oi-flow-ce{background:var(--neg);transition:flex .4s;}
+
 .oi-flow-pe{background:var(--pos);transition:flex .4s;}
+
 .leg-pill{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;font-family:var(--font-mono);font-size:0.7906rem;font-weight:700;}
+
 .leg-pill.buy{background:rgba(18,184,134,.10);border:1px solid rgba(18,184,134,.30);}
+
 .leg-pill.sell{background:rgba(250,82,82,.10);border:1px solid rgba(250,82,82,.30);}
+
 .dec-badge{display:inline-block;padding:5px 16px;border-radius:20px;font-size:1.2219rem;font-weight:700;font-family:var(--font-mono);}
+
 .dec-badge.bull{background:rgba(18,184,134,.15);color:var(--pos);border:1.5px solid rgba(18,184,134,.4);}
+
 .dec-badge.bear{background:rgba(250,82,82,.15);color:var(--neg);border:1.5px solid rgba(250,82,82,.4);}
+
 .dec-badge.neutral{background:rgba(245,159,0,.15);color:var(--warn);border:1.5px solid rgba(245,159,0,.4);}
+
 .vrd-chip{display:grid;grid-template-columns:56px 1fr;gap:4px;align-items:start;padding:4px 0;border-bottom:1px solid var(--border);}
+
 .vrd-chip:last-child{border-bottom:none;}
+
 .vrd-key{font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;}
+
 .vrd-val{font-size:0.8625rem;color:var(--text-secondary);line-height:1.4;}
 
-
 /* == INSTITUTIONAL F&O SIMULATOR == */
-.sim-wrap{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px;}
-.sim-header{padding:14px 18px 10px;border-bottom:1px solid var(--border);}
-.sim-title{font-size:1.0781rem;font-weight:700;color:var(--text-primary);letter-spacing:-.01em;}
-.sim-subtitle{font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.sim-body{padding:14px 18px;}
-.sim-chart-area{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:14px 14px 10px;position:relative;margin-bottom:14px;}
-.sim-chart-label{font-size:0.8625rem;color:var(--text-tertiary);margin-bottom:8px;font-family:var(--font-mono);}
-#sim-gex-canvas{width:100%;display:block;}
-.sim-annot{position:absolute;background:rgba(22,24,29,0.88);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.7906rem;color:var(--text-primary);pointer-events:none;display:none;white-space:nowrap;z-index:10;top:10px;left:50px;}
-.sim-controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
-.sim-ctrl-row{display:flex;align-items:center;gap:10px;}
-.sim-ctrl-label{font-size:0.7906rem;color:var(--text-secondary);min-width:100px;flex-shrink:0;}
-.sim-ctrl-slider{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;background:var(--border);outline:none;cursor:pointer;}
-.sim-ctrl-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--info);border:2px solid var(--bg-1);box-shadow:0 0 0 2px rgba(51,154,240,.3);cursor:pointer;}
-.sim-ctrl-val{font-family:var(--font-mono);font-size:0.8625rem;font-weight:700;color:var(--text-primary);background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:4px 9px;min-width:62px;text-align:center;}
-.sim-dealer-sel{flex:1;padding:5px 8px;font-size:0.7906rem;background:var(--bg-2);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-sans);cursor:pointer;outline:none;}
-.sim-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
-.sim-stat{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center;}
-.sim-stat-label{font-size:0.7906rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;}
-.sim-stat-val{font-size:1.15rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);}
-.sim-stat-sub{font-size:0.8625rem;color:var(--text-tertiary);margin-top:2px;}
-.sim-table-wrap{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
-.sim-table-row{display:grid;grid-template-columns:70px 1fr 54px 54px 1fr;gap:2px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);}
-.sim-table-row:last-child{border-bottom:none;}
-.sim-table-row.atm-row{background:rgba(51,154,240,0.08);}
-.sim-inst-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--text-tertiary);display:inline-block;margin-right:5px;flex-shrink:0;vertical-align:middle;}
-.sim-inst-dot.filled{background:var(--pos);border-color:var(--pos);}
-.sim-regime-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;}
-.sim-regime-label{font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;min-width:90px;}
-.sim-regime-track{flex:1;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--pos) 0%,var(--warn) 40%,var(--warn) 60%,var(--neg) 100%);position:relative;}
-.sim-regime-needle{position:absolute;top:-4px;width:3px;height:16px;background:var(--text-primary);border-radius:2px;transform:translateX(-50%);transition:left .4s cubic-bezier(.4,0,.2,1);}
-.sim-regime-val{font-size:0.7906rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);min-width:60px;text-align:right;}
-.sim-vol-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
-.sim-vol-card{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
-.sim-vol-card-title{font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;}
-.sim-vol-bar-row{display:flex;align-items:center;gap:6px;padding:3px 0;}
-.sim-vol-bar-label{font-size:0.8625rem;color:var(--text-tertiary);font-family:var(--font-mono);min-width:44px;}
-.sim-vol-bar-track{flex:1;height:5px;border-radius:3px;background:var(--border);overflow:hidden;}
-.sim-vol-bar-fill{height:100%;border-radius:3px;transition:width .3s ease;}
-.sim-vol-bar-val{font-size:0.8625rem;font-weight:700;font-family:var(--font-mono);min-width:40px;text-align:right;}
-.sec-btn-simulator{color:var(--info);}
-.sec-btn-simulator.active{background:rgba(51,154,240,.12);color:var(--info);}
-.sec-btn-simulator.active::after{background:var(--info);}
 
+.sim-wrap{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px;}
+
+.sim-header{padding:14px 18px 10px;border-bottom:1px solid var(--border);}
+
+.sim-title{font-size:1.0781rem;font-weight:700;color:var(--text-primary);letter-spacing:-.01em;}
+
+.sim-subtitle{font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+.sim-body{padding:14px 18px;}
+
+.sim-chart-area{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:14px 14px 10px;position:relative;margin-bottom:14px;}
+
+.sim-chart-label{font-size:0.8625rem;color:var(--text-tertiary);margin-bottom:8px;font-family:var(--font-mono);}
+
+#sim-gex-canvas{width:100%;display:block;}
+
+.sim-annot{position:absolute;background:rgba(22,24,29,0.88);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.7906rem;color:var(--text-primary);pointer-events:none;display:none;white-space:nowrap;z-index:10;top:10px;left:50px;}
+
+.sim-controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
+
+.sim-ctrl-row{display:flex;align-items:center;gap:10px;}
+
+.sim-ctrl-label{font-size:0.7906rem;color:var(--text-secondary);min-width:100px;flex-shrink:0;}
+
+.sim-ctrl-slider{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;background:var(--border);outline:none;cursor:pointer;}
+
+.sim-ctrl-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--info);border:2px solid var(--bg-1);box-shadow:0 0 0 2px rgba(51,154,240,.3);cursor:pointer;}
+
+.sim-ctrl-val{font-family:var(--font-mono);font-size:0.8625rem;font-weight:700;color:var(--text-primary);background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:4px 9px;min-width:62px;text-align:center;}
+
+.sim-dealer-sel{flex:1;padding:5px 8px;font-size:0.7906rem;background:var(--bg-2);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-sans);cursor:pointer;outline:none;}
+
+.sim-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+
+.sim-stat{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center;}
+
+.sim-stat-label{font-size:0.7906rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;}
+
+.sim-stat-val{font-size:1.15rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);}
+
+.sim-stat-sub{font-size:0.8625rem;color:var(--text-tertiary);margin-top:2px;}
+
+.sim-inst-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--text-tertiary);display:inline-block;margin-right:5px;flex-shrink:0;vertical-align:middle;}
+
+.sim-inst-dot.filled{background:var(--pos);border-color:var(--pos);}
+
+.sim-regime-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;}
+
+.sim-regime-label{font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;min-width:90px;}
+
+.sim-regime-track{flex:1;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--pos) 0%,var(--warn) 40%,var(--warn) 60%,var(--neg) 100%);position:relative;}
+
+.sim-regime-needle{position:absolute;top:-4px;width:3px;height:16px;background:var(--text-primary);border-radius:2px;transform:translateX(-50%);transition:left .4s cubic-bezier(.4,0,.2,1);}
+
+.sim-regime-val{font-size:0.7906rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);min-width:60px;text-align:right;}
+
+.sim-vol-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+
+.sim-vol-card{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+
+.sim-vol-card-title{font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;}
+
+.sim-vol-bar-row{display:flex;align-items:center;gap:6px;padding:3px 0;}
+
+.sim-vol-bar-label{font-size:0.8625rem;color:var(--text-tertiary);font-family:var(--font-mono);min-width:44px;}
+
+.sim-vol-bar-track{flex:1;height:5px;border-radius:3px;background:var(--border);overflow:hidden;}
+
+.sim-vol-bar-fill{height:100%;border-radius:3px;transition:width .3s ease;}
+
+.sim-vol-bar-val{font-size:0.8625rem;font-weight:700;font-family:var(--font-mono);min-width:40px;text-align:right;}
 
 /* ═══════════════════════════════════════════════════════════════════
    The full standalone Option Chain page CSS that used to be merged in
@@ -1029,31 +603,44 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    block (if pc-order-panel.css fully superseded it) or rename one set
    of selectors so they stop colliding.
    ══════════════════════════════════════════════════════════════════════ */
+
 .pc-panel { font-family:'Inter',sans-serif; color:var(--text-primary); }
+
 .pc-toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+
 .pc-title { margin-right:8px; font-weight:600; color:var(--text-primary); }
+
 .pc-spot-readout { font-weight:700; font-size:15px; color:var(--pos); }
+
 .pc-spacer { flex:1 1 auto; }
+
 .pc-btn {
   background:#2B2E3A; color:var(--text-secondary); border:1px solid #3A3F4B;
   border-radius:6px; padding:5px 10px; font-size:12px; font-family:inherit;
   cursor:pointer; transition:background .15s,color .15s,border-color .15s;
 }
+
 .pc-btn:hover { background:#383C4A; color:var(--text-primary); }
+
 .pc-btn.pc-active { background:var(--info-strong); color:#fff; border-color:var(--info-strong); }
+
 .pc-field {
   display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text-secondary);
   background:#2B2E3A; border:1px solid #3A3F4B; border-radius:6px; padding:4px 8px;
 }
+
 .pc-field input[type=number] {
   width:44px; background:#1A1C24; color:var(--text-primary); border:1px solid #3A3F4B;
   border-radius:4px; padding:2px 4px; font-size:12px; font-family:inherit;
 }
+
 .pc-field input[type=checkbox] { accent-color:var(--info-strong); cursor:pointer; }
+
 .pc-field input[type=color] {
   width:30px; height:22px; padding:0; border:1px solid #3A3F4B; border-radius:4px;
   background:transparent; cursor:pointer;
 }
+
 .pc-footnote { font-size:11px; color:var(--text-muted); margin-top:6px; }
 
 /* ── Layout fix: panel is now a fixed-height flex column so the chart
@@ -1063,12 +650,15 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    all — the order panel (BUY/SELL/CALL/PUT/Lots) was falling into normal
    block flow below the two canvases, which is what produced the big
    blank gap between the chart and the order controls. ── */
+
 .pc-panel{
   display:flex; flex-direction:column;
   height:clamp(460px, 64vh, 640px);
   box-sizing:border-box;
 }
+
 .pc-toolbar-sub{ margin-bottom:8px; }
+
 .pc-interval-field select{ min-width:56px; }
 
 .pc-ohlc-readout{
@@ -1076,23 +666,32 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   font-family:var(--font-mono); font-size:11px; color:var(--text-secondary);
   margin-bottom:4px; flex:0 0 auto;
 }
+
 .pc-ohlc-sym{ font-weight:700; color:var(--text-primary); margin-right:2px; }
+
 .pc-ohlc-item b{ color:var(--text-primary); margin-left:3px; font-weight:600; }
+
 .pc-ohlc-chg{ font-weight:700; }
+
 .pc-ohlc-chg.pc-pos{ color:var(--pos); }
+
 .pc-ohlc-chg.pc-neg{ color:var(--neg); }
 
 /* Chart area now takes all remaining vertical space in the panel instead
    of a fixed 220px — price-chart.js reads this element's clientHeight to
    size the canvas, so the two stay in sync. */
+
 .pc-chart-wrap{
   position:relative; flex:1 1 auto; min-height:0;
   display:flex; flex-direction:column;
 }
+
 #price-chart-canvas{ flex:0 0 auto; width:100%; min-height:0; cursor:crosshair; }
+
 /* Volume sub-panel has no drawing logic wired up yet (canvas exists but
    nothing ever paints to it) — hiding it rather than shipping a
    permanently-blank strip. Re-enable once _drawVolume() exists. */
+
 #price-chart-volume-canvas{ display:none; }
 
 .pc-watermark{
@@ -1105,50 +704,73 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 /* Quick-order panel — docked over the bottom-left of the chart canvas,
    TradingView-style, instead of rendering as plain stacked form controls
    below the chart. */
+
 .pc-order-panel{
   position:absolute; left:10px; bottom:10px; z-index:5;
   background:rgba(22,24,29,.92); border:1px solid #3A3F4B; border-radius:8px;
   padding:8px 10px; box-shadow:0 4px 16px rgba(0,0,0,.4);
   max-width:calc(100% - 20px);
 }
+
 .pc-order-head{ display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:11px; }
+
 .pc-order-name{ font-weight:700; color:var(--text-primary); font-family:var(--font-mono); }
+
 .pc-order-chg{ font-weight:600; }
+
 .pc-order-chg.pc-pos{ color:var(--pos); }
+
 .pc-order-chg.pc-neg{ color:var(--neg); }
+
 .pc-order-body{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+
 .pc-seg{ display:flex; border:1px solid #3A3F4B; border-radius:5px; overflow:hidden; }
+
 .pc-seg button{
   background:#2B2E3A; color:var(--text-secondary); border:none; padding:5px 9px;
   font-size:11px; font-weight:700; cursor:pointer; font-family:inherit;
 }
+
 #pc-order-side button.pc-active.pc-buy{ background:var(--pos); color:#0b0e11; }
+
 #pc-order-side button.pc-active.pc-sell{ background:var(--neg); color:#0b0e11; }
+
 #pc-order-opt button.pc-active{ background:var(--info-strong); color:#fff; }
+
 .pc-order-body select, .pc-order-qty, .pc-order-price{
   background:#1A1C24; color:var(--text-primary); border:1px solid #3A3F4B; border-radius:4px;
   font-size:11px; padding:4px 5px; font-family:inherit;
 }
+
 .pc-order-qty{ width:42px; }
+
 .pc-order-price{ width:76px; }
+
 .pc-order-lbl{ font-size:10px; color:var(--text-muted); }
+
 .pc-order-submit{
   background:var(--pos); color:#0b0e11; border:none; border-radius:5px;
   padding:6px 14px; font-weight:800; font-size:11px; cursor:pointer;
 }
+
 .pc-order-submit.pc-sell{ background:var(--neg); }
 
 .pc-win-bar{
   display:flex; align-items:center; gap:2px; flex:0 0 auto; flex-wrap:wrap;
   padding-top:6px; margin-top:6px; border-top:1px solid #2B2E3A;
 }
+
 .pc-win-btn{
   background:none; border:none; color:var(--text-muted); font-size:11px;
   padding:4px 8px; border-radius:4px; cursor:pointer; font-family:inherit;
 }
+
 .pc-win-btn:hover{ background:#2B2E3A; color:var(--text-primary); }
+
 .pc-win-btn.pc-active{ background:var(--info-strong); color:#fff; }
+
 .pc-win-bar .pc-reset-btn{ margin-left:6px; }
+
 .pc-win-bar .pc-footnote{ margin-top:0; }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1156,6 +778,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    (was injected at runtime by paper-trading.js: ptMountPanel() — moved
    here for the same reason as the PriceChartEngine block above.
    ══════════════════════════════════════════════════════════════════════ */
+
 #pt-toggle-btn{
   position:fixed !important; right:16px !important; bottom:16px !important; z-index:2147483000 !important;
   display:block !important; visibility:visible !important; opacity:1 !important;
@@ -1164,6 +787,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   padding:8px 14px; font:600 12px/1.2 inherit; cursor:pointer;
   box-shadow:0 2px 8px rgba(0,0,0,.4);
 }
+
 #pt-panel{
   /* Widened from a fixed 380px — that width was the root cause of the
      Order/Trade log looking "mixed up": at 380px the Sym column (which
@@ -1177,39 +801,28 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   border:1px solid var(--border); border-radius:10px;
   padding:12px; font:12px/1.4 inherit; box-shadow:0 4px 20px rgba(0,0,0,.5);
 }
+
 #pt-panel.open{display:block !important;}
+
 #pt-panel h4{margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;}
+
 #pt-panel .pt-section{margin-bottom:12px; border-top:1px solid var(--border); padding-top:8px;}
-#pt-panel table{width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed;}
-#pt-panel th,#pt-panel td{padding:4px 6px; text-align:right; border-bottom:1px solid rgba(255,255,255,.05);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-#pt-panel th:first-child,#pt-panel td:first-child{text-align:left;}
+
 #pt-panel .pt-pos{color:var(--pos);}
+
 #pt-panel .pt-neg{color:var(--neg);}
-/* Fixed column widths for the orders table so the Sym cell (which can
-   run long, e.g. "NIFTY 24200 CE") has a hard stop and never crowds
-   into the Side cell next to it. Expiry gets its own column — for
-   CE/PE/FUT orders and calendar spreads especially, expiry is not
-   optional context, it's part of what instrument was actually traded. */
-#pt-orders-table th:nth-child(1),#pt-orders-table td:nth-child(1){width:16%;}
-#pt-orders-table th:nth-child(2),#pt-orders-table td:nth-child(2){width:9%;}
-#pt-orders-table th:nth-child(3),#pt-orders-table td:nth-child(3){width:9%;}
-#pt-orders-table th:nth-child(4),#pt-orders-table td:nth-child(4){width:5%;}
-#pt-orders-table th:nth-child(5),#pt-orders-table td:nth-child(5){width:9%;}
-#pt-orders-table th:nth-child(6),#pt-orders-table td:nth-child(6){width:9%;}
-#pt-orders-table th:nth-child(7),#pt-orders-table td:nth-child(7){width:10%;}
-#pt-orders-table th:nth-child(8),#pt-orders-table td:nth-child(8){width:16%;}
-#pt-orders-table th:nth-child(9),#pt-orders-table td:nth-child(9){width:17%;}
-#pt-positions-table th:nth-child(1),#pt-positions-table td:nth-child(1){width:14%;}
-#pt-positions-table th:nth-child(2),#pt-positions-table td:nth-child(2){width:13%;}
-#pt-positions-table th:nth-child(3),#pt-positions-table td:nth-child(3){width:14%;}
+
 /* Side is now a contained pill (background + padding) instead of bare
    colored text, so it visually reads as its own element rather than
    bleeding into whatever sits next to it in the Sym column. */
+
 .pt-side-badge{display:inline-block; min-width:36px; text-align:center; padding:1px 6px;
   border-radius:3px; font-weight:800; font-size:10px; letter-spacing:.02em;}
+
 .pt-side-buy{background:rgba(46,204,113,.16); color:var(--pos);}
+
 .pt-side-sell{background:rgba(231,76,60,.16); color:var(--neg);}
+
 /* Click-toggle button groups replacing the BUY/SELL and MARKET/LIMIT
    <select>s — a 2-option dropdown is an awkward interaction (open,
    read, pick) for a choice that's really just a single tap/click.
@@ -1217,49 +830,77 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    sync (value + a dispatched 'change' event) so every existing
    $i('pt-side').value / .onchange read elsewhere in this file keeps
    working unmodified. */
+
 .pt-toggle-group{display:flex; flex:1; border-radius:6px; overflow:hidden; border:1px solid var(--border);}
+
 .pt-toggle-btn{flex:1; padding:7px 0; border:none; background:var(--bg-2); color:var(--text-muted);
   font-weight:800; font-size:11px; letter-spacing:.02em; cursor:pointer; transition:background .12s,color .12s;}
+
 .pt-toggle-btn:not(:last-child){border-right:1px solid var(--border);}
+
 .pt-toggle-btn.active{color:#fff;}
+
 .pt-toggle-buy.active{background:var(--pos);}
+
 .pt-toggle-sell.active{background:var(--neg);}
+
 #pt-ordtype-toggle .pt-toggle-btn.active{background:var(--info);}
+
 /* 6-way order-type toggle wraps to 2 rows of 3 instead of squeezing
    every label unreadably thin in one row. */
+
 .pt-toggle-group-6{flex-wrap:wrap; border-radius:6px;}
+
 .pt-toggle-group-6 .pt-toggle-btn{flex:1 1 33.33%; min-width:0;}
+
 .pt-toggle-group-6 .pt-toggle-btn:nth-child(3){border-right:none;}
+
 .pt-toggle-group-6 .pt-toggle-btn:nth-child(-n+3){border-bottom:1px solid var(--border);}
+
 #pt-basket-list{max-height:140px; overflow-y:auto;}
+
 .pt-basket-leg{display:flex; align-items:center; justify-content:space-between; gap:6px;
   font-size:11px; padding:5px 7px; border-radius:4px; background:var(--bg-2);
   border:1px solid var(--border); margin-bottom:4px;}
+
 .pt-basket-leg-remove{cursor:pointer; opacity:.6; font-weight:800; padding:0 3px;}
+
 .pt-basket-leg-remove:hover{opacity:1; color:var(--neg);}
+
 /* Tap target for a rejected order's Status cell — hover tooltips
    (title=...) don't work on touch devices, which is exactly why the
    rejection reason looked "hidden" on a phone/tablet even though it
    was technically present in the markup. Tapping shows the full
    reason as a toast instead of relying on hover. */
+
 .pt-status-tap{cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px;}
+
 #pt-panel input,#pt-panel select{
   width:100%; box-sizing:border-box; margin:2px 0 6px; padding:4px 6px;
   background:#0f1116; color:var(--text-primary); border:1px solid var(--border); border-radius:4px;
 }
+
 #pt-panel .pt-row{display:flex; gap:6px;}
+
 #pt-panel .pt-row > *{flex:1;}
+
 #pt-panel button.pt-submit{
   width:100%; padding:6px; margin-top:4px; border:none; border-radius:4px;
   background:var(--info); color:#fff; font-weight:600; cursor:pointer;
 }
+
 #pt-panel .pt-close{cursor:pointer; opacity:.6; font-weight:400;}
+
 #pt-panel .pt-summary{display:flex; justify-content:space-between; font-size:11px; margin-bottom:6px;}
+
 #pt-err{font-size:11px; min-height:14px; margin-top:4px; color:var(--neg);}
+
 #pt-panel select:disabled{opacity:.4;}
 
 /* Clickable LTP cells in the option chain -> quick BUY/SELL popover */
+
 .pt-ltp-click{cursor:pointer; padding:1px 4px; border-radius:3px; transition:background .1s;}
+
 .pt-ltp-click:hover{background:rgba(59,130,246,.28); outline:1px dashed rgba(59,130,246,.6);}
 
 #pt-quick-popover{
@@ -1268,85 +909,98 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   border:1px solid var(--border); border-radius:8px;
   padding:10px; font:12px/1.4 inherit; box-shadow:0 6px 24px rgba(0,0,0,.55);
 }
+
 #pt-quick-popover .pt-qp-hdr{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-weight:600;}
+
 #pt-quick-popover .pt-qp-close{cursor:pointer; opacity:.6;}
+
 #pt-quick-popover .pt-qp-ltp{font-size:11px; opacity:.75; margin-bottom:6px;}
+
 #pt-quick-popover .pt-qp-row{display:flex; gap:6px; margin-bottom:6px;}
+
 #pt-quick-popover .pt-qp-row input,#pt-quick-popover .pt-qp-row select{
   flex:1; box-sizing:border-box; padding:4px 5px;
   background:#0f1116; color:var(--text-primary); border:1px solid var(--border); border-radius:4px;
 }
+
 #pt-quick-popover .pt-qp-btns{display:flex; gap:6px;}
+
 #pt-quick-popover button{flex:1; border:none; border-radius:4px; padding:7px 0; font-weight:700; cursor:pointer; color:#fff;}
+
 #pt-quick-popover button.pt-qp-buy{background:var(--pos);}
+
 #pt-quick-popover button.pt-qp-sell{background:var(--neg);}
 
 #pt-toast-wrap{position:fixed; right:16px; bottom:60px; z-index:2147483200; display:flex; flex-direction:column; gap:6px; align-items:flex-end; pointer-events:none;}
+
 .pt-toast{
   max-width:280px; background:var(--bg-1); border:1px solid var(--border);
   border-left:3px solid var(--info); border-radius:6px; padding:8px 10px;
   font:11px/1.4 inherit; color:var(--text-primary); box-shadow:0 4px 16px rgba(0,0,0,.5);
   animation:pt-toast-in .15s ease-out;
 }
+
 .pt-toast.pt-toast-err{border-left-color:var(--neg);}
+
 .pt-toast.pt-toast-ok{border-left-color:var(--pos);}
-@keyframes pt-toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 
 /* Live/Paper mode pill in the panel header. Paper is neutral/quiet —
    live is deliberately loud (solid red, pulsing) since this is the one
    visual cue that separates "clicking this button does nothing real"
    from "clicking this button places a real order with real money." */
+
 .pt-mode-toggle{
   cursor:pointer; font-size:10px; font-weight:800; letter-spacing:.04em;
   padding:2px 8px; border-radius:10px; margin-left:8px; user-select:none;
 }
+
 .pt-mode-toggle.paper{background:rgba(255,255,255,.08); color:var(--text-muted); border:1px solid var(--border);}
+
 .pt-mode-toggle.live{background:var(--neg); color:#fff; animation:pt-mode-pulse 1.6s ease-in-out infinite;}
-@keyframes pt-mode-pulse{0%,100%{opacity:1;}50%{opacity:.65;}}
+
 /* Panel border turns red in live mode as a persistent ambient reminder
    that isn't dependent on noticing the small pill in the header. */
+
 #pt-panel.live-mode{border-color:var(--neg); box-shadow:0 4px 20px rgba(231,76,60,.35);}
 
 /* Per-order confirmation modal — deliberately styled heavier/darker
    than the quick-order popover (higher z-index, full backdrop) since
    this is the last checkpoint before a real order goes to the broker. */
+
 #pt-live-confirm-overlay{
   position:fixed; inset:0; z-index:2147483400; display:none;
   background:rgba(0,0,0,.6); align-items:center; justify-content:center;
 }
+
 #pt-live-confirm-overlay.open{display:flex;}
+
 #pt-live-confirm-box{
   width:min(340px, 90vw); background:var(--bg-1); color:var(--text-primary);
   border:2px solid var(--neg); border-radius:10px; padding:16px;
   font:12px/1.5 inherit; box-shadow:0 8px 32px rgba(0,0,0,.6);
 }
+
 #pt-live-confirm-box h5{
   margin:0 0 10px; font-size:14px; color:var(--neg);
   display:flex; align-items:center; gap:6px;
 }
+
 #pt-live-confirm-body{
   background:rgba(255,255,255,.04); border:1px solid var(--border);
   border-radius:6px; padding:8px 10px; margin-bottom:12px; font-size:12px; line-height:1.6;
 }
+
 #pt-live-confirm-body b{color:var(--text-primary);}
+
 #pt-live-confirm-btns{display:flex; gap:8px;}
+
 #pt-live-confirm-btns button{
   flex:1; border:none; border-radius:5px; padding:9px 0; font-weight:800;
   font-size:12px; cursor:pointer; color:#fff;
 }
-#pt-live-confirm-yes{background:var(--neg);}
-#pt-live-confirm-yes:hover{background:#c0392b;}
-#pt-live-confirm-no{background:var(--bg-2); border:1px solid var(--border) !important; color:var(--text-primary) !important;}
 
-.chart-icon {
-  cursor: pointer;
-  font-size: 14px;
-  margin-left: 4px;
-  opacity: 0.75;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  user-select: none;
-}
-.chart-icon:hover {
-  opacity: 1;
-  transform: scale(1.15);
-}
+#pt-live-confirm-yes{background:var(--neg);}
+
+#pt-live-confirm-yes:hover{background:#c0392b;}
+
+#pt-live-confirm-no{background:var(--bg-2); border:1px solid var(--border) !important; color:var(--text-primary) !important;}

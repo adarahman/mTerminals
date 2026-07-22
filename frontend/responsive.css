@@ -1,0 +1,45 @@
+/* responsive.css
+   Every @media block from styles.css, gathered in one place. Each block
+   is annotated with the selector(s) it originally sat next to, so it's
+   still easy to find. This file MUST be linked LAST, after layout.css /
+   panels.css / tables.css / navigation.css — these are override rules
+   for narrower viewports, and CSS resolves ties between equal-specificity
+   rules by source order, so loading this last preserves the exact
+   override behavior styles.css already had (each block used to appear
+   immediately after its base rule). Split out of styles.css (Phase 7 CSS
+   architecture reorg) — no selector, visual, or HTML changes. */
+
+/* was inline after: .db  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .db{padding-left:20px;} /* vertical rail collapses/overlays on narrow screens, see .sec-nav */
+}
+
+/* was inline after: .index-ticker  —  @media (max-width:1100px) */
+@media (max-width:1100px){
+  .index-ticker{max-width:340px;}
+}
+
+/* was inline after: .exec-grid  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .exec-grid{grid-template-columns:1fr 1fr;}
+  .exec-grid .exec-card.c-movers{grid-column:1 / -1;}
+}
+
+/* was inline after: .sec-nav  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .sec-nav{
+    position:sticky;top:8px;bottom:auto;left:auto;
+    flex-direction:row;flex-wrap:wrap;width:auto;height:auto;
+    margin-bottom:6px;
+  }
+}
+
+/* was inline after: .sec-btn.active::after  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .sec-btn.active::after{left:25%;right:25%;top:auto;bottom:-3px;width:auto;height:3px;}
+}
+
+/* was inline after: .arp-summary-grid  —  @media (min-width:900px) */
+@media (min-width:900px){
+  .arp-summary-grid{grid-template-columns:repeat(4,1fr);}
+}

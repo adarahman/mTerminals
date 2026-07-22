@@ -346,3 +346,26 @@
 .u-transition-fast { transition: all 0.1s ease; }
 .u-transition-slow { transition: all 0.25s ease; }
 .u-transition-none { transition: none; }
+
+/* ── Added from styles.css during Phase 7 CSS architecture split ──
+   These two didn't fit any .u-* utility group above but are equally
+   generic/component-agnostic, so they live here rather than in a
+   separate file. No selector or property changes from the original
+   styles.css. ── */
+
+/* [id^="sec-"] scroll-margin — used by every section jump target so a
+   fixed top bar doesn't cover the heading when navigated to. */
+[id^="sec-"]{scroll-margin-top:var(--panel-top, 116px);}
+
+.chart-icon {
+  cursor: pointer;
+  font-size: 14px;
+  margin-left: 4px;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  user-select: none;
+}
+.chart-icon:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
