@@ -323,15 +323,15 @@ class PriceChartEngine {
       fieldSelect.onchange = () => { this.settings.ohlcField = fieldSelect.value; this._saveSettings(); this.render(); };
     }
     panel.querySelectorAll('.pc-type-btn').forEach(b=>{
-      b.onclick = () => { this.settings.type = b.dataset.type; this._zoomStart = this._zoomEnd = null; this.indicatorEngine._clearCache(); this._saveSettings(); this._refreshToolbarState(); this.render(true); };
+      b.onclick = () => { this.settings.type = b.dataset.type; this._zoomStart = this._zoomEnd = null; this._saveSettings(); this._refreshToolbarState(); this.render(true); };
     });
     const smaToggle = $i('pc-sma-toggle'), smaPeriod = $i('pc-sma-period');
     const emaToggle = $i('pc-ema-toggle'), emaPeriod = $i('pc-ema-period');
     const vwapToggle = $i('pc-vwap-toggle');
     const gridToggle = $i('pc-grid-toggle');
     const lineColor = $i('pc-line-color');
-    const syncSma = () => { this.settings.smaPeriods = smaToggle.checked ? [parseInt(smaPeriod.value,10)||20] : []; this.indicatorEngine._clearCache(); this._saveSettings(); this.render(); };
-    const syncEma = () => { this.settings.emaPeriods = emaToggle.checked ? [parseInt(emaPeriod.value,10)||9] : []; this.indicatorEngine._clearCache(); this._saveSettings(); this.render(); };
+    const syncSma = () => { this.settings.smaPeriods = smaToggle.checked ? [parseInt(smaPeriod.value,10)||20] : []; this._saveSettings(); this.render(); };
+    const syncEma = () => { this.settings.emaPeriods = emaToggle.checked ? [parseInt(emaPeriod.value,10)||9] : []; this._saveSettings(); this.render(); };
     if(smaToggle){ smaToggle.onchange = syncSma; smaPeriod.onchange = syncSma; }
     if(emaToggle){ emaToggle.onchange = syncEma; emaPeriod.onchange = syncEma; }
     if(vwapToggle) vwapToggle.onchange = () => { this.settings.showVwap = vwapToggle.checked; this._saveSettings(); this.render(); };
@@ -679,7 +679,6 @@ class PriceChartEngine {
     if(symText && symText !== this._lastHydratedSymbol){
       this._lastHydratedSymbol = symText;
       this._renderCache.tmap = null; // Invalidate cache on symbol change
-      this.indicatorEngine._clearCache(); // Clear indicator cache on symbol change
       this.chartData.clearForSymbolChange(symText); // Free memory for old symbol
       this.hydrateRange(this.settings.range);
     }

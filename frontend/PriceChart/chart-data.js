@@ -48,8 +48,8 @@ class ChartData {
 
   // Cache key for historyBars - includes symbol to avoid cross-symbol contamination
   _histKey(range, symbol) {
-    const sym = symbol || (typeof app !== 'undefined' && app.data.store.state && app.data.store.state.symbol) || 'default';
-    return `${sym}::${range}`;
+    if (!symbol) throw new Error('ChartData: symbol is required (caller must supply it explicitly)');
+    return `${symbol}::${range}`;
   }
 
   setHistoryBars(range, bars, symbol) {
@@ -114,6 +114,20 @@ class ChartData {
 
   getLastTick() {
     return this.ticks[this.ticks.length - 1];
+  }
+
+  // One-time backfill merge: replace current ticks with `hydratedTicks`
+  // (from a history fetch), then replay `existingTicks` (whatever arrived
+  // live while that fetch was in flight) back on top, both through
+  // addTick() so its same-timestamp dedup/nudge logic applies to both
+  // sets rather than being bypassed. Note this goes through clear(),
+  // so — same as before this was encapsulated — historyBars and
+  // hydrating-range state are wiped too, not just ticks.
+  mergeHydratedTicks(hydratedTicks) {
+    const existingTicks = this.ticks.slice();
+    this.clear();
+    hydratedTicks.forEach(tick => this.addTick(tick.p, tick.t, tick.vw));
+    existingTicks.forEach(tick => this.addTick(tick.p, tick.t, tick.vw));
   }
 
   clear() {

@@ -13,7 +13,8 @@ class HistoryLoader {
 
   // Fetch real OHLCV history for a specific range from backend
   async hydrateRange(range, force = false, symbol) {
-    const sym = symbol || (typeof app !== 'undefined' && app.data.store.state && app.data.store.state.symbol) || 'default';
+    if (!symbol) throw new Error('HistoryLoader.hydrateRange: symbol is required');
+    const sym = symbol;
     
     if (!force && this.chartData.getHistoryBars(range, sym)) {
       this.onRenderRequest();
@@ -81,10 +82,7 @@ class HistoryLoader {
         .sort((a, b) => a.t - b.t);
       
       // Merge with existing ticks (keep live ticks that arrived during fetch)
-      const existingTicks = this.chartData.ticks.slice();
-      this.chartData.clear();
-      hydrated.forEach(tick => this.chartData.addTick(tick.p, tick.t, tick.vw));
-      existingTicks.forEach(tick => this.chartData.addTick(tick.p, tick.t, tick.vw));
+      this.chartData.mergeHydratedTicks(hydrated);
       
       this.onRenderRequest();
     } catch (e) {
