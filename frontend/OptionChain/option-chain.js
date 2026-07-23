@@ -625,6 +625,10 @@
       const btn = e.target.closest("button");
       if (!btn) return;
       state.range = +btn.dataset.val;
+      // Once the user picks a range here, this tab owns that choice —
+      // stop letting incoming live snapshots (which carry the dashboard
+      // sidebar's own, unrelated range) silently overwrite it.
+      state._userSetRange = true;
       $("ocRangeGroup").dataset.active = state.range;
       $("ocRangeGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
       renderSummary();
@@ -739,7 +743,7 @@
     // toggle — chain-sync.js has always sent this field, but nothing
     // here ever read it, so the two views could silently show different
     // ATM ranges with no indication either was out of sync.
-    if (msg.range != null && msg.range !== state.range) {
+    if (!state._userSetRange && msg.range != null && msg.range !== state.range) {
       state.range = msg.range;
       const activeBtn = $("ocRangeGroup").querySelector(`button[data-val="${msg.range}"]`);
       if (activeBtn) {
