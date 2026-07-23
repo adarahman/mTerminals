@@ -87,15 +87,11 @@ class DataService {
     }
   }
 
-  // ── SINGLE DATA SOURCE / SINGLE REFRESH PIPELINE ──
-  // Apply whatever expiry the global #expirySelect dropdown currently has
-  // selected to this tick's raw payload BEFORE the dense Option Chain table
-  // reads it, so the chain never flashes back to the primary expiry on a
-  // live tick. This is the same helper renderDashboard() uses for the rest
-  // of the dashboard (see applyExpirySelection below), so both the KPI/
-  // analytics panels and the Option Chain table stay driven by one piece of
-  // state (_selectedExpiry) off one payload.
-  applyExpirySelection(AppState.wsState, _selectedExpiry);
+  // applyExpirySelection() call removed (dead code — see chain-helpers.js):
+  // expiry switching is handled by ChainView.onExpiryChange reconnecting
+  // the WebSocket with ?expiry=..., not by splicing an alternate expiry's
+  // chain into this tick's payload. This call was always a no-op since
+  // app.chain.selectedExpiry (_selectedExpiry) is never written anywhere.
 
   // Feed the live price chart from this same tick's spot value. The
   // chart engine itself (price-chart.js) no longer loads on this page —

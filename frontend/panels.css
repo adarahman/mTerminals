@@ -191,7 +191,7 @@
 
 /* ── SHARED IN-PAGE MODAL CHROME (in-page, same tab) ──
    Generic overlay/panel/iframe styling, used only by the OI Dashboard
-   modal (#oi-dashboard-modal). Option Chain never used a modal either
+   modal (#oi-flow-modal). Option Chain never used a modal either
    before or after its in-dashboard table was removed — it now lives
    entirely at option-chain.html, one click away via the "Full Chain"
    button on the Option Chain Snapshot card. */

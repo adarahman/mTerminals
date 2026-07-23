@@ -494,14 +494,14 @@
   box-shadow:0 4px 16px rgba(245,159,0,0.25);
 }
 
-#oi-dashboard-btn{
+#oi-flow-btn{
   border-color:rgba(51,154,240,0.40);
   background:linear-gradient(135deg, rgba(51,154,240,0.15), rgba(51,154,240,0.05));
   color:var(--info);
   box-shadow:0 1px 4px rgba(51,154,240,0.10);
 }
 
-#oi-dashboard-btn:hover{
+#oi-flow-btn:hover{
   background:linear-gradient(135deg, rgba(51,154,240,0.25), rgba(51,154,240,0.10));
   border-color:var(--info);
   box-shadow:0 4px 16px rgba(51,154,240,0.25);

@@ -344,9 +344,23 @@
 
     const sel = $("ocExpiry");
     const sortedExpiryDates = sortExpiryDates(state.expiryDates);
-    if (sel.dataset.key !== sortedExpiryDates.join("|")) {
+    const expiryKey = sortedExpiryDates.join("|");
+    if (sel.dataset.key !== expiryKey) {
       sel.innerHTML = sortedExpiryDates.map((d) => `<option value="${d}"${d === state.expiry ? " selected" : ""}>${d}</option>`).join("");
-      sel.dataset.key = sortedExpiryDates.join("|");
+      sel.dataset.key = expiryKey;
+    } else if (sel.value !== state.expiry) {
+      // The expiryDates LIST is unchanged (same key, so the innerHTML
+      // rebuild above was skipped) but the ACTIVE expiry moved — e.g. the
+      // main dashboard tab switched expiry for the same symbol via its
+      // own #expirySelect, which broadcasts a new msg.expiry over
+      // oc-live-sync while msg.expiryDates stays byte-identical. Without
+      // this branch the <select> here kept showing whatever expiry was
+      // selected on the LAST innerHTML rebuild — stale relative to
+      // state.rows, which applyLivePayload() already updated to the new
+      // expiry's data — so the dropdown label and the ledger underneath
+      // it visibly disagreed. Mirrors the equivalent fallback in the main
+      // dashboard's own ChainDenseView.renderExpiryOptions (chain-renderer.js).
+      sel.value = state.expiry;
     }
   }
 

@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════
-// OI DASHBOARD (oi_dashboard.html) — extracted from that file's inline
+// OI DASHBOARD (oi-flow.html) — extracted from that file's inline
 // <script> block on 2026-07-12; restructured to a 3-level tab hierarchy
 // on 2026-07-18 (top-level Bar Chart/Butterfly/GEX in #tabs, and a single
 // merged mode row in #modeTabs: 5/15/30/Intraday window buttons on the
 // left, OI Chg/OI/Combined mode buttons on the right, all one line).
 // WebSocket connect/reconnect, parent postMessage feed, mock-data
 // fallback, and the canvas chart renderers (grouped bars, striped
-// combined view) are otherwise unchanged. See oi_dashboard.html for the
+// combined view) are otherwise unchanged. See OI-FLOW.html for the
 // markup this binds to (#oiCanvas, #tabs, #modeTabs, #legendRow,
 // #connBadge, #wsUrlInput, #bflyWrap, etc).
 // ═══════════════════════════════════════════════════════════════════
@@ -20,20 +20,64 @@ const C = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// SHARED ROW HELPERS
+// One place that knows the {strike, peOI, ceOI, peOIChg, ceOIChg,
+// peOIplus/minus, ceOIplus/minus, gex} row shape and the single strike
+// sort order — adaptLiveMessage/mergeDeltaIntoChain/seedMock/jitterMock
+// all build or update rows in this exact shape, so they now go through
+// these instead of each re-deriving plus/minus and re-sorting inline.
+// ─────────────────────────────────────────────────────────────
+const sortByStrike = (a, b) => a.strike - b.strike;
+
+// plus = the positive-only "increase" component of a signed change,
+// minus = the positive-only magnitude of the "decrease" component.
+// Same pair of derived values used for both CE and PE change columns.
+function plusMinus(chg) {
+  return { plus: Math.max(0, chg), minus: Math.max(0, -chg) };
+}
+
+// Builds one CHAIN row from a raw source object (a live-feed strike row,
+// or a mock-seed strike object). Accepts either {peChgOI, ceChgOI}
+// (SmartAPI naming) or {peOIChg, ceOIChg} (already-normalized naming) so
+// it can be fed directly by adaptLiveMessage() and seedMock() alike.
+function makeOiRow(src, gex = 0) {
+  const peOIChg = Number(src.peChgOI ?? src.peOIChg ?? 0);
+  const ceOIChg = Number(src.ceChgOI ?? src.ceOIChg ?? 0);
+  const pe = plusMinus(peOIChg);
+  const ce = plusMinus(ceOIChg);
+  return {
+    strike: Number(src.strike),
+    peOI: Number(src.peOI ?? 0),
+    ceOI: Number(src.ceOI ?? 0),
+    peOIChg, ceOIChg,
+    peOIplus: pe.plus, peOIminus: pe.minus,
+    ceOIplus: ce.plus, ceOIminus: ce.minus,
+    gex
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────────────────────
 // ── TAB STATE (three-level hierarchy) ──
 // Top level:    currentView  = 'bar' | 'butterfly' | 'gex'
 // Mode (shared by bar & butterfly, hidden for gex): currentMode = 'oi' | 'chg' | 'combined'
-// Window (only relevant when currentMode === 'chg'): chgWindow = '5' | '15' | '30' | 'all'
-//   'all' (shown as "Intraday" in the UI) = plain total OI change since
-//   day-open anchor (the old flat "OI Chng" figure).
-//   '5'/'15'/'30' = rolling velocity window from OI_VELOCITY.
+// Window (only relevant when currentMode === 'chg'): chgWindow = null | '5' | '15' | '30'
+//   null = default state for 'chg' mode — shows the flat total OI-change
+//   figure (VIEWS.oichng) immediately when the OIChg mode-tab is clicked.
+//   '5'/'15'/'30' = rolling velocity window from OI_VELOCITY, picked
+//   separately/on-demand via the 5/15/30 buttons next to OIChg.
 let currentView = 'bar';
 let currentMode = 'oi';
-let chgWindow = 'all';
+let chgWindow = null;
+// ATM strike-range filter: 3 | 5 | 10 | 'all'. Feeds getVisibleChain(),
+// which every view (bar/butterfly/gex) reads through, so changing this
+// filters all three consistently. Default of 10 matches the prior
+// hardcoded ATM±10 behavior exactly, so this is additive, not a
+// behavior change until someone actually clicks a different button.
+let rangeFilter = 10;
 
-let SPOT = null, ATM_STRIKE = null;
+let SPOT = null, ATM_STRIKE = null, EXPIRY = null;
 let CHAIN = [];          // [{strike, peOI, ceOI, peOIChg, ceOIChg, peOIplus, peOIminus, ceOIplus, ceOIminus, gex}]
 let OI_VELOCITY = [];    // [{window: 5|15|30, rows: [{strike, ceDOI, peDOI}, ...]}] — same shape chain-views.js reads d.oiVelocity as
 let ws = null;
@@ -44,7 +88,7 @@ let mockTimer = null;
 // PARENT PUSH CHANNEL 
 // ─────────────────────────────────────────────────────────────
 window.addEventListener('message', function (e) {
-  if (!e.data || e.data.type !== 'OI_DASHBOARD_DATA') return;
+  if (!e.data || e.data.type !== 'OI_FLOW_DATA') return;
   if (adaptLiveMessage(e.data.payload)) {
     clearInterval(mockTimer);
     usingMock = false;
@@ -67,12 +111,12 @@ function mergeDeltaIntoChain(changedRows) {
   if (SPOT == null || isNaN(SPOT)) {
     // No full snapshot has established SPOT yet — merging now would
     // corrupt ATM_STRIKE math downstream. Wait for the next full payload.
-    console.warn('[oi-dashboard] delta arrived before SPOT was known, skipping merge.');
+    console.warn('[oi-flow] delta arrived before SPOT was known, skipping merge.');
     return false;
   }
   if (!Array.isArray(CHAIN) || CHAIN.length === 0) {
     // No base chain to merge into yet either — same reasoning.
-    console.warn('[oi-dashboard] delta arrived before CHAIN was seeded, skipping merge.');
+    console.warn('[oi-flow] delta arrived before CHAIN was seeded, skipping merge.');
     return false;
   }
 
@@ -87,16 +131,16 @@ function mergeDeltaIntoChain(changedRows) {
     if (raw.peOI !== undefined) existing.peOI = Number(raw.peOI ?? 0);
     if (raw.ceChgOI !== undefined) {
       existing.ceOIChg = Number(raw.ceChgOI ?? 0);
-      existing.ceOIplus = Math.max(0, existing.ceOIChg);
-      existing.ceOIminus = Math.max(0, -existing.ceOIChg);
+      const ce = plusMinus(existing.ceOIChg);
+      existing.ceOIplus = ce.plus; existing.ceOIminus = ce.minus;
     }
     if (raw.peChgOI !== undefined) {
       existing.peOIChg = Number(raw.peChgOI ?? 0);
-      existing.peOIplus = Math.max(0, existing.peOIChg);
-      existing.peOIminus = Math.max(0, -existing.peOIChg);
+      const pe = plusMinus(existing.peOIChg);
+      existing.peOIplus = pe.plus; existing.peOIminus = pe.minus;
     }
   }
-  CHAIN = Array.from(byStrike.values()).sort((a, b) => a.strike - b.strike);
+  CHAIN = Array.from(byStrike.values()).sort(sortByStrike);
   return true;
 }
 
@@ -113,7 +157,7 @@ function adaptLiveMessage(msg) {
   if (msg.type === 'delta') {
     if (!window.__deltaShapeLogged) {
       window.__deltaShapeLogged = true;
-      console.log('[oi-dashboard] delta received (shape logged once):', JSON.stringify(msg));
+      console.log('[oi-flow] delta received (shape logged once):', JSON.stringify(msg));
     }
     return false;
     // Once confirmed correct, replace the two lines above with:
@@ -126,9 +170,13 @@ function adaptLiveMessage(msg) {
   }
 
   const body = (msg.type === 'full' && msg.payload) ? msg.payload : msg;
+  if (!window.__fullShapeLogged) {
+    window.__fullShapeLogged = true;
+    console.log('[oi-flow] full payload received (shape logged once) — check this for the real expiry field name:', JSON.stringify(body).slice(0, 2000));
+  }
   const strikesArr = body.chain;
   if (!Array.isArray(strikesArr)) {
-    console.warn('[oi-dashboard] connected, but payload.chain missing.', Object.keys(body));
+    console.warn('[oi-flow] connected, but payload.chain missing.', Object.keys(body));
     document.getElementById('lastMsg').textContent = 'connected — unrecognized payload, see console';
     return false;
   }
@@ -138,20 +186,13 @@ function adaptLiveMessage(msg) {
   }
   SPOT = Number(body.spot ?? SPOT);
   ATM_STRIKE = Number(body.atm ?? ATM_STRIKE);
+  EXPIRY = body.expiry ?? body.expiryDate ?? body.expiry_date
+    ?? body.selectedExpiry ?? body.currentExpiry ?? body.expiryLabel
+    ?? EXPIRY;
   OI_VELOCITY = Array.isArray(body.oiVelocity) ? body.oiVelocity : OI_VELOCITY;
-  CHAIN = strikesArr.map(r => {
-    const peOIChg = Number(r.peChgOI ?? 0);
-    const ceOIChg = Number(r.ceChgOI ?? 0);
-    return {
-      strike: Number(r.strike),
-      peOI: Number(r.peOI ?? 0),
-      ceOI: Number(r.ceOI ?? 0),
-      peOIChg, ceOIChg,
-      peOIplus: Math.max(0, peOIChg), peOIminus: Math.max(0, -peOIChg),
-      ceOIplus: Math.max(0, ceOIChg), ceOIminus: Math.max(0, -ceOIChg),
-      gex: gexByStrike[Number(r.strike)] ?? 0
-    };
-  }).sort((a,b) => a.strike - b.strike);
+  CHAIN = strikesArr
+    .map(r => makeOiRow(r, gexByStrike[Number(r.strike)] ?? 0))
+    .sort(sortByStrike);
   if (ATM_STRIKE == null || isNaN(ATM_STRIKE)) {
     ATM_STRIKE = CHAIN.reduce((best,r) => Math.abs(r.strike-SPOT) < Math.abs(best.strike-SPOT) ? r : best, CHAIN[0]).strike;
   }
@@ -218,19 +259,17 @@ function startMock() {
 function seedMock() {
   const strikes = [];
   for (let k = 23600; k <= 24400; k += 50) strikes.push(k);
-  SPOT = 23975.25; ATM_STRIKE = 24000;
+  SPOT = 23975.25; ATM_STRIKE = 24000; EXPIRY = EXPIRY || '28-AUG-2025';
   CHAIN = strikes.map(strike => {
     const dist = Math.abs(strike - ATM_STRIKE);
     const peOI = Math.round(Math.max(5, 140 - dist/8) * 1e5 * (0.6+Math.random()*0.8));
     const ceOI = Math.round(Math.max(5, 90 + dist/12) * 1e5 * (0.6+Math.random()*0.8));
     const peOIChg = Math.round((Math.random()-0.4) * peOI * 0.4);
     const ceOIChg = Math.round((Math.random()-0.4) * ceOI * 0.4);
-    return {
-      strike, peOI, ceOI, peOIChg, ceOIChg,
-      peOIplus: Math.max(0, peOIChg), peOIminus: Math.max(0, -peOIChg),
-      ceOIplus: Math.max(0, ceOIChg), ceOIminus: Math.max(0, -ceOIChg),
-      gex: +( (Math.random()-0.45) * 3 ).toFixed(2)
-    };
+    return makeOiRow(
+      { strike, peOI, ceOI, peOIChg, ceOIChg },
+      +((Math.random()-0.45) * 3).toFixed(2)
+    );
   });
 }
 function jitterMock() {
@@ -241,8 +280,9 @@ function jitterMock() {
     r.ceOI = Math.max(0, r.ceOI + ceOIChg);
     r.peOIChg = peOIChg;
     r.ceOIChg = ceOIChg;
-    r.peOIplus = Math.max(0, peOIChg); r.peOIminus = Math.max(0, -peOIChg);
-    r.ceOIplus = Math.max(0, ceOIChg); r.ceOIminus = Math.max(0, -ceOIChg);
+    const pe = plusMinus(peOIChg), ce = plusMinus(ceOIChg);
+    r.peOIplus = pe.plus; r.peOIminus = pe.minus;
+    r.ceOIplus = ce.plus; r.ceOIminus = ce.minus;
     r.gex = +(r.gex + (Math.random()-0.5)*0.4).toFixed(2);
   });
   SPOT = SPOT + (Math.random()-0.5)*4;
@@ -261,10 +301,11 @@ function fmtM(v) {
 
 function getVisibleChain() {
   if (!CHAIN.length) return CHAIN;
+  if (rangeFilter === 'all') return CHAIN;
   const idx = CHAIN.findIndex(r => r.strike === ATM_STRIKE);
   if (idx < 0) return CHAIN;
-  const start = Math.max(0, idx - 10);
-  const end = Math.min(CHAIN.length, idx + 10 + 1);
+  const start = Math.max(0, idx - rangeFilter);
+  const end = Math.min(CHAIN.length, idx + rangeFilter + 1);
   return CHAIN.slice(start, end);
 }
 
@@ -334,22 +375,26 @@ function combinedBar(color, widthPx, currentOI, chgOI, anchorRight) {
 function buildBflyRows(chain, velByStrike) {
   if (!chain.length) return '';
   const maxOIval = Math.max(...chain.map(r => Math.max(r.ceOI || 0, r.peOI || 0)), 1);
-  const maxDOI = Math.max(...chain.map(r => Math.max(Math.abs(r.ceOIChg || 0), Math.abs(r.peOIChg || 0))), 1);
   const maxVel = Math.max(...chain.map(r => {
     const vr = velByStrike[r.strike] || {};
     return Math.max(Math.abs(vr.ceDOI || 0), Math.abs(vr.peDOI || 0));
   }), 1);
+  const maxOIChg = Math.max(...chain.map(r =>
+    Math.max(Math.abs(r.ceOIChg || 0), Math.abs(r.peOIChg || 0))
+  ), 1);
 
   let html = '';
   chain.forEach(r => {
     let ceV, peV, maxV, signed;
-    if (currentMode === 'chg') {
-      if (chgWindow === 'all') {
-        ceV = r.ceOIChg || 0; peV = r.peOIChg || 0; maxV = maxDOI; signed = true;
-      } else {
-        const vr = velByStrike[r.strike] || {};
-        ceV = vr.ceDOI != null ? vr.ceDOI : 0; peV = vr.peDOI != null ? vr.peDOI : 0; maxV = maxVel; signed = true;
-      }
+    if (currentMode === 'chg' && chgWindow) {
+      // A window (5/15/30) is picked — show rolling OI velocity.
+      const vr = velByStrike[r.strike] || {};
+      ceV = vr.ceDOI != null ? vr.ceDOI : 0; peV = vr.peDOI != null ? vr.peDOI : 0; maxV = maxVel; signed = true;
+    } else if (currentMode === 'chg') {
+      // No window picked — OIChg tab surfaces its own data independently:
+      // the flat total OI-change figure, same field the bar chart's
+      // VIEWS.oichng series reads (r.ceOIChg / r.peOIChg).
+      ceV = r.ceOIChg || 0; peV = r.peOIChg || 0; maxV = maxOIChg; signed = true;
     } else if (currentMode === 'combined') {
       ceV = r.ceOI || 0; peV = r.peOI || 0; maxV = maxOIval; signed = false;
     } else {
@@ -407,11 +452,11 @@ function buildBflyRows(chain, velByStrike) {
 
 function bflyMoverLabel(kind) {
   // kind: 'ce' | 'pe'
-  if (currentMode === 'chg' && chgWindow !== 'all') {
+  if (currentMode === 'chg' && chgWindow) {
     return kind === 'ce' ? `Biggest CE Vel (${chgWindow}m)` : `Biggest PE Vel (${chgWindow}m)`;
   }
-  if (currentMode === 'chg') { // chgWindow === 'all'
-    return kind === 'ce' ? 'Biggest CE build' : 'Biggest PE build';
+  if (currentMode === 'chg') {
+    return kind === 'ce' ? 'Biggest CE OI Chg' : 'Biggest PE OI Chg';
   }
   // 'oi' and 'combined' both rank by plain OI magnitude
   return kind === 'ce' ? 'Biggest CE OI' : 'Biggest PE OI';
@@ -421,10 +466,10 @@ function buildBflyTopMovers(chain, velByStrike) {
   let ceStrike = null, ceVal = 0, peStrike = null, peVal = 0;
   chain.forEach(r => {
     let ceV, peV;
-    if (currentMode === 'chg' && chgWindow !== 'all') {
+    if (currentMode === 'chg' && chgWindow) {
       const vr = velByStrike[r.strike] || {};
       ceV = vr.ceDOI || 0; peV = vr.peDOI || 0;
-    } else if (currentMode === 'chg') { // chgWindow === 'all'
+    } else if (currentMode === 'chg') {
       ceV = r.ceOIChg || 0; peV = r.peOIChg || 0;
     } else {
       ceV = r.ceOI || 0; peV = r.peOI || 0;
@@ -448,7 +493,10 @@ function renderBfly() {
     return;
   }
   const chain = getVisibleChain();
-  const velByStrike = (currentMode === 'chg' && chgWindow !== 'all') ? getVelByStrike(Number(chgWindow)) : {};
+  // OIChg tab shows its own flat total-change data immediately, with no
+  // window required. A velocity lookup only happens once 5/15/30 is
+  // explicitly picked — mirrors getActiveCanvasView()'s bar-chart logic.
+  const velByStrike = (currentMode === 'chg' && chgWindow) ? getVelByStrike(Number(chgWindow)) : {};
   bodyEl.innerHTML = buildBflyRows(chain, velByStrike);
   if (footerEl) footerEl.innerHTML = buildBflyTopMovers(chain, velByStrike);
 }
@@ -505,7 +553,7 @@ function velocityView(win) {
 function getActiveCanvasView() {
   if (currentView === 'gex') return VIEWS.gex;
   if (currentMode === 'oi') return VIEWS.oi;
-  if (currentMode === 'chg') return chgWindow === 'all' ? VIEWS.oichng : velocityView(chgWindow);
+  if (currentMode === 'chg') return chgWindow ? velocityView(chgWindow) : VIEWS.oichng;
   return null; // combined
 }
 
@@ -525,7 +573,7 @@ function drawGrouped(ctx, w, h, view) {
   }));
   if (currentView === 'gex' && !window.__gexLogged) {
     window.__gexLogged = true;
-    console.log('[oi-dashboard] GEX values for visible strikes:',
+    console.log('[oi-flow] GEX values for visible strikes:',
       chain.map(r => ({ strike: r.strike, gex: r.gex })));
   }
   if (maxV <= 0) maxV = 0.01;
@@ -761,6 +809,10 @@ function updateSubTabVisibility() {
 function render() {
   updateSubTabVisibility();
 
+  document.getElementById('spotDisplay').textContent = SPOT ? SPOT.toFixed(2) : '—';
+  const expEl = document.getElementById('expiryDisplay');
+  if (expEl) expEl.textContent = EXPIRY ? ('Exp ' + EXPIRY) : '';
+
   const bflyWrap = document.querySelector('.bfly-wrap');
   const chartWrap = document.querySelector('.chart-wrap');
   if (currentView === 'butterfly') {
@@ -771,7 +823,6 @@ function render() {
   }
   if (bflyWrap) bflyWrap.style.display = 'none';
   if (chartWrap) chartWrap.style.display = '';
-  document.getElementById('spotDisplay').textContent = SPOT ? SPOT.toFixed(2) : '—';
   buildLegend();
 
   const canvas = document.getElementById('oiCanvas');
@@ -800,12 +851,15 @@ function render() {
 // TABS + RESIZE + INIT
 // ─────────────────────────────────────────────────────────────
 // Top-level: Bar Chart / Butterfly / GEX
+function updateViewTabActiveState() {
+  document.querySelectorAll('#tabs .tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.view === currentView));
+}
 document.getElementById('tabs').addEventListener('click', e => {
   const tab = e.target.closest('.tab');
   if (!tab) return;
   currentView = tab.dataset.view;
-  document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
+  updateViewTabActiveState();
   render();
 });
 
@@ -835,13 +889,33 @@ document.getElementById('modeTabs').addEventListener('click', e => {
   }
   if (modeEl) {
     currentMode = modeEl.dataset.mode;
+    if (currentMode === 'chg') chgWindow = null; // always require an explicit 5/15/30 pick
     updateModeRowActiveStates();
     render();
   }
 });
+// ATM strike-range filter (±3/±5/±10/All)
+function updateRangeTabActiveState() {
+  document.querySelectorAll('#rangeGroup .rng-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.range === String(rangeFilter)));
+}
+const _rangeGroupEl = document.getElementById('rangeGroup');
+if (_rangeGroupEl) {
+  _rangeGroupEl.addEventListener('click', e => {
+    const el = e.target.closest('.rng-tab');
+    if (!el) return;
+    rangeFilter = el.dataset.range === 'all' ? 'all' : Number(el.dataset.range);
+    updateRangeTabActiveState();
+    render();
+  });
+}
+
 const _isEmbedded = (window.top !== window.self) || !!window.opener;
 if (_isEmbedded) {
   setBadge('down', 'waiting for dashboard feed…');
 } else {
   connectWS();
 }
+updateViewTabActiveState();      // sync view tab highlight to currentView on load
+updateModeRowActiveStates(); // sync button highlight to currentMode on load, not just on click
+updateRangeTabActiveState(); // sync range-filter highlight to rangeFilter (default ±10) on load

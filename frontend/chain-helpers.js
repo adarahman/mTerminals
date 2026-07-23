@@ -362,33 +362,70 @@ function applyExpirySelection(d, selectedExpiry){
   if(!d) return;
   d._primaryExpiry = d._primaryExpiry || d.expiry || '';
   d._activeExpiry = selectedExpiry || d._primaryExpiry;
-  if(!selectedExpiry || selectedExpiry === d._primaryExpiry){
-    // Switching back to the primary expiry (or first render). Restore the
-    // primary values that got overwritten below the last time a non-primary
-    // expiry was selected — these _primary* backups were being written but
-    // never read back, so d.chain/d.atm/d.oiVelocity/etc used to stay
-    // stuck on the last-selected expiry's data even after switching back.
-    if(d._primaryChain      !== undefined) d.chain      = d._primaryChain;
-    if(d._primaryGreeks     !== undefined) d.greeks     = d._primaryGreeks;
-    if(d._primaryAtm        !== undefined) d.atm        = d._primaryAtm;
-    if(d._primaryDte        !== undefined) d.dte        = d._primaryDte;
-    if(d._primaryCeWall     !== undefined) d.ceWall     = d._primaryCeWall;
-    if(d._primaryPeWall     !== undefined) d.peWall     = d._primaryPeWall;
-    if(d._primaryMaxPain    !== undefined) d.maxPain    = d._primaryMaxPain;
-    if(d._primaryPCR        !== undefined) d.totalPCR   = d._primaryPCR;
-    if(d._primaryCallPremium!== undefined) d.callPremium= d._primaryCallPremium;
-    if(d._primaryPutPremium !== undefined) d.putPremium = d._primaryPutPremium;
-    if(d._primaryAtmIV      !== undefined) d.atmIV      = d._primaryAtmIV;
-    if(d._primaryAtmDelta   !== undefined) d.atmDelta   = d._primaryAtmDelta;
-    if(d._primaryAtmGamma   !== undefined) d.atmGamma   = d._primaryAtmGamma;
-    if(d._primaryAtmTheta   !== undefined) d.atmTheta   = d._primaryAtmTheta;
-    if(d._primaryAtmVega    !== undefined) d.atmVega    = d._primaryAtmVega;
-    if(d._primaryOiVelocity !== undefined) d.oiVelocity = d._primaryOiVelocity;
-    return;
-  }
-
   const chainStore = d.chains || {};
   const metaStore = d.chainMeta || {};
+
+  if(!selectedExpiry || selectedExpiry === d._primaryExpiry){
+    // FIX — root cause of "switch away then back to current expiry shows
+    // no/stale data": this used to restore a one-time snapshot (the old
+    // d._primaryChain/_primaryAtm/etc backups) taken the FIRST instant the
+    // user switched away from the primary expiry, then frozen there for as
+    // long as any other expiry stayed selected (the old code only ever set
+    // these via `x = x || d.foo`, so later ticks could never refresh them).
+    // Meanwhile every live tick kept landing on d.chain by strike-matching
+    // — since d.chain was holding a swapped-in *other* expiry's rows, those
+    // primary-expiry field patches silently blended into that other
+    // expiry's displayed cells (see applyDelta's keyed merge in
+    // market-store.js: it patches whatever array is currently sitting in
+    // target.chain, not necessarily the primary expiry's own rows). So
+    // switching back landed on a stale snapshot, not live data.
+    //
+    // d.chains[_primaryExpiry] sidesteps this: the backend always keeps a
+    // separate, independently-diffed copy of the current expiry's chain
+    // there (mTerminals_json.py: "chains[expiry_str] ... CURRENT chain
+    // always present") and this function never writes into d.chains[...],
+    // only reads from it — so it stays live and uncorrupted the entire
+    // time, no matter what's briefly sitting in d.chain. Rebuild the
+    // primary view from it every tick, the same way the non-primary
+    // branch below rebuilds its own expiry's view, instead of trusting a
+    // frozen backup.
+    const primaryChainSrc = chainStore[d._primaryExpiry];
+    if(primaryChainSrc && primaryChainSrc.length){
+      d.chain = primaryChainSrc.map(row => Object.assign({}, row));
+    }
+    // atm/dte/walls/PCR/premiums/IV are plain scalars (not strike-keyed
+    // arrays), so they can't suffer the in-place merge corruption above —
+    // they get fully overwritten with fresh primary values by the delta
+    // patch every single tick, right before this function runs. Safe to
+    // keep refreshing the backup unconditionally below (no `||` guard),
+    // so restoring here is never more than one tick stale.
+    if(d._primaryAtm         !== undefined) d.atm         = d._primaryAtm;
+    if(d._primaryDte         !== undefined) d.dte         = d._primaryDte;
+    if(d._primaryCeWall      !== undefined) d.ceWall      = d._primaryCeWall;
+    if(d._primaryPeWall      !== undefined) d.peWall      = d._primaryPeWall;
+    if(d._primaryMaxPain     !== undefined) d.maxPain     = d._primaryMaxPain;
+    if(d._primaryPCR         !== undefined) d.totalPCR    = d._primaryPCR;
+    if(d._primaryCallPremium !== undefined) d.callPremium = d._primaryCallPremium;
+    if(d._primaryPutPremium  !== undefined) d.putPremium  = d._primaryPutPremium;
+    if(d._primaryAtmIV       !== undefined) d.atmIV       = d._primaryAtmIV;
+    if(d._primaryAtmDelta    !== undefined) d.atmDelta    = d._primaryAtmDelta;
+    if(d._primaryAtmGamma    !== undefined) d.atmGamma    = d._primaryAtmGamma;
+    if(d._primaryAtmTheta    !== undefined) d.atmTheta    = d._primaryAtmTheta;
+    if(d._primaryAtmVega     !== undefined) d.atmVega     = d._primaryAtmVega;
+    if(d._primaryOiVelocity  !== undefined) d.oiVelocity  = d._primaryOiVelocity;
+    // CAVEAT: greeks is ALSO a strike-keyed array, same exposure as chain
+    // above — but unlike chain, the backend has no chains[expiry]-style
+    // always-live mirror of the PRIMARY expiry's greeks today (chainMeta
+    // only gets a "__meta__{expiry}" entry for *extra* chains — see
+    // chains_by_expiry in mTerminals_json.py, which is only populated
+    // inside the `if extra_chains:` loop). So this one field still relies
+    // on the older one-time backup and can still go stale while a
+    // non-primary expiry is shown. Needs a small backend addition
+    // (mirror primary greeks into chainMeta/chains the same way chain
+    // rows already are) to close fully — flagging rather than masking it.
+    if(d._primaryGreeks !== undefined) d.greeks = d._primaryGreeks;
+    return;
+  }
   const cached = _expiryViewCache[selectedExpiry] || {};
   const selectedChainSrc = chainStore[selectedExpiry] || cached.chain;
   if(!selectedChainSrc || !selectedChainSrc.length) return;
@@ -405,26 +442,35 @@ function applyExpirySelection(d, selectedExpiry){
   const selectedChain = selectedChainSrc.map(row => Object.assign({}, row));
   _expiryViewCache[selectedExpiry] = { chain: selectedChainSrc, meta: selectedMeta };
 
-  // Only back up primary values the FIRST time we swap away from the
-  // primary expiry in a given payload lifetime (the || guards) — repeated
-  // ticks while a non-primary expiry stays selected must not clobber the
-  // backup with the already-swapped-in values.
-  d._primaryChain       = d._primaryChain       || d.chain;
-  d._primaryGreeks       = d._primaryGreeks     || d.greeks;
-  d._primaryAtm         = d._primaryAtm         || d.atm;
-  d._primaryDte         = d._primaryDte         || d.dte;
-  d._primaryCeWall      = d._primaryCeWall      || d.ceWall;
-  d._primaryPeWall      = d._primaryPeWall      || d.peWall;
-  d._primaryMaxPain     = d._primaryMaxPain     || d.maxPain;
-  d._primaryPCR         = d._primaryPCR         || d.totalPCR;
-  d._primaryCallPremium = d._primaryCallPremium || d.callPremium;
-  d._primaryPutPremium  = d._primaryPutPremium  || d.putPremium;
-  d._primaryAtmIV       = d._primaryAtmIV       || d.atmIV;
-  d._primaryAtmDelta    = d._primaryAtmDelta    || d.atmDelta;
-  d._primaryAtmGamma    = d._primaryAtmGamma    || d.atmGamma;
-  d._primaryAtmTheta    = d._primaryAtmTheta    || d.atmTheta;
-  d._primaryAtmVega     = d._primaryAtmVega     || d.atmVega;
-  d._primaryOiVelocity  = d._primaryOiVelocity  || d.oiVelocity;
+  // d.chain no longer needs a backup here at all — the primary branch
+  // above now rebuilds it fresh from d.chains[_primaryExpiry] every time,
+  // which is what actually fixes the staleness/corruption bug. d.greeks
+  // has no such mirror yet (see caveat above), so it's the one field that
+  // still needs the old one-time capture — kept guarded (`||`) since
+  // d.greeks may already be corrupted/swapped by the time we get here on
+  // later ticks, and re-capturing then would just save the corruption.
+  d._primaryGreeks = d._primaryGreeks || d.greeks;
+  // The rest are plain scalars (not strike-keyed arrays), so they can't
+  // pick up cross-expiry corruption the way chain/greeks can — they get
+  // fully overwritten with fresh primary values by the delta patch each
+  // tick, right before this function runs. Refresh every tick (no `||`
+  // guard) instead of freezing at the moment of the first switch, so
+  // switching back to the current expiry is never more than one tick
+  // stale.
+  d._primaryAtm         = d.atm;
+  d._primaryDte         = d.dte;
+  d._primaryCeWall      = d.ceWall;
+  d._primaryPeWall      = d.peWall;
+  d._primaryMaxPain     = d.maxPain;
+  d._primaryPCR         = d.totalPCR;
+  d._primaryCallPremium = d.callPremium;
+  d._primaryPutPremium  = d.putPremium;
+  d._primaryAtmIV       = d.atmIV;
+  d._primaryAtmDelta    = d.atmDelta;
+  d._primaryAtmGamma    = d.atmGamma;
+  d._primaryAtmTheta    = d.atmTheta;
+  d._primaryAtmVega     = d.atmVega;
+  d._primaryOiVelocity  = d.oiVelocity;
 
   d.chain = selectedChain;
   const meta = selectedMeta;

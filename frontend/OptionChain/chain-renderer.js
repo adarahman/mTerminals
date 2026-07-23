@@ -62,11 +62,25 @@ ChainDenseView.prototype.renderExpiryOptions = function(payload) {
     // the pending marker is cleared so normal syncing resumes.
     const pending = sel.dataset.pendingExpiry;
     if (pending) {
-      if (activeExpiry && activeExpiry === pending) {
+      // Compare by parsed calendar date, not raw string — if the backend's
+      // confirmed payload.expiry never byte-matches what onExpiryChange set
+      // as pending (case/format drift), this used to never clear, so the
+      // dropdown stayed force-pinned to a stale value on every future
+      // render regardless of what the user actually selected.
+      if (activeExpiry && typeof parseExpiryDate === "function" && parseExpiryDate(activeExpiry) === parseExpiryDate(pending)) {
+        delete sel.dataset.pendingExpiry;
+      } else if (activeExpiry && activeExpiry === pending) {
         delete sel.dataset.pendingExpiry;
       } else {
-        if (sel.value !== pending) sel.value = pending;
-        return;
+        // Clear pending if it's been too long (5 seconds) to avoid stuck state
+        const pendingTime = parseInt(sel.dataset.pendingExpiryTime || '0');
+        if (Date.now() - pendingTime > 5000) {
+          delete sel.dataset.pendingExpiry;
+          delete sel.dataset.pendingExpiryTime;
+        } else {
+          if (sel.value !== pending) sel.value = pending;
+          return;
+        }
       }
     }
 
@@ -78,7 +92,8 @@ ChainDenseView.prototype.renderExpiryOptions = function(payload) {
         return `<option value="${dt}"${dt === activeExpiry ? " selected" : ""}>${bullet}${dt}</option>`;
       }).join("");
       sel.dataset.optionsKey = key;
-    } else if (activeExpiry && sel.value !== activeExpiry) {
+    } else if (activeExpiry && sel.value !== activeExpiry && !sel.dataset.pendingExpiry) {
+      // Only sync to activeExpiry if there's no pending switch in progress
       sel.value = activeExpiry;
     }
 };
@@ -809,43 +824,34 @@ ChainView.prototype.renderIvSurfaceModal = function() {
   el.innerHTML = this.buildIvSurfaceHtml(_data, chain, atm);
 };
 
-ChainView.prototype.onExpiryChange = function(selectedExpiry) {
-  if(!_data || !selectedExpiry) return;
+  ChainView.prototype.onExpiryChange = function(selectedExpiry) {
+  console.log('[onExpiryChange] called with', selectedExpiry);
+  if(!_data || !selectedExpiry) {
+    console.log('[onExpiryChange] EARLY RETURN — _data:', !!_data, 'selectedExpiry:', selectedExpiry);
+    return;
+  }
   const activeExpiry = _data.expiry || '';
-  if(selectedExpiry === activeExpiry) return; // already showing this expiry, nothing to do
+  const _same = activeExpiry && (
+    selectedExpiry === activeExpiry
+    || (typeof parseExpiryDate === "function" && parseExpiryDate(selectedExpiry) === parseExpiryDate(activeExpiry))
+  );
+  console.log('[onExpiryChange] activeExpiry:', activeExpiry, '_same:', _same);
+  if(_same) return; // already showing this expiry, nothing to do
 
-  // ── PIN THE DROPDOWN TO THE USER'S PICK ──
-  // The <select> already shows selectedExpiry the instant the browser fires
-  // this onchange — that's native behavior, free. The problem is everything
-  // AFTER this point: _data still holds the OLD expiry until the new
-  // connection's first "full" payload lands, and anything that re-renders
-  // the dropdown off stale _data.expiry in that window (a race with an
-  // in-flight tick from the old connection, or a delta payload that never
-  // carries an "expiry" field) stomps the user's visible selection back to
-  // the old value even though the data underneath is already moving to the
-  // new expiry. Tagging the node with a pending marker + value lets
-  // renderExpiryOptions (below) recognize "this is the expiry we're
-  // mid-switch to" and keep deferring to it instead of payload.expiry until
-  // the real payload actually confirms the switch.
   const sel = (typeof getExpirySelectNode === 'function') ? getExpirySelectNode() : null;
   if (sel) {
     sel.value = selectedExpiry;
     sel.dataset.pendingExpiry = selectedExpiry;
+    sel.dataset.pendingExpiryTime = Date.now().toString();
   }
 
-  // Single-expiry-per-connection model: the server only ever fetches/builds
-  // the ONE expiry's chain a client is connected with (NO_EXTRA_CHAINS
-  // defaults on in ws_server_live.py now), so there's no second expiry's
-  // chain/chainMeta sitting in the payload to splice in locally any more.
-  // Reconnecting with ?expiry=... re-points the whole backend pipeline at
-  // the new expiry (ws_handler -> switch_symbol -> _resolve_chain_tokens);
-  // the resulting "full" snapshot on the new connection is what actually
-  // repaints every chain-derived panel, same as any other WS full/delta
-  // handling in updateDashboard's tick handler.
   const base = (_wsUrl || '').split('?')[0];
   const params = new URLSearchParams((_wsUrl || '').split('?')[1] || '');
   params.set('expiry', selectedExpiry);
-  connectWebSocket(`${base}?${params.toString()}`);
+  const newUrl = `${base}?${params.toString()}`;
+  console.log('[onExpiryChange] reconnecting to:', newUrl);
+  connectWebSocket(newUrl);
+  console.log('[onExpiryChange] connectWebSocket call completed, ws readyState:', app.data.wsManager.ws ? app.data.wsManager.ws.readyState : 'no ws');
 };
 
 ChainView.prototype._rerenderChainPanels = function() {

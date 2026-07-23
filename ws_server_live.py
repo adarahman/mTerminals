@@ -1309,7 +1309,7 @@ def _parse_any_expiry(expiry_str):
     list_expiries()/_smartapi_current_expiry) or option_chain_json's format
     ('31-Jul-2026', dash-separated — used by the global EXPIRY/payload
     ["expiry"]). Returns None if it matches neither."""
-    for fmt in ("%d%b%Y", "%d-%b-%Y"):
+    for fmt in ("%d%b%Y", "%d-%b-%Y", "%d-%B-%Y"):
         try:
             return datetime.strptime(expiry_str, fmt).date()
         except (ValueError, TypeError):

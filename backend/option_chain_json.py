@@ -241,24 +241,54 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         expiry_dates = _generate_bse_expiry_series(symbol)
         return df, spot, expiry_dates
     else:
-        expiry_dates = get_available_expiries(symbol)
-        resolved = expiry
-        if resolved not in expiry_dates:
-            if strict_expiry:
-                raise RuntimeError(f"Requested expiry '{expiry}' has no data. Available: {expiry_dates}")
-            today = date.today()
-            future = [e for e in expiry_dates
-                      if pd.to_datetime(e, format="%d-%b-%Y").date() >= today]
-            if not future:
-                raise RuntimeError(f"No future expiries available for {symbol}")
-            resolved = future[0]
-            print(f"[Expiry] '{expiry}' unavailable → selected: '{resolved}'")
-
+        # When using NSE API (no-smartapi mode), get expiries from NSE itself
+        # instead of SmartAPI ScripMaster to avoid format mismatches
         if USE_SMARTAPI:
+            expiry_dates = get_available_expiries(symbol)
+            resolved = expiry
+            # Compare by parsed calendar date, not raw string equality — the
+            # frontend's expiry string ("28-Jul-2026", from payload.expiryDates)
+            # and get_available_expiries(symbol)'s own strings can be the exact
+            # same date in a different case/format, and a raw `in` check here
+            # used to silently treat that as "not found" and fall through to
+            # future[0] (nearest future expiry) every time, even when the
+            # requested expiry was genuinely available. Swap in the matched
+            # CANONICAL string from expiry_dates (not the raw input) so
+            # downstream fetch_option_chain_wide()/fetch_option_chain() calls,
+            # which may do their own exact-string lookups, get a string they
+            # actually recognize too.
+            def _expiry_date(s):
+                try:
+                    return pd.to_datetime(s, format="%d-%b-%Y").date()
+                except (ValueError, TypeError):
+                    return None
+            target_date = _expiry_date(resolved)
+            matched = next((e for e in expiry_dates
+                            if target_date is not None and _expiry_date(e) == target_date), None)
+            if matched is not None:
+                resolved = matched
+            else:
+                if strict_expiry:
+                    raise RuntimeError(...)
+                today = date.today()
+                future = [e for e in expiry_dates if pd.to_datetime(e, format="%d-%b-%Y").date() >= today]
+                if not future:
+                    raise RuntimeError(...)
+                resolved = future[0]
+                print(f"[Expiry] '{expiry}' unavailable → selected: '{resolved}'")
             df = fetch_option_chain_wide(symbol, resolved, strikes_around_atm=STRIKES_EACH_SIDE)
         else:
-            payload = fetch_option_chain(symbol, resolved)
+            # NSE mode: get expiries directly from NSE API response
+            payload = fetch_option_chain(symbol, expiry)
+            if not payload:
+                raise RuntimeError(f"NSE API returned no data for {symbol}")
+            expiry_dates = payload.get("records", {}).get("expiryDates", [])
+            resolved = _resolve_expiry(payload, expiry, strict=strict_expiry)
+            # Re-fetch with the resolved expiry to ensure consistency
+            if resolved != expiry:
+                payload = fetch_option_chain(symbol, resolved)
             df = parse_option_chain_response(payload, resolved)
+        
         if df.empty:
             raise RuntimeError(f"{'SmartAPI' if USE_SMARTAPI else 'NSE'} chain fetch empty for {symbol} {resolved}")
         spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0

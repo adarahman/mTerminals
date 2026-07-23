@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>NIFTY OI Dashboard — Live</title>
 <link rel="stylesheet" href="theme.css">
-<link rel="stylesheet" href="oi-dashboard.css">
-<!-- Butterfly tab styling — scoped here rather than in oi-dashboard.css
+<link rel="stylesheet" href="oi-flow.css">
+<!-- Butterfly tab styling — scoped here rather than in oi-flow.css
      since that file isn't guaranteed to already define these classes.
-     Colors are hardcoded to match the C palette in oi-dashboard.js
+     Colors are hardcoded to match the C palette in oi-flow.js
      (canvas can't read CSS vars, so that file hardcodes hex too — this
      keeps the HTML-table Butterfly view visually consistent with the
      canvas views on the other 4 tabs). -->
@@ -29,6 +29,16 @@
   .mode-tab{ padding:6px 14px; font-size:13px; font-weight:600; color:#8A94A6; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; cursor:pointer; user-select:none; }
   .mode-tab.active{ color:#0B0E14; background:#4DABF7; border-color:#4DABF7; }
   .mode-tab:hover{ color:#E8EDF2; }
+
+  /* ATM strike-range filter (±3/±5/±10/All) — applies to all three
+     top-level views (Bar Chart, Butterfly, GEX) via getVisibleChain().
+     Own class/color (blue, matches mode-tab's accent) so its click
+     handler never collides with .win-tab's chgWindow-switching logic. */
+  .range-group{ display:flex; align-items:center; gap:6px; }
+  .range-label{ font-size:11px; font-weight:600; color:#5E6B7E; text-transform:uppercase; letter-spacing:.05em; margin-right:2px; }
+  .rng-tab{ padding:5px 11px; font-size:12px; font-weight:600; color:#8A94A6; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; cursor:pointer; user-select:none; }
+  .rng-tab.active{ color:#0B0E14; background:#4DABF7; border-color:#4DABF7; }
+  .rng-tab:hover{ color:#E8EDF2; }
 
   .bfly-wrap{ display:none; flex-direction:column; height:100%; overflow:hidden; }
   .bfly-toolbar{ display:flex; align-items:center; justify-content:flex-end; gap:12px; padding:6px 6px 2px; flex-shrink:0; }
@@ -57,6 +67,21 @@
   .bfly-bar{ height:14px; border-radius:3px; min-width:3px; }
   .bfly-footer{ flex-shrink:0; padding:10px 14px; border-top:1px solid rgba(255,255,255,0.08); font-size:13px; line-height:1.6; }
   .bfly-empty{ padding:24px; text-align:center; color:#5E6B7E; font-size:14px; }
+
+  /* Top bar compaction — oi-flow.css's .top-nav/.ws-config rules were
+     sized for a taller bar than this single-line layout needs; !important
+     guarantees this wins regardless of that file's own specificity/order,
+     same reasoning as scoping Butterfly's styles here instead of there. */
+  .top-nav{ padding:6px 14px !important; min-height:0 !important; }
+  .nav-brand{ gap:10px; line-height:1; }
+  .ws-config{ gap:8px; line-height:1; }
+  .ws-config label{ font-size:11px; }
+  .ws-config input{ padding:4px 8px !important; font-size:12px !important; height:auto !important; }
+  .ws-config button{ padding:4px 10px !important; font-size:12px !important; }
+  #lastMsg{ font-size:11px; }
+
+  .expiry-badge{ font-size:12px; font-weight:600; color:#8A94A6; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:3px 9px; }
+  .expiry-badge:empty{ display:none; }
 </style>
 </head>
 <body>
@@ -66,6 +91,7 @@
     <div class="nav-brand">
       <span>NIFTY</span>
       <span class="spot-price" id="spotDisplay">—</span>
+      <span class="expiry-badge" id="expiryDisplay"></span>
       <span class="conn-badge down" id="connBadge">● connecting…</span>
     </div>
     <div class="ws-config">
@@ -78,20 +104,26 @@
 
   <div class="tabs-row">
     <div class="tabs" id="tabs">
-      <div class="tab active" data-view="bar">Bar Chart</div>
+      <div class="tab" data-view="bar">Bar Chart</div>
       <div class="tab" data-view="butterfly">Butterfly</div>
       <div class="tab" data-view="gex">GEX</div>
+    </div>
+    <div class="range-group" id="rangeGroup">
+      <span class="range-label">Strikes</span>
+      <div class="rng-tab" data-range="3">±3</div>
+      <div class="rng-tab" data-range="5">±5</div>
+      <div class="rng-tab active" data-range="10">±10</div>
+      <div class="rng-tab" data-range="all">All</div>
     </div>
     <div class="mode-tabs" id="modeTabs">
       <span class="win-group" id="winGroup">
         <div class="win-tab" data-win="5">5</div>
         <div class="win-tab" data-win="15">15</div>
         <div class="win-tab" data-win="30">30</div>
-        <div class="win-tab" data-win="all">Intraday</div>
       </span>
-      <div class="mode-tab" data-mode="chg">OI Chg</div>
+      <div class="mode-tab" data-mode="chg">OIChg</div>
       <div class="sep"></div>
-      <div class="mode-tab active" data-mode="oi">OI</div>
+      <div class="mode-tab" data-mode="oi">OI</div>
       <div class="mode-tab" data-mode="combined">Combined</div>
     </div>
   </div>
@@ -110,6 +142,6 @@
 
 </div>
 
-<script src="oi-dashboard.js"></script>
+<script src="oi-flow.js"></script>
 </body>
 </html>

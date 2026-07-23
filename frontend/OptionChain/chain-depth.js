@@ -265,7 +265,7 @@ RightPanelView.prototype.renderRightPanel = function(rows) {
     ${buildDepthBoxHtml(rows)}`;
 };
 
-RightPanelView.prototype.buildDepthBoxHtml = function(rows) {
+RightPanelView.prototype.buildDepthBoxHtml =function(rows) {
     const atmRow = rows.find((r) => r.isAtm) || rows[Math.floor(rows.length / 2)];
     const pinnedRow = _selectedDepthStrike != null ? rows.find((r) => r.strike === _selectedDepthStrike) : null;
     const depthRow = pinnedRow || atmRow;

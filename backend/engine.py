@@ -458,46 +458,111 @@ def compute_total_pcr(df: pd.DataFrame) -> float:
 # ===========================================================================
 
 def _build_greeks_table(df: pd.DataFrame, spot: float, base_iv: float,
-                          dte: int, lot_size: int) -> pd.DataFrame:
+                          dte: int, lot_size: int,
+                          use_live_iv: bool = True) -> pd.DataFrame:
     """Per-strike CE/PE Greeks + Net GEX over the full master chain, computed once.
-    Mirrors greeks_dashboard.render_greeks_section's prior inline math
-    exactly (same skew curve, same gamma-on-CE-IV-for-both-legs convention)
-    so chart/table output doesn't shift."""
+
+    UPGRADE (was: single synthetic skew IV fed into both legs, so
+    pGamma/pVega were literally aliased to the CE-side values — not an
+    approximation, an exact identity, since BS gamma has no call/put branch
+    and both legs got the same (S,K,T,r,sigma) inputs). Real CE/PE gamma
+    divergence only exists if the two legs are priced off *different*
+    IVs — i.e. the market's actual put/call skew. This now reads live
+    CE_IV/PE_IV off the chain per strike and prices each leg's Greeks
+    independently. Falls back to the old synthetic get_iv_skew() curve,
+    per leg, whenever the live IV for that strike is missing/zero/NaN
+    (illiquid far-OTM strikes commonly have no live IV yet) — so this
+    degrades gracefully rather than raising or fabricating a number.
+    Set use_live_iv=False to restore the exact prior symmetric-IV behavior
+    if a downstream consumer needs numbers to stay bit-identical.
+    """
     # master (oi_analysis.build_master_table_nse output) uses lowercase
     # snake_case columns ('strike'/'ce_oi'/'pe_oi'); window uses the raw
     # NSE-parser columns ('StrikePrice'/'CE_OI'/'PE_OI').
     strike_col = 'strike' if 'strike' in df.columns else 'StrikePrice'
     ce_oi_col  = 'ce_oi'  if 'ce_oi'  in df.columns else 'CE_OI'
     pe_oi_col  = 'pe_oi'  if 'pe_oi'  in df.columns else 'PE_OI'
+    ce_iv_col  = 'ce_iv'  if 'ce_iv'  in df.columns else 'CE_IV'
+    pe_iv_col  = 'pe_iv'  if 'pe_iv'  in df.columns else 'PE_IV'
+
     strikes = df[strike_col].tolist()
     ce_oi = df[ce_oi_col].fillna(0).tolist()
     pe_oi = df[pe_oi_col].fillna(0).tolist()
+
+    have_live_ce_iv = use_live_iv and ce_iv_col in df.columns
+    have_live_pe_iv = use_live_iv and pe_iv_col in df.columns
+    live_ce_iv = df[ce_iv_col].tolist() if have_live_ce_iv else None
+    live_pe_iv = df[pe_iv_col].tolist() if have_live_pe_iv else None
+
     t_param = max(dte / 365.0, _MIN_T_YEARS)
     r_param = ANNUAL_RISK_FREE_RATE
 
+    def _leg_iv(raw_list, i, fallback):
+        """Live IV for this strike/leg if usable, else the synthetic skew fallback."""
+        if raw_list is None:
+            return fallback
+        v = raw_list[i]
+        if v is None or (isinstance(v, float) and pd.isna(v)) or (isinstance(v, (int, float)) and v <= 0):
+            return fallback
+        v = float(v)
+        return v / 100.0 if v > 1.0 else v  # handle NSE's %-style IV storage (e.g. 14.2 -> 0.142)
+
     rows = []
     for i, k in enumerate(strikes):
-        iv = get_iv_skew(k, spot, base_iv)
-        c_d = bs_delta(spot, k, t_param, r_param, iv, "C")
-        p_d = bs_delta(spot, k, t_param, r_param, iv, "P")
-        c_g = bs_gamma(spot, k, t_param, r_param, iv)
-        c_t = bs_theta(spot, k, t_param, r_param, iv, "C")
-        p_t = bs_theta(spot, k, t_param, r_param, iv, "P")
-        c_v = bs_vega(spot, k, t_param, r_param, iv)
-        gex_val = (ce_oi[i] - pe_oi[i]) * c_g * lot_size * spot / 1_000_000_000
+        skew_iv = get_iv_skew(k, spot, base_iv)
+        ce_iv_eff = _leg_iv(live_ce_iv, i, skew_iv)
+        pe_iv_eff = _leg_iv(live_pe_iv, i, skew_iv)
+
+        c_d = bs_delta(spot, k, t_param, r_param, ce_iv_eff, "C")
+        p_d = bs_delta(spot, k, t_param, r_param, pe_iv_eff, "P")
+        c_g = bs_gamma(spot, k, t_param, r_param, ce_iv_eff)
+        p_g = bs_gamma(spot, k, t_param, r_param, pe_iv_eff)
+        c_t = bs_theta(spot, k, t_param, r_param, ce_iv_eff, "C")
+        p_t = bs_theta(spot, k, t_param, r_param, pe_iv_eff, "P")
+        c_v = bs_vega(spot, k, t_param, r_param, ce_iv_eff)
+        p_v = bs_vega(spot, k, t_param, r_param, pe_iv_eff)
+
+        # Each leg's own OI weighted by its own gamma — no longer collapses
+        # to gamma*(CE_OI-PE_OI) unless ce_iv_eff == pe_iv_eff for that strike.
+        gex_val = (ce_oi[i] * c_g - pe_oi[i] * p_g) * lot_size * spot / 1_000_000_000
 
         rows.append({
             'Strike': k,
             'cDelta': c_d, 'cGamma': c_g, 'cTheta': c_t, 'cVega': c_v,
-            # NOTE: pGamma/pVega intentionally reuse the CE-side gamma/vega
-            # (c_g / c_v), matching greeks_dashboard.py's prior behavior
-            # (pg.append(c_g), pv.append(c_v)) exactly — preserved as-is so
-            # this refactor doesn't silently change displayed numbers.
-            'pDelta': p_d, 'pGamma': c_g, 'pTheta': p_t, 'pVega': c_v,
+            'pDelta': p_d, 'pGamma': p_g, 'pTheta': p_t, 'pVega': p_v,
             'netGEX': gex_val,
-            'iv': iv,
+            'iv': ce_iv_eff,
+            'ce_iv': ce_iv_eff, 'pe_iv': pe_iv_eff,
         })
     return pd.DataFrame(rows)
+
+
+def _summarize_gex(greeks_table: pd.DataFrame) -> dict:
+    """Roll per-strike netGEX (from _build_greeks_table) up into a single
+    regime summary: total exposure, sign, and the strike where cumulative
+    GEX crosses zero (approximate gamma flip point). Pure aggregation over
+    an already-computed column — no new pricing math, no new data fetch."""
+    if greeks_table is None or greeks_table.empty or "netGEX" not in greeks_table.columns:
+        return {"total_gex": 0.0, "gex_regime": "unknown", "gamma_flip_strike": None}
+
+    sorted_tbl = greeks_table.sort_values("Strike")
+    total_gex = float(sorted_tbl["netGEX"].sum())
+
+    cum = 0.0
+    flip_strike = None
+    prev_cum = None
+    for _, row in sorted_tbl.iterrows():
+        cum += row["netGEX"]
+        if prev_cum is not None and (prev_cum < 0) != (cum < 0):
+            flip_strike = float(row["Strike"])
+            break
+        prev_cum = cum
+
+    return {
+        "total_gex": round(total_gex, 4),   # ₹ billions, same convention as netGEX
+        "gex_regime": "positive" if total_gex > 0 else "negative",
+        "gamma_flip_strike": flip_strike,
+    }
 
 
 # ===========================================================================
@@ -1236,6 +1301,11 @@ class EngineResult:
     # This is the real feature source for virtual_oi_estimator.py — do
     # not reconstruct these deltas from vel_df or ctx_dict elsewhere.
     oi_history_snapshot: "pd.DataFrame | None" = None
+    # {total_gex, gex_regime, gamma_flip_strike} — aggregate rollup of
+    # greeks_table['netGEX'], computed once in build_engine_result() via
+    # _summarize_gex(). See _build_greeks_table's docstring for the
+    # live-IV-per-leg convention this is now built on.
+    gex_summary: dict = field(default_factory=dict)
 
     def to_ctx_dict(self) -> dict:
         """Adapter so existing render_*.py functions written for a plain
@@ -1274,6 +1344,7 @@ class EngineResult:
             "window": self.window,
             "near_expiry": self.near_expiry,
             "far_expiry":  self.far_expiry,
+            "gex_summary": self.gex_summary,
         }
 
 
@@ -1330,6 +1401,7 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
 
     # ── Greeks table (full chain — window is kept as a compatibility alias) ──
     greeks_table = _build_greeks_table(master, spot, base_iv, dte, lot_size)
+    gex_summary = _summarize_gex(greeks_table)
 
     # ── ATM Greeks (lot-adjusted, for KPI strip / exec summary / risk) ────
     t_param = max(dte / 365.0, _MIN_T_YEARS)
@@ -1512,4 +1584,5 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
         wing_premiums=wing_premiums,
         near_expiry=near_expiry, far_expiry=far_expiry,
         oi_history_snapshot=df_full_history,
+        gex_summary=gex_summary,
     )

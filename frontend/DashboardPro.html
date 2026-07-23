@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="responsive.css">
 <link rel="stylesheet" href="PriceChart/pc-order-panel.css">
 <style>
-  /* Greeks/GEX modal body — the OI Dashboard modal's panel wraps a full
+  /* Greeks/GEX modal body — the OI Flow modal's panel wraps a full
      iframe (.oc-modal-iframe fills the panel edge-to-edge by design), but
      this modal wraps plain in-page markup instead (#grkgex-content /
      #grkgex-footer — the same nodes ChainView.renderGreeksGex() already
@@ -35,16 +35,16 @@
      for the full CE/PE strike-by-strike table, Greeks toggle, and
      buy/sell click-to-trade cells. -->
 
-<!-- ── OI DASHBOARD MODAL OVERLAY (same-screen, no new window) ── -->
-<div id="oi-dashboard-modal" class="oc-modal">
+<!-- ── OI Flow MODAL OVERLAY (same-screen, no new window) ── -->
+<div id="oi-flow-modal" class="oc-modal">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
       <div class="oc-modal-id">
         <button id="oi-modal-close" class="oc-modal-back" onclick="closeOIDashboardModal()" title="Back to dashboard">←</button>
-        <span class="oc-modal-title">📈 OI Dashboard</span>
+        <span class="oc-modal-title">📈 OI Flow</span>
       </div>
     </div>
-    <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Dashboard"></iframe>
+    <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Flow"></iframe>
   </div>
 </div>
 
@@ -53,7 +53,7 @@
      the main view only shows the compact alerts card (#greeks-alerts-card,
      built by ChainView.buildGreeksAlertsHtml()) — gamma flip / short-gamma
      regime / high theta decay flags, with a "Full Table →" button that
-     opens this modal. Not an iframe like the OI Dashboard modal above:
+     opens this modal. Not an iframe like the OI Flow modal above:
      ChainView.renderGreeksGex() already writes straight into
      #grkgex-content/#grkgex-footer below on every render and live tick
      (those ids used to sit inline in the dashboard template — moving them
@@ -167,7 +167,7 @@
   <button class="sec-btn sec-btn-simulator" onclick="secJump('sec-simulator')"><span>&#127970;</span>Simulator</button>
   <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
   <button class="sec-btn" id="option-chain-btn" onclick="window.open('OptionChain/option-chain.html','_blank')" title="Open the redesigned option chain in a new tab"><span>📊</span>Chain</button>
-  <button class="sec-btn" id="oi-dashboard-btn" onclick="openOIDashboardModal()" title="Open OI dashboard"><span>📈</span>OI Dash</button>
+  <button class="sec-btn" id="oi-flow-btn" onclick="openOIDashboardModal()" title="Open OI Flow"><span>📈</span>OI FLOW</button>
   <button class="sec-btn" id="greeks-dashboard-btn" onclick="openGreeksModal()" title="Open full Greeks & GEX table"><span>Δ</span>Greeks</button>
   <button class="sec-btn" id="fiidii-dashboard-btn" onclick="openFiiDiiModal()" title="Open full FII/DII/Pro/Retail participant OI table"><span>🏦</span>FII/DII</button>
   <!-- Range & velocity toggle — relocated here from its old floating
@@ -274,7 +274,7 @@
 <script src="formatters.js"></script>
 <script src="dom-utils.js"></script>
 <script src="range-tabs.js"></script>
-<script src="OptionChain/chain-helpers.js"></script>
+<script src="chain-helpers.js"></script>
 <!-- chain-views.js split (Phase 2 chain-view decomposition) into 7 files.
      chain-view.js must load FIRST — it declares the ChainDenseView/
      RightPanelView/ChainView classes that the other 6 attach methods to

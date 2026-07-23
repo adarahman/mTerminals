@@ -177,8 +177,8 @@ class OiFlowView {
   // Compact "OI Flow Snapshot" card — replaces the full strike-by-strike
   // butterfly table that used to live in #sec-oi-buildup. That full table
   // (same buildOiFlowRows()/buildOiTopMoversStrip() logic, same CE|Strike|PE
-  // layout) now lives in the OI Dashboard's "Butterfly" tab (oi_dashboard.html
-  // / oi-dashboard.js) so it can be viewed full-size without competing for
+  // layout) now lives in the OI Dashboard's "Butterfly" tab (oi-flow.html
+  // / oi-flow.js) so it can be viewed full-size without competing for
   // space with Greeks/GEX on the main dashboard. This card is the "glance"
   // version: biggest CE/PE build, the ATM strike's own OI/PCR read, and a
   // button straight into that Butterfly tab — same pattern as the Option
@@ -292,7 +292,8 @@ class ExecView {
     <div class="exec-title">📖 Market Story</div>
     <div class="story">±Expected Move <strong style="color:var(--blue);">${Math.round(atmStraddlePrem)}</strong></div>
     <div class="story">ATM Straddle Prem <strong style="color:var(--txt);">CE ₹${fmtN(d.callPremium||0,1)} + PE ₹${fmtN(d.putPremium||0,1)}</strong></div>
-    <div class="story">GEX <strong style="color:var(--blue);">${d.totalGEX!=null?fmtN(d.totalGEX,2)+'B':'—'}</strong></div>
+    <div class="story">GEX <strong style="color:${d.gexRegime==='negative'?'var(--red)':'var(--blue)'};">${d.totalGEX!=null?fmtN(d.totalGEX,2)+'B':'—'}</strong>${d.gexRegime?` <span style="font-size:9px;color:var(--txt3);">(${d.gexRegime==='negative'?'Short':'Long'} Gamma)</span>`:''}</div>
+    ${d.gammaFlipStrike!=null ? `<div class="story">Gamma Flip <strong style="color:var(--txt);">${fmtI(d.gammaFlipStrike)}</strong></div>` : ''}
     ${stratName ? `<div class="story">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--txt3);line-height:1.6;">
       ${isBull ? '🟢 Put writing continues — buy dips.' : isBear ? '🔴 Call writing heavy — sell rallies.' : '🟡 Mixed signals — wait for breakout.'}
@@ -1637,29 +1638,29 @@ class ModalManager {
     _openOIDashboardPopupFallback(tab);
     return;
   }
-  var modal = document.getElementById('oi-dashboard-modal');
+  var modal = document.getElementById('oi-flow-modal');
   var frame = document.getElementById('oi-modal-iframe');
   if(!modal || !frame) return;
   if(!_oiFrameLoaded){
     frame.onload = function () {
         if (app.data.store.state) {
             frame.contentWindow.postMessage(
-                { type: "OI_DASHBOARD_DATA", payload: app.data.store.state },
+                { type: "OI_FLOW_DATA", payload: app.data.store.state },
                 "*"
             );
         }
         if (tab) {
-            frame.contentWindow.postMessage({ type: "OI_DASHBOARD_SET_TAB", tab: tab }, "*");
+            frame.contentWindow.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
         }
     };
-    frame.src = 'oi_dashboard.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''); // must sit alongside this file when deployed
+    frame.src = 'oi-flow.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''); // must sit alongside this file when deployed
     _oiFrameLoaded = true;
   }
   // Every time the modal opens, send the latest state so reopening
   // doesn't show stale data.
   if (frame.contentWindow && app.data.store.state) {
     frame.contentWindow.postMessage(
-        { type: "OI_DASHBOARD_DATA", payload: app.data.store.state },
+        { type: "OI_FLOW_DATA", payload: app.data.store.state },
         "*"
     );
   }
@@ -1668,14 +1669,14 @@ class ModalManager {
   // for 'butterfly' after the panel already booted on 'oi' would otherwise
   // silently land on whatever tab was last active instead.
   if (tab && frame.contentWindow) {
-    frame.contentWindow.postMessage({ type: "OI_DASHBOARD_SET_TAB", tab: tab }, "*");
+    frame.contentWindow.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
   }
   modal.classList.add('open');
   document.addEventListener('keydown', _oiEscHandler);
 }
 
   closeOIDashboardModal(){
-  var modal = document.getElementById('oi-dashboard-modal');
+  var modal = document.getElementById('oi-flow-modal');
   if(!modal) return;
   modal.classList.remove('open');
   document.removeEventListener('keydown', _oiEscHandler);
@@ -1721,7 +1722,7 @@ class ModalManager {
   _openOIDashboardPopupFallback(tab){
   if(_oiDashboardWin && !_oiDashboardWin.closed){
     _oiDashboardWin.focus();
-    if (tab) _oiDashboardWin.postMessage({ type: "OI_DASHBOARD_SET_TAB", tab: tab }, "*");
+    if (tab) _oiDashboardWin.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
     return;
   }
   var w = Math.min(1200, Math.round(screen.availWidth * 0.85));
@@ -1730,7 +1731,7 @@ class ModalManager {
   var top = Math.round((screen.availHeight - h) / 2);
   var features = 'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top +
     ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no';
-  _oiDashboardWin = window.open('oi_dashboard.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''), 'oiDashboardPopup', features);
+  _oiDashboardWin = window.open('oi-flow.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''), 'oiDashboardPopup', features);
   if(_oiDashboardWin) _oiDashboardWin.focus();
 }
 

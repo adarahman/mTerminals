@@ -48,13 +48,35 @@ class WSManager {
     // CONNECTED set), its onclose reconnect timer can still fire, and every
     // broadcast arrives twice. onclose is nulled first so closing this one
     // doesn't itself trigger the auto-reconnect below.
-    if (this.ws) { this.ws.onclose = null; try { this.ws.close(); } catch(e){} }
-    try { this.ws = new WebSocket(this.url); }
+    // close() is not instantaneous — it starts a closing handshake, and the
+    // browser can still deliver an already-in-flight (or last-buffered)
+    // message through the OLD socket's onmessage handler even after close()
+    // has been called. Previously only onclose was nulled here, so a stale
+    // socket mid-close could still fire onmessage -> emit('message', ...)
+    // with data for whatever expiry/symbol it was last serving, racing
+    // against (and sometimes landing after) the new socket's correct
+    // payload. Null out every handler on the old socket, not just onclose.
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.onmessage = null;
+      this.ws.onopen = null;
+      this.ws.onerror = null;
+      try { this.ws.close(); } catch(e){}
+    }
+    let socket;
+    try { socket = new WebSocket(this.url); }
     catch(e){ err('WS init error: '+e.message); return; }
+    this.ws = socket;
 
-    this.ws.onopen = () => this.emit('open');
+    // Belt-and-suspenders: even with the handlers above nulled, guard by
+    // identity too. If `socket` (captured in this closure) is no longer
+    // this.ws by the time a handler fires — e.g. connect() ran again before
+    // this particular handler got cleared — the event is silently dropped
+    // instead of being emitted.
+    socket.onopen = () => { if (this.ws === socket) this.emit('open'); };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) return;
       let msg;
       try { msg = JSON.parse(event.data); }
       catch(e){ err('WS parse error: '+e.message); return; }
@@ -62,12 +84,13 @@ class WSManager {
       this.emit('message', msg);
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
       this.emit('close');
       this.reconnect();
     };
 
-    this.ws.onerror = () => { /* onclose fires next and triggers reconnect */ };
+    socket.onerror = () => { /* onclose fires next and triggers reconnect */ };
   }
 
   disconnect() {

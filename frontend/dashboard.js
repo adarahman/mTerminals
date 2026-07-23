@@ -291,7 +291,7 @@ window.addEventListener('load', function(){
 
 // Click on the dark backdrop (outside the panel) also closes it.
 document.addEventListener('DOMContentLoaded', function(){
-  var modal = document.getElementById('oi-dashboard-modal');
+  var modal = document.getElementById('oi-flow-modal');
   if(modal){
     modal.addEventListener('click', function(e){
       if(e.target === modal) closeOIDashboardModal();
