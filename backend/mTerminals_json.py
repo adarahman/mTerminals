@@ -1242,7 +1242,21 @@ def export_dashboard_json(
     # ── 11. ExpiryContext (current / near / monthly / far) ─────────────────
     try:
         em = make_expiry_manager(expiry_dates or [EXPIRY])
-        payload.update(em.to_json_payload())   # overwrites expiry, dte, expiryDates; adds expiryContext
+        # Capture the actually-fetched expiry/dte BEFORE the update below —
+        # ExpiryManager's own "current" bucket is computed independently as
+        # the nearest calendar expiry from expiry_dates, with no awareness
+        # of which expiry EXPIRY was actually resolved to this tick (e.g.
+        # after a manual dropdown switch to a non-nearest expiry). Letting
+        # its output overwrite payload["expiry"]/["dte"] unconditionally
+        # silently reverted every manual expiry switch back to the nearest
+        # expiry on every tick, even though the correct chain had already
+        # been fetched and everything else in the payload was correct.
+        _actual_expiry = payload["expiry"]
+        _actual_dte = payload.get("dte")
+        payload.update(em.to_json_payload())   # adds expiryContext; also overwrites expiry/dte/expiryDates — restored below
+        payload["expiry"] = _actual_expiry
+        if _actual_dte is not None:
+            payload["dte"] = _actual_dte
     except Exception as _em_err:
         print(f"[WARN] ExpiryManager failed ({_em_err}) — expiryContext omitted")
         payload["expiryDates"]   = expiry_dates or [EXPIRY]
