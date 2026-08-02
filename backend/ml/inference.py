@@ -25,6 +25,7 @@ import time
 import logging
 import os
 import joblib
+import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -526,4 +527,3 @@ def load_virtual_oi_coordinator(model_registry_dir="model_registry") -> "Virtual
 # ──────────────────────────────────────────────────────────────────────────────
 #  Training function – uses oi_snapshots.json to fit a HuberRegressor
 # ──────────────────────────────────────────────────────────────────────────────
-
