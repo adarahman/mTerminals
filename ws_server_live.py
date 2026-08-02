@@ -51,6 +51,7 @@ from brokers.smartapi_history import get_index_candles, get_candle_data
 from risk.account_guard import (
     LiveAccountRiskGuard, pnl_from_positions, open_lots_from_positions,
 )
+from risk.position_reconciler import PositionReconciler
 from decision.auto_executor import AutoExecutor
 
 _REAL_EXPORT = mTerminals_json.export_dashboard_json
@@ -267,6 +268,14 @@ def _live_trading_kill_switch_active():
 # rather than per-order. Trips the SAME kill-switch file above; see
 # risk/account_guard.py's module docstring for the full design.
 _ACCOUNT_GUARD = LiveAccountRiskGuard(LIVE_TRADING_KILL_SWITCH_FILE)
+
+# Diffs the live order book against the live position book (both from
+# AngelOne) and alerts on mismatch — same kill-switch file as the guard
+# above. See risk/position_reconciler.py's module docstring for the full
+# design and why both a periodic check (reconcile_loop below) and a
+# post-fill check (in _handle_place_order) exist.
+_POSITION_RECONCILER = PositionReconciler(LIVE_TRADING_KILL_SWITCH_FILE)
+POSITION_RECONCILE_SECONDS = int(os.environ.get("POSITION_RECONCILE_SECONDS", "120"))
 
 # Strategy -> execution bridge — the automated "algo" path, separate from
 # and independent of LIVE_TRADING_ENABLED (both must be true for an
@@ -748,6 +757,18 @@ async def _handle_place_order(payload):
                 _ACCOUNT_GUARD.update_pnl(pnl_from_positions(post_fill_positions))
             except Exception as e:
                 print(f"[account_guard] could not refresh daily P&L after order: {e}", flush=True)
+            try:
+                # Fast post-fill confirmation that this order's fill is
+                # actually reflected in the position book — the periodic
+                # reconcile_loop below is the real safety net (catches
+                # drift unrelated to this app's own order flow), this is
+                # just a quicker check right after our own action, same
+                # relationship update_pnl() above has to the periodic
+                # daily-loss check.
+                post_fill_orders = await asyncio.to_thread(smartapi_get_order_book)
+                _POSITION_RECONCILER.check(post_fill_orders, post_fill_positions, PT_LOT_SIZES)
+            except Exception as e:
+                print(f"[position_reconciler] could not run post-fill check: {e}", flush=True)
             await _broadcast_portfolio(current_prices)
         return
 
@@ -2068,6 +2089,37 @@ async def _funds_poll_body():
         await asyncio.sleep(FUNDS_POLL_SECONDS)
 
 
+async def reconcile_loop():
+    """Periodic position reconciliation — the real safety net for drift
+    that has nothing to do with this app's own order flow (a position
+    closed manually via the AngelOne app, a fill that landed without this
+    process seeing it). Unlike _funds_poll_body, this IS gated on
+    LIVE_TRADING_ENABLED: with live trading off there are no real
+    positions to reconcile, and it would just be two empty broker lists
+    diffing against each other every cycle. Runs unconditionally once
+    live trading is enabled — not tied to the Live-mode UI toggle the way
+    start/stop_funds_polling() is, since silent drift can happen whether
+    or not anyone currently has the Live pill on."""
+    while True:
+        try:
+            orders = await asyncio.to_thread(smartapi_get_order_book)
+            positions = await asyncio.to_thread(smartapi_get_positions)
+            result = _POSITION_RECONCILER.check(orders, positions, PT_LOT_SIZES)
+            if result.clean:
+                print("[position_reconciler] periodic check: clean", flush=True)
+            else:
+                print(f"[position_reconciler] periodic check: "
+                      f"{len(result.mismatches)} mismatch(es), "
+                      f"{len(result.unparseable_symbols)} unparseable", flush=True)
+        except Exception as e:
+            # Same defensive posture as _funds_poll_body/engine_loop — a
+            # failed reconciliation cycle should never take down the loop,
+            # just skip to the next one.
+            print(f"[position_reconciler] periodic check failed "
+                  f"(will retry in {POSITION_RECONCILE_SECONDS}s): {e}", flush=True)
+        await asyncio.sleep(POSITION_RECONCILE_SECONDS)
+
+
 def start_funds_polling():
     """Idempotent — a second toggle-on while already running is a no-op,
     not a duplicate poller."""
@@ -2575,6 +2627,8 @@ async def main():
     try:
         asyncio.create_task(index_quote_loop())
         asyncio.create_task(bridge_loop())
+        if LIVE_TRADING_ENABLED:
+            asyncio.create_task(reconcile_loop())
         # No funds_loop() task here anymore — funds polling starts/stops
         # live via the {"type":"toggle_live_mode",...} WS message (see
         # ws_handler + start_funds_polling()/stop_funds_polling() above),
