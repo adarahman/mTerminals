@@ -28,9 +28,60 @@ different entry points both do it, e.g. one script importing another.
 
 import logging
 import os
+import re
 
 _DEFAULT_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _configured = False
+
+# Matches e.g. "'Authorization': 'Bearer eyJ...'" or "'X-PrivateKey': 'shFC9gWu'"
+# inside a dict-repr'd headers blob, single- or double-quoted either side.
+_SENSITIVE_HEADER_RE = re.compile(
+    r"(['\"](?:Authorization|X-PrivateKey)['\"]\s*:\s*['\"])[^'\"]*(['\"])"
+)
+
+
+class RedactSensitiveHeaders(logging.Filter):
+    """Scrubs live credentials out of log records before they're emitted.
+
+    brokers/smartapi_client.py's underlying SmartApi SDK dumps the full
+    outgoing request headers -- including the live session Bearer token
+    and the API private key -- straight into the log on every HTTP
+    failure (see its smartConnect.py `_request()`, `logger.error(f"...
+    Headers: {headers}...")`). That's a plaintext credential leak on
+    every timeout/network hiccup, and it happens inside a vendored pip
+    package we can't safely patch in place (a `pip install -r
+    requirements.txt` would silently wipe any in-place edit).
+    Intercepting at the log-record level instead works regardless of
+    how the SDK itself changes: this filter is attached directly to the
+    `logzero` singleton logger the SDK (and our own brokers/*.py, which
+    intentionally share it -- see their `from logzero import logger`)
+    both log through, so it runs on every record before any handler
+    (console, file, etc.) sees it.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if "Authorization" in msg or "X-PrivateKey" in msg:
+            record.msg = _SENSITIVE_HEADER_RE.sub(r"\1[REDACTED]\2", msg)
+            record.args = ()
+        return True
+
+
+def _attach_credential_redaction() -> None:
+    """Best-effort: also covers logzero's singleton logger, which is a
+    separate object from the stdlib root logger and has its own
+    handler(s) attached directly (see RedactSensitiveHeaders' docstring
+    for why). Safe to no-op if logzero isn't installed in this
+    environment -- nothing here is required for the app to run."""
+    logging.getLogger().addFilter(RedactSensitiveHeaders())
+    try:
+        import logzero
+        logzero.logger.addFilter(RedactSensitiveHeaders())
+    except ImportError:
+        pass
 
 
 def configure_logging(level: str = None) -> None:
@@ -45,4 +96,5 @@ def configure_logging(level: str = None) -> None:
 
     resolved_level = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
     logging.basicConfig(level=resolved_level, format=_DEFAULT_FORMAT)
+    _attach_credential_redaction()
     _configured = True

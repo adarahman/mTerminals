@@ -2852,6 +2852,15 @@ async def lot_sizes_handler(request):
 
 
 async def main():
+    # Must run before any task that can hit a broker API timeout
+    # (start_smartapi_feed(), engine_loop(), ...) gets a chance to log
+    # one -- see logging_config.py's RedactSensitiveHeaders for why:
+    # without this, the SmartApi SDK's own error logging dumps the live
+    # session Bearer token and API private key in plaintext on every
+    # request failure.
+    from logging_config import configure_logging
+    configure_logging()
+
     app = web.Application(middlewares=[no_cache_middleware])
 
     app.router.add_get('/ws', ws_handler)
