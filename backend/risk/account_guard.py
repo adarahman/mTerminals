@@ -157,6 +157,24 @@ class LiveAccountRiskGuard:
         state = self._load()
         return state.tripped, state.trip_reason
 
+    def get_status(self) -> dict:
+        """Read-only snapshot of today's guard state for status reporting
+        (e.g. ws_server_live.py's algoStatus broadcast). Reuses the same
+        _load() as is_tripped()/check_new_order() — one SQLite read, no
+        extra state — so this can be polled periodically without adding
+        a second source of truth."""
+        state = self._load()
+        return {
+            "tripped": state.tripped,
+            "trip_reason": state.trip_reason,
+            "daily_pnl": state.last_pnl,
+            "peak_pnl": state.peak_pnl,
+            "consecutive_drawdowns": state.consecutive_drawdowns,
+            "daily_loss_limit_rupees": LIVE_MAX_DAILY_LOSS_RUPEES,
+            "max_open_lots": LIVE_MAX_OPEN_LOTS,
+            "max_consecutive_drawdowns": LIVE_MAX_CONSECUTIVE_DRAWDOWNS,
+        }
+
     def check_new_order(self, qty_lots: int, current_open_lots: int) -> tuple[bool, str | None]:
         """Pre-trade exposure check. current_open_lots comes from the
         broker's own position book (see open_lots_from_positions()) —

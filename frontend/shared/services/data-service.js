@@ -204,6 +204,7 @@ class DataService {
       this.lastRenderedSymbol = AppState.wsState.symbol || this.lastRenderedSymbol;
       parseAndRender(JSON.stringify(AppState.wsState));
       if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
+      if (window.renderAlgoStatusPanel) window.renderAlgoStatusPanel(AppState.wsState);
       return;
     }
     this.lastRenderedSymbol = AppState.wsState.symbol || _lastRenderedSymbol;
@@ -218,6 +219,12 @@ class DataService {
     // needs its own cheap patch-in-place call here, same pattern as the
     // other panels on this line.
     if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
+    // Algo status panel — same self-mounted, outside-#dashboard treatment
+    // as the paper trading panel above. Its own setHtmlIfChanged guard
+    // (algo-status.js) keeps this a no-op on ticks where algoStatus
+    // itself hasn't changed since algo_status_loop() broadcasts on its
+    // own slow independent timer, not tick-cadence.
+    if (window.renderAlgoStatusPanel) window.renderAlgoStatusPanel(AppState.wsState);
   };
 }
 

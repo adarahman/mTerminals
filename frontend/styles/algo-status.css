@@ -1,0 +1,70 @@
+/* Algo status floating badge + panel — see Dashboard/algo-status.js.
+   Positioned bottom-left, but offset past .sec-nav (navigation.css) — that
+   rail is pinned at left:10px, 72px wide, full viewport height, z-index:999.
+   A plain left:16px sits spatially underneath it AND behind it in stacking
+   order (999 > --z-popover's 900), so this clears the rail's right edge
+   (10+72=82px) with a margin instead of tucking in beside #pt-toggle-btn's
+   bottom-right corner (styles/paper-trading.css), which would collide with
+   that panel opening upward from the same corner. */
+
+#algo-toggle-btn{
+  position:fixed; left:98px; bottom:16px; z-index:var(--z-popover);
+  display:block; visibility:visible; opacity:1;
+  background:var(--bg-1); color:var(--text-primary);
+  border:1px solid var(--border); border-radius:8px;
+  padding:8px 14px; font:600 12px/1.2 inherit; cursor:pointer;
+  box-shadow:var(--shadow-sm);
+}
+#algo-toggle-btn.algo-live{border-color:var(--neg); color:var(--neg);}
+#algo-toggle-btn.algo-tripped{
+  border-color:var(--neg); background:rgba(231,76,60,.14); color:var(--neg);
+  animation:pt-mode-pulse 1.6s ease-in-out infinite; /* reuses paper-trading.css's existing pulse keyframes */
+}
+
+#algo-panel{
+  position:fixed; left:98px; bottom:60px; z-index:var(--z-popover);
+  width:min(340px, calc(96vw - 98px)); max-height:78vh; overflow-y:auto; display:none;
+  background:var(--bg-1); color:var(--text-primary);
+  border:1px solid var(--border); border-radius:10px;
+  padding:var(--space-4); font:12px/1.4 inherit; box-shadow:var(--shadow-md);
+}
+#algo-panel.open{display:block;}
+#algo-panel h4{margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;}
+#algo-panel .algo-close{cursor:pointer; opacity:.6; font-weight:400;}
+
+.algo-empty{opacity:.6; padding:var(--space-2) 0;}
+
+.algo-alert{
+  background:rgba(231,76,60,.14); border:1px solid var(--neg); color:var(--neg);
+  border-radius:6px; padding:var(--space-2) var(--space-3); margin-bottom:var(--space-3);
+  font-weight:700; font-size:11px; line-height:1.4;
+}
+
+.algo-section-title{
+  font-size:10px; text-transform:uppercase; letter-spacing:.05em; opacity:.55;
+  margin:var(--space-3) 0 var(--space-1); border-top:1px solid var(--border); padding-top:var(--space-2);
+}
+#algo-panel .algo-section-title:first-of-type{border-top:none; margin-top:var(--space-1);}
+
+.algo-row{display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); padding:3px 0;}
+.algo-label{opacity:.75;}
+.algo-limit{opacity:.5; font-size:10.5px; margin-left:auto;}
+.algo-row .algo-limit{margin-left:var(--space-2);}
+
+.algo-badge{
+  display:inline-block; padding:2px 8px; border-radius:10px;
+  font-weight:800; font-size:10px; letter-spacing:.03em;
+}
+.algo-badge-ok{background:rgba(46,204,113,.16); color:var(--pos);}
+.algo-badge-bad{background:rgba(231,76,60,.2); color:var(--neg); animation:pt-mode-pulse 1.6s ease-in-out infinite;}
+.algo-badge-live{background:var(--neg); color:#fff;}
+
+.algo-pos{color:var(--pos);}
+.algo-neg{color:var(--neg);}
+
+.algo-last-decision{
+  margin-top:var(--space-2); padding:var(--space-2); border-radius:6px;
+  background:var(--bg-2); border:1px solid var(--border);
+  font-size:11px; font-style:italic; opacity:.85; line-height:1.4;
+}
+.algo-last-decision.algo-pos{border-color:var(--pos); opacity:1;}

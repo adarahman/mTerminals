@@ -277,6 +277,15 @@ _ACCOUNT_GUARD = LiveAccountRiskGuard(LIVE_TRADING_KILL_SWITCH_FILE)
 _POSITION_RECONCILER = PositionReconciler(LIVE_TRADING_KILL_SWITCH_FILE)
 POSITION_RECONCILE_SECONDS = int(os.environ.get("POSITION_RECONCILE_SECONDS", "120"))
 
+# How often the dashboard's algo status panel gets refreshed. Deliberately
+# NOT tick-cadence (engine_loop can run several times a second) — this is
+# supervisory/status info, not live-tick data, and _ACCOUNT_GUARD.get_status()
+# does a SQLite read each call, so this runs on its own slow, independent
+# loop the same way index_quote_loop()/reconcile_loop() do rather than
+# piggybacking on every engine_loop tick.
+ALGO_STATUS_POLL_SECONDS = int(os.environ.get("ALGO_STATUS_POLL_SECONDS", "5"))
+LAST_ALGO_STATUS = None
+
 # Strategy -> execution bridge — the automated "algo" path, separate from
 # and independent of LIVE_TRADING_ENABLED (both must be true for an
 # auto-executed order to reach the real broker). Constructed further
@@ -505,6 +514,15 @@ async def ws_handler(request):
         if LAST_FUNDS is not None:
             msg_str = orjson.dumps({"type": "funds", "payload": LAST_FUNDS}, default=_json_default).decode()
             await ws.send_str(msg_str)
+        # Algo status (live-trading/kill-switch/account-guard/auto-executor
+        # state) — hand a new client whatever algo_status_loop() last
+        # computed instead of leaving the status panel blank for up to
+        # ALGO_STATUS_POLL_SECONDS until the next periodic broadcast.
+        try:
+            status = LAST_ALGO_STATUS if LAST_ALGO_STATUS is not None else _build_algo_status()
+            await ws.send_str(orjson.dumps({"type": "algoStatus", "payload": status}, default=_json_default).decode())
+        except Exception as e:
+            print(f"[algo-status] initial snapshot failed: {e}", flush=True)
         # Hand a new client whatever paper-trading state already exists
         # (positions/orders survive process restarts via SQLite) instead of
         # leaving the panel empty until the next place_order/tick.
@@ -819,6 +837,26 @@ async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_
 # _submit_auto_order defined above. OFF by default
 # (AUTO_STRATEGY_EXECUTION_ENABLED); see decision/auto_executor.py.
 _AUTO_EXECUTOR = AutoExecutor(_ACCOUNT_GUARD, _submit_auto_order)
+
+
+def _build_algo_status() -> dict:
+    """Composes the {\"type\":\"algoStatus\",...} broadcast payload — one
+    place that reads every live-trading/algo safety mechanism's current
+    state, so the dashboard can show a single status panel instead of
+    someone having to tail server logs to know whether the algo is armed,
+    what it last decided, or why the kill switch is active. Pure
+    read-only snapshot: calling this never changes any guard/executor
+    state. See PROJECT-ARCHITECTURE.md's algo-readiness sections (§11,
+    §12) for what each of these mechanisms does."""
+    return {
+        "liveTradingEnabled": LIVE_TRADING_ENABLED,
+        "killSwitchActive": _live_trading_kill_switch_active(),
+        "maxLotsPerOrder": LIVE_MAX_LOTS_PER_ORDER,
+        "maxOrdersPerMinute": LIVE_MAX_ORDERS_PER_MINUTE,
+        "accountGuard": _ACCOUNT_GUARD.get_status(),
+        "autoExecutor": _AUTO_EXECUTOR.get_status(SYMBOL),
+        "symbol": SYMBOL,
+    }
 
 
 async def broadcast(message):
@@ -2120,6 +2158,25 @@ async def reconcile_loop():
         await asyncio.sleep(POSITION_RECONCILE_SECONDS)
 
 
+async def algo_status_loop():
+    """Periodic {\"type\":\"algoStatus\",...} broadcast — see
+    _build_algo_status(). Runs unconditionally (not gated on
+    LIVE_TRADING_ENABLED) so the dashboard's status panel always shows an
+    accurate picture, including the common case of confirming live
+    trading/auto-execution are OFF, not just when they're armed."""
+    global LAST_ALGO_STATUS
+    while True:
+        try:
+            LAST_ALGO_STATUS = _build_algo_status()
+            await broadcast({"type": "algoStatus", "payload": LAST_ALGO_STATUS})
+        except Exception as e:
+            # Same defensive posture as every other periodic loop here —
+            # a bad read (e.g. a locked SQLite file mid-write) should
+            # never take the loop down, just skip to the next cycle.
+            print(f"[algo-status] poll failed (will retry in {ALGO_STATUS_POLL_SECONDS}s): {e}", flush=True)
+        await asyncio.sleep(ALGO_STATUS_POLL_SECONDS)
+
+
 def start_funds_polling():
     """Idempotent — a second toggle-on while already running is a no-op,
     not a duplicate poller."""
@@ -2627,6 +2684,7 @@ async def main():
     try:
         asyncio.create_task(index_quote_loop())
         asyncio.create_task(bridge_loop())
+        asyncio.create_task(algo_status_loop())
         if LIVE_TRADING_ENABLED:
             asyncio.create_task(reconcile_loop())
         # No funds_loop() task here anymore — funds polling starts/stops

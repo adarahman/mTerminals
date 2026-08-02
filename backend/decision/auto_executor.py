@@ -122,6 +122,15 @@ class AutoExecutor:
         self._trade_count_today: dict[str, int] = {}
         self._count_day: Optional[str] = None
 
+        # Last evaluate() outcome per symbol, purely for status reporting
+        # (e.g. the frontend's algo status panel) — evaluate()/maybe_execute()
+        # already compute a human-readable ExecutionDecision.reason on every
+        # tick, this just retains the most recent one instead of letting it
+        # only ever reach a log line. Not consulted by any gating logic
+        # itself, so it's safe to read from another coroutine/thread without
+        # locking (worst case a status read sees the previous tick's value).
+        self._last_decision: dict[str, ExecutionDecision] = {}
+
     def _roll_day_if_needed(self):
         today = self._today_fn()
         if self._count_day != today:
@@ -134,8 +143,18 @@ class AutoExecutor:
         gating logic is unit-testable without an event loop or a fake
         broker."""
         if not self.enabled:
-            return ExecutionDecision(False, "auto-execution disabled (AUTO_STRATEGY_EXECUTION_ENABLED=false)")
+            outcome = ExecutionDecision(False, "auto-execution disabled (AUTO_STRATEGY_EXECUTION_ENABLED=false)")
+            self._last_decision[symbol] = outcome
+            return outcome
 
+        outcome = self._evaluate_inner(decision, symbol)
+        self._last_decision[symbol] = outcome
+        return outcome
+
+    def _evaluate_inner(self, decision: dict, symbol: str) -> ExecutionDecision:
+        """The actual gating chain, split out of evaluate() so every exit
+        path (including the master-switch short-circuit above) funnels
+        through one place that records _last_decision — see evaluate()."""
         action_type = decision.get("actionType", "WAIT")
         if action_type not in _SINGLE_LEG_ACTIONS:
             return ExecutionDecision(False, f"action_type '{action_type}' not auto-executable (WAIT or multi-leg — v1 scope)")
@@ -172,6 +191,27 @@ class AutoExecutor:
         instrument_type, side = _SINGLE_LEG_ACTIONS[action_type]
         return ExecutionDecision(True, f"cleared: {action_type} confidence={confidence}",
                                   instrument_type=instrument_type, side=side, strike=int(strike))
+
+    def get_status(self, symbol: str) -> dict:
+        """Read-only snapshot for status reporting (e.g. ws_server_live.py's
+        algoStatus broadcast) — does not affect gating, safe to call from
+        any coroutine. `last_decision_reason` mirrors the most recent
+        evaluate() outcome, which is already the same human-readable
+        string logged on every tick, just retained instead of only ever
+        reaching a log line."""
+        self._roll_day_if_needed()
+        last = self._last_decision.get(symbol)
+        return {
+            "enabled": self.enabled,
+            "min_confidence": self.min_confidence,
+            "cooldown_seconds": self.cooldown_seconds,
+            "max_trades_per_symbol_per_day": self.max_trades_per_symbol_per_day,
+            "qty_lots": self.qty_lots,
+            "trades_today": self._trade_count_today.get(symbol, 0),
+            "last_execution_ts": self._last_execution_ts.get(symbol),
+            "last_decision_should_execute": last.should_execute if last else None,
+            "last_decision_reason": last.reason if last else None,
+        }
 
     async def maybe_execute(self, decision: dict, symbol: str, expiry: str) -> ExecutionDecision:
         """Call once per tick with that tick's decision block. Evaluates,
