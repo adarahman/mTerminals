@@ -58,6 +58,12 @@ AUTO_STRATEGY_EXECUTION_ENABLED = (
 AUTO_TRADE_COOLDOWN_SECONDS = int(os.environ.get("AUTO_TRADE_COOLDOWN_SECONDS", "300"))
 AUTO_TRADE_MAX_PER_SYMBOL_PER_DAY = int(os.environ.get("AUTO_TRADE_MAX_PER_SYMBOL_PER_DAY", "10"))
 AUTO_TRADE_QTY_LOTS = int(os.environ.get("AUTO_TRADE_QTY_LOTS", "1"))
+# Cap on the in-memory auto-trade history feed (see AutoExecutor._history
+# below) — this is a "what did the algo attempt and why" display list for
+# the dashboard, not an audit trail of record (the broker's own order book
+# and paper_trading.py's SQLite log are that), so an unbounded list isn't
+# needed and would just grow forever across a long-running process.
+AUTO_TRADE_HISTORY_MAX = int(os.environ.get("AUTO_TRADE_HISTORY_MAX", "200"))
 
 # action_type -> (instrument_type, side). WAIT and every multi-leg
 # action_type are intentionally absent — see module docstring.
@@ -88,7 +94,7 @@ class AutoExecutor:
     def __init__(
         self,
         guard,  # risk.account_guard.LiveAccountRiskGuard — see module docstring
-        submit_order_fn: Callable[[str, str, str, int, str, int], Awaitable[None]],
+        submit_order_fn: Callable[[str, str, str, int, str, int], Awaitable[dict]],
         enabled: bool = AUTO_STRATEGY_EXECUTION_ENABLED,
         min_confidence: int = T.CONFIDENCE_EXECUTE_MIN,
         cooldown_seconds: int = AUTO_TRADE_COOLDOWN_SECONDS,
@@ -130,6 +136,37 @@ class AutoExecutor:
         # itself, so it's safe to read from another coroutine/thread without
         # locking (worst case a status read sees the previous tick's value).
         self._last_decision: dict[str, ExecutionDecision] = {}
+
+        # Rolling history of ACTUAL EXECUTION ATTEMPTS only (evaluate()
+        # returned should_execute=True) — not every tick's evaluate() miss.
+        # A tick that WAITs, fails confidence, or is in cooldown happens
+        # continuously and is already summarized by _last_decision above;
+        # recording every one of those here would make this list nothing
+        # but noise. This is specifically "what did the algo actually try
+        # to do, and did it go through" — the input to trusting/distrusting
+        # auto-execution, not a tick-by-tick decision trace. Newest entry
+        # first (list.insert(0, ...)), capped at AUTO_TRADE_HISTORY_MAX.
+        self._history: list[dict] = []
+
+    def _record_history(self, symbol: str, outcome: "ExecutionDecision", status: str, detail: str):
+        """status is 'executed' (submit_order_fn succeeded — the order
+        actually reached the broker) or 'rejected' (submit_order_fn raised,
+        e.g. a downstream account_guard/kill-switch/resolve failure that
+        happened AFTER evaluate() cleared — see _submit_auto_order's own
+        comment on why that distinction now exists). detail is the
+        rejection exception's message for 'rejected', or the same
+        cleared-reason evaluate() already produced for 'executed'."""
+        self._history.insert(0, {
+            "ts": self._now_fn(),
+            "symbol": symbol,
+            "side": outcome.side,
+            "instrument_type": outcome.instrument_type,
+            "strike": outcome.strike,
+            "qty_lots": self.qty_lots,
+            "status": status,
+            "reason": detail,
+        })
+        del self._history[AUTO_TRADE_HISTORY_MAX:]
 
     def _roll_day_if_needed(self):
         today = self._today_fn()
@@ -213,6 +250,13 @@ class AutoExecutor:
             "last_decision_reason": last.reason if last else None,
         }
 
+    def get_history(self) -> list[dict]:
+        """Read-only snapshot of the auto-trade attempt feed (see
+        _record_history's docstring for what qualifies) — newest first.
+        Returns shallow copies so a caller mutating the returned list/dicts
+        can't corrupt this instance's own history."""
+        return [dict(entry) for entry in self._history]
+
     async def maybe_execute(self, decision: dict, symbol: str, expiry: str) -> ExecutionDecision:
         """Call once per tick with that tick's decision block. Evaluates,
         and if cleared, submits via submit_order_fn — the account_guard's
@@ -231,11 +275,13 @@ class AutoExecutor:
             )
             self._last_execution_ts[symbol] = self._now_fn()
             self._trade_count_today[symbol] = self._trade_count_today.get(symbol, 0) + 1
+            self._record_history(symbol, outcome, "executed", outcome.reason)
             logger.info(f"[auto_executor] EXECUTED {symbol} {outcome.side} {outcome.instrument_type} "
                         f"{outcome.strike} — {outcome.reason}")
             print(f"[auto_executor] EXECUTED {symbol} {outcome.side} {outcome.instrument_type} "
                   f"{outcome.strike} — {outcome.reason}", flush=True)
         except Exception as e:
+            self._record_history(symbol, outcome, "rejected", str(e))
             logger.error(f"[auto_executor] submit_order_fn raised for {symbol}: {e}")
             print(f"[auto_executor] FAILED to submit {symbol} {outcome.side} {outcome.instrument_type} "
                   f"{outcome.strike}: {e}", flush=True)

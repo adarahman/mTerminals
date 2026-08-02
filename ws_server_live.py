@@ -286,6 +286,18 @@ POSITION_RECONCILE_SECONDS = int(os.environ.get("POSITION_RECONCILE_SECONDS", "1
 ALGO_STATUS_POLL_SECONDS = int(os.environ.get("ALGO_STATUS_POLL_SECONDS", "5"))
 LAST_ALGO_STATUS = None
 
+# Cache of the most recent live position-book fetch, populated by
+# reconcile_loop()'s own periodic smartapi_get_positions() call (below).
+# _build_algo_status() reads this to report current open lots on the
+# status panel instead of making its own separate broker API call every
+# ALGO_STATUS_POLL_SECONDS (5s) — reconcile_loop's own cadence
+# (POSITION_RECONCILE_SECONDS, 120s by default) is plenty fresh for a
+# status display; the actual pre-trade exposure check in
+# _handle_place_order still does its own live fetch, unaffected by this.
+# None until live trading is enabled and reconcile_loop has completed its
+# first cycle.
+LAST_LIVE_POSITIONS = None
+
 # Strategy -> execution bridge — the automated "algo" path, separate from
 # and independent of LIVE_TRADING_ENABLED (both must be true for an
 # auto-executed order to reach the real broker). Constructed further
@@ -672,7 +684,15 @@ async def _handle_place_order(payload):
     matches the LTP they clicked on. Always re-broadcasts portfolio +
     orders afterward, whether the order filled, queued as a pending LIMIT,
     or was rejected, so the panel's orders table shows *something*
-    immediately instead of waiting on the next engine_loop tick."""
+    immediately instead of waiting on the next engine_loop tick.
+
+    Returns a {"status": ..., "reason"/"order_id": ...} dict on every
+    path (rejected/failed/placed for the live branch, the paper engine's
+    own Order.status/reject_reason for the paper branch) — added so
+    _submit_auto_order() (below) can tell a downstream rejection from an
+    actual placement instead of assuming success just because this
+    function didn't raise. Manual callers (ws_handler) don't currently
+    use the return value, so this is purely additive."""
     symbol = (payload.get("symbol") or "").strip().upper()
     instrument_type = payload.get("instrument_type") or "INDEX"
     expiry = payload.get("expiry") or ""
@@ -731,14 +751,14 @@ async def _handle_place_order(payload):
         if rejection_reason:
             print(f"[live-trading] REJECTED: {rejection_reason} — {symbol} {side} {qty_lots} lot(s)", flush=True)
             await _broadcast_portfolio(current_prices)
-            return
+            return {"status": "rejected", "reason": rejection_reason}
 
         resolved = _resolve_live_order_token(symbol, instrument_type, expiry, strike)
         if resolved is None:
-            print(f"[live-trading] REJECTED: could not resolve instrument token for "
-                  f"{symbol} {expiry} {strike}{instrument_type}", flush=True)
+            reason = f"could not resolve instrument token for {symbol} {expiry} {strike}{instrument_type}"
+            print(f"[live-trading] REJECTED: {reason}", flush=True)
             await _broadcast_portfolio(current_prices)
-            return
+            return {"status": "rejected", "reason": reason}
 
         exchange, tradingsymbol, symboltoken = resolved
         # BUGFIX: this used to read option_chain_json.LOT_SIZES — a THIRD,
@@ -767,8 +787,10 @@ async def _handle_place_order(payload):
             )
             print(f"[live-trading] PLACED: {tradingsymbol} {transaction_type} {quantity} "
                   f"qty (order_id={order_id})", flush=True)
+            live_result = {"status": "placed", "order_id": order_id}
         except Exception as e:
             print(f"[live-trading] FAILED: {tradingsymbol} {transaction_type} {quantity} — {e}", flush=True)
+            live_result = {"status": "failed", "reason": str(e)}
         finally:
             try:
                 post_fill_positions = await asyncio.to_thread(smartapi_get_positions)
@@ -788,7 +810,7 @@ async def _handle_place_order(payload):
             except Exception as e:
                 print(f"[position_reconciler] could not run post-fill check: {e}", flush=True)
             await _broadcast_portfolio(current_prices)
-        return
+        return live_result
 
     # ── Paper trading path (unchanged) ──────────────────────────────────
     order = PT_ENGINE.place_order(
@@ -804,6 +826,7 @@ async def _handle_place_order(payload):
           flush=True)
 
     await _broadcast_portfolio(current_prices)
+    return {"status": order.status, "reason": order.reject_reason}
 
 
 async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_lots):
@@ -813,14 +836,21 @@ async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_
     the algo's behalf — that's the ONE difference from a manual order;
     every other check in _handle_place_order (lot size, rate limit,
     account_guard exposure/trip state) still runs exactly as it does for
-    a human-submitted order. Raises on rejection (rather than swallowing
-    it) so AutoExecutor.maybe_execute() can log the failure — this
-    function doesn't itself inspect _handle_place_order's outcome since
-    that function only prints/broadcasts and doesn't return a status; a
-    rejection shows up as a "REJECTED"/"FAILED" line in the server log
-    from _handle_place_order itself, same as any manual live-order
-    rejection would."""
-    await _handle_place_order({
+    a human-submitted order.
+
+    Raises on rejection so AutoExecutor.maybe_execute() logs the failure
+    (and records it in the auto-trade history feed) instead of treating
+    a downstream-rejected order as a success. This used to just call
+    _handle_place_order and return — since that function only printed a
+    "REJECTED"/"FAILED" server-log line and returned None either way, a
+    live-trading-gate rejection that happened AFTER auto_executor's own
+    evaluate() cleared (kill switch flipped, guard tripped, exposure cap
+    hit, resolve failure) was silently reported as EXECUTED to both the
+    log and the dashboard's status panel. _handle_place_order now returns
+    a {"status": ...} dict on every path (see its own docstring) — a
+    non-"placed" status here is turned into an exception, same as if
+    smartapi_place_order itself had thrown."""
+    result = await _handle_place_order({
         "symbol": symbol,
         "instrument_type": instrument_type,
         "expiry": expiry,
@@ -831,6 +861,11 @@ async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_
         "live": True,
         "confirmed": True,
     })
+    status = (result or {}).get("status")
+    if status != "placed":
+        reason = (result or {}).get("reason") or f"unexpected status {status!r} from _handle_place_order"
+        raise RuntimeError(reason)
+    return result
 
 
 # Strategy -> execution bridge — constructed here since it needs
@@ -848,13 +883,32 @@ def _build_algo_status() -> dict:
     read-only snapshot: calling this never changes any guard/executor
     state. See PROJECT-ARCHITECTURE.md's algo-readiness sections (§11,
     §12) for what each of these mechanisms does."""
+    guard_status = _ACCOUNT_GUARD.get_status()
+    # current_open_lots pairs with the max_open_lots limit already in
+    # guard_status, so the panel can show "current / limit" rather than
+    # just the bare cap. Sourced from LAST_LIVE_POSITIONS (reconcile_loop's
+    # own periodic fetch, see that global's comment) instead of a fresh
+    # broker call here — this is a status display, not the pre-trade
+    # exposure check (which still fetches fresh in _handle_place_order).
+    try:
+        guard_status["current_open_lots"] = (
+            open_lots_from_positions(LAST_LIVE_POSITIONS, PT_LOT_SIZES)
+            if LAST_LIVE_POSITIONS is not None else None
+        )
+    except Exception as e:
+        print(f"[algo-status] could not compute open lots from cached positions: {e}", flush=True)
+        guard_status["current_open_lots"] = None
+
+    exec_status = _AUTO_EXECUTOR.get_status(SYMBOL)
+    exec_status["history"] = _AUTO_EXECUTOR.get_history()[:30]
+
     return {
         "liveTradingEnabled": LIVE_TRADING_ENABLED,
         "killSwitchActive": _live_trading_kill_switch_active(),
         "maxLotsPerOrder": LIVE_MAX_LOTS_PER_ORDER,
         "maxOrdersPerMinute": LIVE_MAX_ORDERS_PER_MINUTE,
-        "accountGuard": _ACCOUNT_GUARD.get_status(),
-        "autoExecutor": _AUTO_EXECUTOR.get_status(SYMBOL),
+        "accountGuard": guard_status,
+        "autoExecutor": exec_status,
         "symbol": SYMBOL,
     }
 
@@ -2138,10 +2192,12 @@ async def reconcile_loop():
     live trading is enabled — not tied to the Live-mode UI toggle the way
     start/stop_funds_polling() is, since silent drift can happen whether
     or not anyone currently has the Live pill on."""
+    global LAST_LIVE_POSITIONS
     while True:
         try:
             orders = await asyncio.to_thread(smartapi_get_order_book)
             positions = await asyncio.to_thread(smartapi_get_positions)
+            LAST_LIVE_POSITIONS = positions
             result = _POSITION_RECONCILER.check(orders, positions, PT_LOT_SIZES)
             if result.clean:
                 print("[position_reconciler] periodic check: clean", flush=True)

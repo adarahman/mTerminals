@@ -136,6 +136,9 @@ function buildAlgoStatusHtml(status){
 
   const dailyPnl = guard.daily_pnl;
   const pnlCls = dailyPnl != null && dailyPnl < 0 ? 'algo-neg' : 'algo-pos';
+  const openLots = guard.current_open_lots;
+  const maxLots = guard.max_open_lots;
+  const lotsCls = (openLots != null && maxLots != null && openLots >= maxLots) ? 'algo-neg' : 'algo-pos';
   const guardDetail = `
     <div class="algo-section-title">Account guard</div>
     <div class="algo-row"><span class="algo-label">Daily P&amp;L</span>
@@ -146,8 +149,9 @@ function buildAlgoStatusHtml(status){
       <span>${guard.consecutive_drawdowns ?? '—'}</span>
       <span class="algo-limit">limit ${guard.max_consecutive_drawdowns ?? '—'}</span>
     </div>
-    <div class="algo-row"><span class="algo-label">Max open lots</span>
-      <span class="algo-limit">${guard.max_open_lots ?? '—'}</span>
+    <div class="algo-row"><span class="algo-label">Open lots</span>
+      <span class="${lotsCls}">${openLots ?? '—'}</span>
+      <span class="algo-limit">limit ${maxLots ?? '—'}</span>
     </div>
   `;
 
@@ -167,8 +171,20 @@ function buildAlgoStatusHtml(status){
       <span class="algo-limit">${_algoFmtAgo(exec.last_execution_ts)}</span>
     </div>
     <div class="algo-last-decision ${exec.last_decision_should_execute ? 'algo-pos' : ''}">
-      ${exec.last_decision_reason ? '“' + exec.last_decision_reason + '”' : 'No decision evaluated yet.'}
+      ${exec.last_decision_reason ? '“' + ptEscAttr(exec.last_decision_reason) + '”' : 'No decision evaluated yet.'}
     </div>
+  `;
+
+  // Distinct from the manual paper/live orders table (paper-trading.js) —
+  // this is specifically what AutoExecutor actually attempted to act on
+  // (evaluate() cleared, i.e. status.autoExecutor.history — see
+  // auto_executor.py's _record_history docstring for why routine misses
+  // like WAIT/low-confidence/cooldown are NOT in this list; those are
+  // already covered by "Last execution"/execDetail above). Newest first,
+  // server already trims to the most recent 30 for the broadcast.
+  const historyDetail = `
+    <div class="algo-section-title">Auto-trade feed</div>
+    <div class="algo-history-list">${buildAutoTradeHistoryHtml(exec.history)}</div>
   `;
 
   const caps = `
