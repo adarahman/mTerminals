@@ -26,6 +26,7 @@ from brokers.smartapi_client import (
     get_atm_chain as _get_atm_chain,
     find_option_token as _find_option_token,
     get_batch_quotes as _get_batch_quotes,
+    get_batch_quotes_by_token as _get_batch_quotes_by_token,
     get_spot_quote as _get_spot_quote,
     get_fno_underlyings as _get_fno_underlyings,
     INDEX_TOKENS as _INDEX_TOKENS,
@@ -50,6 +51,13 @@ class MarketData(Protocol):
     def get_batch_quotes(self, exchange: str, symbol_token_pairs: list,
                           mode: str = "FULL") -> dict:
         """Up to 50 (tradingsymbol, token) pairs -> dict keyed by tradingsymbol."""
+        ...
+
+    def get_batch_quotes_by_token(self, exchange: str, symbol_token_pairs: list,
+                                   mode: str = "FULL") -> dict:
+        """Same request as get_batch_quotes(), but dict keyed by str(symbolToken)
+        instead of Angel's tradingsymbol display name — use when the caller
+        needs to re-key back to its own symbol names, not Angel's."""
         ...
 
     def get_spot_quote(self, underlying: str) -> Optional[dict]:
@@ -82,6 +90,9 @@ class SmartApiMarketData:
 
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
         return _get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+
+    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        return _get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
 
     def get_spot_quote(self, underlying):
         return _get_spot_quote(underlying)

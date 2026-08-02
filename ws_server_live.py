@@ -1828,12 +1828,19 @@ def fetch_index_quotes_smartapi_sync():
     2026-07-17 — that incident is exactly why batching via getMarketData
     is used here instead.
 
-    get_batch_quotes() returns rows keyed by str(symbolToken), NOT by the
-    tradingsymbol/index name passed in — so results here MUST be re-keyed
-    back to symbol via the same (symbol, token) pairs list used to build
-    the request. Skipping this re-keying step silently returns nothing for
-    every symbol (no exception) — this bit VIX once already, see
-    smartapi_pipeline_adapter.py's fetch_all_pills_and_vix_batched().
+    Uses get_batch_quotes_by_token() (not get_batch_quotes()), keyed by
+    str(symbolToken) rather than Angel's tradingSymbol display name.
+    (2026-08-02: two bugs in a row here before landing on this — first
+    the docstring/lookup assumed str(symbolToken) keying when
+    get_batch_quotes() actually keys by tradingSymbol, so every symbol
+    missed; switching to `nse_raw.get(sym)` then "fixed" only VIX, purely
+    because _VIX_TRADINGSYMBOL happens to already be hardcoded to Angel's
+    real display string ("India VIX") — NIFTY/BANKNIFTY/MIDCPNIFTY's
+    short codes don't match whatever Angel actually calls them. Token is
+    the only identifier guaranteed to round-trip correctly regardless of
+    Angel's naming, so this now keys by that instead of guessing another
+    display-name string. See get_batch_quotes_by_token()'s docstring in
+    smartapi_client.py.)
 
     Returns {"NIFTY": {...}, ..., "INDIA VIX": {...}, "SENSEX": {...}},
     same shape/keys as the market_api path, so index_quote_loop() can use
@@ -1846,7 +1853,7 @@ def fetch_index_quotes_smartapi_sync():
     nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
 
     try:
-        nse_raw = market_data.get_batch_quotes("NSE", nse_pairs, mode="FULL")
+        nse_raw = market_data.get_batch_quotes_by_token("NSE", nse_pairs, mode="FULL")
     except Exception as e:
         print(f"[index-quote] smartapi NSE batch FAILED: {e}", flush=True)
         nse_raw = {}
@@ -1863,7 +1870,7 @@ def fetch_index_quotes_smartapi_sync():
     if "SENSEX" in market_data.index_tokens():
         bse_pairs = [("SENSEX", market_data.index_tokens()["SENSEX"]["token"])]
         try:
-            bse_raw = market_data.get_batch_quotes("BSE", bse_pairs, mode="FULL")
+            bse_raw = market_data.get_batch_quotes_by_token("BSE", bse_pairs, mode="FULL")
         except Exception as e:
             print(f"[index-quote] smartapi BSE batch FAILED: {e}", flush=True)
             bse_raw = {}

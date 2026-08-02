@@ -950,6 +950,17 @@ def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
     symbol_token_pairs: list of (tradingsymbol, token) tuples
     mode: 'LTP' | 'OHLC' | 'FULL'  (FULL includes OI, volume, depth)
     Returns: dict keyed by tradingsymbol -> quote data
+
+    NOTE: keyed by Angel's own `tradingSymbol` field as returned in the
+    response — for indices this is Angel's display name (confirmed: it's
+    "India VIX" for VIX, not the short code "VIX"), which does NOT
+    necessarily match whatever symbol string you passed in on the request
+    side. Only safe to re-key results back to your own symbol names when
+    you've independently verified Angel's tradingSymbol matches what you
+    requested (as done for VIX below). If you can't make that guarantee
+    for every symbol in your batch, use get_batch_quotes_by_token()
+    instead and match by token, which round-trips correctly no matter
+    what Angel calls the instrument.
     """
     if not symbol_token_pairs:
         return {}
@@ -969,6 +980,55 @@ def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
         fetched = response.get("data", {}).get("fetched", [])
         for row in fetched:
             results[row.get("tradingSymbol", row.get("symbolToken"))] = row
+
+    return results
+
+
+def get_batch_quotes_by_token(exchange, symbol_token_pairs, mode="FULL"):
+    """
+    Same request as get_batch_quotes(), but keyed by symbolToken (as a
+    str) instead of Angel's tradingSymbol display name.
+
+    Use this instead of get_batch_quotes() whenever the caller needs to
+    re-key results back to ITS OWN symbol names/short codes rather than
+    whatever display string Angel happens to return — e.g. index quotes,
+    where Angel's tradingSymbol for NIFTY/BANKNIFTY/MIDCPNIFTY is some
+    human-readable variant, not the plain short code requested. Token is
+    what's actually sent on the request, so it's the one identifier
+    guaranteed to round-trip correctly regardless of naming quirks.
+    See fetch_index_quotes_smartapi_sync() in ws_server_live.py for the
+    call site this was added for (2026-08-02) — get_batch_quotes()'s
+    tradingSymbol keying silently missed NIFTY/BANKNIFTY/MIDCPNIFTY there
+    because their short codes don't match Angel's display names, the same
+    class of bug that VIX only avoided because its tradingsymbol constant
+    happened to already be hardcoded to Angel's real display string.
+
+    symbol_token_pairs: list of (tradingsymbol, token) tuples — the
+      tradingsymbol half is unused here (kept for call-site symmetry with
+      get_batch_quotes()); only token drives both the request and the
+      result keys.
+    mode: 'LTP' | 'OHLC' | 'FULL'  (FULL includes OI, volume, depth)
+    Returns: dict keyed by str(symbolToken) -> quote data
+    """
+    if not symbol_token_pairs:
+        return {}
+
+    results = {}
+    for i in range(0, len(symbol_token_pairs), 50):
+        chunk = symbol_token_pairs[i:i + 50]
+        tokens = [token for _, token in chunk]
+        response = _session.call(
+            "getMarketData", mode, {exchange: tokens}
+        )
+        if not response.get("status"):
+            logger.warning(f"[smartapi_client] getMarketData batch failed: {response}")
+            continue
+
+        fetched = response.get("data", {}).get("fetched", [])
+        for row in fetched:
+            tok = row.get("symbolToken")
+            if tok is not None:
+                results[str(tok)] = row
 
     return results
 
