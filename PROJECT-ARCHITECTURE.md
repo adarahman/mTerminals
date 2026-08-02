@@ -387,3 +387,79 @@ been removed from the codebase. See §1.
 - **`Backend.zip`** contained a full `__MACOSX/` folder (23 `._*` AppleDouble resource-fork files) — pure zip artifact from compressing on macOS Finder, zero functional content. Safe to leave out of any future zip.
 - **`engine.py`** has one deprecated *parameter* (not a whole file) worth noting: `velocity_window_minutes` (~line 1360) is marked `# deprecated, unused — velocity is now always 5/15/30min, see get_oi_velocity`. Harmless to leave, cheap to remove next time that function signature is touched.
 - **`paper_trading.py`'s independent `LOT_SIZES`** (see §1) is the one live duplication risk found in this pass — it can silently drift from the shared `lot_sizes.py` the rest of the pipeline uses. Not urgent, but worth a single-source-of-truth fix.
+- **`ml/inference.py`** was missing `import pandas as pd` despite `_infer()` calling `pd.DataFrame(...)` — the surrounding `try/except Exception` silently swallowed the resulting `NameError` on every call, so VirtualOI predicted a stale `0.0` forever instead of erroring loudly. Fixed by adding the import.
+- **`risk/account_guard.py`'s position-field parsing** (`pnl_from_positions()`, `open_lots_from_positions()`, see §11) reads AngelOne SmartAPI's `position` response defensively across a few known field-name variants (`pnl`/`netpnl`/`realised`, `netqty`/`quantity`), but has NOT been verified against a real account's actual response shape yet. First live-trading session with this guard active should confirm the field names resolve (a "could not verify current open exposure" rejection message means they didn't) before relying on the exposure cap.
+
+## 11. Backend — account-level risk guard (`risk/account_guard.py`)
+
+Added to close the "no account-level risk limits" gap flagged during the
+algo-trading-readiness review — per-order checks (`LIVE_MAX_LOTS_PER_ORDER`,
+`LIVE_MAX_ORDERS_PER_MINUTE`, both in `ws_server_live.py`) already existed;
+nothing tracked risk *across* orders over a trading day.
+
+**Three guards, evaluated once per live order attempt, all persisted in
+`runtime/cache/live_risk_guard.db` (survives a server restart):**
+
+| Guard | Config (env var, default) | Trip condition |
+|---|---|---|
+| Daily max loss | `LIVE_MAX_DAILY_LOSS_RUPEES` (5000) | Account's total daily P&L (from AngelOne's own position book) ≤ -limit |
+| Max open exposure | `LIVE_MAX_OPEN_LOTS` (5) | current open lots + this order's lots > limit — checked pre-trade, not after |
+| Drawdown streak | `LIVE_MAX_CONSECUTIVE_DRAWDOWNS` (3) | daily P&L gets worse than its own running peak N checks in a row |
+
+**Integration points in `ws_server_live.py`'s `_handle_place_order`:**
+- `_ACCOUNT_GUARD = LiveAccountRiskGuard(LIVE_TRADING_KILL_SWITCH_FILE)` — instantiated once at module load, right next to the existing kill-switch file definition, so both mechanisms write to the **same** file (one kill switch, not two).
+- Pre-trade: `is_tripped()` check, then (if a lot size was resolved) a fresh `smartapi_get_positions()` call feeds `open_lots_from_positions()` → `check_new_order()`.
+- Post-fill (in the `finally` block, so it runs whether the order succeeded or failed): another `smartapi_get_positions()` call feeds `pnl_from_positions()` → `update_pnl()`.
+- A trip touches `LIVE_TRADING_KILL_SWITCH_FILE` directly — it does **not** auto-clear on a new trading day even though the guard's own SQLite state resets daily; a human has to remove the file after reviewing what tripped it.
+
+Tests: `backend/tests/test_account_guard.py` (16 cases — trip conditions, streak reset, persistence across instances, fail-closed parsing).
+
+**Explicitly out of scope for this pass** (see the readiness roadmap this closed one item of): the strategy→execution bridge, a backtesting harness, broker session resilience, and position reconciliation are all still open.
+
+## 12. Backend — strategy → execution bridge (`decision/auto_executor.py`)
+
+Closes the "no automated decide→execute loop" gap from the algo-readiness
+review — item #4 on that roadmap, built after §11's account_guard (item
+#1) on purpose: automating order placement before account-level risk
+limits exist is how accounts blow up. This is the piece that actually
+makes the system an algo rather than a decision-support terminal —
+everything upstream (`decision/decision_engine.py`) already computed a
+bias/action every tick; nothing acted on it before this.
+
+**Design — additive, not a replacement for the manual path:**
+`AutoExecutor.evaluate()` is a pure function (`DecisionResult` dict +
+symbol → `ExecutionDecision`) gating on: master switch
+(`AUTO_STRATEGY_EXECUTION_ENABLED`, independent of `LIVE_TRADING_ENABLED`
+— both must be true), `actionType` (single-leg only in v1 — `BUY_CE`,
+`BUY_PE`, `SELL_CE`, `SELL_PE`; every multi-leg type and `WAIT` are
+refused, not attempted), `conflictFlag`, `executeRecommended`,
+`confidence` vs threshold, a present `suggestedStrike`, the account
+guard's trip state, a per-symbol cooldown, and a per-symbol daily trade
+cap. When cleared, `maybe_execute()` calls `submit_order_fn` — wired in
+`ws_server_live.py` to `_submit_auto_order()`, which builds the same
+payload shape a dashboard click sends and calls `_handle_place_order`
+with `live=True, confirmed=True` filled in on the algo's behalf. Every
+other check in that function (lot size, rate limit, account_guard
+exposure/trip) runs exactly as it does for a human-submitted order — this
+module only decides WHETHER and WHAT to submit, the existing safety
+chain still gates HOW.
+
+**Integration point:** `engine_loop()`, right after `LAST_PAYLOAD =
+payload` — `payload.get("decision")` is handed to
+`_AUTO_EXECUTOR.maybe_execute()` as a fire-and-forget `asyncio.create_task`
+so a slow broker call can't delay that tick's own broadcast.
+
+**Known limitation:** cooldown and per-symbol daily-trade-count state are
+in-memory only (reset on restart) — unlike account_guard's SQLite state.
+The persisted account-level guard is the real backstop across a restart;
+cooldown/trade-count here are a secondary throttle layered on top, not
+the primary safety mechanism. Worth persisting properly if
+auto-execution actually goes live.
+
+Tests: `backend/tests/test_auto_executor.py` (20 cases — gating logic,
+action-type mapping, cooldown, daily cap, submit-failure handling).
+
+**Still open after this pass:** backtesting harness (nothing has
+validated `decision_engine.py`'s output against history before this
+module can act on it live), broker session resilience, and position
+reconciliation.

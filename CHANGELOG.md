@@ -1,3 +1,28 @@
+## [Unreleased]
+
+### Added
+- Account-level risk guard for live trading (`risk/account_guard.py`):
+  a daily max-loss cutoff, a max open-exposure cap checked against the
+  broker's own live position book, and a consecutive-drawdown circuit
+  breaker — all evaluated across the whole trading day, not just per
+  order, and persisted across a server restart. Trips the same
+  kill-switch file `ws_server_live.py` already checks. See
+  `PROJECT-ARCHITECTURE.md` §11.
+- Strategy → execution bridge (`decision/auto_executor.py`): turns
+  DecisionEngine's per-tick bias/action into automated live orders,
+  gated behind its own master switch (`AUTO_STRATEGY_EXECUTION_ENABLED`,
+  independent of `LIVE_TRADING_ENABLED`) plus confidence/conflict/
+  cooldown/daily-cap checks, and routed through the exact same manual
+  order path (lot-size verification, rate limit, account_guard) so an
+  auto-executed order is checked identically to a human-submitted one.
+  Single-leg action types only in v1. See `PROJECT-ARCHITECTURE.md` §12.
+
+### Fixed
+- `ml/inference.py` was missing `import pandas as pd`, so every
+  VirtualOI inference call silently `NameError`'d and fell back to a
+  stale `0.0` prediction instead of actually running the model — no
+  error surfaced because the surrounding `try/except` swallowed it.
+
 ## [2.1.0] - 2026-07-26
 
 ### Added

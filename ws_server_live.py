@@ -36,17 +36,22 @@ from pipeline_config import RuntimeConfig  # noqa: E402
 from paper_trading import PaperTradingEngine, _instrument_key, LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from brokers.market_data import market_data
 from brokers.smartapi_client import (
-    # NOTE: place_order/get_order_book/get_funds are imported but never
-    # actually called anywhere in this file (or anywhere else) — order
-    # execution isn't wired up yet, PaperTradingEngine is the only live
-    # order path. Left as-is; out of scope for the MarketData interface.
+    # place_order is the real live-order path, called from
+    # _handle_place_order below when LIVE_TRADING_ENABLED and a client
+    # explicitly confirms. get_positions backs account_guard's pre-trade
+    # exposure check and post-fill daily P&L tracking (see below).
     place_order as smartapi_place_order,
     get_order_book as smartapi_get_order_book,
+    get_positions as smartapi_get_positions,
     get_funds as smartapi_get_funds,
 )
 from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
 from smartapi_feed_adapter import TickAggregator
 from brokers.smartapi_history import get_index_candles, get_candle_data
+from risk.account_guard import (
+    LiveAccountRiskGuard, pnl_from_positions, open_lots_from_positions,
+)
+from decision.auto_executor import AutoExecutor
 
 _REAL_EXPORT = mTerminals_json.export_dashboard_json
 _CAPTURED = {}
@@ -255,6 +260,20 @@ else:
 
 def _live_trading_kill_switch_active():
     return os.path.exists(LIVE_TRADING_KILL_SWITCH_FILE)
+
+
+# Account-level risk guard — daily loss limit, max open exposure, and a
+# drawdown-streak breaker, all evaluated across the whole trading day
+# rather than per-order. Trips the SAME kill-switch file above; see
+# risk/account_guard.py's module docstring for the full design.
+_ACCOUNT_GUARD = LiveAccountRiskGuard(LIVE_TRADING_KILL_SWITCH_FILE)
+
+# Strategy -> execution bridge — the automated "algo" path, separate from
+# and independent of LIVE_TRADING_ENABLED (both must be true for an
+# auto-executed order to reach the real broker). Constructed further
+# below, after _handle_place_order/_submit_auto_order are defined, since
+# its submit_order_fn calls into that function. See
+# decision/auto_executor.py's module docstring for the full design.
 
 
 # ── WebSocket origin allowlist ──────────────────────────────────────────
@@ -665,6 +684,22 @@ async def _handle_place_order(payload):
             # against NSE's current circular — see that dict's own comment)
             # before it can be traded live.
             rejection_reason = f"no verified lot size for {symbol} — refusing to guess on a live order"
+        else:
+            # Account-level checks — evaluated across the whole trading
+            # day, not just this order. See risk/account_guard.py.
+            guard_tripped, guard_trip_reason = _ACCOUNT_GUARD.is_tripped()
+            if guard_tripped:
+                rejection_reason = f"account risk guard tripped: {guard_trip_reason}"
+            else:
+                try:
+                    live_positions = await asyncio.to_thread(smartapi_get_positions)
+                    current_open_lots = open_lots_from_positions(live_positions, PT_LOT_SIZES)
+                except Exception as e:
+                    print(f"[account_guard] could not fetch position book for exposure check: {e}", flush=True)
+                    current_open_lots = None
+                allowed, exposure_reason = _ACCOUNT_GUARD.check_new_order(qty_lots, current_open_lots)
+                if not allowed:
+                    rejection_reason = exposure_reason
 
         if rejection_reason:
             print(f"[live-trading] REJECTED: {rejection_reason} — {symbol} {side} {qty_lots} lot(s)", flush=True)
@@ -708,6 +743,11 @@ async def _handle_place_order(payload):
         except Exception as e:
             print(f"[live-trading] FAILED: {tradingsymbol} {transaction_type} {quantity} — {e}", flush=True)
         finally:
+            try:
+                post_fill_positions = await asyncio.to_thread(smartapi_get_positions)
+                _ACCOUNT_GUARD.update_pnl(pnl_from_positions(post_fill_positions))
+            except Exception as e:
+                print(f"[account_guard] could not refresh daily P&L after order: {e}", flush=True)
             await _broadcast_portfolio(current_prices)
         return
 
@@ -725,6 +765,39 @@ async def _handle_place_order(payload):
           flush=True)
 
     await _broadcast_portfolio(current_prices)
+
+
+async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_lots):
+    """Bridge from decision/auto_executor.py into the existing manual
+    order path. Builds the same payload shape a dashboard click sends to
+    _handle_place_order, with live=True and confirmed=True filled in on
+    the algo's behalf — that's the ONE difference from a manual order;
+    every other check in _handle_place_order (lot size, rate limit,
+    account_guard exposure/trip state) still runs exactly as it does for
+    a human-submitted order. Raises on rejection (rather than swallowing
+    it) so AutoExecutor.maybe_execute() can log the failure — this
+    function doesn't itself inspect _handle_place_order's outcome since
+    that function only prints/broadcasts and doesn't return a status; a
+    rejection shows up as a "REJECTED"/"FAILED" line in the server log
+    from _handle_place_order itself, same as any manual live-order
+    rejection would."""
+    await _handle_place_order({
+        "symbol": symbol,
+        "instrument_type": instrument_type,
+        "expiry": expiry,
+        "strike": strike,
+        "side": side,
+        "order_type": "MARKET",
+        "qty_lots": qty_lots,
+        "live": True,
+        "confirmed": True,
+    })
+
+
+# Strategy -> execution bridge — constructed here since it needs
+# _submit_auto_order defined above. OFF by default
+# (AUTO_STRATEGY_EXECUTION_ENABLED); see decision/auto_executor.py.
+_AUTO_EXECUTOR = AutoExecutor(_ACCOUNT_GUARD, _submit_auto_order)
 
 
 async def broadcast(message):
@@ -2080,6 +2153,16 @@ async def engine_loop():
 
         if payload is not None:
             LAST_PAYLOAD = payload
+
+            # Strategy -> execution bridge: hand this tick's decision
+            # block to the auto-executor. No-op unless
+            # AUTO_STRATEGY_EXECUTION_ENABLED=true; see
+            # decision/auto_executor.py. Fire-and-forget task so a slow
+            # broker call (position-book fetch, order placement) can't
+            # delay this tick's own broadcast below.
+            decision_block = payload.get("decision")
+            if decision_block:
+                asyncio.create_task(_AUTO_EXECUTOR.maybe_execute(decision_block, SYMBOL, EXPIRY))
 
             # Feed NSE's authoritative changeinOpenInterest into the
             # SmartAPI aggregator's OI baselines every cycle (not just at
