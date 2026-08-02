@@ -94,6 +94,8 @@ class AutoExecutor:
         cooldown_seconds: int = AUTO_TRADE_COOLDOWN_SECONDS,
         max_trades_per_symbol_per_day: int = AUTO_TRADE_MAX_PER_SYMBOL_PER_DAY,
         qty_lots: int = AUTO_TRADE_QTY_LOTS,
+        now_fn: Callable[[], float] = time.time,
+        today_fn: Callable[[], str] = lambda: time.strftime("%Y-%m-%d"),
     ):
         self.guard = guard
         self.submit_order_fn = submit_order_fn
@@ -102,6 +104,18 @@ class AutoExecutor:
         self.cooldown_seconds = cooldown_seconds
         self.max_trades_per_symbol_per_day = max_trades_per_symbol_per_day
         self.qty_lots = qty_lots
+        # Pluggable clock, defaulting to the real wall clock — every live
+        # call site (ws_server_live.py) never passes these, so production
+        # behavior is unchanged. backtest/replay.py injects functions
+        # bound to each tick's SIMULATED timestamp instead, so cooldown
+        # and the daily-trade-cap rollover get evaluated against real
+        # historical time gaps rather than the backtest process's own
+        # (near-instant) wall-clock runtime. Without this, replaying a
+        # week of history in under a second would either never clear a
+        # cooldown or never roll the trade-count day over, and the
+        # backtest would silently validate nothing about either gate.
+        self._now_fn = now_fn
+        self._today_fn = today_fn
 
         # In-memory only — see module docstring.
         self._last_execution_ts: dict[str, float] = {}
@@ -109,7 +123,7 @@ class AutoExecutor:
         self._count_day: Optional[str] = None
 
     def _roll_day_if_needed(self):
-        today = time.strftime("%Y-%m-%d")
+        today = self._today_fn()
         if self._count_day != today:
             self._count_day = today
             self._trade_count_today = {}
@@ -146,8 +160,9 @@ class AutoExecutor:
 
         self._roll_day_if_needed()
         last_ts = self._last_execution_ts.get(symbol)
-        if last_ts is not None and (time.time() - last_ts) < self.cooldown_seconds:
-            remaining = self.cooldown_seconds - (time.time() - last_ts)
+        now = self._now_fn()
+        if last_ts is not None and (now - last_ts) < self.cooldown_seconds:
+            remaining = self.cooldown_seconds - (now - last_ts)
             return ExecutionDecision(False, f"cooldown active — {remaining:.0f}s remaining for {symbol}")
 
         count_today = self._trade_count_today.get(symbol, 0)
@@ -174,7 +189,7 @@ class AutoExecutor:
                 symbol, outcome.instrument_type, expiry, outcome.strike,
                 outcome.side, self.qty_lots,
             )
-            self._last_execution_ts[symbol] = time.time()
+            self._last_execution_ts[symbol] = self._now_fn()
             self._trade_count_today[symbol] = self._trade_count_today.get(symbol, 0) + 1
             logger.info(f"[auto_executor] EXECUTED {symbol} {outcome.side} {outcome.instrument_type} "
                         f"{outcome.strike} — {outcome.reason}")

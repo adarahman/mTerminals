@@ -1308,6 +1308,16 @@ def export_dashboard_json(
         try:
             ctx_for_decision = engine_result.to_ctx_dict() if hasattr(engine_result, "to_ctx_dict") else ctx_dict
             payload["decision"] = DecisionEngine().evaluate(engine_result, ctx_for_decision).to_dict()
+            # Persist this tick's decision so backtest/replay.py has
+            # ground-truth history to replay auto_executor.py against.
+            # See backtest/snapshot_logger.py's module docstring for why
+            # this has to run from here (live) rather than being
+            # reconstructed after the fact. Never raises.
+            try:
+                from backtest.snapshot_logger import log_decision_snapshot
+                log_decision_snapshot(engine_result, payload["decision"])
+            except Exception as _snap_err:
+                logger.warning(f"[export_dashboard_json] decision snapshot logging failed ({_snap_err})")
         except Exception as _de_err:
             logger.warning(f"[export_dashboard_json] DecisionEngine failed ({_de_err}) — decision block omitted")
             payload["decision"] = {
