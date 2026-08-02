@@ -1,0 +1,654 @@
+<!-- .html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- Space Grotesk added: a sharper, angular display face used for nav
+     labels, tickers, and the big spot readout — the old all-Inter-at-9/10px
+     type was reading soft/blurry at normal zoom. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles/theme.css">
+<link rel="stylesheet" href="../styles/animations.css">
+<link rel="stylesheet" href="../styles/layout.css">
+<link rel="stylesheet" href="../styles/tables.css">
+<link rel="stylesheet" href="../styles/navigation.css">
+<link rel="stylesheet" href="../styles/panels.css">
+<link rel="stylesheet" href="../PriceChart/price-chart-components.css">
+<link rel="stylesheet" href="../styles/paper-trading.css">
+<link rel="stylesheet" href="../styles/responsive.css">
+<link rel="stylesheet" href="../styles/fiidii-report.css">
+<link rel="stylesheet" href="../PriceChart/pc-order-panel.css">
+<style>
+  /* Greeks/GEX modal body — the OI Flow modal's panel wraps a full
+     iframe (.oc-modal-iframe fills the panel edge-to-edge by design), but
+     this modal wraps plain in-page markup instead (#grkgex-content /
+     #grkgex-footer — the same nodes ChainView.renderGreeksGex() already
+     writes into), which needs scroll + padding rather than iframe sizing,
+     so it gets its own class instead of reusing .oc-modal-iframe on a div. */
+  .greeks-modal-body{ flex:1; min-height:0; overflow-y:auto; padding:12px 14px; }
+
+  /* Click-to-expand affordance shared by the Strategy Payoff canvas and the
+     Institutional F&O Simulator's GEX canvas — both now open a lightbox-
+     style modal (openStratPayoffModal()/openSimGexModal()) instead of only
+     living inline, since each chart also has a wider, unpaired look in its
+     own modal. .chart-expand-icon is hidden until hover so it doesn't
+     compete with the chart's own tooltip/annotation for attention. */
+  .chart-expand-wrap{ transition:box-shadow .15s ease; }
+  .chart-expand-wrap:hover{ box-shadow:0 0 0 1px var(--accent,#3b82f6) inset; }
+  .chart-expand-icon{
+    position:absolute; top:8px; right:10px; z-index:2;
+    font-size:13px; line-height:1; color:var(--txt3);
+    background:var(--bg2); border:1px solid var(--border); border-radius:5px;
+    padding:3px 5px; opacity:0; transition:opacity .15s ease;
+    pointer-events:none;
+  }
+  .chart-expand-wrap:hover .chart-expand-icon{ opacity:1; }
+
+  /* Chart-expand modal bodies — the enlarged canvas gets breathing room
+     (padding) and a min-height so it doesn't look cramped at the modal's
+     full width, same body-scroll treatment as the other modals'
+     .greeks-modal-body when content overflows a very short viewport. */
+  .chart-modal-body{ flex:1; min-height:0; overflow-y:auto; padding:16px 20px 20px; }
+</style>
+</head>
+<body><div class="db">
+
+<!-- Option Chain no longer has an in-page table here — the dashboard now
+     shows a compact snapshot card (built inline by
+     ChainView.buildChainSummaryHtml() in chain-views.js, between the
+     Decision/Executive boxes and OI Flow) with a link to the full,
+     dedicated ledger at option-chain.html. See that file / option-chain.js
+     for the full CE/PE strike-by-strike table, Greeks toggle, and
+     buy/sell click-to-trade cells. -->
+
+<!-- ── OI Flow MODAL OVERLAY (same-screen, no new window) ── -->
+<div id="oi-flow-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="oi-modal-close" class="oc-modal-back" onclick="closeOIDashboardModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">📈 OI Flow</span>
+      </div>
+    </div>
+    <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Flow"></iframe>
+  </div>
+</div>
+
+<!-- ── GREEKS / GEX MODAL OVERLAY (same-screen, no new window) ──
+     Full per-strike Greeks/GEX table, moved out of the main dashboard so
+     the main view only shows the compact alerts card (#greeks-alerts-card,
+     built by ChainView.buildGreeksAlertsHtml()) — gamma flip / short-gamma
+     regime / high theta decay flags, with a "Full Table →" button that
+     opens this modal. Not an iframe like the OI Flow modal above:
+     ChainView.renderGreeksGex() already writes straight into
+     #grkgex-content/#grkgex-footer below on every render and live tick
+     (those ids used to sit inline in the dashboard template — moving them
+     here is a pure relocation, no rendering logic changed), so this modal
+     is always current the moment it's opened; no data needs to be pushed
+     into it the way OI_DASHBOARD_DATA is pushed into the OI iframe. -->
+<div id="greeks-dashboard-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="greeks-modal-close" class="oc-modal-back" onclick="closeGreeksModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">Δ Greeks &amp; Net GEX</span>
+      </div>
+      <div class="tab-group" id="grk-tabs">
+        <div class="tab-btn active-grk" onclick="switchGrkTab('delta',this)">Δ</div>
+        <div class="tab-btn" onclick="switchGrkTab('gamma',this)">Γ</div>
+        <div class="tab-btn" onclick="switchGrkTab('theta',this)">Θ</div>
+        <div class="tab-btn" onclick="switchGrkTab('vega',this)">Vega</div>
+      </div>
+      <!-- Strike-level table, so it needs the same ATM range control the
+           sidebar has — renderGreeksGex() already filters through
+           getFilteredChain()/_chainRange (see chain-greeks.js), so the
+           data was always range-aware; this was just the missing button.
+           Registered in switchChainRange's group list (chain-view.js) so
+           it stays in lockstep with the sidebar's own toggle. -->
+      <div class="tab-group" id="range-tabs-grk" data-range-tabs></div>
+    </div>
+    <div class="greeks-modal-body">
+      <!-- Single strike-indexed table: Greeks (CE/PE, tab-selected) and
+      -- Net GEX share one <td> per strike instead of two separate cards
+      -- each repeating the strike column. -->
+      <div id="grkgex-content" class="algn-body"></div>
+      <!-- Total/Regime/Flip strip — pinned outside the scrolling table,
+      -- same treatment as OI Flow's top-movers strip. -->
+      <div id="grkgex-footer" class="section-footer"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── FII / DII PARTICIPANT OI MODAL OVERLAY (same-screen, no new window) ──
+     Full participant comparison table, moved out of the main dashboard so
+     the main view only shows the compact sentiment summary card (built by
+     ExecView.buildFiiDiiSummaryCard(), rendered below the exec grid), with
+     a "Full Table →" button that opens this modal. Same treatment as the
+     Greeks modal above: not an iframe — ExecView.renderFiiDiiModal()
+     writes straight into #fiidii-modal-content on every render/live tick
+     (via _rerenderChainPanels in chain-views.js), so this modal is always
+     current the moment it's opened.
+
+     Above the table, .fd-report holds the FII/DII flow chart, long-short
+     ratio gauge, participant OI bars, and sector heatmap — merged in
+     from the old standalone FII-DII.html terminal page (see
+     fiidii-report.js/fiidii-report.css). That page's IV skew panel was
+     dropped rather than carried over — it duplicated the existing, more
+     accurate IV Surface modal built from live chain data (see
+     openIvSurfaceModal() below). Unlike the table below, these panels
+     are fed by a dedicated WebSocket to ws_server_live.py's
+     /dashboard-relay endpoint that FiiDiiReportFeed opens on modal open
+     and closes on modal close (see modal-manager.js), since that data is
+     genuinely separate from the main dashboard's tick. -->
+<div id="fiidii-dashboard-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="fiidii-modal-close" class="oc-modal-back" onclick="closeFiiDiiModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🏦 FII / DII / Pro / Retail Participant OI</span>
+      </div>
+    </div>
+    <div class="greeks-modal-body">
+      <div class="fd-report">
+        <div class="fd-report-status" id="fdReportStatus">CONNECTING…</div>
+
+        <!-- ── UNIFIED MARKET BIAS ──
+             Combines cash-market flow trend (nse_fii_dii_flow_fetch.py) and
+             F&O participant positioning (fii_dii_sentiment.py) into one
+             decision-oriented read, computed server-side by
+             analytics/fii_dii_market_bias.py and pushed as `payload.bias`
+             over the same /dashboard-relay feed as flow/ratio/oi/sectors
+             below. Rendered by fdRenderBias() in fiidii-report.js. This
+             card is the "so what" on top of the raw panels underneath —
+             it deliberately shows caveats/confidence rather than always
+             sounding certain, so treat a low-confidence read here as a
+             prompt to look at the panels below yourself, not as noise. -->
+        <div class="fd-bias-card" id="fdBiasCard">
+          <div class="fd-bias-head">
+            <span class="fd-bias-label" id="fdBiasLabel">—</span>
+            <span class="fd-bias-score" id="fdBiasScore">--</span>
+            <span class="fd-bias-confidence" id="fdBiasConfidence">confidence --%</span>
+          </div>
+          <ul class="fd-bias-narrative" id="fdBiasNarrative"></ul>
+          <ul class="fd-bias-caveats" id="fdBiasCaveats"></ul>
+        </div>
+
+        <div class="fd-grid">
+
+          <div class="fd-panel">
+            <div class="fd-panel-head">
+              <span class="fd-panel-title">FII / DII NET FLOW — 30D</span>
+              <span class="fd-panel-meta">₹ CRORE</span>
+            </div>
+            <div class="fd-flow-body">
+              <div class="fd-flow-chart"><canvas id="fdFlowCanvas"></canvas></div>
+              <div class="fd-flow-legend">
+                <div class="fd-legend-item">
+                  <span class="fd-legend-key"><span class="fd-swatch" style="background:var(--fd-violet)"></span>FII (CASH)</span>
+                  <span class="fd-legend-val" id="fdLegendFii">--</span>
+                </div>
+                <div class="fd-legend-item">
+                  <span class="fd-legend-key"><span class="fd-swatch" style="background:var(--fd-grey)"></span>DII</span>
+                  <span class="fd-legend-val" id="fdLegendDii">--</span>
+                </div>
+                <div class="fd-legend-item">
+                  <span class="fd-legend-key">NET (30D)</span>
+                  <span class="fd-legend-val" id="fdLegendNet">--</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="fd-panel">
+            <div class="fd-panel-head">
+              <span class="fd-panel-title">FII LONG-SHORT RATIO &amp; PARTICIPANT OI</span>
+              <span class="fd-panel-meta">FUTURES · % OF TOTAL</span>
+            </div>
+            <div class="fd-gauge-wrap">
+              <div class="fd-gauge-readout">
+                <span class="fd-gauge-pct" id="fdGaugePct">--%</span>
+                <span class="fd-gauge-bias" id="fdGaugeBias">--</span>
+              </div>
+              <div class="fd-ascii-bar" id="fdRatioBar"></div>
+              <div class="fd-gauge-sub" id="fdGaugeSub">--</div>
+            </div>
+            <div class="fd-oi-rows" id="fdOiRows"><!-- filled by fiidii-report.js --></div>
+            <div class="fd-gauge-scale"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
+          </div>
+
+          <div class="fd-panel fd-heat-panel">
+            <div class="fd-panel-head">
+              <span class="fd-panel-title">F&amp;O SECTOR BUILDUP HEATMAP</span>
+              <span class="fd-panel-meta">SESSION Δ%</span>
+            </div>
+            <div class="fd-heat-grid" id="fdHeatGrid"><!-- filled by fiidii-report.js --></div>
+          </div>
+
+        </div>
+      </div>
+
+      <div id="fiidii-modal-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── IV SURFACE MODAL OVERLAY (same-screen, no new window) ──
+     Full per-strike CE/PE IV bar table + Skew/Max IV/Min IV footer, moved
+     out of the main dashboard so the main view only shows the compact
+     alerts card (#iv-alerts-card, built by ChainView.buildIvAlertsHtml())
+     — elevated skew / IV rank extremes — with a "Full Surface →" button
+     that opens this modal. Same treatment as the Greeks modal: not an
+     iframe — ChainView.renderIvSurfaceModal() writes straight into
+     #iv-surface-content on every render/live tick (via
+     _rerenderChainPanels in chain-views.js), so this modal is always
+     current the moment it's opened. -->
+<div id="iv-surface-modal" class="oc-modal" onclick="if(event.target===this) closeIvSurfaceModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="iv-surface-modal-close" class="oc-modal-back" onclick="closeIvSurfaceModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">📉 IV Surface</span>
+      </div>
+      <!-- Strike-level table — same gap/fix as the Greeks modal above. -->
+      <div class="tab-group" id="range-tabs-iv" data-range-tabs></div>
+    </div>
+    <div class="greeks-modal-body">
+      <div id="iv-surface-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── GREEKS BY MONEYNESS CHART EXPAND MODAL (same-screen, no new window) ──
+     Same treatment as the Strategy Payoff / Net GEX expand modals above:
+     enlarged view of the Tier-2 "Δ Greeks by Moneyness" line chart,
+     opened by clicking the chart itself (openGreeksChartModal()). Unlike
+     those two (which paint a second <canvas> manually via a shared
+     _draw*OnCanvas helper), this chart is a Chart.js instance
+     (chart-legend.js) — ensureGreeksChart() now accepts a canvas id and
+     keeps one Chart.js instance per id, and updateGreeksMoneynessChart()
+     updates every instance that currently exists, so #greeksChart-modal
+     stays exactly as current as the inline #greeksChart on every render/
+     live tick, whether or not this modal is open — same "never stale the
+     instant it opens" guarantee the other expand modals give. -->
+<div id="greeks-chart-modal" class="oc-modal" onclick="if(event.target===this) closeGreeksChartModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="greeks-chart-modal-close" class="oc-modal-back" onclick="closeGreeksChartModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">Δ Greeks by Moneyness</span>
+      </div>
+    </div>
+    <div class="chart-modal-body" style="position:relative;">
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:12px;font-size:11px;color:var(--txt3);">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#2a78d6;"></span>Delta (call)</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#1baf7a;"></span>Gamma</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#e34948;"></span>|Theta| decay</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#eda100;"></span>Vega</span>
+      </div>
+      <div style="position:relative;width:100%;height:calc(100% - 34px);min-height:420px;">
+        <canvas id="greeksChart-modal" role="img" aria-label="Enlarged line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain."></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── STRATEGY PAYOFF EXPAND MODAL (same-screen, no new window) ──
+     Enlarged view of the Strategy Payoff card's canvas, opened by clicking
+     the chart itself (openStratPayoffModal(), wired via the
+     .chart-expand-wrap click handler on the inline canvas in
+     renderDashboard's grid). Unlike the Greeks/FII-DII/IV-Surface modals
+     above, this doesn't wrap a separate always-current content block —
+     it's a second canvas (#strat-payoff-canvas-modal) that
+     renderStratPayoff()'s _drawPayoffOnCanvas paints in the same pass as
+     the inline card's canvas on every render/live tick, so it's already
+     current the instant the modal opens; no extra push needed. -->
+<div id="strat-payoff-modal" class="oc-modal" onclick="if(event.target===this) closeStratPayoffModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="strat-payoff-modal-close" class="oc-modal-back" onclick="closeStratPayoffModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🎯 Strategy Payoff</span>
+      </div>
+    </div>
+    <div class="chart-modal-body">
+      <canvas id="strat-payoff-canvas-modal" style="width:100%;display:block;" height="480" data-h="480"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ── SIMULATOR GEX CHART EXPAND MODAL (same-screen, no new window) ──
+     Same treatment as the Strategy Payoff expand modal just above:
+     enlarged view of the Institutional F&O Simulator's Net GEX Profile
+     canvas, opened by clicking the chart itself (openSimGexModal()).
+     #sim-gex-canvas-modal is painted by simRenderGEXChart()'s
+     _drawGexOnCanvas in the same pass as the inline card's canvas, and
+     #sim-annot-modal is its matching hover-tooltip target (mirrors
+     #sim-annot next to the inline canvas). -->
+<div id="sim-gex-modal" class="oc-modal" onclick="if(event.target===this) closeSimGexModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="sim-gex-modal-close" class="oc-modal-back" onclick="closeSimGexModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🏦 Net GEX Profile ($B) &#8593;</span>
+      </div>
+    </div>
+    <div class="chart-modal-body" style="position:relative;">
+      <canvas id="sim-gex-canvas-modal" height="480" data-h="480" style="width:100%;display:block;"></canvas>
+      <div class="sim-annot" id="sim-annot-modal"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── VOL/OI VELOCITY CHART EXPAND MODAL (same-screen, no new window) ──
+     Same treatment as the Strategy Payoff/Net GEX expand modals above:
+     used to expand inline via a toggle button, growing/shrinking the
+     whole row under it on the main dashboard every time someone opened
+     or closed it. Opened by clicking the summary panel
+     (openVolOiVelocityModal(), see the Vol/OI Velocity block in
+     chain-renderer.js's buildSimulatorHtml). #sdt-voi-grid is repainted
+     by simRenderVolGrid() in the same tick pass as every other simulator
+     panel regardless of whether this modal is open, so it's already
+     current the instant it opens — it lives only here now, not
+     duplicated on the main dashboard. -->
+<div id="vol-oi-velocity-modal" class="oc-modal" onclick="if(event.target===this) closeVolOiVelocityModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="vol-oi-velocity-modal-close" class="oc-modal-back" onclick="closeVolOiVelocityModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">📊 Vol/OI Velocity by Strike (Block Detection)</span>
+      </div>
+    </div>
+    <div class="chart-modal-body">
+      <div class="sim-vol-grid" id="sdt-voi-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── STRIKE DETAIL REPORT MODAL ──
+     Replaces the old strike-detail-report.html standalone popup
+     (window.open + postMessage to a separate browser window/file).
+     simRenderTable() (simulator-view.js) already writes directly into
+     #sdt-stat-atm/#sdt-stat-spot/#sdt-stat-totaloi/#sdt-stat-pcr/
+     #sdt-rows on every tick whenever those elements exist in the DOM —
+     that direct-write path predates this move (it was a dormant
+     fallback for a possible future inline table) — so this modal is
+     current the instant it opens with zero new data-plumbing. All
+     .sdt-* classes below (statbar/table-wrap/head/row/oi-bar/...) are
+     the same ones already shared with the Institutional F&O Simulator's
+     inline strike rows (tables.css), so this needed no new CSS either.
+     No "live/stale" indicator here (the old popup had one, guarding
+     against the postMessage bridge going quiet) — moot now that this
+     renders in the same tick loop as everything else on the page,
+     same as the Vol/OI Velocity modal just above. -->
+<div id="strike-detail-report-modal" class="oc-modal" onclick="if(event.target===this) closeStrikeDetailReportModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="strike-detail-report-modal-close" class="oc-modal-back" onclick="closeStrikeDetailReportModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🏛️ Strike Detail Report</span>
+      </div>
+    </div>
+    <div class="chart-modal-body" style="padding:14px;overflow-y:auto;">
+      <div class="sdt-statbar">
+        <div class="sdt-stat">
+          <div class="sdt-stat-label">ATM Strike</div>
+          <div class="sdt-stat-value" id="sdt-stat-atm">&mdash;</div>
+        </div>
+        <div class="sdt-stat">
+          <div class="sdt-stat-label">Spot Price</div>
+          <div class="sdt-stat-value" id="sdt-stat-spot">&mdash;</div>
+        </div>
+        <div class="sdt-stat">
+          <div class="sdt-stat-label">Total OI (Near ATM)</div>
+          <div class="sdt-stat-value" id="sdt-stat-totaloi">&mdash;</div>
+        </div>
+        <div class="sdt-stat">
+          <div class="sdt-stat-label">PCR (Near ATM)</div>
+          <div class="sdt-stat-value" id="sdt-stat-pcr">&mdash;</div>
+        </div>
+      </div>
+      <div class="sdt-table-wrap">
+        <div class="sdt-head">
+          <span class="sdt-head-cell">Strike <span class="sdt-sort-arrows">&#8645;</span></span>
+          <span class="sdt-head-cell">Dist. from ATM <span class="sdt-sort-arrows">&#8645;</span></span>
+          <span class="sdt-head-cell sdt-oi-cell">
+            <span style="display:flex;align-items:center;gap:4px;">Open Interest <span class="sdt-sort-arrows">&#8645;</span></span>
+            <span class="sdt-oi-legend">
+              <span><span class="dot" style="background:var(--ce);"></span>Call OI</span>
+              <span><span class="dot" style="background:var(--pe);"></span>Put OI</span>
+            </span>
+          </span>
+          <span class="sdt-head-cell">&Delta;OI Today <span class="sdt-sort-arrows">&#8645;</span></span>
+          <span class="sdt-head-cell" style="justify-content:flex-end;">IV <span class="sdt-sort-arrows">&#8645;</span></span>
+          <span class="sdt-head-cell" style="justify-content:flex-end;">Delta <span class="sdt-sort-arrows">&#8645;</span></span>
+          <span class="sdt-head-cell">Smart Money <span class="sdt-sort-arrows">&#8645;</span></span>
+          <span class="sdt-head-cell">Market Structure <span class="sdt-sort-arrows">&#8645;</span></span>
+        </div>
+        <div id="sdt-rows">
+          <div style="padding:12px;color:var(--txt3);font-size:11px;">Waiting for the dashboard to send data&hellip;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- The index ticker strip (NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX pills) no
+     longer has its own row here — it now renders inline inside the top-bar,
+     to the right of the big active-symbol spot readout (see
+     renderTopBarHtml() in dashboard.js, which calls renderIndexTicker()
+     directly). -->
+
+<!-- ── VERTICAL SECTION NAV (left rail) ──
+     Was a horizontal row above the top-bar; now a fixed vertical stripe
+     docked to the left edge of the screen so section jumps stay reachable
+     from anywhere without a horizontal bar eating vertical space. The
+     Expiry control has been pulled OUT of this list — it's no longer a
+     "jump to section" action, so it doesn't belong with the others. It's
+     relocated next to the DTE readout in the top-bar (see
+     #expiry-select-holder below and moveExpirySelectIntoTopBar() in
+     dashboard.js, which physically re-parents this same <select> into the
+     top-bar's dedicated Expiry pill on every render instead of rebuilding it — so its
+     option list and current selection survive live ticks). -->
+<div class="sec-nav" id="sec-nav-bar">
+  <span class="sec-nav-label">⚡ Jump</span>
+  <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
+  <!-- Targets fixed to the ids these sections actually render with today
+       (oi-flow-summary-card — see buildOiFlowSummaryHtml() in
+       oi-flow-view.js). The old targets, sec-oi-buildup and sec-iv, were
+       leftovers from a prior layout and matched no element in the
+       current template, so these buttons were silently no-ops
+       (secJump() finds nothing and returns). The IV Surface button that
+       used to sit here is gone (2026-08-01) — it targeted
+       iv-hv-skew-detail-card (chain-greeks.js's buildIvHvSkewDetailHtml),
+       which was removed as a duplicate of Advanced Analytics' IV Rank
+       Details card. Repointing it at advanced-analytics-card would have
+       just duplicated the "Advanced" button below, so it was dropped
+       instead of kept as a second link to the same place. -->
+  <button class="sec-btn" onclick="secJump('oi-flow-summary-card')"><span>📈</span>OI Flow</button>
+  <button class="sec-btn sec-btn-simulator" onclick="secJump('sec-simulator')"><span>&#127970;</span>Simulator</button>
+  <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
+  <button class="sec-btn" onclick="secJump('greeks-alerts-card')"><span>Δ</span>Greeks</button>
+  <button class="sec-btn" onclick="secJump('fiidii-summary-card')"><span>🏦</span>FII/DII</button>
+  <button class="sec-btn" onclick="secJump('advanced-analytics-card')"><span>🔬</span>Advanced</button>
+  <!-- Range & velocity toggle — relocated here from its old floating
+       .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
+       there). Reuses the sec-btn styling so it sits inline with the other
+       nav buttons instead of needing its own CSS. Still calls the same
+       toggleControlSidebar(), which just toggles the 'open' class on
+       #ctrl-sidebar — the panel markup/logic underneath is untouched. -->
+  <button class="sec-btn" id="ctrl-sidebar-toggle-btn" onclick="toggleControlSidebar()" title="Range & velocity controls"><span>🎛️</span>Range Vel</button>
+</div>
+
+<!-- Global expiry control — the ONLY expiry selector in the app. Kept as
+     a standalone static element (not inside the vertical nav, and not
+     inside the dashboard's rebuilt innerHTML) so dashboard.js can move
+     the *same* <select> node into the top-bar's dedicated Expiry pill on every render
+     without ever destroying/recreating it. Hidden here; visible once
+     re-parented. Changing it re-renders the whole dashboard (all
+     sections), regardless of which section is currently in view. -->
+<div id="expiry-select-holder" style="display:none;">
+  <select
+      id="expirySelect"
+      onchange="onExpiryChange(this.value)"
+      title="Select expiry — ● = live chain data available"
+  ></select>
+</div>
+
+<!-- ── CONTROL SIDEBAR (ATM range + velocity window, works from any section) ──
+     The old .ctrl-sidebar-toggle button that lived here has been removed —
+     it's now the "Range/Vel" button in the left #sec-nav-bar rail above,
+     since this floating button (pinned near the top of the screen) had
+     almost no visible/tappable height there. #ctrl-sidebar is still the
+     element whose 'open' class gets toggled — only the trigger moved. -->
+<div class="ctrl-sidebar" id="ctrl-sidebar">
+  <div class="ctrl-sidebar-panel">
+    <div class="ctrl-sidebar-group">
+      <div class="ctrl-sidebar-group-label">Vel Window</div>
+      <div class="tab-group" id="vel-tabs-side">
+        <div class="tab-btn active-vel" onclick="switchVelTab(5,this)">5m</div>
+        <div class="tab-btn" onclick="switchVelTab(15,this)">15m</div>
+        <div class="tab-btn" onclick="switchVelTab(30,this)">30m</div>
+      </div>
+    </div>
+    <div class="ctrl-sidebar-divider"></div>
+    <div class="ctrl-sidebar-group">
+      <div class="ctrl-sidebar-group-label">ATM Range</div>
+      <div class="tab-group" id="range-tabs-side" data-range-tabs></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── LOADER ── -->
+<div id="loader" style="display: block;">
+  <div class="load-zone">
+    <div class="load-title">📊 Live Dashboard Feed</div>
+    <div class="load-sub">
+      <span id="ws-status" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:6px;"></span>
+      Connecting to Python engine over WebSocket at <code style="font-size:11px;background:var(--bg2);padding:2px 8px;border-radius:4px;font-family:var(--mono);" id="ws-url-label">ws://localhost:8765</code>. Updates push automatically — no polling, no file.
+    </div>
+    <div class="load-methods" style="grid-template-columns:1fr 1fr;">
+      <div class="load-btn" onclick="(function(){const u=prompt('WebSocket URL', _wsUrl); if(u) connectWebSocket(u);})()"><span>🔌 Change URL</span><small>Point to a different engine</small></div>
+      <div class="load-btn" onclick="triggerPaste()"><span>📋 Paste JSON</span><small>Manual fallback snapshot</small></div>
+    </div>
+    <input type="file" id="file-input" accept=".json" style="display:none;" onchange="handleFile(event)">
+    <textarea id="paste-area" placeholder="Paste JSON here…"></textarea>
+    <button id="load-go" onclick="loadFromPaste()">Load dashboard</button>
+    <div id="err-msg"></div>
+  </div>
+</div>
+<!-- ── OPTION CHAIN ──
+     The full dense CE/PE strike table (previously a static #sec-chain
+     block relocated into #dashboard by a #chain-anchor placeholder) has
+     been removed from this file entirely. In its place, ChainView now
+     builds a compact "Option Chain Snapshot" card inline as part of the
+     normal #dashboard template — see ChainView.buildChainSummaryHtml()
+     in chain-views.js — so there's nothing to anchor or relocate here
+     anymore; it's just another section in the template string like OI
+     Flow or IV Surface. The full strike-by-strike ledger (Greeks toggle,
+     buy/sell click cells, Bid/Ask depth) lives at option-chain.html,
+     one click away via the snapshot card's "Full Chain" button. -->
+
++<!-- ── PRICE CHART MOUNT ──
++     Dedicated, always-visible host for the mini price chart
++     (price-chart.js: PriceChartEngine.ensureMounted()). Must live OUTSIDE
++     #dashboard: #dashboard's entire innerHTML is replaced wholesale on
++     every full rebuild (ChainView.renderDashboard()), and #dashboard
++     itself stays display:none until the first live payload arrives.
++     Without this element, ensureMounted() falls back to inserting the
++     chart as #dashboard's first child — which then gets destroyed by the
++     next full rebuild and re-created/re-inserted above the top bar the
++     next time anything (resize, hover) calls render() again. -->
+<div id="price-chart-mount"></div>
+
+<!-- ── DASHBOARD ──
+     Decision → Executive boxes → Option Chain Snapshot → OI Flow → IV
+     Surface → Simulator → Strategy, all built fresh into this container
+     on every render by ChainView.renderDashboard(). -->
+<div id="dashboard" style="display: none;"></div>
+
+<!-- Greeks-by-Moneyness legend + canvas now render inside the dashboard
+     template, next to FII/DII in the tier-2 row (see renderDashboard's
+     #sec-tier2 grid) — it used to pair with Strategy Payoff, which now
+     pairs with the Institutional F&O Simulator instead. The canvas is
+     recreated on every innerHTML rebuild, so the Chart.js instance below
+     is created/re-bound lazily rather than once here. -->
+<!-- Phase 5: EventBus. Zero-dependency, loads first so every module's
+     `if (window.eventBus) window.eventBus.emit(...)` guard is always true
+     regardless of load order after this point. -->
+<script src="../shared/config.js"></script>
+<script src="../shared/logger.js"></script>
+<script src="../shared/state/app-state.js"></script>
+<script src="../shared/utils/event-bus.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="chart-legend.js"></script>
+<script src="../PriceChart/chart-data.js"></script>
+<script src="../PriceChart/chart-renderer.js"></script>
+<script src="../PriceChart/indicator-engine.js"></script>
+<script src="../PriceChart/history-loader.js"></script>
+<script src="../PriceChart/price-chart.js"></script>
+<script src="../shared/utils/formatters.js"></script>
+<script src="../shared/utils/dom-utils.js"></script>
+<script src="range-tabs.js"></script>
+<script src="chain/chain-helpers.js"></script>
+<!-- chain-views.js split (Phase 2 chain-view decomposition) into 7 files.
+     chain-view.js must load FIRST — it declares the ChainDenseView/
+     RightPanelView/ChainView classes that the other 6 attach methods to
+     via ClassName.prototype.method = ... . The other 6 can load in any
+     order relative to each other, but all must load before dashboard.js
+     (whose App constructor does `new ChainDenseView()` / `new ChainView()`
+     and expects every prototype method already attached). See each
+     chain-*.js file's own header comment for what it holds. -->
+<script src="chain/chain-view.js"></script>
+<script src="chain/chain-template.js"></script>
+<!-- Phase 3 rendering/logic split: chain-view-models.js is the pure
+     business-logic + template layer (row/strike-detail view-model
+     builders, plus the HTML templates consuming them — merged from a
+     formerly-separate chain-templates.js on 2026-07-29, see that file's
+     header) that replaces the inline calculation+markup that used to
+     live in ChainDenseView.buildRowsHtml (chain-renderer.js) and
+     ChainDenseView.buildStrikeDetailHtml (chain-depth.js). It's a plain
+     function file (no classes), so nothing here depends on
+     chain-view.js's class declarations having run first — but it MUST
+     load before chain-renderer.js/chain-depth.js, whose methods call
+     into it at render time. (Previously this loaded after both, which
+     only worked by luck — plain function declarations are hoisted and
+     nothing called them until actual render time, well after every
+     script had finished loading. Fixed here rather than relying on
+     that.) -->
+<script src="chain/chain-view-models.js"></script>
+<script src="conviction-gauge.js"></script>
+<script src="chain/chain-renderer.js"></script>
+<script src="chain/chain-depth.js"></script>
+<script src="chain/chain-greeks.js"></script>
+<script src="chain/chain-sync.js"></script>
+<script src="../engines/smart-money.js"></script>
+<script src="../engines/market-structure.js"></script>
+
+<script src="dashboard-thresholds.js"></script>
+<script src="strike-detail-report-panel.js"></script>
+<script src="oi-flow-view.js"></script>
+<script src="exec-view.js"></script>
+<script src="strategy-view.js"></script>
+<script src="simulator-view.js"></script>
+<!-- Advanced Analytics collapsible: attaches ChainView.prototype.
+     buildAdvancedAnalyticsHtml, called from chain-renderer.js's
+     renderDashboard(). Needs ChainView already declared (chain-view.js),
+     plus fmtI/fmtN/fmtK, getFilteredChain, activeAtm (chain-helpers.js /
+     formatters.js), INST_THRESHOLDS (dashboard-thresholds.js above), and
+     smartMoneyBadge (engines/smart-money.js) — all already loaded by this
+     point. Must load before dashboard.js constructs the App. -->
+<script src="advanced-analytics-view.js"></script>
+<script src="modal-manager.js"></script>
+<script src="fiidii-report.js"></script>
+<script src="../shared/services/ws-manager.js"></script>
+<script src="../shared/stores/market-store.js"></script>
+<script src="../shared/services/data-service.js"></script>
+<script src="ui-controls.js"></script>
+<!-- Phase 4 Panel Manager: panel-manager.js declares the Panel base class
+     and PanelManager registry; dashboard-panels.js's six Panel subclasses
+     extend it. Both must load before dashboard.js, whose App constructor
+     does `new PanelManager()` and `new PriceChartPanel()` / etc. -->
+<script src="panel-manager.js"></script>
+<script src="dashboard-panels.js"></script>
+<script src="dashboard.js"></script>
+<script src="paper-trading.js"></script>
+</body></html>

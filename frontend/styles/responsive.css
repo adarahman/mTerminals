@@ -1,0 +1,72 @@
+/* responsive.css
+   Every @media block from styles.css, gathered in one place. Each block
+   is annotated with the selector(s) it originally sat next to, so it's
+   still easy to find. This file MUST be linked LAST, after layout.css /
+   panels.css / tables.css / navigation.css — these are override rules
+   for narrower viewports, and CSS resolves ties between equal-specificity
+   rules by source order, so loading this last preserves the exact
+   override behavior styles.css already had (each block used to appear
+   immediately after its base rule). Split out of styles.css (Phase 7 CSS
+   architecture reorg) — no selector, visual, or HTML changes. */
+
+/* was inline after: .db  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .db{padding-left: var(--space-6);} /* vertical rail collapses/overlays on narrow screens, see .sec-nav */
+}
+
+/* was inline after: .index-ticker  —  @media (max-width:1100px) */
+@media (max-width:1100px){
+  .index-ticker{max-width:340px;}
+}
+
+/* was inline after: .exec-grid  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .exec-grid{grid-template-columns:1fr 1fr;}
+  .exec-grid .exec-card.c-movers{grid-column:1 / -1;}
+}
+
+/* .row2 (Chain Snapshot / Greeks Alerts / FII-DII Sentiment) and .row3
+   (Tier-3 collapsibles) — added alongside the redesign mockup's Tier-2/
+   Tier-3 layout (layout.css/.row2, panels.css/.row3). Same one-column
+   collapse the other multi-card grids on this page already get below
+   900px. */
+@media (max-width:900px){
+  .row2{grid-template-columns:1fr;}
+  .row3{grid-template-columns:1fr;}
+}
+
+/* was inline after: .sec-nav  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .sec-nav{
+    position:sticky;top:8px;bottom:auto;left:auto;
+    flex-direction:row;flex-wrap:wrap;width:auto;height:auto;
+    margin-bottom: var(--space-2);
+  }
+}
+
+/* was inline after: .sec-btn.active::after  —  @media (max-width:900px) */
+@media (max-width:900px){
+  .sec-btn.active::after{left:25%;right:25%;top:auto;bottom:-3px;width:auto;height:3px;}
+}
+
+/* was inline after: .arp-summary-grid  —  @media (min-width:900px)
+   2 columns, not 3 — the 3rd card (Volume & Vol/OI) has also moved out to
+   its own Tier-3 collapsible (see chain-template.js's
+   buildVolOiDetailHtml), joining dOI · 5/15/30m which moved out earlier.
+   This now just matches panels.css's base .arp-summary-grid rule
+   (also repeat(2,1fr)), so this override is kept only so the intent stays
+   documented alongside the other grid-column overrides in this file. */
+@media (min-width:900px){
+  .arp-summary-grid{grid-template-columns:repeat(2,1fr);}
+}
+
+/* was inline after: .dd-grid  —  @media (max-width:640px)
+   Decision Detail's Active Signals / S&R Levels 2-column grid (added
+   alongside panels.css/.dd-grid) — same single-column collapse pattern
+   as .row2/.row3 above, but at 640px rather than 900px since this card
+   itself only spans one column of the page grid (it's not full-width
+   like exec-grid/row2), so it has more room before it actually needs to
+   stack. */
+@media (max-width:640px){
+  .dd-grid{grid-template-columns:1fr;}
+}

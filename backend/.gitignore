@@ -1,0 +1,42 @@
+# Runtime cache — regenerated at process start / accumulates during live
+# ticks. Not source; do not commit. See paths.py, storage/caches.py,
+# brokers/smartapi_client.py (ScripMaster cache), and oi/oi_analysis.py
+# (OI history parquet log).
+#
+# NOTE (2026-07-31): runtime/ used to live inside backend/ (this file's
+# own directory); it now lives one level up, as a sibling of backend/,
+# per paths.py. If this file is your repo's *root* .gitignore, the
+# pattern below is correct as-is. If it instead sits inside a backend/
+# subfolder of a larger repo, move this entry (and the instrument-cache
+# one below) up to the root .gitignore, since git's `dir/*` patterns are
+# relative to whichever .gitignore file they're written in.
+runtime/cache/*
+!runtime/cache/.gitkeep
+
+# Instrument-master cache (brokers/smartapi_instruments.py via
+# config.py) — previously ./.angelone_cache, a separate untracked
+# directory; now lives under runtime/ alongside everything else, unless
+# ANGELONE_CACHE_DIR overrides it.
+runtime/instrument_cache/*
+!runtime/instrument_cache/.gitkeep
+
+# Paper trading DB (local state, not source) -- now written into
+# runtime/cache/ (see paper_trading.py's DB_PATH), already covered by the
+# runtime/cache/* pattern above. Kept here as a fallback in case anything
+# still runs against the old cwd-relative default.
+paper_trading.db
+
+# Legacy broker instrument cache location -- only used if ANGELONE_CACHE_DIR
+# is set back to this path; default is now runtime/instrument_cache/ above.
+.angelone_cache/*
+!.angelone_cache/.gitkeep
+
+# Credentials
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/

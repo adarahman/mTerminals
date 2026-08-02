@@ -1,0 +1,1269 @@
+/* panels.css
+   Card/panel chrome and the componentry that lives inside panels: exec
+   cards, section cards, verdict box, badges/pills/signal chips, the
+   analytics summary strip (arp-*), loader, simulator panel, and the
+   shared in-page modal chrome. Split out of styles.css (Phase 7 CSS
+   architecture reorg) — no selector, visual, or HTML changes. */
+
+*{box-sizing:border-box;margin:0;padding:0;}
+
+.exec-card{
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:8px 10px;
+  position:relative;
+  overflow-x:hidden;
+  overflow-y:auto !important;
+  display:flex;
+  flex-direction:column;
+}
+
+.exec-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--exec-accent, var(--bg-2));
+}
+
+.exec-card.c-green::before{background:var(--pos);}
+
+.exec-card.c-amber::before{background:var(--warn);}
+
+.exec-card.c-blue::before{background:var(--info);}
+
+.exec-card.c-red::before{background:var(--neg);}
+
+.exec-card.c-fiidii::before{background:var(--text-tertiary);}
+
+.exec-card.c-fiidii{margin-top: var(--space-4);}
+
+.exec-title{
+  /* Was --text-tertiary at 0.71875rem — read fine in isolation, but next
+     to the now-bright .section-title headers beside it in the same
+     exec-grid row (Greeks/Net GEX, Option Chain Snapshot) it looked
+     dim/unreadable by comparison. Matched to the same size/weight/color
+     standard so every card header in a row reads at equal strength. */
+  font-size:0.8125rem;font-weight:650;letter-spacing:.06em;
+  font-family:var(--font-display);
+  text-transform:uppercase;color:var(--text-primary);margin-bottom:10px;
+}
+
+.exec-badge{
+  display:inline-block;padding: var(--space-2) var(--space-5);border-radius:30px;
+  font-weight:700;font-size:1.2219rem;font-family:var(--font-mono);
+}
+
+.exec-badge.bull{background:rgba(18,184,134,0.15);color:var(--pos);border:1.5px solid rgba(18,184,134,0.35);}
+
+.exec-badge.bear{background:rgba(250,82,82,0.15);color:var(--neg);border:1.5px solid rgba(250,82,82,0.35);}
+
+.exec-badge.neutral{background:rgba(245,159,0,0.15);color:var(--warn);border:1.5px solid rgba(245,159,0,0.35);}
+
+.exec-header{display:flex;justify-content:space-between;align-items:flex-start;gap: var(--space-4);margin-bottom: var(--space-4);}
+
+.exec-score{text-align:right;line-height:1;}
+
+.exec-score-num{font-size:2.1562rem;font-weight:700;font-family:var(--font-mono);}
+
+.exec-score-unit{font-size:1.0062rem;font-weight:500;}
+
+.exec-small{font-size:0.7906rem;color:var(--text-tertiary);margin-top: var(--space-1);letter-spacing:.08em;text-transform:uppercase;}
+
+.exec-target{display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid var(--border);font-size:0.7906rem;color:var(--text-secondary);}
+
+.exec-target strong{color:var(--text-primary);font-family:var(--font-mono);}
+
+.dot{width:10px;height:10px;border-radius:50%;background:var(--warn);}
+
+.p-row{display:grid;grid-template-columns:82px 1fr 28px;gap: var(--space-2);align-items:center;margin:5px 0;}
+
+.level-card{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-lg);padding: var(--space-5);}
+
+.level-row{display:grid;grid-template-columns:35px 1fr 90px;gap:10px;align-items:center;margin:8px 0;}
+
+.level-bar{height:8px;background:var(--bg-2);border-radius:5px;overflow:hidden;}
+
+.level-bar .green{height:100%;background:#16c784;}
+
+.level-bar .red{height:100%;background:#ff5b5b;}
+
+.range-row,
+.prob-row{display:flex;justify-content:space-between;padding:8px 0;}
+
+.level-card hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
+
+.p-bar{height:7px;background:var(--bg-2);border-radius:6px;overflow:hidden;}
+
+.p-fill{height:100%;border-radius:6px;transition:width 0.4s ease;}
+
+.sig-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);}
+
+.sig-bull{color:var(--pos);font-weight:600;}
+
+.sig-bear{color:var(--neg);font-weight:600;}
+
+.sig-neutral{color:var(--warn);font-weight:600;}
+
+.story{font-size:0.8625rem;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap: var(--space-3);line-height:1.3;}
+
+.story:last-of-type{border-bottom:none;}
+
+.story strong{color:var(--text-primary);font-family:var(--font-mono);font-size:0.8625rem;white-space:nowrap;}
+
+/* ── VERDICT ── */
+
+.verdict-box{
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-left:3px solid var(--pos);
+  border-radius:var(--radius);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom:10px;
+  display:flex;align-items:flex-start;gap: var(--space-4);
+}
+
+.verdict-box.bearish{border-left-color:var(--neg);}
+
+.verdict-box.neutral{border-left-color:var(--warn);}
+
+.verdict-icon{font-size:1.4375rem;line-height:1;margin-top:1px;flex-shrink:0;}
+
+.verdict-title{font-size:0.9344rem;font-weight:600;color:var(--text-primary);margin-bottom: var(--space-1);}
+
+.verdict-detail{font-size:0.7906rem;color:var(--text-secondary);line-height:1.7;}
+
+/* ── VERDICT (Tier-1 hero card) ── ported verbatim from the redesign
+   mockup's .verdict/.verdict-top/.verdict-label/.verdict-call/
+   .verdict-conf, retokenized onto theme.css's real names the same way
+   layout.css's migration note describes (--bg3/--bg2 -> --bg-2/--bg-1,
+   --line/--line-soft -> --border/--border-2, --tx-mid/--tx-hi ->
+   --text-secondary/--text-primary, --disp/--mono -> --font-display/
+   --font-mono). These classes existed in the mockup but were never
+   carried into panels.css when it was split out — only .verdict-strip/
+   .verdict-stat below made the cut — so renderDecisionBoxHtml
+   (chain-template.js) had been rebuilding an approximation of this look
+   with one-off inline styles ever since, which is why it kept drifting
+   from the template no matter how those inline values were tuned. Use
+   these classes directly instead of adding more inline styles. */
+.verdict{
+  position:relative;
+  background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:20px 22px 20px 26px;
+  overflow:hidden;
+  margin-bottom:10px;
+  --verdict-accent: var(--warn);
+}
+.verdict.bullish{ --verdict-accent: var(--pos); }
+.verdict.bearish{ --verdict-accent: var(--neg); }
+.verdict::before{
+  content:'';
+  position:absolute;left:0;top:0;bottom:0;width:5px;
+  background:var(--verdict-accent);
+  box-shadow:0 0 18px var(--verdict-accent);
+}
+.verdict-top{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px 32px;}
+.verdict-label{font-family:var(--font-display);font-size:11.5px;font-weight:600;letter-spacing:.1em;color:var(--text-secondary);text-transform:uppercase;}
+.verdict-call{font-family:var(--font-display);font-size:34px;font-weight:700;letter-spacing:-.01em;color:var(--verdict-accent);margin-top:2px;}
+.verdict-fut{font-size:11px;color:var(--text-tertiary);margin-top:5px;}
+
+/* Confidence block — % large and prominent, action message directly
+   below it as a second line within the same block (not a separate row
+   of the card). Sits between the bias call (left) and Trade Grade (far
+   right) on the same header line, per the redesign mockup's row layout. */
+.verdict-mini-chart{
+  align-self:center;
+  flex:0 0 auto;
+  padding:8px 14px;
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm, 6px);
+  cursor:pointer;
+  transition:border-color .15s ease, background .15s ease;
+  line-height:0;
+}
+.verdict-mini-chart:hover{
+  border-color:var(--text-tertiary);
+  background:var(--bg-1);
+}
+.verdict-mini-chart svg{ display:block; }
+.verdict-conf{text-align:center;}
+.verdict-conf-label{font-size:0.6875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;}
+.verdict-conf-big{font-family:var(--font-mono);font-size:1.75rem;font-weight:700;line-height:1.15;}
+.verdict-conf-msg{font-size:0.8125rem;color:var(--text-secondary);margin-top:2px;white-space:nowrap;}
+
+/* Trade Grade — far right of the same header line, same label/value
+   pattern as Confidence but right-aligned and single-line (no message
+   under it). */
+.verdict-grade{text-align:right;}
+.verdict-grade-big{font-family:var(--font-mono);font-size:1.75rem;font-weight:700;line-height:1.15;}
+
+/* ── VERDICT STRIP ── — ported from the redesign mockup's verdict-strip
+   (row of small stat cells below the main verdict body). Used by
+   renderDecisionBoxHtml (chain-template.js) for the Decision / Strategy /
+   Confidence row that replaced the old detailed Strategy column. Base
+   template assumes 5 stats (grid-template-columns:repeat(5,1fr)) per the
+   mockup; callers with fewer stats override grid-template-columns inline
+   (e.g. repeat(3,1fr)) rather than this getting a fixed count baked in. */
+.verdict-strip{
+  display:grid;grid-template-columns:repeat(5,1fr);gap:0;
+  margin-top: var(--space-5);border-top:1px solid var(--border-2);padding-top:14px;
+}
+.verdict-stat{padding:0 16px;border-left:1px solid var(--border-2);min-width:0;}
+.verdict-stat:first-child{border-left:none;padding-left:0;}
+.verdict-stat .k{font-size:0.7188rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom: var(--space-1);}
+.verdict-stat .v{font-family:var(--font-mono);font-size:1rem;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.verdict-stat-explain{
+  font-family:var(--font-sans);font-size:0.6875rem;font-weight:400;color:var(--text-secondary);
+  margin-top: var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.verdict-stat .v.bull{color:var(--pos);}
+.verdict-stat .v.bear{color:var(--neg);}
+
+/* Stacked two-line stat box — used for Max Pain+ATM Strike and CE
+   Wall+PE Wall, each pair sharing a single strip column instead of
+   getting a column each, freeing width now that Spot no longer needs
+   its own column here. */
+.verdict-stat-2line{display:flex;flex-direction:column;gap: var(--space-3);min-width:0;}
+.verdict-stat-line{display:flex;align-items:baseline;justify-content:space-between;gap: var(--space-3);min-width:0;}
+.verdict-stat-line .k{font-size:0.6875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:0;flex-shrink:0;}
+.verdict-stat-line .v{font-family:var(--font-mono);font-size:0.8125rem;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+
+/* ── SECTION CARDS ──
+   Visual-hierarchy pass (2026-08-01): every .section-card now carries the
+   same "top accent strip + tinted icon chip" identity language
+   .exec-card/.oic-card already established, driven by ONE domain-accent
+   modifier class per card (sc-blue/sc-violet/sc-green/sc-amber/sc-
+   neutral, set via --section-accent). Before this, .section-card was
+   flat bg-1/border/radius with no identity at all — fine in isolation,
+   but every section on the page used the exact same recipe, so nothing
+   distinguished e.g. the Greeks/GEX card from the Option Chain Snapshot
+   card sitting right next to it. The 5-color set is intentionally
+   restrained (reuses existing semantic tokens, no new hues except the
+   scoped --sc-violet local below) so the page reads as organized
+   modules, not a rainbow. Assignment is by DOMAIN, not by card:
+     blue    = market/index overview
+     violet  = Greeks / gamma exposure
+     green   = OI, chain & institutional flow data
+     amber   = strategy / decision-adjacent
+     neutral = secondary/derived detail (tucked-away or supporting cards)
+   Elevation also bumped (shadow-sm) and padding opened up slightly so
+   cards read as raised modules rather than flat dividers. */
+
+.section-card{
+  --sc-violet: #8B7FFF;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius-md);
+  padding:16px 18px;
+  position:relative;
+  box-shadow:var(--shadow-sm);
+}
+
+.section-card::before{
+  content:'';
+  position:absolute;top:0;left:0;right:0;height:2px;
+  border-radius:var(--radius-md) var(--radius-md) 0 0;
+  background:var(--section-accent, var(--border));
+}
+
+.section-card.sc-blue{    --section-accent:var(--info); }
+.section-card.sc-violet{  --section-accent:var(--sc-violet); }
+.section-card.sc-green{   --section-accent:var(--pos); }
+.section-card.sc-amber{   --section-accent:var(--warn); }
+.section-card.sc-red{     --section-accent:var(--neg); }
+.section-card.sc-neutral{ --section-accent:var(--text-tertiary); }
+
+.section-header{
+  display:flex;align-items:center;gap: var(--space-3);justify-content:space-between;
+  margin-bottom: var(--space-5);flex-wrap:wrap;
+  padding-bottom:11px;
+  border-bottom:1px solid var(--border-2);
+}
+
+.section-title{
+  display:flex;align-items:center;gap:9px;
+  font-size:0.8125rem;font-weight:650;font-family:var(--font-display);
+  color:var(--text-primary);text-transform:uppercase;letter-spacing:0.06em;
+}
+
+/* Icon chip — wraps the emoji/glyph already inline in each card's title
+   string (e.g. "🎯 Strategy Payoff" -> "<span class=section-icon>🎯</span>
+   Strategy Payoff") so the same accent color used in the top strip also
+   shows up as a tinted badge next to the label — the two together are
+   what make a section recognizable at a glance without reading the
+   text, per the redesign brief's "visual anchors" goal. */
+.section-icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;flex:0 0 22px;border-radius:6px;
+  font-size:12px;line-height:1;font-style:normal;
+  background:color-mix(in srgb, var(--section-accent, var(--text-tertiary)) 16%, transparent);
+  color:var(--section-accent, var(--text-tertiary));
+  border:1px solid color-mix(in srgb, var(--section-accent, var(--text-tertiary)) 40%, transparent);
+}
+
+/* ── CONVICTION MULTIPLIER GAUGE (conviction-gauge.js) ──
+   4-pillar alignment card. Verdict badge reuses this file's pos/neg/info/
+   warn/tertiary palette rather than introducing new colors — bullish
+   pillars/verdicts are --pos, bearish are --neg, LEAN is --info/--warn,
+   WAIT/abstain is --text-tertiary, matching every other bull/bear read in
+   this dashboard (.sig-bull/.sig-bear, .sp-bull/.sp-bear, etc). */
+
+.cg-verdict{
+  font-family:var(--font-mono);font-weight:700;font-size:0.8125rem;
+  letter-spacing:.04em;white-space:nowrap;
+}
+
+.cg-pillars-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap: var(--space-3);margin-bottom: var(--space-3);
+}
+
+.cg-pillar{
+  display:flex;align-items:flex-start;gap: var(--space-3);
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:8px 10px;min-width:0;
+}
+
+.cg-pillar-icon{
+  font-size:0.75rem;line-height:1.4;flex-shrink:0;font-weight:700;
+}
+
+.cg-pillar.cg-bull .cg-pillar-icon{color:var(--pos);}
+.cg-pillar.cg-bear .cg-pillar-icon{color:var(--neg);}
+.cg-pillar.cg-abstain .cg-pillar-icon{color:var(--text-tertiary);}
+
+.cg-pillar-body{min-width:0;flex:1 1 auto;}
+
+.cg-pillar-label{
+  font-family:var(--font-display);font-weight:600;font-size:0.6875rem;
+  color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;
+  margin-bottom:2px;
+}
+
+.cg-pillar-detail{
+  font-family:var(--font-mono);font-size:0.6875rem;color:var(--text-tertiary);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
+.cg-footer{
+  font-size:0.6875rem;color:var(--text-tertiary);
+}
+
+/* Explainability block — checklist of the pillars agreeing with the
+   verdict's direction (or, for WAIT, all non-abstaining pillars), plus
+   a confidence % derived from the same vote count as the verdict. Sits
+   between the pillar grid and the existing bullish/bearish/abstain
+   footer, reusing .cg-footer's type scale so it doesn't compete with it. */
+.cg-explain{
+  border-top:1px solid var(--border);margin-top: var(--space-3);
+  padding-top: var(--space-3);margin-bottom: var(--space-3);
+}
+
+.cg-explain-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom: var(--space-2);
+}
+
+.cg-explain-title{
+  font-family:var(--font-display);font-weight:600;font-size:0.6875rem;
+  color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;
+}
+
+.cg-reason{
+  display:flex;align-items:baseline;gap: var(--space-2);
+  font-size:0.75rem;padding:2px 0;min-width:0;
+}
+
+.cg-reason-check{color:var(--pos);font-weight:700;flex-shrink:0;}
+
+.cg-reason-label{
+  font-family:var(--font-display);font-weight:600;color:var(--text-secondary);
+  flex-shrink:0;
+}
+
+.cg-reason-detail{
+  font-family:var(--font-mono);color:var(--text-tertiary);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+}
+
+@media (max-width:640px){
+  .cg-pillars-grid{grid-template-columns:1fr;}
+}
+
+/* ── TEMPLATE COMPONENTS ──────────────────────────────────────────────
+   Reusable pieces from the redesign mockup (Dashboard Redesign Mockup -
+   Claude.html): CE/PE legend dot+bar, alert rows with a severity flag,
+   a legend footer for abbreviation-heavy cards, and a 3-up microgrid for
+   compact stat readouts (dOI 5/15/30m, IV/HV/Skew). Applied to Option
+   Chain Snapshot, Greeks/GEX Alerts, IV Surface Alerts, and FII/DII
+   Sentiment — the four cards called out as "as per template". */
+
+.dot.ce{background:var(--ce);}
+.dot.pe{background:var(--pe);}
+
+.chain-bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0 10px;background:var(--bg-2);}
+.chain-bar .ce{background:var(--ce);}
+.chain-bar .pe{background:var(--pe);}
+
+.chain-legend{display:flex;gap: var(--space-5);font-size:0.8281rem;color:var(--text-secondary);margin-bottom: var(--space-3);}
+.chain-legend span{display:flex;align-items:center;gap: var(--space-2);}
+
+.kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;}
+.kv{display:flex;justify-content:space-between;font-size:0.8281rem;padding:5px 0;border-bottom:1px dashed var(--border-2);}
+.kv:last-child{border-bottom:none;}
+.kv .k{color:var(--text-secondary);}
+.kv .v{font-family:var(--font-mono);color:var(--text-primary);font-weight:500;}
+
+.alert-row{display:flex;align-items:center;gap:10px;padding:7px 8px;border-bottom:1px solid var(--border-2);font-size:0.8125rem;line-height:1.4;}
+.alert-row:last-child{border-bottom:none;}
+.alert-row .txt{color:var(--text-secondary);flex:1;}
+.alert-row .txt strong{color:var(--text-primary);}
+.alert-row .num{font-family:var(--font-mono);color:var(--text-primary);}
+
+.flag{
+  font-size:0.6875rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  padding:2px 7px;border-radius:4px;flex-shrink:0;
+}
+.flag.bear{background:var(--neg-dim);color:var(--neg);}
+.flag.bull{background:var(--pos-dim);color:var(--pos);}
+.flag.neutral{background:var(--warn-dim);color:var(--warn);}
+
+.microgrid{display:grid;grid-template-columns:repeat(3,1fr);gap: var(--space-3);margin-top:10px;}
+.micro{background:var(--bg-2);border:1px solid var(--border-2);border-radius:6px;padding:8px 10px;text-align:center;}
+.micro .k{font-size:0.6531rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;}
+.micro .v{font-family:var(--font-mono);font-size:0.8625rem;margin-top:3px;}
+.micro .v.bull{color:var(--pos);} .micro .v.bear{color:var(--neg);}
+
+.legend-foot{
+  display:flex;flex-wrap:wrap;gap:6px 16px;
+  font-size:0.7188rem;color:var(--text-tertiary);
+  margin-top:10px;padding-top:10px;border-top:1px solid var(--border-2);
+}
+.legend-foot b{color:var(--text-secondary);font-family:var(--font-mono);}
+
+/* ── TIER-3 COLLAPSIBLES ── — was dOI · 5/15/30m, IV vs HV / Skew, and
+   ATM Greeks (see chain-renderer.js's history comment where #sec-tier3
+   used to be built). All three have since moved out or been removed —
+   dOI was redundant with Option Chain Snapshot's "OI Flow" strip, ATM
+   Greeks folded into the Δ Greeks / Net GEX exec card, and IV vs HV /
+   Skew was removed as a duplicate of Advanced Analytics' IV Rank Details
+   card (2026-08-01). #sec-tier3 itself no longer renders — the .row3
+   class definition and its per-item-count column overrides stay below
+   in case a Tier-3-style row is reintroduced later. */
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:10px;}
+
+details.card{
+  padding:0;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+}
+details.card summary{
+  list-style:none;cursor:pointer;
+  display:flex;align-items:center;gap: var(--space-3);
+  justify-content:space-between;
+  padding:11px 16px;
+}
+details.card summary::-webkit-details-marker{display:none;}
+details.card summary .card-head{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+details.card summary .chev{margin-left:auto;flex-shrink:0;color:var(--text-tertiary);transition:transform .15s;font-size:11px;}
+details.card[open] summary .chev{transform:rotate(90deg);}
+details.card summary .card-head{margin:0;}
+.detail-body{padding:0 16px 14px;border-top:1px solid var(--border-2);margin-top:2px;padding-top:10px;}
+
+.card-head{
+  display:flex;align-items:center;gap: var(--space-3);
+  font-family:var(--font-display);
+  font-size:0.8125rem;
+  font-weight:650;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--text-primary);
+}
+.card-head .ic{font-size:13px;line-height:1;}
+.card-head .fill{flex:1;}
+.card-head .link{
+  font-family:var(--font-sans);
+  font-size:0.8125rem;
+  font-weight:600;
+  letter-spacing:0;
+  text-transform:none;
+  color:var(--info);
+  cursor:pointer;
+}
+.card-head .link:hover{text-decoration:underline;}
+
+/* ── DECISION DETAIL — compact 2-column redesign ──
+   renderDecisionBoxHtml's Tier-3 body (chain-template.js) used to stack
+   Trap Warning / Active Signals / S&R Levels full-width, top to bottom,
+   with S&R Levels wrapping across two rows of the shared 3-up .microgrid
+   (4-5 cells didn't divide evenly by 3). This trims Trap Warning down to
+   a single-line strip and puts Active Signals and S&R Levels side by
+   side instead, so the whole collapsible reads in noticeably less
+   vertical space without dropping any of the same data. */
+
+.dd-trap{
+  display:flex;align-items:center;gap: var(--space-3);
+  padding:7px 10px;margin-bottom: var(--space-3);
+  background:rgba(239,88,114,0.08);
+  border:1px solid rgba(239,88,114,0.3);
+  border-left:3px solid var(--neg);
+  border-radius:6px;
+}
+.dd-trap .ic{color:var(--neg);font-size:12px;flex-shrink:0;}
+.dd-trap .lbl{
+  font-family:var(--font-display);font-size:0.6rem;font-weight:700;
+  color:var(--neg);text-transform:uppercase;letter-spacing:.07em;
+  flex-shrink:0;
+}
+.dd-trap .txt{
+  font-size:0.7rem;font-weight:600;color:var(--text-primary);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+.dd-grid{display:grid;grid-template-columns:1fr 1fr;gap: var(--space-5);margin-top: var(--space-4);align-items:stretch;}
+.dd-col{min-width:0;display:flex;flex-direction:column;}
+.dd-col-title{
+  font-family:var(--font-display);font-size:0.6531rem;font-weight:700;
+  color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.08em;
+  margin-bottom: var(--space-3);
+}
+
+/* One row of Active Signals — same content/severity-dot pattern the old
+   inline-styled row used, just promoted to a real class. */
+.dd-sig{display:flex;align-items:flex-start;gap: var(--space-2);padding:4px 0;border-bottom:1px solid var(--border-2);font-size:0.75rem;line-height:1.45;}
+.dd-sig:last-child{border-bottom:none;}
+
+/* Wraps the Active Signals rows so this column stretches/centers the
+   same way .metric-strip does on the right — both columns now fill whichever
+   side ends up taller (5 signals vs. trap+S&R strip) instead of one
+   column stretching via .dd-col while the other's content just sits
+   top-aligned with dead space under it. */
+.dd-sig-list{flex:1;display:flex;flex-direction:column;justify-content:center;}
+
+/* ── METRIC STRIP ── — single-row "fill the full width, equal cells"
+   stat readout. Originally built just for S&R Levels (was .sr-strip/
+   .sr-cell) but generalized here and adopted by ATM Greeks and IV vs HV/
+   Skew (chain-greeks.js) too, replacing their .microgrid usage: a fixed
+   3-column grid leaves an orphaned, dead-space row whenever the item
+   count isn't a multiple of 3 (4 Greeks -> 3 + 1 alone; 5 IV stats -> 3 +
+   2) — exactly the empty-space-on-the-right look. A single flex row
+   where every cell is flex:1 has no such remainder: 4 cells split the
+   width into quarters, 5 into fifths, always flush to both edges, and
+   all three Tier-3 cards now share one visual language instead of two.
+   .microgrid/.micro themselves are untouched — dOI 5/15/30m still uses
+   the 3-up grid, since 3 items divides evenly there. */
+.metric-strip{display:flex;flex:1;background:var(--bg-2);border:1px solid var(--border-2);border-radius:6px;overflow:hidden;margin-top:10px;}
+/* Reset the standalone margin-top above when the strip is already a flex
+   child of Decision Detail's .dd-col (spacing there comes from
+   .dd-col-title / .dd-trap's own margin instead). */
+.dd-col .metric-strip{margin-top:0;}
+.metric-cell{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:7px 4px;border-right:1px solid var(--border-2);min-width:0;gap:2px;}
+.metric-cell:last-child{border-right:none;}
+.metric-cell .k{font-size:0.625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;}
+.metric-cell .v{font-family:var(--font-mono);font-size:0.775rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.metric-cell .v.bull{color:var(--pos);}
+.metric-cell .v.bear{color:var(--neg);}
+/* Second line — points-away-from-spot for S&R's R1/R2/S1/S2, IV Rank for
+   its ATM IV cell; unused (omitted) by ATM Greeks/IV vs HV since those
+   don't have a matching secondary figure per cell. Dimmer/smaller than
+   .v since it's supporting context, not the headline figure for the
+   cell. */
+.metric-cell .d{font-family:var(--font-mono);font-size:0.65rem;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.metric-cell .d.bull{color:var(--pos);opacity:.75;}
+.metric-cell .d.bear{color:var(--neg);opacity:.75;}
+
+/* ── ATM GREEKS BAR (used inline in chain-greeks.js's
+   buildGreeksAlertsHtml, part of the Δ Greeks / Net GEX exec card) ──
+   Literal █/░ glyph bar (matches the reference look exactly) split into
+   two spans so the filled portion can take this file's --pos/--neg/
+   --warn/--info palette per Greek while the empty portion stays neutral
+   — var(--font-mono) is already used for .metric-cell .v above, so no
+   new font dependency. Negative-range handling isn't needed here since
+   atmDelta/Gamma/Theta/Vega are all sent non-negative (see mgBar's JS
+   comment). */
+.metric-cell .mg-bar-text{display:block;margin-top:3px;font-family:var(--font-mono);font-size:0.7rem;line-height:1;letter-spacing:-0.5px;}
+.metric-cell .mg-bar-text .off{color:var(--text-tertiary);opacity:.4;}
+.metric-cell .mg-bar-text .on.delta{color:var(--info);}
+.metric-cell .mg-bar-text .on.gamma{color:var(--warn);}
+.metric-cell .mg-bar-text .on.theta{color:var(--neg);}
+.metric-cell .mg-bar-text .on.vega{color:var(--pos);}
+
+
+
+.t{width:100%;font-size:0.7906rem;border-collapse:collapse;table-layout:fixed;}
+
+/* signal badges */
+
+.sp{font-size:0.8625rem;font-weight:500;padding:2px 7px;border-radius:20px;display:inline-block;white-space:nowrap;}
+
+.sp-lb{background:rgba(18,184,134,0.12);color:var(--pos);border:1px solid rgba(18,184,134,0.2);}
+
+.sp-sc{background:rgba(245,159,0,0.12);color:var(--warn);border:1px solid rgba(245,159,0,0.2);}
+
+.sp-sb{background:rgba(250,82,82,0.12);color:var(--neg);border:1px solid rgba(250,82,82,0.2);}
+
+.sp-n{background:var(--bg-2);color:var(--text-tertiary);border:1px solid var(--border);}
+
+/* ── IV ROW ── */
+
+.iv-row{display:flex;justify-content:space-between;align-items:center;font-size:0.8625rem;padding:6px 0;border-bottom:1px solid var(--border);}
+
+.iv-row:last-child{border-bottom:none;}
+
+/* combined-signal pills */
+
+.sp-strongbull{background:rgba(18,184,134,0.18);color:var(--pos);border:1px solid rgba(18,184,134,0.35);font-weight:700;}
+
+.sp-bull{background:rgba(18,184,134,0.12);color:var(--pos);border:1px solid rgba(18,184,134,0.2);}
+
+.sp-strongbear{background:rgba(250,82,82,0.18);color:var(--neg);border:1px solid rgba(250,82,82,0.35);font-weight:700;}
+
+.sp-bear{background:rgba(250,82,82,0.12);color:var(--neg);border:1px solid rgba(250,82,82,0.2);}
+
+.sp-mixed{background:rgba(245,159,0,0.12);color:var(--warn);border:1px solid rgba(245,159,0,0.2);}
+
+/* ── IV PROGRESS BAR ── */
+
+.iv-prog{margin-bottom:10px;}
+
+.iv-prog-head{display:flex;justify-content:space-between;font-size:0.7906rem;margin-bottom: var(--space-1);}
+
+.iv-prog-track{height:6px;border-radius:3px;background:var(--bg-2);overflow:hidden;}
+
+.iv-prog-fill{height:100%;border-radius:3px;}
+
+/* ── SUMMARY FOOTER ── */
+
+.section-footer{display:flex;gap: var(--space-5);padding-top:10px;border-top:1px solid var(--border);font-size:0.7906rem;color:var(--text-tertiary);flex-wrap:wrap;margin-top: var(--space-3);}
+
+.section-footer strong{color:var(--text-primary);}
+
+/* ── SHARED IN-PAGE MODAL CHROME (in-page, same tab) ──
+   Generic overlay/panel/iframe styling, used only by the OI Dashboard
+   modal (#oi-flow-modal). Option Chain never used a modal either
+   before or after its in-dashboard table was removed — it now lives
+   entirely at option-chain.html, one click away via the "Full Chain"
+   button on the Option Chain Snapshot card. */
+
+.oc-modal{
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  background:rgba(0,0,0,0.55);
+  padding:2vh 2vw;
+}
+
+.oc-modal.open{
+  display:flex;
+  align-items:stretch;
+  justify-content:center;
+}
+
+.oc-modal-panel{
+  width:100%;
+  max-width:1600px;
+  display:flex;
+  flex-direction:column;
+  background:var(--bg-0);
+  border-radius:var(--radius-md);
+  overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,0.45);
+}
+
+.oc-modal-bar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:8px 14px;
+  background:var(--bg-1);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+
+.oc-modal-title{
+  font-size:0.8625rem;font-weight:700;color:var(--text-primary);letter-spacing:.02em;
+}
+
+/* Left-corner back button, replacing the old top-right "✕ Close" button
+   on all 4 modals (OI Dashboard / Greeks-GEX / FII-DII / IV Surface) —
+   matches option-chain.html's .oc-back pattern (circular arrow button
+   next to the title) instead of a right-aligned red close pill.
+   NOTE: the previous #oc-modal-close / #oc-modal-close:hover rules here
+   used to target an id ("oc-modal-close") that none of the actual
+   buttons in DashboardPro.html ever had (they used oi-modal-close /
+   greeks-modal-close / fiidii-modal-close / iv-surface-modal-close
+   instead), so that styling was already dead — removed rather than
+   left orphaned now that the markup changes too. */
+.oc-modal-id{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.oc-modal-back{
+  width:34px;height:34px;border-radius:50%;
+  background:var(--bg-2);border:1px solid var(--border);
+  color:var(--text-secondary);font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,color .15s,transform .1s;
+  flex-shrink:0;margin-top:2px;
+}
+
+.oc-modal-back:hover{
+  border-color:var(--info);
+  color:var(--text-primary);
+  transform:translateX(-2px);
+}
+
+.oc-modal-iframe{
+  flex:1 1 auto;
+  width:100%;
+  border:none;
+  background:#0b0e11;
+}
+
+/* ── ANALYTICS SUMMARY STRIP ──
+   Generic key/value-with-bar row component. Now used by the Option Chain
+   Snapshot card (see ChainView.chainSummaryBodyHtml in chain-views.js). */
+
+.arp-strip{
+  background:var(--bg-2);border-radius:var(--radius-sm);
+  padding:8px 10px;margin-bottom:10px;
+  overflow:hidden;
+}
+
+.arp-row{
+  display:grid;grid-template-columns:52px minmax(0,1fr);
+  align-items:center;gap: var(--space-2);
+  padding:3px 0;
+}
+
+.arp-row+.arp-row{border-top:1px solid var(--border);}
+
+.arp-key{font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;}
+
+.arp-val{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;overflow:hidden;min-width:0;}
+
+.arp-num{font-size:0.7906rem;font-weight:700;font-family:var(--font-mono);white-space:nowrap;flex-shrink:0;}
+
+.arp-bar{height:7px;border-radius:2px;flex-shrink:1;min-width:2px;max-width:72px;}
+
+/* ── OI SNAPSHOT REDESIGN ──────────────────────────────────────────────
+   Visual rework of the "Option Chain Snapshot" card's always-visible
+   grid to match the reference mockup: a bigger 2-up stat card (colored
+   icon badge, big signed value, inline sparkline, PCR footer row) plus
+   a full-width "OI Flow" card below (clock-tagged 5/15/30m figures + a
+   circular "open full view" button). Emitted by
+   ChainView.prototype.buildChainSummaryHtml in chain-template.js — the
+   markup below replaces the old .arp-sum-card 3-tile version. The old
+   .arp-summary-grid/.arp-sum-*/.arp-skew-*/.arp-doi-* rules that backed
+   that version have been removed: buildVolOiDetailHtml (the Volume &
+   Vol/OI Tier-3 collapsible) only emits .arp-vratio-* markup now, not
+   that component, so nothing referenced them anymore. */
+
+.oi-snap-heading{
+  display:flex;align-items:center;gap: var(--space-3);
+  font-family:var(--font-display);font-weight:700;font-size:0.9375rem;
+  color:var(--text-primary);
+}
+
+.oi-snap-badge{
+  font-family:var(--font-mono);font-weight:700;font-size:0.6875rem;
+  color:var(--text-secondary);background:var(--bg-2);
+  border:1px solid var(--border);border-radius:999px;
+  padding: var(--space-1) var(--space-4);letter-spacing:.03em;white-space:nowrap;
+}
+
+.oi-snap-fullchain{
+  display:inline-flex;align-items:center;gap: var(--space-2);
+  font-family:var(--font-display);font-weight:600;font-size:0.75rem;
+  color:var(--text-primary);background:var(--bg-2);
+  border:1px solid var(--border);border-radius:999px;
+  padding:7px 14px;cursor:pointer;white-space:nowrap;
+}
+.oi-snap-fullchain:hover{border-color:var(--info);color:var(--info);}
+
+.oi-snap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;}
+
+.oi-snap-card{
+  border-radius:var(--radius);border:1px solid;
+  padding: var(--space-4);display:flex;flex-direction:column;gap:10px;min-width:0;
+}
+.oi-snap-card.pos{background:var(--pos-dim);border-color:rgba(32,201,151,.25);}
+.oi-snap-card.info{background:var(--info-dim);border-color:rgba(116,192,252,.25);}
+
+.oi-snap-card-top{display:flex;align-items:center;gap: var(--space-3);}
+
+.oi-snap-icon{
+  width:28px;height:28px;flex:0 0 28px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+}
+.oi-snap-icon.pos{background:rgba(32,201,151,.16);}
+.oi-snap-icon.info{background:rgba(116,192,252,.16);}
+
+.oi-snap-title{
+  font-family:var(--font-display);font-weight:700;font-size:0.78rem;
+  color:var(--text-primary);letter-spacing:.02em;
+}
+
+.oi-snap-body{display:flex;align-items:flex-end;justify-content:space-between;gap: var(--space-3);min-width:0;}
+
+.oi-snap-label{font-size:0.7rem;color:var(--text-secondary);margin-bottom:3px;}
+
+.oi-snap-value{font-family:var(--font-mono);font-weight:700;font-size:1.2rem;white-space:nowrap;}
+.oi-snap-value.pos{color:var(--pos);}
+.oi-snap-value.neg{color:var(--neg);}
+
+.oi-snap-spark{flex-shrink:0;}
+
+.oi-snap-footer{
+  display:flex;align-items:center;justify-content:space-between;gap: var(--space-3);flex-wrap:wrap;
+  padding-top: var(--space-3);border-top:1px solid var(--border);
+}
+.oi-snap-footer-label{font-family:var(--font-mono);font-size:0.7rem;font-weight:700;color:var(--text-secondary);}
+.oi-snap-footer-val{font-family:var(--font-mono);font-size:0.95rem;font-weight:700;}
+.oi-snap-footer-val.warn{color:var(--warn);}
+.oi-snap-footer-tag{
+  font-size:0.65rem;font-weight:600;color:var(--text-secondary);
+  background:var(--bg-1);border:1px solid var(--border);border-radius:999px;padding:3px 9px;white-space:nowrap;
+}
+
+.oi-flow-card{
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);
+  padding: var(--space-4);display:flex;flex-direction:column;gap: var(--space-4);
+}
+.oi-flow-head{display:flex;align-items:center;gap: var(--space-3);}
+.oi-flow-icon{
+  width:28px;height:28px;flex:0 0 28px;border-radius:50%;
+  background:rgba(140,110,255,.16);display:flex;align-items:center;justify-content:center;
+}
+.oi-flow-body{display:flex;align-items:center;gap:0;}
+.oi-flow-cols{flex:1 1 auto;display:flex;justify-content:space-around;flex-wrap:wrap;gap: var(--space-4);}
+.oi-flow-col{display:flex;flex-direction:column;align-items:center;gap:5px;}
+.oi-flow-win{font-size:0.7rem;color:var(--text-secondary);}
+.oi-flow-clock{color:#8c6eff;}
+.oi-flow-val{font-family:var(--font-mono);font-weight:700;font-size:1.2rem;}
+.oi-flow-divider{width:1px;align-self:stretch;background:var(--border);margin:0 14px;}
+.oi-flow-open-btn{
+  width:42px;height:42px;flex:0 0 42px;border-radius:50%;border:1px solid var(--info);
+  background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+}
+.oi-flow-open-btn:hover{background:var(--info-dim);}
+
+@media (max-width:640px){
+  .oi-snap-grid{grid-template-columns:1fr;}
+  .oi-flow-body{flex-direction:column;gap: var(--space-5);}
+  .oi-flow-divider{display:none;}
+}
+
+/* Volume + Vol/OI ratio card */
+
+.arp-vratio-rows{display:flex;flex-direction:column;gap:5px;}
+
+.arp-vratio-row{display:flex;align-items:center;gap:7px;}
+
+.arp-vratio-side{width:18px;font-family:var(--font-mono);font-size:0.625rem;font-weight:700;}
+
+.arp-vratio-num{font-family:var(--font-mono);font-size:0.6875rem;font-weight:600;min-width:42px;}
+
+.arp-vratio-track{flex:1;height:6px;border-radius:3px;background:var(--bg-1);overflow:hidden;}
+
+.arp-vratio-fill{height:100%;border-radius:3px;}
+
+.arp-vratio-fill.ce{background:var(--neg);}
+
+.arp-vratio-fill.pe{background:var(--pos);}
+
+.arp-vratio-val{font-family:var(--font-mono);font-size:0.6875rem;font-weight:700;color:var(--text-primary);min-width:32px;text-align:right;}
+
+/* ── LOADER ── */
+
+#loader{padding:32px 0;}
+
+.load-zone{
+  border:2px dashed var(--border);border-radius:var(--radius);
+  padding:32px 24px;text-align:center;margin-bottom: var(--space-4);
+}
+
+.load-title{font-size:1.0781rem;font-weight:600;color:var(--text-primary);margin-bottom: var(--space-3);}
+
+.load-sub{font-size:0.8625rem;color:var(--text-secondary);margin-bottom: var(--space-6);line-height:1.7;}
+
+.load-methods{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom: var(--space-4);}
+
+.load-btn{
+  display:flex;flex-direction:column;align-items:center;gap: var(--space-3);
+  padding:18px 12px;border:1px solid var(--border);
+  border-radius:var(--radius);background:var(--bg-1);cursor:pointer;
+  transition:all 0.15s;
+}
+
+.load-btn:hover{border-color:var(--info);background:var(--bg-2);}
+
+.load-btn i{font-size:1.725rem;color:var(--text-primary);}
+
+.load-btn span{font-size:0.8625rem;font-weight:500;color:var(--text-primary);}
+
+.load-btn small{font-size:0.8625rem;color:var(--text-tertiary);text-align:center;}
+
+#paste-area{
+  width:100%;height:72px;font-size:0.7906rem;font-family:var(--font-mono);
+  border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:10px;background:var(--bg-2);color:var(--text-primary);resize:vertical;display:none;
+}
+
+#load-go{
+  margin-top: var(--space-3);font-size:0.8625rem;padding:7px 22px;
+  border-radius:var(--radius-sm);border:1px solid var(--info);
+  background:rgba(51,154,240,0.1);color:var(--info);cursor:pointer;display:none;
+}
+
+#err-msg{font-size:0.7906rem;color:var(--neg);margin-top: var(--space-3);min-height:16px;}
+
+/* ── GENIUS ── */
+
+.mini-kv{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
+
+.mini-kv-lbl{font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px;}
+
+.mini-kv-val{font-size:1.15rem;font-weight:700;font-family:var(--font-mono);}
+
+.oi-flow-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:2px 0;}
+
+.oi-flow-ce{background:var(--neg);transition:flex .4s;}
+
+.oi-flow-pe{background:var(--pos);transition:flex .4s;}
+
+.leg-pill{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;font-family:var(--font-mono);font-size:0.7906rem;font-weight:700;}
+
+.leg-pill.buy{background:rgba(18,184,134,.10);border:1px solid rgba(18,184,134,.30);}
+
+.leg-pill.sell{background:rgba(250,82,82,.10);border:1px solid rgba(250,82,82,.30);}
+
+.dec-badge{display:inline-block;padding:5px 16px;border-radius:20px;font-size:1.2219rem;font-weight:700;font-family:var(--font-mono);}
+
+.dec-badge.bull{background:rgba(18,184,134,.15);color:var(--pos);border:1.5px solid rgba(18,184,134,.4);}
+
+.dec-badge.bear{background:rgba(250,82,82,.15);color:var(--neg);border:1.5px solid rgba(250,82,82,.4);}
+
+.dec-badge.neutral{background:rgba(245,159,0,.15);color:var(--warn);border:1.5px solid rgba(245,159,0,.4);}
+
+.vrd-chip{display:grid;grid-template-columns:56px 1fr;gap: var(--space-1);align-items:start;padding:4px 0;border-bottom:1px solid var(--border);}
+
+.vrd-chip:last-child{border-bottom:none;}
+
+.vrd-key{font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;}
+
+.vrd-val{font-size:0.8625rem;color:var(--text-secondary);line-height:1.4;}
+
+/* == INSTITUTIONAL F&O SIMULATOR == */
+
+/* No margin-bottom here — .sim-wrap is used both as a grid item
+   (#sec-simulator, paired with #sec-strats/.section-card, which carries
+   no margin-bottom of its own) and as a standalone block (#sdt-panel,
+   which sets its own inline margin-bottom:10px). A margin-bottom baked
+   into the class made #sec-simulator's box render 10px shorter than
+   #sec-strats even with the parent grid's align-items:stretch, since
+   stretch fills the row's cross size minus each item's own margin. */
+.sim-wrap{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;box-shadow:var(--shadow-sm);position:relative;}
+
+.sim-wrap::before{
+  content:'';
+  position:absolute;top:0;left:0;right:0;height:2px;z-index:1;
+  background:var(--section-accent, var(--border));
+}
+.sim-wrap.sim-amber{  --section-accent:var(--warn); }
+.sim-wrap.sim-neutral{ --section-accent:var(--text-tertiary); }
+
+.sim-header{padding:14px 18px 10px;border-bottom:1px solid var(--border);}
+
+.sim-title{font-size:1.0781rem;font-weight:700;color:var(--text-primary);letter-spacing:-.01em;}
+
+.sim-subtitle{font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+.sim-body{padding:14px 18px;}
+
+.sim-chart-area{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:14px 14px 10px;position:relative;margin-bottom:14px;}
+
+.sim-chart-label{font-size:0.8625rem;color:var(--text-tertiary);margin-bottom: var(--space-3);font-family:var(--font-mono);}
+
+#sim-gex-canvas{width:100%;display:block;}
+
+.sim-annot{position:absolute;background:rgba(22,24,29,0.88);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.7906rem;color:var(--text-primary);pointer-events:none;display:none;white-space:nowrap;z-index:10;top:10px;left:50px;}
+
+.sim-controls{display:grid;grid-template-columns:1fr 1fr;gap: var(--space-4);margin-bottom:14px;}
+
+.sim-ctrl-row{display:flex;align-items:center;gap:10px;}
+
+.sim-ctrl-label{font-size:0.7906rem;font-weight:600;color:var(--text-primary);min-width:100px;flex-shrink:0;}
+
+.sim-ctrl-slider{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;background:var(--border);outline:none;cursor:pointer;}
+
+.sim-ctrl-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--info);border:2px solid var(--bg-1);box-shadow:0 0 0 2px rgba(51,154,240,.3);cursor:pointer;}
+
+.sim-ctrl-val{font-family:var(--font-mono);font-size:0.8625rem;font-weight:700;color:var(--text-primary);background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:4px 9px;min-width:62px;text-align:center;}
+
+.sim-dealer-sel{flex:1;padding:5px 8px;font-size:0.7906rem;background:var(--bg-2);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-sans);cursor:pointer;outline:none;}
+
+.sim-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap: var(--space-3);margin-bottom:14px;}
+
+.sim-stat{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center;}
+
+.sim-stat-label{font-size:0.7906rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom: var(--space-1);}
+
+.sim-stat-val{font-size:1.15rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);}
+
+.sim-stat-sub{font-size:0.8625rem;color:var(--text-tertiary);margin-top:2px;}
+
+.sim-inst-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--text-tertiary);display:inline-block;margin-right:5px;flex-shrink:0;vertical-align:middle;}
+
+.sim-inst-dot.filled{background:var(--pos);border-color:var(--pos);}
+
+.sim-regime-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;margin-bottom: var(--space-4);}
+
+.sim-regime-label{font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;min-width:90px;}
+
+.sim-regime-track{flex:1;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--pos) 0%,var(--warn) 40%,var(--warn) 60%,var(--neg) 100%);position:relative;}
+
+.sim-regime-needle{position:absolute;top:-4px;width:3px;height:16px;background:var(--text-primary);border-radius:2px;transform:translateX(-50%);transition:left .4s cubic-bezier(.4,0,.2,1);}
+
+.sim-regime-val{font-size:0.7906rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);min-width:60px;text-align:right;}
+
+.sim-vol-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+
+.sim-vol-card{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+
+.sim-vol-card-title{font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;margin-bottom: var(--space-3);}
+
+.sim-vol-bar-row{display:flex;align-items:center;gap: var(--space-2);padding:3px 0;}
+
+.sim-vol-bar-label{font-size:0.8625rem;color:var(--text-tertiary);font-family:var(--font-mono);min-width:44px;}
+
+.sim-vol-bar-track{flex:1;height:5px;border-radius:3px;background:var(--border);overflow:hidden;}
+
+.sim-vol-bar-fill{height:100%;border-radius:3px;transition:width .3s ease;}
+
+.sim-vol-bar-val{font-size:0.8625rem;font-weight:700;font-family:var(--font-mono);min-width:40px;text-align:right;}
+
+/* ═══════════════════════════════════════════════════════════════════
+   The full standalone Option Chain page CSS that used to be merged in
+   here (option_chain.html's entire stylesheet, including a second
+   :root redefining --bg/--text/--mono/etc for the old in-dashboard
+   dense chain table) has been removed along with that table. The full
+   ledger UI now lives only in option-chain.css, loaded solely by
+   option-chain.html — it no longer needs to duplicate into this file.
+   ═══════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   OI FLOW SNAPSHOT + INSTITUTIONAL ACTIVITY CRUX — redesign
+   Applies to #oi-flow-summary-card (OiFlowView.buildOiFlowSummaryHtml)
+   and #inst-activity-summary-card (ExecView.buildInstitutionalActivity-
+   SummaryCard) — see panels-views.js. Both cards sit side by side in
+   chain-renderer.js's OI Flow + Crux grid (layout.css doesn't need
+   touching, they already share a 2-col grid there). This block replaces
+   the ad-hoc inline styles those two builders used to write with real,
+   reusable classes so the pair reads as one designed unit instead of two
+   improvised ones. --oic-purple is a scoped local, not promoted to
+   theme.css — it's only ever used as an icon-chip accent on these two
+   cards (distinct from --retail, which is semantically the retail-
+   participant series color even though it happens to be the same hue). */
+
+.oic-card{
+  --oic-purple: #8B5CF6;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg);
+  padding:18px 20px;
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  height:100%;
+}
+
+/* Vol/OI Velocity by Strike + OI Flow Snapshot, unified into one card
+   (2026-08-02) — see the OI FLOW SECTION comment in chain-renderer.js.
+   #sdt-panel and #oi-flow-summary-card stay separate DOM nodes (required
+   for the outerHTML-diff/drag-guard reasons documented there); this is a
+   purely visual merge: one shared border/background/shadow on the
+   outer wrapper, #sdt-panel's own chrome dropped in favor of it, and
+   #oi-flow-summary-card's .oic-card chrome overridden away via the
+   descendant selector below so it seats flush under the velocity panel
+   instead of floating as its own bordered box. */
+.oic-merged-card{
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-sm);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+}
+
+.oic-merged-vel{
+  padding:14px 20px;
+  border-bottom:1px solid var(--border);
+  position:relative;
+}
+.oic-merged-vel::before{
+  content:'';
+  position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--text-tertiary);
+}
+
+.oic-merged-card #oi-flow-summary-card{
+  border:none;
+  border-radius:0;
+  box-shadow:none;
+  background:transparent;
+  height:auto;
+  flex:1;
+}
+
+.oic-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  flex-wrap:wrap;
+}
+
+.oic-head-left{display:flex;align-items:center;gap: var(--space-4);min-width:0;}
+
+.oic-icon{
+  width:34px;height:34px;flex-shrink:0;
+  border-radius:9px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;
+  background:rgba(116,192,252,0.14);color:var(--info);
+}
+.oic-icon.icon-amber{background:var(--warn-dim);color:var(--warn);}
+
+.oic-title{
+  font-family:var(--font-display);
+  font-size:1.0625rem;font-weight:700;
+  color:var(--text-primary);
+  letter-spacing:0.01em;
+  min-width:0;
+  display:flex;align-items:baseline;gap: var(--space-3);flex-wrap:wrap;
+}
+
+.oic-title .oic-sub{
+  font-size:0.6875rem;font-weight:600;color:var(--text-tertiary);
+  letter-spacing:.06em;text-transform:uppercase;
+}
+
+.oic-action{
+  display:inline-flex;align-items:center;gap: var(--space-2);
+  padding:8px 14px;
+  border-radius:var(--radius-pill);
+  border:1px solid var(--info-dim);
+  background:rgba(116,192,252,0.06);
+  color:var(--info);
+  font-size:0.8125rem;font-weight:600;
+  white-space:nowrap;cursor:pointer;
+  transition:background .12s,border-color .12s;
+}
+.oic-action:hover{background:rgba(116,192,252,0.16);border-color:var(--info);}
+
+/* Strike Detail Report button, moved out of .oic-head — at typical card
+   widths the header's title + subtitle badge left no room for the
+   button, so flex-wrap dropped it onto its own centered second line.
+   A left-aligned footer, pinned to the bottom of the card via
+   margin-top:auto (.oic-card is flex-direction:column), reads as a
+   deliberate "more detail below" action instead of an overflow. */
+.oic-footer{
+  margin-top:auto;
+  padding-top:14px;
+  border-top:1px solid var(--border-2);
+}
+.oic-footer .oic-action{margin:0;}
+
+/* ── OI Flow Snapshot tiles (ATM read + Biggest Build) ── */
+
+.oic-tiles{display:grid;grid-template-columns:1fr 1fr;gap: var(--space-4);align-items:stretch;}
+
+.oic-tile{
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius-md);
+  padding: var(--space-5);
+  min-width:0;
+}
+
+.oic-tile-head{display:flex;align-items:center;gap: var(--space-3);margin-bottom:14px;}
+
+.oic-tile-icon{
+  width:26px;height:26px;flex-shrink:0;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;background:rgba(139,92,246,0.16);color:var(--oic-purple);
+}
+
+.oic-tile-label{
+  font-size:0.6875rem;font-weight:700;color:var(--text-secondary);
+  letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+
+.oic-atm-figs{display:flex;align-items:baseline;gap: var(--space-3);font-family:var(--font-mono);flex-wrap:wrap;}
+.oic-atm-figs .fig{font-size:1.375rem;font-weight:700;line-height:1;}
+.oic-atm-figs .fig.ce{color:var(--ce);}
+.oic-atm-figs .fig.pe{color:var(--pe);}
+.oic-atm-figs .sep{font-size:0.6875rem;color:var(--text-tertiary);font-weight:500;font-family:var(--font-sans);}
+
+.oic-pcr{margin-top:10px;font-size:0.8125rem;font-weight:700;}
+
+.oic-build-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:0.8125rem;color:var(--text-secondary);}
+.oic-build-row:not(:last-child){border-bottom:1px solid var(--border-2);}
+.oic-build-row .val{font-family:var(--font-mono);font-weight:700;}
+.oic-build-row .val.ce{color:var(--ce);}
+.oic-build-row .val.pe{color:var(--pe);}
+.oic-build-row .delta{font-size:0.75rem;font-weight:700;margin-left:5px;}
+.oic-build-row .delta.up{color:var(--pos);}
+
+/* ── Institutional Activity Crux badges + strongest-signal callout ── */
+
+.oic-badges{display:flex;flex-wrap:wrap;gap: var(--space-3);margin-bottom:14px;}
+
+.oic-badge{
+  display:flex;align-items:center;gap: var(--space-3);
+  padding:9px 14px;
+  border-radius:8px;
+  background:var(--bg-2);
+  border-left:3px solid var(--border);
+  font-size:0.8125rem;
+  flex:1 1 auto;
+  min-width:120px;
+}
+.oic-badge.b-blue{border-left-color:var(--info);}
+.oic-badge.b-amber{border-left-color:var(--warn);}
+.oic-badge.b-red{border-left-color:var(--neg);}
+.oic-badge.b-green{border-left-color:var(--pos);}
+.oic-badge .lbl{font-weight:700;color:var(--text-secondary);letter-spacing:.04em;font-size:0.75rem;}
+.oic-badge .val{color:var(--text-primary);white-space:nowrap;}
+
+.oic-signal{
+  display:flex;align-items:center;gap: var(--space-4);
+  padding:14px 16px;
+  border-radius:var(--radius-md);
+  border:1px solid var(--neg-dim);
+  background:rgba(255,107,107,0.05);
+  margin-top:auto;
+}
+.oic-signal-icon{
+  width:36px;height:36px;flex-shrink:0;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,107,107,0.14);color:var(--neg);font-size:16px;
+  border:1px solid var(--neg-dim);
+}
+.oic-signal-body{font-size:0.8125rem;color:var(--text-secondary);min-width:0;}
+.oic-signal-body strong{font-weight:700;}
+.oic-signal-meta{color:var(--text-tertiary);}
+
+.oic-empty{font-size:0.8125rem;color:var(--text-tertiary);padding:8px 0;}
+
+@media (max-width:900px){
+  .oic-tiles{grid-template-columns:1fr;}
+  .oic-badges{flex-direction:column;}
+}

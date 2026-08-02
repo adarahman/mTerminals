@@ -1,0 +1,88 @@
+/* ══════════════════════════════════════════════════════════════════════
+   PriceChartEngine panel (was injected at runtime by
+   Dashboard.js: PriceChartEngine._injectStyles() — moved here so all CSS
+   lives in one file instead of being split across .js template literals.
+   The order-panel selectors (.pc-order-panel/.pc-seg/etc.) live solely in
+   pc-order-panel.css now — this file only keeps the chart-shell rules
+   (.pc-panel/.pc-toolbar/.pc-btn/.pc-chart-wrap/.pc-win-bar/...).
+   ══════════════════════════════════════════════════════════════════════ */
+.pc-panel { font-family:'Inter',sans-serif; color:var(--text-primary); }
+.pc-toolbar { display:flex; flex-wrap:wrap; gap: var(--space-2); align-items:center; margin-bottom: var(--space-3); }
+.pc-title { margin-right: var(--space-3); font-weight:600; color:var(--text-primary); }
+.pc-spot-readout { font-weight:700; font-size:15px; color:var(--pos); }
+.pc-spacer { flex:1 1 auto; }
+.pc-btn {
+  background:#2B2E3A; color:var(--text-secondary); border:1px solid #3A3F4B;
+  border-radius:6px; padding:5px 10px; font-size:12px; font-family:inherit;
+  cursor:pointer; transition:background .15s,color .15s,border-color .15s;
+}
+.pc-btn:hover { background:#383C4A; color:var(--text-primary); }
+.pc-btn.pc-active { background:var(--info-strong); color:#fff; border-color:var(--info-strong); }
+.pc-field {
+  display:flex; align-items:center; gap: var(--space-1); font-size:12px; color:var(--text-secondary);
+  background:#2B2E3A; border:1px solid #3A3F4B; border-radius:6px; padding: var(--space-1) var(--space-3);
+}
+.pc-field input[type=number] {
+  width:44px; background:#1A1C24; color:var(--text-primary); border:1px solid #3A3F4B;
+  border-radius:4px; padding:2px 4px; font-size:12px; font-family:inherit;
+}
+.pc-field input[type=checkbox] { accent-color:var(--info-strong); cursor:pointer; }
+.pc-field input[type=color] {
+  width:30px; height:22px; padding:0; border:1px solid #3A3F4B; border-radius:4px;
+  background:transparent; cursor:pointer;
+}
+.pc-footnote { font-size:11px; color:var(--text-muted); margin-top: var(--space-2); }
+/* ── Layout fix: panel is now a fixed-height flex column so the chart
+   canvas actually fills the card instead of sitting at a hardcoded 220px
+   inside a tall, unstyled container. .pc-chart-wrap/.pc-order-panel/
+   .pc-win-bar/.pc-ohlc-readout/.pc-watermark previously had NO css at
+   all — the order panel (BUY/SELL/CALL/PUT/Lots) was falling into normal
+   block flow below the two canvases, which is what produced the big
+   blank gap between the chart and the order controls. ── */
+.pc-panel{
+  display:flex; flex-direction:column;
+  height:clamp(460px, 64vh, 640px);
+  box-sizing:border-box;
+}
+.pc-toolbar-sub{ margin-bottom: var(--space-3); }
+.pc-interval-field select{ min-width:56px; }
+.pc-ohlc-readout{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  font-family:var(--font-mono); font-size:11px; color:var(--text-secondary);
+  margin-bottom: var(--space-1); flex:0 0 auto;
+}
+.pc-ohlc-sym{ font-weight:700; color:var(--text-primary); margin-right:2px; }
+.pc-ohlc-item b{ color:var(--text-primary); margin-left:3px; font-weight:600; }
+.pc-ohlc-chg{ font-weight:700; }
+.pc-ohlc-chg.pc-pos{ color:var(--pos); }
+.pc-ohlc-chg.pc-neg{ color:var(--neg); }
+/* Chart area now takes all remaining vertical space in the panel instead
+   of a fixed 220px — price-chart.js reads this element's clientHeight to
+   size the canvas, so the two stay in sync. */
+.pc-chart-wrap{
+  position:relative; flex:1 1 auto; min-height:0;
+  display:flex; flex-direction:column;
+}
+#price-chart-canvas{ flex:0 0 auto; width:100%; min-height:0; cursor:crosshair; }
+/* Volume sub-panel has no drawing logic wired up yet (canvas exists but
+   nothing ever paints to it) — hiding it rather than shipping a
+   permanently-blank strip. Re-enable once _drawVolume() exists. */
+#price-chart-volume-canvas{ display:none; }
+.pc-watermark{
+  position:absolute; top:8px; left:12px; z-index:1;
+  font-family:var(--font-display); font-weight:700;
+  font-size:13px; letter-spacing:.04em; color:rgba(255,255,255,.18);
+  pointer-events:none; text-transform:uppercase;
+}
+.pc-win-bar{
+  display:flex; align-items:center; gap:2px; flex:0 0 auto; flex-wrap:wrap;
+  padding-top: var(--space-2); margin-top: var(--space-2); border-top:1px solid #2B2E3A;
+}
+.pc-win-btn{
+  background:none; border:none; color:var(--text-muted); font-size:11px;
+  padding: var(--space-1) var(--space-3); border-radius:4px; cursor:pointer; font-family:inherit;
+}
+.pc-win-btn:hover{ background:#2B2E3A; color:var(--text-primary); }
+.pc-win-btn.pc-active{ background:var(--info-strong); color:#fff; }
+.pc-win-bar .pc-reset-btn{ margin-left: var(--space-2); }
+.pc-win-bar .pc-footnote{ margin-top:0; }
