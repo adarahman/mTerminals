@@ -205,6 +205,7 @@ class DataService {
       parseAndRender(JSON.stringify(AppState.wsState));
       if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
       if (window.renderAlgoStatusPanel) window.renderAlgoStatusPanel(AppState.wsState);
+      if (window.renderReconciliationAlerts) renderReconciliationAlerts(AppState.wsState);
       return;
     }
     this.lastRenderedSymbol = AppState.wsState.symbol || _lastRenderedSymbol;
@@ -225,6 +226,12 @@ class DataService {
     // itself hasn't changed since algo_status_loop() broadcasts on its
     // own slow independent timer, not tick-cadence.
     if (window.renderAlgoStatusPanel) window.renderAlgoStatusPanel(AppState.wsState);
+    // Reconciliation alerts (risk/position_reconciler.py) — same
+    // self-mounted, outside-#dashboard treatment, toast-based rather than
+    // a persistent panel patch, so its own internal dedupe (algo-status.js's
+    // _reconSeenTs) is what keeps this a no-op once an alert's already
+    // been shown, not a setHtmlIfChanged guard like the panels above.
+    if (window.renderReconciliationAlerts) renderReconciliationAlerts(AppState.wsState);
   };
 }
 

@@ -53,6 +53,7 @@ from risk.account_guard import (
 )
 from risk.position_reconciler import PositionReconciler
 from decision.auto_executor import AutoExecutor
+from backtest.replay import run_backtest
 
 _REAL_EXPORT = mTerminals_json.export_dashboard_json
 _CAPTURED = {}
@@ -285,6 +286,14 @@ POSITION_RECONCILE_SECONDS = int(os.environ.get("POSITION_RECONCILE_SECONDS", "1
 # piggybacking on every engine_loop tick.
 ALGO_STATUS_POLL_SECONDS = int(os.environ.get("ALGO_STATUS_POLL_SECONDS", "5"))
 LAST_ALGO_STATUS = None
+
+# Most recent non-clean PositionReconciler.check() result, broadcast as
+# {"type":"reconciliationAlert",...} — see _broadcast_reconciliation_alert().
+# Handed to newly-connecting clients the same way LAST_ALGO_STATUS is, so a
+# dashboard opened after a mismatch was found still sees it instead of
+# waiting for the next drift (which may never come, if it was a one-off
+# propagation-lag blip that already resolved itself).
+LAST_RECONCILIATION_ALERT = None
 
 # Cache of the most recent live position-book fetch, populated by
 # reconcile_loop()'s own periodic smartapi_get_positions() call (below).
@@ -535,6 +544,17 @@ async def ws_handler(request):
             await ws.send_str(orjson.dumps({"type": "algoStatus", "payload": status}, default=_json_default).decode())
         except Exception as e:
             print(f"[algo-status] initial snapshot failed: {e}", flush=True)
+        # Most recent position-reconciliation mismatch, if any — same
+        # "hand over what we already have" treatment as algoStatus above,
+        # so a dashboard opened after a mismatch was found doesn't sit
+        # blank until the next drift happens to recur.
+        if LAST_RECONCILIATION_ALERT is not None:
+            try:
+                await ws.send_str(orjson.dumps(
+                    {"type": "reconciliationAlert", "payload": LAST_RECONCILIATION_ALERT},
+                    default=_json_default).decode())
+            except Exception as e:
+                print(f"[position_reconciler] initial alert snapshot failed: {e}", flush=True)
         # Hand a new client whatever paper-trading state already exists
         # (positions/orders survive process restarts via SQLite) instead of
         # leaving the panel empty until the next place_order/tick.
@@ -806,7 +826,8 @@ async def _handle_place_order(payload):
                 # relationship update_pnl() above has to the periodic
                 # daily-loss check.
                 post_fill_orders = await asyncio.to_thread(smartapi_get_order_book)
-                _POSITION_RECONCILER.check(post_fill_orders, post_fill_positions, PT_LOT_SIZES)
+                post_fill_result = _POSITION_RECONCILER.check(post_fill_orders, post_fill_positions, PT_LOT_SIZES)
+                await _broadcast_reconciliation_alert(post_fill_result, source="post_fill")
             except Exception as e:
                 print(f"[position_reconciler] could not run post-fill check: {e}", flush=True)
             await _broadcast_portfolio(current_prices)
@@ -911,6 +932,48 @@ def _build_algo_status() -> dict:
         "autoExecutor": exec_status,
         "symbol": SYMBOL,
     }
+
+
+async def _broadcast_reconciliation_alert(result, source: str):
+    """Turns a non-clean PositionReconciler.check() result into a
+    {"type":"reconciliationAlert",...} broadcast — previously this result
+    was only ever printed to the server log (see reconcile_loop's and
+    _handle_place_order's own prints), so the only way to know a mismatch
+    was found — even a below-trip-threshold one — was tailing logs. These
+    are cheap, low-severity signals by design (see position_reconciler.py's
+    module docstring): most resolve themselves next cycle once a fill
+    propagates, but a human watching the dashboard should still see them
+    as they happen rather than only learning about the expensive case
+    (an actual kill-switch trip) after the fact.
+
+    No-ops on a clean result — this only fires the broadcast (and updates
+    LAST_RECONCILIATION_ALERT, which new connections are handed) when
+    there's actually something to show. `source` distinguishes the fast
+    post-fill check from the periodic sweep, purely for display context.
+    """
+    global LAST_RECONCILIATION_ALERT
+    if result.clean:
+        return
+
+    tripped = result.max_abs_diff_lots() >= _POSITION_RECONCILER.trip_lots
+    payload = {
+        "ts": time.time(),
+        "source": source,
+        "tripped": tripped,
+        "tripLots": _POSITION_RECONCILER.trip_lots,
+        "mismatches": [
+            {
+                "symbol": m.symbol,
+                "orderBookLots": m.order_book_lots,
+                "positionLots": m.position_lots,
+                "diffLots": m.diff_lots,
+            }
+            for m in result.mismatches
+        ],
+        "unparseableSymbols": result.unparseable_symbols,
+    }
+    LAST_RECONCILIATION_ALERT = payload
+    await broadcast({"type": "reconciliationAlert", "payload": payload})
 
 
 async def broadcast(message):
@@ -2205,6 +2268,7 @@ async def reconcile_loop():
                 print(f"[position_reconciler] periodic check: "
                       f"{len(result.mismatches)} mismatch(es), "
                       f"{len(result.unparseable_symbols)} unparseable", flush=True)
+                await _broadcast_reconciliation_alert(result, source="periodic")
         except Exception as e:
             # Same defensive posture as _funds_poll_body/engine_loop — a
             # failed reconciliation cycle should never take down the loop,
@@ -2646,6 +2710,91 @@ async def _get_history_cached(req_symbol, range_key, cfg):
         _HISTORY_INFLIGHT.pop(key, None)
 
 
+async def backtest_handler(request):
+    """Runs backtest/replay.py's run_backtest() against captured decision
+    history (backtest/snapshot_logger.py) for the requested symbol/date
+    range/gating parameters, and returns a JSON summary + trade list +
+    cumulative-P&L equity curve for the dashboard's backtest results
+    viewer (Dashboard/backtest-view.js). Closes the loop iterating on
+    decision_engine.py's thresholds started: previously the only way to
+    see a backtest's output was CLI (backtest/replay.py's own
+    `if __name__ == "__main__"` block, printing to stdout).
+
+    Query params (all optional except symbol, which falls back to the
+    server's current SYMBOL): start, end (snapshot_logger date-range
+    filters, e.g. '2026-07-01'), minConfidence, cooldownSeconds,
+    maxTradesPerSymbolPerDay, qtyLots, useAccountGuard ('true'/'false').
+    See run_backtest()'s own docstring for what each gate does — these
+    are the exact same AutoExecutor.evaluate() gates the live path uses,
+    just parameterized here so different thresholds can be iterated on
+    without editing env vars and restarting the server.
+
+    Runs on the request-handling task directly (not asyncio.to_thread) —
+    unlike the SmartAPI history handlers above, this hits no broker/rate
+    limit, and a backtest is already something a user explicitly
+    requested and is waiting on, not a background tick that would stall
+    other clients' broadcasts.
+    """
+    req_symbol = (request.query.get("symbol") or SYMBOL).strip().upper()
+
+    def _int_param(name, default):
+        raw = request.query.get(name)
+        if raw is None or raw == "":
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
+    start = request.query.get("start") or None
+    end = request.query.get("end") or None
+    use_account_guard = str(request.query.get("useAccountGuard", "")).strip().lower() in ("1", "true", "yes")
+
+    try:
+        result = await run_backtest(
+            req_symbol,
+            start=start,
+            end=end,
+            qty_lots=_int_param("qtyLots", 1),
+            min_confidence=_int_param("minConfidence", 40),
+            cooldown_seconds=_int_param("cooldownSeconds", 300),
+            max_trades_per_symbol_per_day=_int_param("maxTradesPerSymbolPerDay", 10),
+            use_account_guard=use_account_guard,
+        )
+    except Exception as e:
+        print(f"[http] /api/backtest failed for {req_symbol}: {e}", flush=True)
+        return web.json_response({"error": str(e)}, status=500)
+
+    # Equity curve: cumulative realized P&L across CLOSED trades in
+    # execution order (SimTrade.pnl is None for anything still open —
+    # excluded here the same way BacktestResult.closed_trades already
+    # does, since an unrealized/open position has no settled P&L point
+    # to plot yet).
+    equity_curve = []
+    cum = 0.0
+    for i, t in enumerate(result.closed_trades, start=1):
+        cum += t.pnl
+        equity_curve.append({"seq": i, "ts": t.exit_time, "cumPnl": round(cum, 2)})
+
+    trades = [
+        {
+            "symbol": t.symbol, "expiry": t.expiry, "instrumentType": t.instrument_type,
+            "side": t.side, "strike": t.strike, "qtyLots": t.qty_lots,
+            "entryTime": t.entry_time, "entryPrice": t.entry_price,
+            "exitTime": t.exit_time, "exitPrice": t.exit_price,
+            "exitReason": t.exit_reason, "pnl": t.pnl,
+        }
+        for t in result.trades
+    ]
+
+    return web.json_response({
+        "symbol": req_symbol,
+        "summary": result.summary(),
+        "trades": trades,
+        "equityCurve": equity_curve,
+    })
+
+
 async def history_handler(request):
     """Full OHLCV backfill for the price chart, sourced from SmartAPI via
     get_index_candles() (chunked to respect Angel One's ~30-day intraday
@@ -2710,6 +2859,7 @@ async def main():
     app.router.add_get('/dashboard-relay', bridge_ws_handler)
     app.router.add_get('/api/spot-history', spot_history_handler)
     app.router.add_get('/api/history', history_handler)
+    app.router.add_get('/api/backtest', backtest_handler)
     app.router.add_get('/api/lot-sizes', lot_sizes_handler)
 
     FRONTEND_DIR = SCRIPT_DIR / "frontend"

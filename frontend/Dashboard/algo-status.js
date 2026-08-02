@@ -95,6 +95,43 @@ function _algoFmtAgo(tsSeconds){
   return Math.floor(secs/3600) + 'h ago';
 }
 
+// Renders decision/auto_executor.py's history feed — status.autoExecutor
+// .history, newest-first entries of shape {ts, symbol, side,
+// instrument_type, strike, qty_lots, status, reason} (see
+// AutoExecutor._record_history's docstring for exactly what qualifies:
+// only actual submit attempts, 'executed' or 'rejected' — routine misses
+// like WAIT/low-confidence/cooldown never reach this list, those are
+// already covered by execDetail's "Last execution"/last-decision line
+// above). This is the primary trust/distrust surface for auto-execution:
+// distinct from the manual paper/live orders table (paper-trading.js),
+// specifically "what did the algo itself attempt, and did it go through".
+function buildAutoTradeHistoryHtml(history){
+  if(!history || !history.length){
+    return '<div class="algo-history-empty">No auto-executed trades yet.</div>';
+  }
+  return history.map(h => {
+    const executed = String(h.status).toLowerCase() === 'executed';
+    const statusCls = executed ? 'algo-history-executed' : 'algo-history-rejected';
+    const statusLabel = executed ? 'EXECUTED' : 'REJECTED';
+    const legLabel = [h.side, h.strike, h.instrument_type].filter(Boolean).join(' ')
+      || h.symbol || '—';
+    const qty = h.qty_lots != null ? `${h.qty_lots} lot${h.qty_lots===1?'':'s'}` : '';
+    return `
+      <div class="algo-history-item ${statusCls}">
+        <div class="algo-history-top">
+          <span class="algo-history-leg">${ptEscAttr(legLabel)}${qty ? ' · ' + qty : ''}</span>
+          <span class="algo-history-badge">${statusLabel}</span>
+        </div>
+        <div class="algo-history-meta">
+          <span class="algo-history-symbol">${ptEscAttr(h.symbol || '')}</span>
+          <span class="algo-history-time">${_algoFmtAgo(h.ts)}</span>
+        </div>
+        <div class="algo-history-reason">${ptEscAttr(h.reason || '')}</div>
+      </div>
+    `;
+  }).join('');
+}
+
 function buildAlgoStatusHtml(status){
   if(!status) return '<div class="algo-empty">No status received yet.</div>';
 
@@ -230,4 +267,84 @@ function renderAlgoStatusPanel(wsState){
 }
 window.renderAlgoStatusPanel = renderAlgoStatusPanel;
 
+// ── Reconciliation alerts ────────────────────────────────────────────
+// Fed by {"type":"reconciliationAlert","payload":{...}} —
+// ws_server_live.py's _broadcast_reconciliation_alert() fires this
+// whenever risk/position_reconciler.py's periodic sweep (reconcile_loop)
+// or its post-fill check finds the live order book and position book
+// disagree, EVEN BELOW the lot threshold that actually trips the kill
+// switch (see position_reconciler.py's module docstring — most of these
+// resolve themselves next cycle, but a human watching should still see
+// them as cheap early signals rather than only learning about it once a
+// trip already happened). MarketStore.ingest()'s generic branch lands
+// this at wsState.reconciliationAlert for free, same as algoStatus.
+//
+// Deliberately its own toast host, not paper-trading.js's #pt-toast-wrap
+// — mount order between the two files' DOMContentLoaded listeners isn't
+// guaranteed, and this needs to survive independently of whether the
+// paper trading panel happens to be mounted.
+function reconMountToastHost(){
+  if($i('recon-toast-wrap')) return;
+  const wrap = document.createElement('div');
+  wrap.id = 'recon-toast-wrap';
+  document.body.appendChild(wrap);
+}
+
+function _reconToast(message, kind){
+  const wrap = $i('recon-toast-wrap');
+  if(!wrap) return;
+  const el = document.createElement('div');
+  el.className = 'recon-toast ' + (kind === 'err' ? 'recon-toast-err' : 'recon-toast-warn');
+  el.textContent = message;
+  wrap.appendChild(el);
+  // Trip alerts (kill switch actually fired) stay up longer than a plain
+  // below-threshold mismatch — the latter is a "just so you know", the
+  // former is the thing account_guard trips also require a human to
+  // manually clear (delete the kill-switch file), so it deserves more
+  // than a quick flash.
+  const ttl = kind === 'err' ? 9000 : 5000;
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transition = 'opacity .2s';
+    setTimeout(() => el.remove(), 220);
+  }, ttl);
+}
+
+function _reconFmtMismatch(m){
+  const sign = n => (n > 0 ? '+' : '') + n;
+  return `${m.symbol} off by ${sign(m.diffLots)} lot${Math.abs(m.diffLots)===1?'':'s'} `
+       + `(order book ${sign(m.orderBookLots)} vs positions ${sign(m.positionLots)})`;
+}
+
+// Dedupe by ts — algo_status-style periodic broadcasts share the same
+// payload shape every cycle, and ts (server-side time.time()) is unique
+// per check, so a client that's had this alert in wsState since before
+// this tab was open (initial-connection replay) doesn't re-toast on
+// every render pass. Same "seen key" pattern as paper-trading.js's
+// ptNotifyNewRejections().
+const _reconSeenTs = new Set();
+function renderReconciliationAlerts(wsState){
+  if(!wsState) return;
+  const alert = wsState.reconciliationAlert;
+  if(!alert || _reconSeenTs.has(alert.ts)) return;
+  _reconSeenTs.add(alert.ts);
+
+  const kind = alert.tripped ? 'err' : 'warn';
+  const sourceLabel = alert.source === 'post_fill' ? 'post-fill check' : 'periodic check';
+
+  if(alert.tripped){
+    const worst = (alert.mismatches || []).slice().sort((a,b) => Math.abs(b.diffLots) - Math.abs(a.diffLots))[0];
+    _reconToast(`⛔ Position reconciliation TRIPPED the kill switch — ${worst ? _reconFmtMismatch(worst) : 'see server log'}`, 'err');
+  } else if(alert.mismatches && alert.mismatches.length){
+    alert.mismatches.forEach(m => {
+      _reconToast(`⚠ Reconciliation mismatch (${sourceLabel}): ${_reconFmtMismatch(m)}`, kind);
+    });
+  }
+  if(alert.unparseableSymbols && alert.unparseableSymbols.length){
+    _reconToast(`⚠ Reconciliation (${sourceLabel}) couldn't parse: ${alert.unparseableSymbols.join(', ')}`, 'warn');
+  }
+}
+window.renderReconciliationAlerts = renderReconciliationAlerts;
+
 window.addEventListener('DOMContentLoaded', algoMountPanel);
+window.addEventListener('DOMContentLoaded', reconMountToastHost);

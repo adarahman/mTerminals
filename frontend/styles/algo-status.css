@@ -63,3 +63,41 @@
   font-size:11px; font-style:italic; opacity:.85; line-height:1.4;
 }
 .algo-last-decision.algo-pos{border-color:var(--pos); opacity:1;}
+
+/* Auto-executed trade feed (buildAutoTradeHistoryHtml, algo-status.js) —
+   distinct from the manual paper/live orders table's rows, so it gets
+   its own compact card look instead of reusing .algo-row's single-line
+   layout (a reason string needs its own line to be legible). */
+.algo-history-empty{opacity:.6; padding:var(--space-2) 0; font-size:11px;}
+.algo-history-list{display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;}
+.algo-history-item{
+  padding:6px 8px; border-radius:6px; background:var(--bg-2);
+  border:1px solid var(--border); font-size:11px; line-height:1.4;
+}
+.algo-history-item.algo-history-executed{border-left:3px solid var(--pos);}
+.algo-history-item.algo-history-rejected{border-left:3px solid var(--neg); opacity:.85;}
+.algo-history-top{display:flex; align-items:center; justify-content:space-between; gap:var(--space-2);}
+.algo-history-leg{font-weight:700;}
+.algo-history-badge{font-size:9.5px; letter-spacing:.04em; opacity:.7; font-weight:800;}
+.algo-history-executed .algo-history-badge{color:var(--pos);}
+.algo-history-rejected .algo-history-badge{color:var(--neg);}
+.algo-history-meta{display:flex; justify-content:space-between; opacity:.55; font-size:10px; margin-top:2px;}
+.algo-history-reason{margin-top:3px; opacity:.8; font-style:italic;}
+
+/* Reconciliation alert toasts (renderReconciliationAlerts, algo-status.js)
+   — same fixed toast-stack pattern as paper-trading.css's #pt-toast-wrap,
+   kept as an independent host so mount order between the two files'
+   DOMContentLoaded listeners doesn't matter. */
+#recon-toast-wrap{
+  position:fixed; z-index:var(--z-toast, 9999); right:16px; bottom:16px;
+  display:flex; flex-direction:column; gap:8px; align-items:flex-end; pointer-events:none;
+}
+.recon-toast{
+  pointer-events:auto; max-width:360px; padding:10px 14px; border-radius:8px;
+  font-size:12px; line-height:1.4; box-shadow:var(--shadow-md);
+  transition:opacity .2s;
+}
+.recon-toast-warn{background:rgba(241,196,15,.16); border:1px solid #f1c40f; color:#f1c40f;}
+.recon-toast-err{
+  background:rgba(231,76,60,.18); border:1px solid var(--neg); color:var(--neg); font-weight:700;
+}
