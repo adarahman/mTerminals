@@ -506,9 +506,3 @@
   border-color:var(--info);
   box-shadow:0 4px 16px rgba(51,154,240,0.25);
 }
-
-.sec-btn-simulator{color:var(--info);}
-
-.sec-btn-simulator.active{background:rgba(51,154,240,.12);color:var(--info);}
-
-.sec-btn-simulator.active::after{background:var(--info);}

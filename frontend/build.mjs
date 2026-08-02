@@ -39,7 +39,7 @@ const pages = [
     css: [
       "styles/theme.css", "styles/animations.css", "styles/layout.css", "styles/tables.css",
       "styles/navigation.css", "styles/panels.css", "PriceChart/price-chart-components.css",
-      "styles/paper-trading.css", "styles/responsive.css", "styles/fiidii-report.css",
+      "styles/paper-trading.css", "styles/algo-status.css", "styles/responsive.css", "styles/fiidii-report.css",
       "PriceChart/pc-order-panel.css",
     ],
     js: [
@@ -65,7 +65,7 @@ const pages = [
         "Dashboard/fiidii-report.js",
         "shared/services/ws-manager.js", "shared/stores/market-store.js", "shared/services/data-service.js",
         "Dashboard/ui-controls.js", "Dashboard/panel-manager.js", "Dashboard/dashboard-panels.js",
-        "Dashboard/dashboard.js", "Dashboard/paper-trading.js",
+        "Dashboard/dashboard.js", "Dashboard/paper-trading.js", "Dashboard/algo-status.js",
       ],
     ],
   },

@@ -365,16 +365,17 @@ function ptFmtExpiry(expiry){
 let _ptSymbolTouched = false;
 
 function ptMountPanel(){
-  if($i('pt-toggle-btn')) return; // already mounted, e.g. after bfcache-forced reload path
+  if($i('pt-panel')) return; // already mounted, e.g. after bfcache-forced reload path
 
   // Styling for #pt-panel/#pt-quick-popover/.pt-toast/#pt-live-confirm-*/etc.
   // now lives in styles/paper-trading.css (was runtime-injected here via a <style> tag).
 
-  const btn = document.createElement('button');
-  btn.id = 'pt-toggle-btn';
-  btn.textContent = '📊 Paper';
-  btn.onclick = () => $i('pt-panel').classList.toggle('open');
-  document.body.appendChild(btn);
+  // The toggle button itself is no longer created here — it's the static
+  // #pt-toggle-btn "Paper" sec-btn in the left #sec-nav-bar rail
+  // (DashboardPro.html), relocated (2026-08-02) from a floating fixed
+  // bottom-right button that sat permanently on top of whatever table
+  // row happened to be scrolled underneath it. togglePtPanel() (below)
+  // opens this panel positioned next to that rail button instead.
 
   const panel = document.createElement('div');
   panel.id = 'pt-panel';
@@ -622,6 +623,41 @@ function ptMountPanel(){
   ptUpdateOrdTypeFields();
   ptRenderBasket();
 }
+
+// Mirrors ui-controls.js's toggleControlSidebar() / algo-status.js's
+// toggleAlgoPanel(): the panel isn't docked to a fixed corner anymore,
+// so position it next to wherever the "Paper" rail button actually is,
+// clamped so it can never render partially off-screen. #pt-panel is
+// wide (min(660px, 96vw)), so this is what most needs the clamp — a
+// naive right-of-button placement would routinely run off the right
+// edge on anything narrower than a wide desktop viewport.
+function togglePtPanel(){
+  const el = $i('pt-panel');
+  if(!el) return;
+  const opening = !el.classList.contains('open');
+  el.classList.toggle('open');
+  if(opening){
+    const btn = $i('pt-toggle-btn');
+    if(btn){
+      const r = btn.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const EDGE_MARGIN = 16;
+      let left = Math.max(r.right + 8, EDGE_MARGIN);
+      let top  = r.top;
+      requestAnimationFrame(()=>{
+        const pw = el.offsetWidth || 660;
+        const ph = el.offsetHeight || 400;
+        if(left + pw > vw - 8) left = Math.max(EDGE_MARGIN, vw - pw - 8);
+        if(top + ph > vh - 8) top = Math.max(EDGE_MARGIN, vh - ph - 8);
+        el.style.left = left + 'px';
+        el.style.top  = top + 'px';
+      });
+      el.style.left = left + 'px';
+      el.style.top  = top + 'px';
+    }
+  }
+}
+window.togglePtPanel = togglePtPanel;
 
 // Rebuilds the expiry <select> (and, via ptRefreshStrikeOptions, the
 // strike <select>) from live chain data instead of requiring manual
@@ -994,7 +1030,7 @@ function ptToggleLiveMode(){
   const title = $i('pt-panel-title');
   if(title) title.textContent = _ptLiveMode ? 'Live Trading' : 'Paper Trading';
   if(panel) panel.classList.toggle('live-mode', _ptLiveMode);
-  if(floatBtn) floatBtn.textContent = _ptLiveMode ? '🔴 Live' : '📊 Paper';
+  if(floatBtn) floatBtn.innerHTML = _ptLiveMode ? '<span>🔴</span>Live' : '<span>📊</span>Paper';
   ptToast(_ptLiveMode ? 'LIVE trading mode enabled' : 'Back to Paper trading mode', _ptLiveMode ? 'err' : 'ok');
   // Directs the socket to start/stop real funds polling, the same way
   // switching the top-bar symbol dropdown directs it to switch feeds —

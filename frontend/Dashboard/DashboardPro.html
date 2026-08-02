@@ -452,20 +452,12 @@
 <div class="sec-nav" id="sec-nav-bar">
   <span class="sec-nav-label">⚡ Jump</span>
   <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
-  <!-- Targets fixed to the ids these sections actually render with today
-       (oi-flow-summary-card — see buildOiFlowSummaryHtml() in
-       oi-flow-view.js). The old targets, sec-oi-buildup and sec-iv, were
-       leftovers from a prior layout and matched no element in the
-       current template, so these buttons were silently no-ops
-       (secJump() finds nothing and returns). The IV Surface button that
-       used to sit here is gone (2026-08-01) — it targeted
-       iv-hv-skew-detail-card (chain-greeks.js's buildIvHvSkewDetailHtml),
-       which was removed as a duplicate of Advanced Analytics' IV Rank
-       Details card. Repointing it at advanced-analytics-card would have
-       just duplicated the "Advanced" button below, so it was dropped
-       instead of kept as a second link to the same place. -->
-  <button class="sec-btn" onclick="secJump('oi-flow-summary-card')"><span>📈</span>OI Flow</button>
-  <button class="sec-btn sec-btn-simulator" onclick="secJump('sec-simulator')"><span>&#127970;</span>Simulator</button>
+  <!-- OI Flow and Simulator jump buttons removed (2026-08-02) — redundant
+       slots: the OI Flow summary card itself has an "Open full OI Flow
+       view" button (openOIDashboardModal()) that does the same job, and
+       Simulator is reached from there / the Institutional F&O Simulator
+       entry points elsewhere on the page. Freed slots reused for Algo/
+       Paper below instead of growing the rail further. -->
   <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
   <button class="sec-btn" onclick="secJump('greeks-alerts-card')"><span>Δ</span>Greeks</button>
   <button class="sec-btn" onclick="secJump('fiidii-summary-card')"><span>🏦</span>FII/DII</button>
@@ -477,6 +469,17 @@
        toggleControlSidebar(), which just toggles the 'open' class on
        #ctrl-sidebar — the panel markup/logic underneath is untouched. -->
   <button class="sec-btn" id="ctrl-sidebar-toggle-btn" onclick="toggleControlSidebar()" title="Range & velocity controls"><span>🎛️</span>Range Vel</button>
+  <!-- Algo status and Paper trading toggles — relocated here (2026-08-02)
+       from their old floating fixed positions (bottom-left/bottom-right
+       of the viewport, always visible on top of whatever table row
+       happened to be scrolled underneath them). Same "Range Vel"
+       treatment: one slot in the rail instead of a permanently-
+       obstructing floating button. IDs are kept identical
+       (algo-toggle-btn / pt-toggle-btn) so renderAlgoStatusPanel()/
+       ptToggleLiveMode()'s existing classList/innerHTML updates keep
+       targeting the same element with no changes needed there. -->
+  <button class="sec-btn" id="algo-toggle-btn" onclick="toggleAlgoPanel()" title="Algo trading safety status"><span>🤖</span>Algo</button>
+  <button class="sec-btn" id="pt-toggle-btn" onclick="togglePtPanel()" title="Paper trading panel"><span>📊</span>Paper</button>
 </div>
 
 <!-- Global expiry control — the ONLY expiry selector in the app. Kept as

@@ -18,19 +18,19 @@
 // indexQuotes/funds already use — no changes needed there.
 //
 // Self-mounts on DOMContentLoaded, same pattern as paper-trading.js's
-// ptMountPanel(). Independent floating button (bottom-left, so it never
-// overlaps the paper-trading button which lives bottom-right) + a
-// slide-out panel. Styling in styles/algo-status.css.
+// ptMountPanel(). The toggle button itself is no longer created here —
+// it's the static #algo-toggle-btn "Algo" sec-btn in the left
+// #sec-nav-bar rail (DashboardPro.html), relocated (2026-08-02) from a
+// floating fixed bottom-left button that sat permanently on top of
+// whatever table row happened to be scrolled underneath it. This
+// function now only builds the slide-out panel + wires toggleAlgoPanel(),
+// which opens it positioned next to that rail button (same approach as
+// ui-controls.js's toggleControlSidebar()) instead of a hardcoded corner.
+// Styling in styles/algo-status.css.
 // ============================================================
 
 function algoMountPanel(){
-  if($i('algo-toggle-btn')) return; // already mounted (e.g. bfcache reload)
-
-  const btn = document.createElement('button');
-  btn.id = 'algo-toggle-btn';
-  btn.textContent = '🤖 Algo';
-  btn.onclick = () => $i('algo-panel').classList.toggle('open');
-  document.body.appendChild(btn);
+  if($i('algo-panel')) return; // already mounted (e.g. bfcache reload)
 
   const panel = document.createElement('div');
   panel.id = 'algo-panel';
@@ -40,6 +40,39 @@ function algoMountPanel(){
   `;
   document.body.appendChild(panel);
 }
+
+// Mirrors ui-controls.js's toggleControlSidebar(): the panel isn't docked
+// to a fixed corner anymore, so position it next to wherever the rail
+// button actually is (its position in #sec-nav-bar can shift slightly
+// depending on which sec-btn-* items are currently visible), clamped so
+// it can never render partially off-screen.
+function toggleAlgoPanel(){
+  const el = $i('algo-panel');
+  if(!el) return;
+  const opening = !el.classList.contains('open');
+  el.classList.toggle('open');
+  if(opening){
+    const btn = $i('algo-toggle-btn');
+    if(btn){
+      const r = btn.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const EDGE_MARGIN = 16;
+      let left = Math.max(r.right + 8, EDGE_MARGIN);
+      let top  = r.top;
+      requestAnimationFrame(()=>{
+        const pw = el.offsetWidth || 340;
+        const ph = el.offsetHeight || 200;
+        if(left + pw > vw - 8) left = Math.max(EDGE_MARGIN, vw - pw - 8);
+        if(top + ph > vh - 8) top = Math.max(EDGE_MARGIN, vh - ph - 8);
+        el.style.left = left + 'px';
+        el.style.top  = top + 'px';
+      });
+      el.style.left = left + 'px';
+      el.style.top  = top + 'px';
+    }
+  }
+}
+window.toggleAlgoPanel = toggleAlgoPanel;
 
 // Small helper: colored ON/OFF-style badge, reused for every boolean row
 // below instead of hand-rolling the same span markup four times.
@@ -175,7 +208,7 @@ function renderAlgoStatusPanel(wsState){
   // same for paper/live.
   btn.classList.toggle('algo-tripped', killActive || guardTripped);
   btn.classList.toggle('algo-live', liveOn && !killActive && !guardTripped);
-  btn.textContent = (killActive || guardTripped) ? '🤖 ⛔ Algo' : (liveOn ? '🤖 🔴 Algo' : '🤖 Algo');
+  btn.innerHTML = (killActive || guardTripped) ? '<span>⛔</span>Algo' : (liveOn ? '<span>🔴</span>Algo' : '<span>🤖</span>Algo');
 
   setHtmlIfChanged(body, buildAlgoStatusHtml(status));
 }

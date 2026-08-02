@@ -1,20 +1,15 @@
-/* Algo status floating badge + panel — see Dashboard/algo-status.js.
-   Positioned bottom-left, but offset past .sec-nav (navigation.css) — that
-   rail is pinned at left:10px, 72px wide, full viewport height, z-index:999.
-   A plain left:16px sits spatially underneath it AND behind it in stacking
-   order (999 > --z-popover's 900), so this clears the rail's right edge
-   (10+72=82px) with a margin instead of tucking in beside #pt-toggle-btn's
-   bottom-right corner (styles/paper-trading.css), which would collide with
-   that panel opening upward from the same corner. */
+/* Algo status rail button + panel — see Dashboard/algo-status.js.
+   #algo-toggle-btn is now a plain "Algo" sec-btn living in the left
+   #sec-nav-bar rail (DashboardPro.html) — relocated (2026-08-02) from a
+   floating fixed bottom-left button that sat permanently on top of
+   whatever table row happened to scroll underneath it. Base look/hover/
+   active states all come from .sec-btn (navigation.css); only the two
+   state-color modifiers below still belong here. #algo-panel is no
+   longer anchored to that old button's corner — toggleAlgoPanel()
+   (algo-status.js) positions it dynamically next to wherever the rail
+   button actually is, same approach as ui-controls.js's
+   toggleControlSidebar()/.ctrl-sidebar-panel. */
 
-#algo-toggle-btn{
-  position:fixed; left:98px; bottom:16px; z-index:var(--z-popover);
-  display:block; visibility:visible; opacity:1;
-  background:var(--bg-1); color:var(--text-primary);
-  border:1px solid var(--border); border-radius:8px;
-  padding:8px 14px; font:600 12px/1.2 inherit; cursor:pointer;
-  box-shadow:var(--shadow-sm);
-}
 #algo-toggle-btn.algo-live{border-color:var(--neg); color:var(--neg);}
 #algo-toggle-btn.algo-tripped{
   border-color:var(--neg); background:rgba(231,76,60,.14); color:var(--neg);
@@ -22,8 +17,8 @@
 }
 
 #algo-panel{
-  position:fixed; left:98px; bottom:60px; z-index:var(--z-popover);
-  width:min(340px, calc(96vw - 98px)); max-height:78vh; overflow-y:auto; display:none;
+  position:fixed; z-index:var(--z-popover);
+  width:min(340px, calc(100vw - 32px)); max-height:78vh; overflow-y:auto; display:none;
   background:var(--bg-1); color:var(--text-primary);
   border:1px solid var(--border); border-radius:10px;
   padding:var(--space-4); font:12px/1.4 inherit; box-shadow:var(--shadow-md);

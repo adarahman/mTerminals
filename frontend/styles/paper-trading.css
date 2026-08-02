@@ -1,16 +1,16 @@
-/* Paper trading panel, popovers, notifications, and confirmation modal. */
-
-#pt-toggle-btn{
-  position:fixed; right:16px; bottom:16px; z-index:var(--z-popover);
-  display:block; visibility:visible; opacity:1;
-  background:var(--bg-1); color:var(--text-primary);
-  border:1px solid var(--border); border-radius:8px;
-  padding:8px 14px; font:600 12px/1.2 inherit; cursor:pointer;
-  box-shadow:var(--shadow-sm);
-}
+/* Paper trading panel, popovers, notifications, and confirmation modal.
+   #pt-toggle-btn is now a plain "Paper" sec-btn living in the left
+   #sec-nav-bar rail (DashboardPro.html) — relocated (2026-08-02) from a
+   floating fixed bottom-right button that sat permanently on top of
+   whatever table row happened to scroll underneath it. Base look/hover/
+   active states all come from .sec-btn (navigation.css). #pt-panel is
+   no longer anchored to that old button's corner — togglePtPanel()
+   (paper-trading.js) positions it dynamically next to wherever the rail
+   button actually is, same approach as ui-controls.js's
+   toggleControlSidebar()/.ctrl-sidebar-panel. */
 
 #pt-panel{
-  position:fixed; right:16px; bottom:60px; z-index:var(--z-popover);
+  position:fixed; z-index:var(--z-popover);
   width:min(660px, 96vw); max-height:78vh; overflow-y:auto; display:none;
   background:var(--bg-1); color:var(--text-primary);
   border:1px solid var(--border); border-radius:10px;

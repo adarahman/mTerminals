@@ -71,14 +71,3 @@
   .dd-grid{grid-template-columns:1fr;}
 }
 
-/* algo-status.css's #algo-toggle-btn/#algo-panel are offset to left:98px
-   to clear .sec-nav's fixed 72px rail (see that file's own comment) — but
-   .sec-nav itself un-pins to position:sticky/left:auto below 900px (the
-   .sec-nav block above), so the same 98px offset would just leave a dead
-   gap on narrower screens instead of clearing anything. Match the rail's
-   own breakpoint and fall back to the same left:16px every other
-   bottom-left-pinned floating element on this page uses. */
-@media (max-width:900px){
-  #algo-toggle-btn{left:16px;}
-  #algo-panel{left:16px; width:min(340px, calc(96vw - 16px));}
-}
