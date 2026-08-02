@@ -17,6 +17,18 @@
   auto-executed order is checked identically to a human-submitted one.
   Single-leg action types only in v1. See `PROJECT-ARCHITECTURE.md` §12.
 
+- Direct test coverage for SmartAPI session/WebSocket resilience
+  (`backend/tests/test_smartapi_client.py`,
+  `backend/tests/test_smartapi_ws_client.py`): `SmartApiSession.call()`'s
+  transient-network retry, rate-limit backoff, and re-login-on-token-error
+  paths, and `SmartTickStream`'s desired-subscription replay on
+  reconnect and `run_forever_with_reconnect()`'s exponential backoff /
+  rebuild-failure handling. Neither module had a test seam before —
+  `conftest.py`'s new `smartapi_modules` fixture gives `brokers/
+  smartapi_client.py` the same `RUNTIME_DIR`-backed fake-ScripMaster
+  seam the `ws_server_live` fixture already uses, without that
+  fixture's heavier `chdir`/`sys.argv`/`PaperTradingEngine` overhead.
+
 ### Fixed
 - `ml/inference.py` was missing `import pandas as pd`, so every
   VirtualOI inference call silently `NameError`'d and fell back to a

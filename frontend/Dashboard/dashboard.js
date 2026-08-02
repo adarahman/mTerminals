@@ -352,8 +352,24 @@ window.addEventListener('DOMContentLoaded', function(){
 // never shows up until a hard reload bypasses bfcache entirely. Forcing
 // a real reload whenever the page is restored from bfcache makes a plain
 // refresh behave the same as Cmd+Shift+R for reconnect purposes.
+//
+// GUARDED (2026-08-02): Safari doesn't always honor location.reload() as
+// a real navigation — it can re-serve the SAME bfcache entry again right
+// after the reload, so this handler fires again with persisted=true,
+// reloads again, and repeats. Symptom seen live: 3 rapid WS
+// disconnect/reconnect cycles (close_code=1001) within ~2 seconds, none
+// of them 3s apart (WSManager.reconnect()'s own delay), because each
+// cycle was a real page reload, not the socket manager's reconnect path.
+// sessionStorage survives a reload (unlike an in-memory JS flag) so the
+// guard holds across the whole loop, not just within one page instance.
 window.addEventListener('pageshow', function(event){
   if (event.persisted) {
+    const last = Number(sessionStorage.getItem('_bfcacheReloadAt') || 0);
+    if (Date.now() - last < 5000) {
+      return;  // just force-reloaded very recently — let this load stand,
+                // rather than risk another bfcache-serve/reload cycle.
+    }
+    sessionStorage.setItem('_bfcacheReloadAt', String(Date.now()));
     location.reload();
   }
 });

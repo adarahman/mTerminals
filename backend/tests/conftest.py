@@ -113,3 +113,39 @@ def ws_server_live(tmp_path_factory):
             os.environ.pop("LIVE_TRADING_ENABLED", None)
         else:
             os.environ["LIVE_TRADING_ENABLED"] = old_live_enabled_env
+
+
+@pytest.fixture(scope="session")
+def smartapi_modules(tmp_path_factory):
+    """Imports brokers/smartapi_client.py and brokers/smartapi_ws_client.py
+    exactly once for the whole session, with the same RUNTIME_DIR/
+    ScripMaster-cache seam as the ws_server_live fixture above, but
+    without that fixture's chdir/sys.argv/PaperTradingEngine overhead —
+    session/reconnect tests don't need any of that, just an import that
+    doesn't reach out to the real network or the real runtime/cache/.
+
+    Session-scoped for the same reason as ws_server_live: re-importing
+    per-test would re-run ScripMaster indexing for no benefit, since
+    individual tests patch SmartApiSession/SmartTickStream instances
+    directly rather than relying on module-level state.
+    """
+    runtime_dir = tmp_path_factory.mktemp("smartapi_runtime")
+    cache_dir = runtime_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "_scrip_master_cache.json").write_text(json.dumps(_FAKE_SCRIP_MASTER))
+
+    old_runtime_dir_env = os.environ.get("RUNTIME_DIR")
+    os.environ["RUNTIME_DIR"] = str(runtime_dir)
+    for p in (PROJECT_ROOT, BACKEND_DIR):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    try:
+        import brokers.smartapi_client as smartapi_client
+        import brokers.smartapi_ws_client as smartapi_ws_client
+        yield smartapi_client, smartapi_ws_client
+    finally:
+        if old_runtime_dir_env is None:
+            os.environ.pop("RUNTIME_DIR", None)
+        else:
+            os.environ["RUNTIME_DIR"] = old_runtime_dir_env
