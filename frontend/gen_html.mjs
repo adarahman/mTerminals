@@ -9,7 +9,7 @@ const jobs = [
     src: "Dashboard/DashboardPro.html", out: "Dashboard/DashboardPro.html",
     cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">[\s\S]*?<link rel="stylesheet" href="\.\.\/PriceChart\/pc-order-panel\.css">/,
     cssReplacement: `<link rel="stylesheet" href="dashboard.bundle.css">`,
-    jsBlock: /<script src="\.\.\/shared\/config\.js"><\/script>[\s\S]*?<script src="paper-trading\.js"><\/script>/,
+    jsBlock: /<script src="\.\.\/shared\/config\.js"><\/script>[\s\S]*?<script src="backtest-view\.js"><\/script>/,
     jsReplacement:
 `<script src="dashboard.bundle.1.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>

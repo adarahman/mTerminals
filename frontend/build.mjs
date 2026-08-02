@@ -66,6 +66,7 @@ const pages = [
         "shared/services/ws-manager.js", "shared/stores/market-store.js", "shared/services/data-service.js",
         "Dashboard/ui-controls.js", "Dashboard/panel-manager.js", "Dashboard/dashboard-panels.js",
         "Dashboard/dashboard.js", "Dashboard/paper-trading.js", "Dashboard/algo-status.js",
+        "Dashboard/backtest-view.js",
       ],
     ],
   },
