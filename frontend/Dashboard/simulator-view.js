@@ -600,7 +600,10 @@ return '<div class="sdt-row' +
         oiBarHtml(oiSplit.ce, oiSplit.pe, maxLegOI) +
         '<span class="sdt-oi-fig" style="color:var(--pe);">' + fmtK(oiSplit.pe) + '</span>' +
       '</span>' +
-      '<span style="font-family:var(--mono);color:' + chgClr + ';">' + (oiDomChg >= 0 ? '+' : '\u2212') + fmtK(Math.abs(oiDomChg)) + '</span>' +
+      '<span style="display:flex;align-items:center;gap:4px;white-space:nowrap;">' +
+        '<span style="width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:' + (oiDominant === 'CE' ? 'var(--ce)' : 'var(--pe)') + ';" title="' + oiDominant + ' is the larger leg at this strike"></span>' +
+        '<span style="font-family:var(--mono);color:' + chgClr + ';">' + (oiDomChg >= 0 ? '+' : '\u2212') + fmtK(Math.abs(oiDomChg)) + '</span>' +
+      '</span>' +
       '<span style="text-align:right;color:var(--amber);font-family:var(--mono);">' + fmtN(g.iv || simIV, 1) + '%</span>' +
       '<span style="text-align:right;font-family:var(--mono);color:var(--txt);">' + fmtN(netDelta, 2) + '</span>' +
       '<span style="display:flex;align-items:center;gap:4px;white-space:nowrap;">' +

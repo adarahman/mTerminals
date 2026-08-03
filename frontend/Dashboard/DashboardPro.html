@@ -153,26 +153,17 @@
       <div class="fd-report">
         <div class="fd-report-status" id="fdReportStatus">CONNECTING…</div>
 
-        <!-- ── UNIFIED MARKET BIAS ──
-             Combines cash-market flow trend (nse_fii_dii_flow_fetch.py) and
-             F&O participant positioning (fii_dii_sentiment.py) into one
-             decision-oriented read, computed server-side by
-             analytics/fii_dii_market_bias.py and pushed as `payload.bias`
-             over the same /dashboard-relay feed as flow/ratio/oi/sectors
-             below. Rendered by fdRenderBias() in fiidii-report.js. This
-             card is the "so what" on top of the raw panels underneath —
-             it deliberately shows caveats/confidence rather than always
-             sounding certain, so treat a low-confidence read here as a
-             prompt to look at the panels below yourself, not as noise. -->
-        <div class="fd-bias-card" id="fdBiasCard">
-          <div class="fd-bias-head">
-            <span class="fd-bias-label" id="fdBiasLabel">—</span>
-            <span class="fd-bias-score" id="fdBiasScore">--</span>
-            <span class="fd-bias-confidence" id="fdBiasConfidence">confidence --%</span>
-          </div>
-          <ul class="fd-bias-narrative" id="fdBiasNarrative"></ul>
-          <ul class="fd-bias-caveats" id="fdBiasCaveats"></ul>
-        </div>
+        <!-- UNIFIED MARKET BIAS card removed from here — it's the same
+             read (analytics/fii_dii_market_bias.py's payload.bias) already
+             rendered on the main dashboard by ExecView.buildFiiDiiBiasHtml()
+             inside buildFiiDiiSummaryCard()'s .fd-bias-card, visible above
+             the "Full Table →" button that opens this modal. Showing it a
+             second time in here was a pure repeat of what the person just
+             saw one click ago; the modal now starts straight at the raw
+             flow/ratio/OI/sector panels, which are genuinely modal-only
+             content. See fiidii-report.js's fdUpdateReport() for the
+             matching change (still marks the feed live on payload.bias,
+             just no longer renders it into a modal element). -->
 
         <div class="fd-grid">
 

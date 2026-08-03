@@ -133,37 +133,6 @@ function fdRenderSectors(data) {
   `).join('');
 }
 
-// ============ RENDER: unified market bias card ============
-// payload.bias is analytics/fii_dii_market_bias.py's get_market_bias_report()
-// output verbatim (see that module's docstring for the full shape) — this
-// is presentation only, no scoring/combining logic lives here.
-function fdBiasLabelClass(label) {
-  const l = (label || '').toLowerCase();
-  if (l === 'bullish') return 'fd-up';
-  if (l === 'bearish') return 'fd-down';
-  return 'fd-flat'; // Neutral / Mixed
-}
-function fdRenderBias(bias) {
-  if (!bias) return;
-
-  const labelEl = document.getElementById('fdBiasLabel');
-  const scoreEl = document.getElementById('fdBiasScore');
-  const confEl = document.getElementById('fdBiasConfidence');
-  const narrativeEl = document.getElementById('fdBiasNarrative');
-  const caveatsEl = document.getElementById('fdBiasCaveats');
-  if (!labelEl || !scoreEl || !confEl || !narrativeEl || !caveatsEl) return;
-
-  const cls = fdBiasLabelClass(bias.overallLabel);
-  labelEl.textContent = bias.overallLabel || 'Unscored';
-  labelEl.className = 'fd-bias-label ' + cls;
-  scoreEl.textContent = `score ${bias.overallScore >= 0 ? '+' : ''}${bias.overallScore}`;
-  scoreEl.className = 'fd-bias-score ' + cls;
-  confEl.textContent = `confidence ${bias.overallConfidence}%`;
-
-  narrativeEl.innerHTML = (bias.narrative || []).map(n => `<li>${n}</li>`).join('');
-  caveatsEl.innerHTML = (bias.caveats || []).map(c => `<li>${c}</li>`).join('');
-}
-
 // ============ RENDER: flow legend (right-side totals) ============
 function fdFmtCr(n) {
   const sign = n >= 0 ? '+' : '-';
@@ -252,7 +221,11 @@ function fdMarkLive() {
 // doc comment for the full field-by-field shape. quotes intentionally
 // ignored — this report has no ticker strip.
 function fdUpdateReport(payload = {}) {
-  if (payload.bias) { fdRenderBias(payload.bias); fdMarkLive(); }
+  // payload.bias (analytics/fii_dii_market_bias.py) no longer renders here —
+  // that card was a duplicate of the one already shown on the main
+  // dashboard (ExecView.buildFiiDiiBiasHtml, above the "Full Table →"
+  // button). Still counts toward "is this feed live" below.
+  if (payload.bias) { fdMarkLive(); }
   if (payload.flow) { fdFlowSeries = payload.flow; fdDrawFlow(); fdRenderFlowLegend(); fdMarkLive(); }
   if (typeof payload.ratio === 'number' || (payload.ratio && typeof payload.ratio === 'object')) {
     fdRenderRatioBar(payload.ratio);

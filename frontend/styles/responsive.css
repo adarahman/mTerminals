@@ -71,3 +71,23 @@
   .dd-grid{grid-template-columns:1fr;}
 }
 
+/* .oc-modal (Greeks/GEX, FII-DII, IV Surface, OI Dashboard, Strike Detail
+   Report, ...) — only above the same 900px breakpoint where .sec-nav is
+   still position:fixed at the left edge (below it, .sec-nav goes sticky/
+   horizontal at the top of the page instead, so there's no fixed-left
+   rail to clear here). Overrides padding-left specifically (not `left`,
+   which was tried first — that stacked with .oc-modal's own base
+   `padding:2vh 2vw` from panels.css, pushing the panel out to roughly
+   90px + 2vw instead of 90px, ballooning the reserved strip to ~1.8x the
+   rail's actual footprint). padding-left alone replaces just that one
+   side of the shorthand, so the panel's content starts right at 90px —
+   matching .db's own padding-left (layout.css), the app's existing
+   convention for how much room the rail needs — leaving only the rail
+   itself (plus a few px breathing room) in that strip instead of a
+   visibly oversized gutter. z-index alone (navigation.css/.sec-nav)
+   already keeps the rail clickable even without this, but that left it
+   visually floating on top of the modal's own content; this makes the
+   layout actually account for the rail instead. */
+@media (min-width:901px){
+  .oc-modal{padding-left:90px;}
+}

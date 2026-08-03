@@ -239,14 +239,17 @@ class ExecView {
   // read fine as a .kv-grid row shape, but doesn't match the mockup's
   // intent for this card, which is a numeric position readout (like
   // "-2,140 Cr") colored by sign, not a label.
-  // ── FII / DII BIAS SUMMARY BLOCK (main-dashboard, not modal-only) ──
+  // ── FII / DII BIAS SUMMARY BLOCK ──
   // d.fiiDiiBias is analytics/fii_dii_market_bias.py's get_market_bias_report()
-  // output verbatim — same shape/source fiidii-report.js's fdRenderBias()
-  // renders inside the modal (backend/mTerminals_json.py now caches +
-  // exposes it on the main tick as "fiiDiiBias" specifically so this read
-  // doesn't depend on the modal's live /dashboard-relay connection). Reuses
-  // the modal's .fd-bias-* classes (fiidii-report.css, loaded globally, not
-  // modal-scoped) rather than duplicating that CSS here.
+  // output verbatim (backend/mTerminals_json.py caches + exposes it on the
+  // main tick as "fiiDiiBias" so this read doesn't depend on the modal's
+  // live /dashboard-relay connection). This is now the ONLY place this bias
+  // card renders — the modal used to show the same read a second time via
+  // fdRenderBias()/#fdBiasCard, purely repeating what's already visible
+  // here above the "Full Table →" button; that copy was removed from
+  // DashboardPro.html and fiidii-report.js. Still uses the .fd-bias-*
+  // classes (fiidii-report.css, loaded globally, not modal-scoped) rather
+  // than duplicating that CSS here.
   buildFiiDiiBiasHtml(bias){
   if(!bias || !bias.asOf) return '';
   const l = (bias.overallLabel || '').toLowerCase();
