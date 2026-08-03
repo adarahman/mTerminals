@@ -46,6 +46,12 @@
     velWin: 5,
     greeksOpen: false,
     selectedStrike: null,
+    // Real server-fed vol/OI ratio + max-pain strike, filled in by
+    // applyLivePayload() once chain-sync.js starts forwarding them —
+    // empty/null until the first live broadcast arrives, same as demo
+    // mode's other fields.
+    volOiRatios: {},
+    maxPain: null,
   };
   // Set by initLiveSync() when a BroadcastChannel to the dashboard tab is
   // open; used by the expiry dropdown's change handler to ask the
@@ -265,21 +271,21 @@
   }
 
   // ── SMART MONEY / MARKET STRUCTURE ──
-  // Ported from the main dashboard's Strike Detail table
-  // (panels-views.js simRenderTable() — smartMoneyBadge() /
-  // marketStructureLabels()), same tunable heuristics and thresholds, so
-  // this page's read never drifts from the one shown there. That table
-  // gets a server-side vol/OI ratio feed (this.simState.volOiRatios) this
-  // standalone page doesn't have, so volRatio here is instead derived
-  // from raw vol/oi already on each row — same "volume as % of OI" scale.
-  // INST_NEAR_BAND_STRIKES now comes from shared/market-structure.js
-  // (loaded above), so this page can't drift out of sync with the main
-  // dashboard on where "near" ends.
+  // Uses the SHARED smartMoneyBadge() / marketStructureLabels()
+  // (engines/smart-money.js, engines/market-structure.js — both loaded
+  // above) instead of a local re-derivation, so this page's read can't
+  // drift from the main dashboard's Strike Detail table. volRatio prefers
+  // the real server-fed ratio forwarded by chain-sync.js
+  // (state.volOiRatios, same field the Strike Detail table reads) and
+  // only falls back to a local vol/oi approximation when that hasn't
+  // arrived yet for a given strike (see computeStrikeAnalytics() below).
+  // INST_THRESHOLDS stays a local copy (identical values to
+  // dashboard-thresholds.js) rather than a shared import, since this page
+  // loads independently of the main dashboard's script set.
   const INST_THRESHOLDS = {
     near: { oiMult: 1.75, volRatioMax: 40 },
     far: { oiMult: 1.2, volRatioMax: 55 },
   };
-  const MARKET_STRUCTURE = { MAJOR_MULT: 1.30, WEAK_MULT: 0.80, FRESH_CHG_MULT: 0.50 };
 
   // Same label set as panels-views.js, abbreviated for this page's dense
   // per-strike row (the full-text badge lives in the drawer/main table;
@@ -330,70 +336,59 @@
     const medianOiOf = (list) => median(list.map((r) => (r.ce.oi || 0) + (r.pe.oi || 0)));
     const medianByBand = { near: medianOiOf(nearRows), far: medianOiOf(farRows) };
 
-    // Market Structure — CE OI at/above ATM reads as resistance building
-    // up above spot, PE OI at/below ATM reads as support below it, each
-    // ranked within its own pool (same as marketStructureLabels()).
-    const resPool = rows.filter((r) => r.strike >= atm)
-      .map((r) => ({ strike: r.strike, oi: r.ce.oi || 0, chg: r.ce.oiChg || 0 }))
-      .sort((a, b) => b.oi - a.oi);
-    const supPool = rows.filter((r) => r.strike <= atm)
-      .map((r) => ({ strike: r.strike, oi: r.pe.oi || 0, chg: r.pe.oiChg || 0 }))
-      .sort((a, b) => b.oi - a.oi);
-    const resMedian = median(resPool.map((p) => p.oi));
-    const supMedian = median(supPool.map((p) => p.oi));
-
-    const structure = {};
-    resPool.forEach((p, i) => {
-      if (p.oi <= 0) return;
-      if (i === 0) structure[p.strike] = { text: "Major Resistance", color: "#dc2626" };
-      else if (i === 1 && p.oi > resMedian * MARKET_STRUCTURE.MAJOR_MULT) structure[p.strike] = { text: "Resistance Building", color: "var(--put)" };
-      else if (p.chg > p.oi * MARKET_STRUCTURE.FRESH_CHG_MULT && p.oi < resMedian * MARKET_STRUCTURE.MAJOR_MULT) structure[p.strike] = { text: "Fresh Writing", color: "#F4B740" };
-      else if (p.oi > resMedian * MARKET_STRUCTURE.WEAK_MULT) structure[p.strike] = { text: "Weak Resistance", color: "var(--oc-text-3)" };
+    // Market Structure — now calls the SHARED marketStructureLabels()
+    // (engines/market-structure.js, already loaded on this page — see
+    // option-chain.html) instead of a hand-duplicated copy of the same
+    // resistance/support-ranking logic. That inline copy used to exist
+    // here purely because nobody wired the call through; the thresholds
+    // were already identical, so this removes drift risk with no
+    // behavior change for anyone who already agreed with this page's
+    // structure reads, and fixes the ones who didn't (e.g. the Max Pain
+    // strike is now labeled here too, which the old inline copy never
+    // did at all).
+    const oiByStrike = {};
+    rows.forEach((r) => {
+      oiByStrike[r.strike] = {
+        ce: r.ce.oi || 0, pe: r.pe.oi || 0,
+        ceChg: r.ce.oiChg || 0, peChg: r.pe.oiChg || 0,
+      };
     });
-    supPool.forEach((p, i) => {
-      if (structure[p.strike]) return; // resistance label at the shared ATM strike already won
-      if (p.oi <= 0) return;
-      if (i === 0) structure[p.strike] = { text: "Major Support", color: "#10b981" };
-      else if (i === 1 && p.oi > supMedian * MARKET_STRUCTURE.MAJOR_MULT) structure[p.strike] = { text: "Support Building", color: "var(--call)" };
-      else if (p.chg > p.oi * MARKET_STRUCTURE.FRESH_CHG_MULT && p.oi < supMedian * MARKET_STRUCTURE.MAJOR_MULT) structure[p.strike] = { text: "PE Writing", color: "#F4B740" };
-      else if (p.oi > supMedian * MARKET_STRUCTURE.WEAK_MULT) structure[p.strike] = { text: "Weak Support", color: "var(--oc-text-3)" };
-    });
+    const structure = marketStructureLabels(rows, atm, oiByStrike, state.maxPain);
 
     // Smart Money — 5-level badge (ACC/DIST/HEDGE institutional size +
-    // direction, ROLL high-turnover flat, else RETAIL), same thresholds
-    // as smartMoneyBadge().
-    const SMART_COLORS = {
-    acc: "var(--call)",
-    dist: "var(--put)",
-    hedge: "#F4B740",
-    roll: "#3b82f6",
-    retail: "var(--oc-text-3)"
-};
+    // direction, ROLL high-turnover flat, else RETAIL), via the SHARED
+    // smartMoneyBadge() (engines/smart-money.js). volRatio prefers the
+    // real server-fed ratio (state.volOiRatios, forwarded by
+    // chain-sync.js — same field the main dashboard's Strike Detail
+    // Report reads) so this tab's ACC/RETAIL read matches the Strike
+    // Detail Report's for the same strike. Falls back to a local
+    // approximation from raw vol/oi only when server data isn't
+    // available yet for that strike (e.g. right after a fresh page load
+    // before the first live broadcast lands, or demo mode).
     const smartMoney = {};
     rows.forEach((r) => {
       const band = bandOf[r.strike];
       const th = INST_THRESHOLDS[band];
       const totalOI = (r.ce.oi || 0) + (r.pe.oi || 0);
-      const ceRatio = r.ce.oi ? ((r.ce.vol || 0) / r.ce.oi) * 100 : 0;
-      const peRatio = r.pe.oi ? ((r.pe.vol || 0) / r.pe.oi) * 100 : 0;
-      const volRatio = totalOI > 0 ? (ceRatio + peRatio) / 2 : 0;
+      const serverRatio = state.volOiRatios && state.volOiRatios[String(r.strike)];
+      let volRatio, hasRatioData;
+      if (serverRatio) {
+        volRatio = ((serverRatio.ce || 0) + (serverRatio.pe || 0)) / 2;
+        hasRatioData = totalOI > 0;
+      } else {
+        const ceRatio = r.ce.oi ? ((r.ce.vol || 0) / r.ce.oi) * 100 : 0;
+        const peRatio = r.pe.oi ? ((r.pe.vol || 0) / r.pe.oi) * 100 : 0;
+        volRatio = totalOI > 0 ? (ceRatio + peRatio) / 2 : 0;
+        hasRatioData = totalOI > 0;
+      }
       const medianOI = medianByBand[band];
       const isInst = totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax;
       const oiDominant = (r.ce.oi || 0) >= (r.pe.oi || 0) ? "ce" : "pe";
       const oiDomChg = oiDominant === "ce" ? (r.ce.oiChg || 0) : (r.pe.oiChg || 0);
 
-      const hasRatioData = totalOI > 0;
-
-const sm = smartMoneyBadge(
-    hasRatioData,
-    isInst,
-    oiDomChg,
-    totalOI,
-    volRatio,
-    th
-);
-
-smartMoney[r.strike] = sm;
+      smartMoney[r.strike] = smartMoneyBadge(
+        hasRatioData, isInst, oiDomChg, totalOI, volRatio, th
+      );
     });
 
     return { structure, smartMoney };
@@ -998,6 +993,13 @@ smartMoney[r.strike] = sm;
     if (msg.spotChgPct != null) state.spotChgPct = msg.spotChgPct;
     if (msg.expiry) state.expiry = msg.expiry;
     if (msg.expiryDates) state.expiryDates = msg.expiryDates;
+    // NEW: real server-fed vol/OI ratio + max-pain strike (see
+    // chain-sync.js's _broadcastToOptionChainTab) — used below in
+    // computeStrikeAnalytics() so this tab's Smart Money / Market
+    // Structure read matches the main dashboard's Strike Detail Report
+    // instead of approximating from raw per-row vol/oi.
+    if (msg.volOiRatios) state.volOiRatios = msg.volOiRatios;
+    if (msg.maxPain != null) state.maxPain = msg.maxPain;
     // Keep this tab's range in sync with the main dashboard's sidebar
     // toggle — chain-sync.js has always sent this field, but nothing
     // here ever read it, so the two views could silently show different

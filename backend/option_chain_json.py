@@ -3,6 +3,7 @@ import sys
 import argparse
 import traceback
 import logging
+import threading
 import pandas as pd
 import time
 from datetime import date, datetime, timedelta
@@ -66,11 +67,48 @@ logger = logging.getLogger(__name__)
 # just refreshed less often).
 DF_IDX_TTL_SECONDS = 20
 _DF_IDX_CACHE = TTLSlot(ttl_seconds=DF_IDX_TTL_SECONDS, clock="epoch")
+_DF_IDX_REFRESH_LOCK = threading.Lock()
+_DF_IDX_REFRESHING = False
+
+
+def _refresh_df_idx_background():
+    """Runs off the tick's critical path — see _fetch_all_indices_cached."""
+    global _DF_IDX_REFRESHING
+    try:
+        _DF_IDX_CACHE.set(fetch_all_indices())
+    except Exception as e:
+        logger.error(f"[_refresh_df_idx_background] fetch_all_indices failed: {e}")
+    finally:
+        with _DF_IDX_REFRESH_LOCK:
+            _DF_IDX_REFRESHING = False
 
 
 def _fetch_all_indices_cached():
-    if not _DF_IDX_CACHE.is_fresh():
+    """Stale-while-revalidate: on TTL expiry, kick off the 6-way NSE
+    refresh in a background thread and return the last known value
+    immediately, instead of blocking this tick's pipeline on it. Only
+    the very first call (cold start, no value yet) blocks, since there's
+    nothing to fall back to.
+    """
+    global _DF_IDX_REFRESHING
+
+    if _DF_IDX_CACHE.value is None:
+        # Cold start — nothing cached yet, must block once.
         _DF_IDX_CACHE.set(fetch_all_indices())
+        return _DF_IDX_CACHE.value
+
+    if not _DF_IDX_CACHE.is_fresh():
+        with _DF_IDX_REFRESH_LOCK:
+            already_refreshing = _DF_IDX_REFRESHING
+            if not already_refreshing:
+                _DF_IDX_REFRESHING = True
+        if not already_refreshing:
+            threading.Thread(
+                target=_refresh_df_idx_background,
+                daemon=True,
+                name="df_idx_refresh",
+            ).start()
+
     return _DF_IDX_CACHE.value
 
 # ─── Virtual OI estimator coordinator loader ──────────────────────────
