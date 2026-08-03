@@ -97,6 +97,19 @@ ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
       // this is what makes the range control "global" rather than each
       // surface keeping its own independent filter.
       range: (typeof _chainRange !== "undefined" ? _chainRange : 3),
+      // BUGFIX: maxPain and volOiRatios were never forwarded, so
+      // option-chain.js's state.maxPain/state.volOiRatios stayed stuck at
+      // their initial null/{} forever (its `if (msg.maxPain != null)` /
+      // `if (msg.volOiRatios)` guards never fired). That silently desynced
+      // this tab's Smart Money / Market Structure columns from the Strike
+      // Detail Report's — the ATM strike never got tagged "Max Pain" here
+      // (falling through to a resistance/support rank instead), and Smart
+      // Money fell back to a local vol/oi approximation instead of the
+      // real server-fed ratio the Strike Detail Report reads. Both fields
+      // already exist on payload (see mTerminals_json.py) — just weren't
+      // included in this postMessage.
+      maxPain: payload.maxPain,
+      volOiRatios: payload.volOiRatios,
     });
 };
 
