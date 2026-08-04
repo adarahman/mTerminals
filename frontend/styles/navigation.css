@@ -138,20 +138,9 @@
 
 .expiry-divider{width:1px;height:28px;background:var(--border);flex-shrink:0;}
 
-/* Top-bar Profit & Fund pills (see renderFundPillHtml() in chain-views.js)
-   — reuse .expiry-pill's layout, just clickable (opens #pt-panel) and
-   with a low-fund warning state so "should I square off?" is answerable
-   without opening the Paper Trading panel first. */
-
-.pt-topbar-pill{cursor:pointer;border-radius:8px;transition:background .15s ease;}
-
-.pt-topbar-pill:hover{background:rgba(255,255,255,0.06);}
-
-.pt-topbar-pill-warn{
-  background:rgba(250,82,82,0.12);
-  border:1px solid rgba(250,82,82,0.35);
-  animation:pt-fund-pulse 2s ease-in-out infinite;
-}
+/* Top-bar Profit & Fund pills removed (2026-08-04) — that readout now
+   lives in the Portfolio Tracker panel (#pt-portfolio-panel), not the
+   top-bar. See chain/chain-template.js's renderTopBarHtml(). */
 
 .top-bar-left{
   display:flex;align-items:center;

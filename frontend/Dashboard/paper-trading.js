@@ -365,22 +365,27 @@ function ptFmtExpiry(expiry){
 let _ptSymbolTouched = false;
 
 function ptMountPanel(){
-  if($i('pt-panel')) return; // already mounted, e.g. after bfcache-forced reload path
+  if($i('pt-order-panel')) return; // already mounted, e.g. after bfcache-forced reload path
 
-  // Styling for #pt-panel/#pt-quick-popover/.pt-toast/#pt-live-confirm-*/etc.
-  // now lives in styles/paper-trading.css (was runtime-injected here via a <style> tag).
+  // Styling for #pt-order-panel/#pt-portfolio-panel/#pt-quick-popover/
+  // .pt-toast/#pt-live-confirm-*/etc. lives in styles/paper-trading.css
+  // (was runtime-injected here via a <style> tag).
 
-  // The toggle button itself is no longer created here — it's the static
-  // #pt-toggle-btn "Paper" sec-btn in the left #sec-nav-bar rail
-  // (DashboardPro.html), relocated (2026-08-02) from a floating fixed
-  // bottom-right button that sat permanently on top of whatever table
-  // row happened to be scrolled underneath it. togglePtPanel() (below)
-  // opens this panel positioned next to that rail button instead.
+  // The toggle buttons themselves are not created here — they're the
+  // static #pt-order-toggle-btn "Order" and #pt-toggle-btn "Portfolio"
+  // sec-btns in the left #sec-nav-bar rail (DashboardPro.html). Split
+  // 2026-08-04 from a single combined "Paper" button/panel (itself
+  // relocated 2026-08-02 from a floating fixed bottom-right button) into
+  // two: Order GUI (order entry + basket) and Portfolio Tracker (P&L,
+  // Fund, positions, trade log — this is also where the top-bar's old
+  // P&L/Fund pills moved to, see chain/chain-template.js). toggleOrder-
+  // Panel()/togglePortfolioPanel() (below) open each positioned next to
+  // its own rail button.
 
-  const panel = document.createElement('div');
-  panel.id = 'pt-panel';
-  panel.innerHTML = `
-    <h4><span id="pt-panel-title">Paper Trading</span> <span id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Click to switch between Paper and Live trading">📝 PAPER</span> <span class="pt-close" onclick="$i('pt-panel').classList.remove('open')">✕</span></h4>
+  const orderPanel = document.createElement('div');
+  orderPanel.id = 'pt-order-panel';
+  orderPanel.innerHTML = `
+    <h4><span id="pt-panel-title">Order GUI</span> <span id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Click to switch between Paper and Live trading">📝 PAPER</span> <span class="pt-close" onclick="$i('pt-order-panel').classList.remove('open')">✕</span></h4>
     <div class="pt-section">
       <div class="pt-row">
         <select id="pt-symbol"></select>
@@ -450,6 +455,13 @@ function ptMountPanel(){
         </div>
       </div>
     </div>
+  `;
+  document.body.appendChild(orderPanel);
+
+  const portfolioPanel = document.createElement('div');
+  portfolioPanel.id = 'pt-portfolio-panel';
+  portfolioPanel.innerHTML = `
+    <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <span class="pt-close" onclick="$i('pt-portfolio-panel').classList.remove('open')">✕</span></h4>
     <div class="pt-section">
       <div class="pt-summary"><span>Realized</span><span id="pt-realized">—</span></div>
       <div class="pt-summary"><span>Unrealized</span><span id="pt-unrealized">—</span></div>
@@ -492,12 +504,13 @@ function ptMountPanel(){
       </tr></thead><tbody></tbody></table>
     </div>
   `;
-  document.body.appendChild(panel);
+  document.body.appendChild(portfolioPanel);
 
   // Tap-to-reveal for rejected orders' reason (see .pt-status-tap CSS note
   // above) — delegated once on the table body since rows are rebuilt on
-  // every re-render.
-  panel.addEventListener('click', (e)=>{
+  // every re-render. Lives on the Portfolio Tracker panel now — that's
+  // where the orders table (#pt-orders-table) actually is.
+  portfolioPanel.addEventListener('click', (e)=>{
     const td = e.target.closest('.pt-status-tap');
     if(td) ptToast('Rejected — ' + (td.dataset.reason || 'no reason provided'), 'err');
   });

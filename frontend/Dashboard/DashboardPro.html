@@ -471,7 +471,17 @@
        ptToggleLiveMode()'s existing classList/innerHTML updates keep
        targeting the same element with no changes needed there. -->
   <button class="sec-btn" id="algo-toggle-btn" onclick="toggleAlgoPanel()" title="Algo trading safety status"><span>🤖</span>Algo</button>
-  <button class="sec-btn" id="pt-toggle-btn" onclick="togglePtPanel()" title="Paper trading panel"><span>📊</span>Paper</button>
+  <!-- Paper Trading split (2026-08-04) into two separate panels: Order GUI
+       (order entry form + basket, pt-order-panel) and Portfolio Tracker
+       (P&L, Fund, positions, trade log — pt-portfolio-panel). The old
+       single "Paper" button/panel combined both; #pt-toggle-btn keeps its
+       id (renderFundPillHtml's old top-bar pill and any other references
+       used to open it) but now opens the Portfolio Tracker specifically,
+       since that's where the top-bar's former P&L/Fund readout moved to
+       (see renderTopBarHtml/renderFundPillHtml removal in
+       chain/chain-template.js). #pt-order-toggle-btn is new. -->
+  <button class="sec-btn" id="pt-order-toggle-btn" onclick="toggleOrderPanel()" title="Place a paper/live order"><span>📝</span>Order</button>
+  <button class="sec-btn" id="pt-toggle-btn" onclick="togglePortfolioPanel()" title="Portfolio tracker — P&amp;L, fund, positions, trade log"><span>📊</span>Portfolio</button>
   <button class="sec-btn" id="backtest-toggle-btn" onclick="toggleBacktestModal()" title="Backtest decision engine thresholds"><span>📈</span>Backtest</button>
 </div>
 

@@ -126,37 +126,18 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
         <span class="expiry-pill-label">As of</span>
         <span class="expiry-pill-val time-val" id="time-display">${d.refreshTime||'--'}</span>
       </div>
-      ${this.renderFundPillHtml(d)}
     </div>
   </div>`;
 };
 
-  // Always-visible Profit/Fund readout so a square-off decision doesn't
-  // require opening the (collapsed-by-default) Paper Trading panel first.
-  // ptComputeFundSummary() lives in paper-trading.js, which loads after
-  // this file in DashboardPro.html — safe to call here anyway since this
-  // only ever runs at render time (a live WS tick), by which point every
-  // script tag has already executed. Guarded regardless, in case
-  // paper-trading.js is ever removed/reordered or the portfolio feed
-  // hasn't arrived yet.
-ChainView.prototype.renderFundPillHtml = function(d) {
-    if (typeof window.ptComputeFundSummary !== 'function') return '';
-    const fs = window.ptComputeFundSummary(d);
-    if (!fs) return '';
-    const pnlColor = fs.netPnl >= 0 ? 'var(--green)' : 'var(--red)';
-    const warnCls = fs.lowFund ? ' pt-topbar-pill-warn' : '';
-    const openPanel = "onclick=\"var p=document.getElementById('pt-panel'); if(p) p.classList.add('open');\"";
-    const fundUnavailable = fs.fundSource === 'live-unavailable';
-    return `<div class="expiry-divider"></div>
-      <div class="expiry-pill pt-topbar-pill${warnCls}" ${openPanel} title="Net P&amp;L${fs.fundSource==='live-real'?' (real, from AngelOne)':fs.isLive?' after charges (paper model — live mode is on)':' after charges'} — click for full Paper Trading detail">
-        <span class="expiry-pill-label">P&amp;L${fs.fundSource==='live-unavailable'?' (paper)':''}</span>
-        <span class="expiry-pill-val" style="color:${pnlColor}">${fs.netPnl>=0?'+':''}${fmtI(fs.netPnl)}</span>
-      </div>
-      <div class="expiry-pill pt-topbar-pill${warnCls}" ${openPanel} title="${fundUnavailable?'Live account funds aren\'t wired up yet — see ptComputeFundSummary() in paper-trading.js':fs.fundSource==='live-real'?'Real available margin, from AngelOne rmsLimit()':'Available margin (approx.)'} — click for full Paper Trading detail">
-        <span class="expiry-pill-label">Fund</span>
-        <span class="expiry-pill-val" style="color:${fundUnavailable?'var(--txt3)':(fs.lowFund?'var(--red)':'var(--txt)')}">${fundUnavailable?'n/a':fmtI(fs.fund)}</span>
-      </div>`;
-};
+  // The P&L/Fund pills that used to render here (renderFundPillHtml,
+  // clickable, opening the old combined #pt-panel) have been removed
+  // (2026-08-04) — that readout now lives permanently in the Portfolio
+  // Tracker panel (#pt-portfolio-panel, opened from the "Portfolio"
+  // #pt-toggle-btn in the left #sec-nav-bar rail) instead of duplicating
+  // it in the top-bar's already-crowded expiry strip. ptComputeFundSummary()
+  // in paper-trading.js is still the source of that data — it's just
+  // consumed directly by ptRenderPortfolioSummary() now, not here.
 
   // ── MINI SPARKLINE — small live price trace shown in the Decision
   // Engine card's header row, between the bias call and Confidence.
