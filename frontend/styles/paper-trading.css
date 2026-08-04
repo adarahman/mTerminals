@@ -1,26 +1,29 @@
-/* Paper trading panel, popovers, notifications, and confirmation modal.
-   #pt-toggle-btn is now a plain "Paper" sec-btn living in the left
-   #sec-nav-bar rail (DashboardPro.html) — relocated (2026-08-02) from a
-   floating fixed bottom-right button that sat permanently on top of
-   whatever table row happened to scroll underneath it. Base look/hover/
-   active states all come from .sec-btn (navigation.css). #pt-panel is
-   no longer anchored to that old button's corner — togglePtPanel()
-   (paper-trading.js) positions it dynamically next to wherever the rail
-   button actually is, same approach as ui-controls.js's
-   toggleControlSidebar()/.ctrl-sidebar-panel. */
+/* Paper trading panels, popovers, notifications, and confirmation modal.
+   #pt-order-toggle-btn ("Order") and #pt-toggle-btn ("Portfolio") are
+   plain sec-btns living in the left #sec-nav-bar rail (DashboardPro.html)
+   — relocated (2026-08-02) from a floating fixed bottom-right button that
+   sat permanently on top of whatever table row happened to scroll
+   underneath it, then split (2026-08-04) from one combined panel into
+   #pt-order-panel (Order GUI) and #pt-portfolio-panel (Portfolio
+   Tracker). Base look/hover/active states come from .sec-btn
+   (navigation.css). Neither panel is anchored to its button's corner —
+   toggleOrderPanel()/togglePortfolioPanel() (paper-trading.js) position
+   each dynamically next to wherever its own rail button actually is,
+   same approach as ui-controls.js's toggleControlSidebar()/
+   .ctrl-sidebar-panel. */
 
-#pt-panel{
+#pt-order-panel, #pt-portfolio-panel{
   position:fixed; z-index:var(--z-popover);
   width:min(660px, 96vw); max-height:78vh; overflow-y:auto; display:none;
   background:var(--bg-1); color:var(--text-primary);
   border:1px solid var(--border); border-radius:10px;
   padding:var(--space-4); font:12px/1.4 inherit; box-shadow:var(--shadow-md);
 }
-#pt-panel.open{display:block;}
-#pt-panel h4{margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;}
-#pt-panel .pt-section{margin-bottom:var(--space-4); border-top:1px solid var(--border); padding-top:var(--space-3);}
-#pt-panel .pt-pos{color:var(--pos);}
-#pt-panel .pt-neg{color:var(--neg);}
+#pt-order-panel.open, #pt-portfolio-panel.open{display:block;}
+#pt-order-panel h4, #pt-portfolio-panel h4{margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;}
+#pt-order-panel .pt-section, #pt-portfolio-panel .pt-section{margin-bottom:var(--space-4); border-top:1px solid var(--border); padding-top:var(--space-3);}
+#pt-order-panel .pt-pos, #pt-portfolio-panel .pt-pos{color:var(--pos);}
+#pt-order-panel .pt-neg, #pt-portfolio-panel .pt-neg{color:var(--neg);}
 
 .pt-side-badge{display:inline-block; min-width:36px; text-align:center; padding:1px 6px; border-radius:3px; font-weight:800; font-size:10px; letter-spacing:.02em;}
 .pt-side-buy{background:rgba(46,204,113,.16); color:var(--pos);}
@@ -44,14 +47,14 @@
 .pt-basket-leg-remove:hover{opacity:1; color:var(--neg);}
 .pt-status-tap{cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px;}
 
-#pt-panel input,#pt-panel select{width:100%; box-sizing:border-box; margin:2px 0 6px; padding:var(--space-1) var(--space-2); background:#0f1116; color:var(--text-primary); border:1px solid var(--border); border-radius:4px;}
-#pt-panel .pt-row{display:flex; gap:var(--space-2);}
-#pt-panel .pt-row > *{flex:1;}
-#pt-panel button.pt-submit{width:100%; padding:var(--space-2); margin-top:var(--space-1); border:none; border-radius:4px; background:var(--info); color:#fff; font-weight:600; cursor:pointer;}
-#pt-panel .pt-close{cursor:pointer; opacity:.6; font-weight:400;}
-#pt-panel .pt-summary{display:flex; justify-content:space-between; font-size:11px; margin-bottom:var(--space-2);}
+#pt-order-panel input,#pt-order-panel select,#pt-portfolio-panel input,#pt-portfolio-panel select{width:100%; box-sizing:border-box; margin:2px 0 6px; padding:var(--space-1) var(--space-2); background:#0f1116; color:var(--text-primary); border:1px solid var(--border); border-radius:4px;}
+#pt-order-panel .pt-row, #pt-portfolio-panel .pt-row{display:flex; gap:var(--space-2);}
+#pt-order-panel .pt-row > *, #pt-portfolio-panel .pt-row > *{flex:1;}
+#pt-order-panel button.pt-submit, #pt-portfolio-panel button.pt-submit{width:100%; padding:var(--space-2); margin-top:var(--space-1); border:none; border-radius:4px; background:var(--info); color:#fff; font-weight:600; cursor:pointer;}
+#pt-order-panel .pt-close, #pt-portfolio-panel .pt-close{cursor:pointer; opacity:.6; font-weight:400;}
+#pt-order-panel .pt-summary, #pt-portfolio-panel .pt-summary{display:flex; justify-content:space-between; font-size:11px; margin-bottom:var(--space-2);}
 #pt-err{font-size:11px; min-height:14px; margin-top:var(--space-1); color:var(--neg);}
-#pt-panel select:disabled{opacity:.4;}
+#pt-order-panel select:disabled, #pt-portfolio-panel select:disabled{opacity:.4;}
 
 .pt-ltp-click{cursor:pointer; padding:1px 4px; border-radius:3px; transition:background .1s;}
 .pt-ltp-click:hover{background:rgba(59,130,246,.28); outline:1px dashed rgba(59,130,246,.6);}
@@ -74,7 +77,7 @@
 .pt-mode-toggle{cursor:pointer; font-size:10px; font-weight:800; letter-spacing:.04em; padding:2px 8px; border-radius:10px; margin-left:var(--space-3); user-select:none;}
 .pt-mode-toggle.paper{background:rgba(255,255,255,.08); color:var(--text-muted); border:1px solid var(--border);}
 .pt-mode-toggle.live{background:var(--neg); color:#fff; animation:pt-mode-pulse 1.6s ease-in-out infinite;}
-#pt-panel.live-mode{border-color:var(--neg); box-shadow:0 4px 20px rgba(231,76,60,.35);}
+#pt-order-panel.live-mode{border-color:var(--neg); box-shadow:0 4px 20px rgba(231,76,60,.35);}
 
 #pt-live-confirm-overlay{position:fixed; inset:0; z-index:var(--z-critical-modal); display:none; background:rgba(0,0,0,.6); align-items:center; justify-content:center;}
 #pt-live-confirm-overlay.open{display:flex;}

@@ -644,13 +644,18 @@ function ptMountPanel(){
 // wide (min(660px, 96vw)), so this is what most needs the clamp — a
 // naive right-of-button placement would routinely run off the right
 // edge on anything narrower than a wide desktop viewport.
-function togglePtPanel(){
-  const el = $i('pt-panel');
+// Shared positioning helper for the two split panels (order/portfolio) —
+// opens `panelId` next to `btnId`, clamped so it never renders partially
+// off-screen. Extracted from the old single-panel togglePtPanel() when
+// the panel was split 2026-08-04; #pt-order-panel/#pt-portfolio-panel
+// are each min(660px, 96vw) wide, so this is what most needs the clamp.
+function ptTogglePanelNear(panelId, btnId){
+  const el = $i(panelId);
   if(!el) return;
   const opening = !el.classList.contains('open');
   el.classList.toggle('open');
   if(opening){
-    const btn = $i('pt-toggle-btn');
+    const btn = $i(btnId);
     if(btn){
       const r = btn.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;
@@ -670,7 +675,14 @@ function togglePtPanel(){
     }
   }
 }
-window.togglePtPanel = togglePtPanel;
+function toggleOrderPanel(){
+  ptTogglePanelNear('pt-order-panel', 'pt-order-toggle-btn');
+}
+function togglePortfolioPanel(){
+  ptTogglePanelNear('pt-portfolio-panel', 'pt-toggle-btn');
+}
+window.toggleOrderPanel = toggleOrderPanel;
+window.togglePortfolioPanel = togglePortfolioPanel;
 
 // Rebuilds the expiry <select> (and, via ptRefreshStrikeOptions, the
 // strike <select>) from live chain data instead of requiring manual
@@ -994,7 +1006,7 @@ function ptPlaceBasket(){
     setTimeout(()=>{ if(errEl.textContent==='Basket sent') errEl.textContent=''; }, 2000);
     _ptBasket = [];
     ptRenderBasket();
-    const panel = $i('pt-panel');
+    const panel = $i('pt-order-panel');
     if(panel) panel.classList.add('open');
   } else {
     ptToast('Basket failed to send (WS not connected)', 'err');
@@ -1033,17 +1045,26 @@ function ptToggleLiveMode(){
   }
   _ptLiveMode = !_ptLiveMode;
   const pill = $i('pt-mode-toggle');
-  const panel = $i('pt-panel');
-  const floatBtn = $i('pt-toggle-btn');
+  const panel = $i('pt-order-panel');
+  // #pt-toggle-btn is the dedicated "Portfolio" rail button now (see
+  // DashboardPro.html's 2026-08-04 order/portfolio split) — it no longer
+  // doubles as a paper/live mode indicator, so its label is left alone.
+  // The portfolio panel's own mode readout (pt-portfolio-mode-badge) is
+  // synced here instead, mirroring the order panel's pt-mode-toggle pill.
+  const portfolioBadge = $i('pt-portfolio-mode-badge');
   if(pill){
     pill.textContent = _ptLiveMode ? '🔴 LIVE' : '📝 PAPER';
     pill.classList.toggle('live', _ptLiveMode);
     pill.classList.toggle('paper', !_ptLiveMode);
   }
+  if(portfolioBadge){
+    portfolioBadge.textContent = _ptLiveMode ? '🔴 LIVE' : '📝 PAPER';
+    portfolioBadge.classList.toggle('live', _ptLiveMode);
+    portfolioBadge.classList.toggle('paper', !_ptLiveMode);
+  }
   const title = $i('pt-panel-title');
   if(title) title.textContent = _ptLiveMode ? 'Live Trading' : 'Paper Trading';
   if(panel) panel.classList.toggle('live-mode', _ptLiveMode);
-  if(floatBtn) floatBtn.innerHTML = _ptLiveMode ? '<span>🔴</span>Live' : '<span>📊</span>Paper';
   ptToast(_ptLiveMode ? 'LIVE trading mode enabled' : 'Back to Paper trading mode', _ptLiveMode ? 'err' : 'ok');
   // Directs the socket to start/stop real funds polling, the same way
   // switching the top-bar symbol dropdown directs it to switch feeds —
@@ -1125,7 +1146,7 @@ function _ptSendOrderNow(payload, errEl){
     // this was the core of "no trade/order information after order
     // sent": ordering from the option-chain popover left the panel
     // closed the whole time.
-    const panel = $i('pt-panel');
+    const panel = $i('pt-order-panel');
     if(panel) panel.classList.add('open');
     if(AppState.wsState) renderPaperTradingPanel(AppState.wsState);
   } else {
@@ -1745,7 +1766,7 @@ function ptRenderOrdersTable(view, wsState){
 // ── Orchestrator ── unchanged entry point / call signature, now just
 // wires: mount -> form sync (always) -> guard -> compute -> render x3.
 function renderPaperTradingPanel(wsState){
-  if(!$i('pt-panel')) ptMountPanel();
+  if(!$i('pt-order-panel')) ptMountPanel();
   if(!wsState) return;
 
   // Must not be blocked on `portfolio` existing — see ptSyncFormFromWsState.
