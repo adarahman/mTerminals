@@ -275,6 +275,31 @@ function switchActiveIndex(sym) {
   if (window.eventBus) window.eventBus.emit('symbol:change', { symbol: sym });
 }
 window.switchActiveIndex = switchActiveIndex;
+
+// Manual price-source selector — "EQ" (cash-market spot, default) or
+// "FUT" (near-month futures LTP). See ws_server_live.py's PRICE_SOURCE
+// for why: EQ goes stale in the last ~15min before close (3:15-3:30),
+// leaving nothing for the decision engine to evaluate; FUT keeps ticking
+// through 3:30. Mirrors switchActiveIndex()'s pattern exactly, except it
+// preserves whatever symbol param is already on the URL instead of
+// dropping it — a price-source switch shouldn't also reset your symbol.
+function setPriceSource(source) {
+  if (source !== 'EQ' && source !== 'FUT') return;
+  const [base, query] = (_wsUrl || '').split('?');
+  const params = new URLSearchParams(query || '');
+  params.set('priceSource', source);
+  connectWebSocket(`${base}?${params.toString()}`);
+  if (window.eventBus) window.eventBus.emit('priceSource:change', { source });
+}
+window.setPriceSource = setPriceSource;
+
+// Called by a top-bar <select onchange> next to the symbol picker, same
+// wiring as onSymbolPicked() above.
+function onPriceSourcePicked(val){
+  setPriceSource(val);
+}
+window.onPriceSourcePicked = onPriceSourcePicked;
+
 window.renderIndexTicker = renderIndexTicker;
 
 // deepMerge() and applyDelta() live in market-store.js, used only by

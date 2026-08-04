@@ -348,12 +348,29 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
 # file — same _load_scrip_master() cache, no new network dependency.
 
 def _get_futures_contract(underlying: str, expiry_dash: str | None = None,
-                           exchange: str = "NFO") -> dict | None:
+                           exchange: str = "NFO", which: str = "NEAR") -> dict | None:
+    """which is only consulted when expiry_dash is None (i.e. "give me
+    a monthly slot by relative position" instead of "give me this exact
+    date") — NEAR/NEXT/FAR map to the 1st/2nd/3rd soonest listed FUTIDX
+    expiry. Clamped to whatever's actually listed (FAR silently becomes
+    NEXT or NEAR if a 3rd month isn't listed yet) rather than returning
+    None for an out-of-range request — a caller asking for "the far
+    month" shouldn't get nothing just because NSE hasn't listed it yet.
+
+    instrumenttype covers BOTH "FUTIDX" (index futures — NIFTY/BANKNIFTY)
+    and "FUTSTK" (single-stock futures — RELIANCE/etc.) — reusing
+    smartapi_instruments._FNO_FUT_TYPES rather than a separate literal,
+    since that's the same set get_lot_size() and the F&O lot-size table
+    already treat as "this is a futures contract" elsewhere in this
+    codebase. Previously filtered to "FUTIDX" only, so this always
+    silently returned None (empty futures fetch, PRICE_SOURCE=FUT
+    quietly no-op'd back to EQ) for any single-stock underlying."""
+    from brokers.smartapi_instruments import _FNO_FUT_TYPES
     data = _load_scrip_master()
     cands = [row for row in data
              if row.get("exch_seg") == exchange
              and row.get("name") == underlying.upper()
-             and row.get("instrumenttype") == "FUTIDX"]
+             and row.get("instrumenttype") in _FNO_FUT_TYPES]
     if not cands:
         return None
     cands.sort(key=lambda r: datetime.strptime(r["expiry"], "%d%b%Y"))
@@ -362,13 +379,27 @@ def _get_futures_contract(underlying: str, expiry_dash: str | None = None,
         cands = [c for c in cands if c["expiry"] == target]
         if not cands:
             return None
-    return cands[0]  # nearest expiry if not specified
+        return cands[0]
+    idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
+    idx = min(idx, len(cands) - 1)
+    return cands[idx]
 
 
 def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
-                        exchange: str = "NFO") -> pd.DataFrame:
-    """Replacement for market_api.fetch_nifty_futures()."""
-    fut = _get_futures_contract(underlying, expiry_dash, exchange)
+                        exchange: str = "NFO", which: str = "NEAR") -> pd.DataFrame:
+    """Replacement for market_api.fetch_nifty_futures().
+
+    IMPORTANT: expiry_dash means "this exact futures expiry date" — do
+    NOT pass the options chain's EXPIRY here (previously done at both
+    option_chain_json.py call sites). NIFTY/BANKNIFTY futures are listed
+    monthly; options are often weekly. Passing a weekly options expiry
+    as expiry_dash makes _get_futures_contract()'s exact-match filter
+    empty on every week that isn't the monthly expiry week, silently
+    returning an empty DataFrame the rest of the month. Leave expiry_dash
+    None and use `which` (NEAR/NEXT/FAR) to pick a monthly slot by
+    relative position instead — see option_chain_json.py's FUTURES_EXPIRY.
+    """
+    fut = _get_futures_contract(underlying, expiry_dash, exchange, which=which)
     if not fut:
         return pd.DataFrame()
 

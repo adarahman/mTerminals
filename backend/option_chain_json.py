@@ -158,6 +158,40 @@ NO_VIRTUAL_OI  = _args.no_virtual_oi
 # 10 even under --no-smartapi, where 50 was intended.
 STRIKES_EACH_SIDE = 10
 
+# Underlying price source fed into df["Spot"] (and downstream into every
+# engine.py bs_* Greeks call, wall selection, PCR, etc.):
+#   "EQ"  (default) — NSE option-chain response's own underlyingValue,
+#         a cash-market index quote. Reliable all session, EXCEPT it goes
+#         stale in roughly the last 15 min before close (~3:15-3:30) —
+#         NSE's own closing-auction/index-computation window means this
+#         field stops updating even though the market (and the F&O chain
+#         itself) is still live and moving. With EQ frozen, every score
+#         downstream (PCR, walls, confidence, verdicts) reads a fixed
+#         spot and produces nothing new to evaluate — "everything goes
+#         blind" for that last stretch.
+#   "FUT" — near-month futures LTP (already fetched every tick via
+#         fetch_futures_wide() into df_fut, previously computed and
+#         discarded). Futures keep trading and ticking live through
+#         3:30, so swapping this in during the EQ-stale window keeps the
+#         whole pipeline evaluating instead of freezing. Not basis-
+#         adjusted back toward EQ's frame — during the window this
+#         matters most, EQ isn't a trustworthy reference to adjust
+#         toward anyway, and using the futures price directly is the
+#         standard convention for a live options-desk reference price
+#         near close.
+# Manual only (no auto-fallback) — see set_price_source()/pipeline_config.py.
+PRICE_SOURCE = "EQ"
+
+# Which monthly futures contract PRICE_SOURCE="FUT" resolves to —
+# "NEAR" (current month, default), "NEXT", or "FAR". See
+# fetch_futures_wide()'s docstring (smartapi_pipeline_adapter.py): this
+# used to silently pass the options chain's own EXPIRY (often weekly)
+# as the futures expiry filter, which only ever matched on the monthly
+# expiry week and returned an empty futures fetch every other week —
+# fixed by resolving futures by relative monthly position instead of
+# reusing the options expiry string. Manual only, via set_runtime_config().
+FUTURES_EXPIRY = "NEAR"
+
 # Whether the base option-chain fetch itself uses SmartAPI REST or falls
 # back to market_api.py's NSE/BSE-native REST. Standalone default is True;
 # a long-lived host repoints this via set_runtime_config() below, based on
@@ -192,7 +226,7 @@ def set_runtime_config(cfg: RuntimeConfig) -> None:
     it's not part of this contract.
     """
     global SYMBOL, EXPIRY, NO_EXTRA_CHAINS, STRICT_EXPIRY, NO_VIRTUAL_OI
-    global STRIKES_EACH_SIDE, USE_SMARTAPI
+    global STRIKES_EACH_SIDE, USE_SMARTAPI, PRICE_SOURCE, FUTURES_EXPIRY
     if cfg.symbol is not None: SYMBOL = cfg.symbol
     if cfg.expiry is not None: EXPIRY = cfg.expiry
     if cfg.no_extra_chains is not None: NO_EXTRA_CHAINS = cfg.no_extra_chains
@@ -200,6 +234,16 @@ def set_runtime_config(cfg: RuntimeConfig) -> None:
     if cfg.no_virtual_oi is not None: NO_VIRTUAL_OI = cfg.no_virtual_oi
     if cfg.strikes_each_side is not None: STRIKES_EACH_SIDE = cfg.strikes_each_side
     if cfg.use_smartapi is not None: USE_SMARTAPI = cfg.use_smartapi
+    if cfg.price_source is not None:
+        src = cfg.price_source.strip().upper()
+        if src not in ("EQ", "FUT"):
+            raise ValueError(f"price_source must be 'EQ' or 'FUT', got {cfg.price_source!r}")
+        PRICE_SOURCE = src
+    if cfg.futures_expiry is not None:
+        fexp = cfg.futures_expiry.strip().upper()
+        if fexp not in ("NEAR", "NEXT", "FAR"):
+            raise ValueError(f"futures_expiry must be 'NEAR', 'NEXT', or 'FAR', got {cfg.futures_expiry!r}")
+        FUTURES_EXPIRY = fexp
 
 
 logger.info("\n=== LIGHTWEIGHT JSON OPTIONS PIPELINE INITIALIZATION ===")
@@ -389,11 +433,14 @@ def main():
                 # fetch_futures_wide() already resolves FUTIDX contracts
                 # generically off the ScripMaster (_get_futures_contract),
                 # same as the NSE branch below — exchange="BFO" is the only
-                # difference.
-                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, EXPIRY, exchange="BFO")
+                # difference. expiry_dash left None (was: EXPIRY) — see
+                # fetch_futures_wide()'s docstring for why reusing the
+                # options chain's own expiry here was wrong; `which`
+                # (FUTURES_EXPIRY) picks the monthly contract instead.
+                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, None, exchange="BFO", which=FUTURES_EXPIRY)
             else:
                 fut_chain = ex.submit(_fetch_and_parse, SYMBOL, EXPIRY, "NSE", STRICT_EXPIRY)
-                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, EXPIRY)
+                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, None, which=FUTURES_EXPIRY)
             # df_idx now TTL-cached (see _fetch_all_indices_cached above) —
             # still submitted through the pool each tick, but only actually
             # hits NSE once every DF_IDX_TTL_SECONDS; other ticks get the
@@ -426,6 +473,33 @@ def main():
                 if resolved != EXPIRY: EXPIRY = resolved
             df_fut  = fut_fut.result()
             df_idx  = fut_idx.result()
+
+            # PRICE_SOURCE override — see PRICE_SOURCE's own docstring above
+            # for why. Only swaps in when df_fut actually has a usable LTP;
+            # if the futures fetch itself failed/returned empty (network
+            # blip, contract not resolved, etc.) this silently keeps EQ
+            # rather than falling through to spot=0, which would trip the
+            # "Invalid Spot Price" abort below.
+            #
+            # Logged unconditionally whenever PRICE_SOURCE=="FUT" (not just
+            # on success) — this used to be a silent no-op on failure,
+            # which made "selected FUT but spot didn't move" indistinguishable
+            # from "the switch never even reached this code" from the logs
+            # alone. Now every tick says explicitly which branch it took.
+            if PRICE_SOURCE == "FUT":
+                if df_fut is None or df_fut.empty:
+                    logger.warning(f"[PRICE_SOURCE=FUT] df_fut empty for {SYMBOL} — "
+                                    f"futures contract resolution or quote fetch failed; keeping EQ spot={spot}")
+                else:
+                    fut_ltp = df_fut["LTP"].iloc[0] if "LTP" in df_fut.columns else 0.0
+                    if fut_ltp and fut_ltp > 0:
+                        logger.info(f"[PRICE_SOURCE=FUT] {SYMBOL} spot {spot} -> {fut_ltp} "
+                                    f"(contract={df_fut['Contract'].iloc[0] if 'Contract' in df_fut.columns else '?'})")
+                        spot = fut_ltp
+                        df["Spot"] = spot
+                    else:
+                        logger.warning(f"[PRICE_SOURCE=FUT] df_fut present for {SYMBOL} but LTP is "
+                                        f"{fut_ltp!r} (missing/zero) — keeping EQ spot={spot}")
 
             _live_vix, _live_vix_chg_pct = fut_unified.result()
             _live_vix = _live_vix or 0.0
@@ -565,7 +639,8 @@ def main():
             df_clean=df_clean, master=engine_result.master, ctx_dict=ctx_dict,
             SYMBOL=SYMBOL, EXPIRY=EXPIRY, dte=dte, engine_result=engine_result,
             out_path="mTerminals.json", expiry_dates=expiry_dates, extra_chains=extra_chains if extra_chains else None,
-            use_virtual_oi=not NO_VIRTUAL_OI, contributors=contributors, all_indices=all_indices
+            use_virtual_oi=not NO_VIRTUAL_OI, contributors=contributors, all_indices=all_indices,
+            price_source=PRICE_SOURCE, futures_expiry=FUTURES_EXPIRY,
         )
         logger.info("\nSUCCESS: JSON Framework updated snapshot successfully.")
 

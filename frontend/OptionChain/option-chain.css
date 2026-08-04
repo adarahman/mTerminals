@@ -83,11 +83,14 @@ body{
   letter-spacing:-0.01em;color:var(--oc-text);
   display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
 }
-#ocSpot{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
 .oc-spot-chg{
   font-family:var(--font-mono);font-size:0.95rem;font-weight:600;
+  font-variant-numeric: tabular-nums;
+  display:inline-block;
+  min-width: 4.5ch;      /* covers "+12.34" / "-1.23" etc without reflow */
+  text-align:right;
   color:var(--call);
-}
+}                   
 .oc-spot-chg.down{color:var(--put);}
 
 .oc-head-controls{

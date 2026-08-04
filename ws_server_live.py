@@ -138,6 +138,13 @@ _parser.add_argument("--portfolio-poll-seconds", type=float, default=0.5,
 ARGS = _parser.parse_args()
 
 SYMBOL       = ARGS.symbol.strip().upper()
+# Manual price-source selector — "EQ" (default, cash-market spot from the
+# NSE option-chain response) or "FUT" (near-month futures LTP). See
+# option_chain_json.py's PRICE_SOURCE docstring for the 3:15-3:30 EQ-goes-
+# stale rationale. Switched the same way SYMBOL is — via ?priceSource= on
+# the WS URL, see ws_handler() — and read fresh into RuntimeConfig every
+# tick by run_pipeline_once() -> _configure_pipeline_globals().
+PRICE_SOURCE = "EQ"
 EXPIRY       = ARGS.expiry
 POLL_SECONDS = ARGS.poll_seconds
 MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
@@ -516,6 +523,23 @@ async def ws_handler(request):
     requested_expiry = request.query.get("expiry")
     if requested_symbol or requested_expiry:
         switch_symbol(requested_symbol or SYMBOL, requested_expiry)
+
+    # Manual price-source selector — see PRICE_SOURCE's declaration above.
+    # Deliberately NOT bundled into switch_symbol(): switching symbol
+    # should not silently reset your price-source choice back to EQ, and
+    # unlike symbol/expiry this doesn't need LAST_PAYLOAD cleared or the
+    # engine-loop wake event poked — it takes effect on the pipeline's next
+    # regularly-scheduled tick, same as any other RuntimeConfig field.
+    requested_price_source = request.query.get("priceSource")
+    if requested_price_source:
+        src = requested_price_source.strip().upper()
+        if src in ("EQ", "FUT"):
+            global PRICE_SOURCE
+            if src != PRICE_SOURCE:
+                print(f"[ws] price source switch requested: {PRICE_SOURCE} -> {src}", flush=True)
+                PRICE_SOURCE = src
+        else:
+            print(f"[ws] ignoring invalid ?priceSource={requested_price_source!r} (must be EQ or FUT)", flush=True)
 
     try:
         # New clients need a full snapshot before they can apply deltas.
@@ -1403,7 +1427,7 @@ async def bridge_loop():
         await asyncio.sleep(2)
 
 
-def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, strict_expiry=None, no_virtual_oi=None):
+def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, strict_expiry=None, no_virtual_oi=None, price_source=None):
     """Point option_chain_json's runtime config at `symbol`, via
     option_chain_json.set_runtime_config() (see pipeline_config.py). Used
     only by run_pipeline_once() for the primary --symbol's full
@@ -1428,6 +1452,7 @@ def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, stric
         no_extra_chains=no_extra_chains,
         strict_expiry=strict_expiry,
         no_virtual_oi=no_virtual_oi,
+        price_source=price_source,
     ))
 
 
@@ -1963,6 +1988,7 @@ def run_pipeline_once():
         no_extra_chains=not ARGS.extra_chains,
         strict_expiry=ARGS.strict_expiry,
         no_virtual_oi=ARGS.no_virtual_oi,
+        price_source=PRICE_SOURCE,
     )
 
     _CAPTURED.clear()
@@ -2749,6 +2775,11 @@ async def backtest_handler(request):
     start = request.query.get("start") or None
     end = request.query.get("end") or None
     use_account_guard = str(request.query.get("useAccountGuard", "")).strip().lower() in ("1", "true", "yes")
+    # See run_backtest()'s override_execute_recommended docstring — needed
+    # when captured history was logged while confidence never crossed the
+    # hardcoded T.CONFIDENCE_EXECUTE_MIN (40), which freezes executeRecommended
+    # False on every snapshot regardless of minConfidence passed here.
+    override_execute_recommended = str(request.query.get("overrideExecuteRecommended", "")).strip().lower() in ("1", "true", "yes")
 
     try:
         result = await run_backtest(
@@ -2760,6 +2791,7 @@ async def backtest_handler(request):
             cooldown_seconds=_int_param("cooldownSeconds", 300),
             max_trades_per_symbol_per_day=_int_param("maxTradesPerSymbolPerDay", 10),
             use_account_guard=use_account_guard,
+            override_execute_recommended=override_execute_recommended,
         )
     except Exception as e:
         print(f"[http] /api/backtest failed for {req_symbol}: {e}", flush=True)

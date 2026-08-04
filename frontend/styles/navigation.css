@@ -192,6 +192,29 @@
   background-position:right 14px center;
 }
 
+/* Same visual language as .symbol-select, deliberately smaller/muted —
+   this is a secondary control (EQ is the correct default almost all
+   session; FUT only matters in the last ~15min before close) and
+   shouldn't visually compete with the symbol picker for attention. */
+.price-source-select{
+  font-size:0.8125rem;
+  font-weight:700;
+  color:var(--text-tertiary);
+  background:#15171c;
+  border:1.5px solid var(--border, #2a2d34);
+  border-radius:999px;
+  outline:none;
+  cursor:pointer;
+  -webkit-appearance:none;
+  appearance:none;
+  padding:4px 20px 4px 10px;
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
+  background-repeat:no-repeat;
+  background-position:right 8px center;
+}
+
+.price-source-tag{font-size:0.6875rem;font-weight:700;color:var(--text-tertiary);vertical-align:middle;}
+
 .spot{font-size:1.8687rem;font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
 
 .spot.bearish{color:var(--neg);}

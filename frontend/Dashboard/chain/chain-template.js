@@ -87,7 +87,22 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            F&O contracts, grouped Indices/Stocks) plus whatever custom
            symbol is currently active if it isn't already in that list. -->
       <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY', d.fnoSymbols)}</select>
-      <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
+      <!-- Manual EQ/FUT price-source selector — see setPriceSource() in
+           chain-helpers.js. d.priceSource comes straight off the backend
+           payload (mTerminals_json.py's export_dashboard_json()); default
+           "EQ" if the field hasn't arrived yet on a very first render. -->
+      <select id="priceSourceSelect" class="price-source-select" title="Spot price source (EQ goes stale ~3:15-3:30; switch to FUT to keep evaluating)" onchange="onPriceSourcePicked(this.value)">
+        <option value="EQ"${(d.priceSource||'EQ')==='EQ'?' selected':''}>EQ</option>
+        <option value="FUT"${d.priceSource==='FUT'?' selected':''}>FUT</option>
+      </select>
+      <!-- Only matters once priceSource=FUT is picked above, but shown
+           always for a stable layout rather than popping in/out. -->
+      <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Which monthly futures contract to use as FUT source" onchange="onFuturesExpiryPicked(this.value)">
+        <option value="NEAR"${(d.futuresExpiry||'NEAR')==='NEAR'?' selected':''}>NEAR</option>
+        <option value="NEXT"${d.futuresExpiry==='NEXT'?' selected':''}>NEXT</option>
+        <option value="FAR"${d.futuresExpiry==='FAR'?' selected':''}>FAR</option>
+      </select>
+      <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}${d.priceSource==='FUT'?` <small class="price-source-tag">(FUT ${d.futuresExpiry||'NEAR'})</small>`:''}</span>
       ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}% (${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)})</span>`:''}
       ${renderIndexTicker(d)}
     </div>

@@ -209,6 +209,7 @@ async def run_backtest(
     use_account_guard: bool = False,
     db_path: Optional[str] = None,
     ltp_log_path: Optional[str] = None,
+    override_execute_recommended: bool = False,
 ) -> BacktestResult:
     """Core async entry point. See run_backtest_sync() for a plain
     synchronous call site (e.g. a notebook or a CLI script).
@@ -220,6 +221,17 @@ async def run_backtest(
     result = BacktestResult(symbol=symbol)
     if not snapshots:
         return result
+    if override_execute_recommended:
+        for row in snapshots:
+            decision = json.loads(row["decision_json"])
+            decision["executeRecommended"] = decision.get("confidence", 0) >= min_confidence
+            row["decision_json"] = json.dumps(decision)
+
+    if override_execute_recommended:
+        for row in snapshots:
+            decision = json.loads(row["decision_json"])
+            decision["executeRecommended"] = decision.get("confidence", 0) >= min_confidence
+            row["decision_json"] = json.dumps(decision)
 
     ltp = LtpHistory(symbol, log_path=ltp_log_path or JSON_HISTORY_LOG_PATH)
 

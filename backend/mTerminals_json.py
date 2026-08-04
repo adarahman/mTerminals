@@ -844,6 +844,12 @@ def export_dashboard_json(
                                # _compute_index_contributors() in option_chain_json.py.
                                # None/empty for symbols with no matching NSE basket.
     all_indices=None,         # list of {Symbol, Last Price, % Change} for ticker strip
+    price_source="EQ",        # "EQ" or "FUT" — option_chain_json.PRICE_SOURCE at call
+                               # time. Passed as a param (not imported directly) to
+                               # avoid a circular import — option_chain_json.py is this
+                               # function's only caller.
+    futures_expiry=None,      # near-month futures expiry string when price_source="FUT"
+                               # (option_chain_json.FUTURES_EXPIRY at call time), else None.
 ):
     logger.info(f"[export_dashboard_json] Assembling frontend payload for {SYMBOL}...")
 
@@ -1168,6 +1174,16 @@ def export_dashboard_json(
         "spotChange":    _r(ctx_dict.get("spot_change",  0), 2),
         "spotChgPct":    _r(ctx_dict.get("spot_chg_pct", 0), 2),
         "spotBias":      str(ctx_dict.get("bias",        "Neutral")),
+        # "EQ" or "FUT" — see option_chain_json.PRICE_SOURCE's docstring.
+        # Surfaced so the frontend can label the price e.g. "Spot (FUT)"
+        # rather than silently showing a futures-derived number as if it
+        # were the untouched cash-market spot.
+        "priceSource":   str(price_source),
+        # Near-month futures expiry used when price_source="FUT" (empty
+        # string when EQ or unset) — same reasoning as priceSource above:
+        # the frontend needs this to label which contract the FUT price
+        # came from, not just that it's a FUT price.
+        "futuresExpiry": str(futures_expiry) if futures_expiry else "",
         "expiry":        str(EXPIRY),
         "expiryDates":   expiry_dates or [],   # <-- NEW: full list
         "dte":           _to_int(dte),
