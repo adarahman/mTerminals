@@ -41,11 +41,11 @@
 
 /* highlights the currently-connected symbol; position stays fixed */
 
-.idx-pill-sym{font-family:var(--font-display);font-size:0.8625rem;font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;}
+.idx-pill-sym{font-family:var(--font-display);font-size:var(--fs-base);font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;}
 
-.idx-pill-val{font-size:0.9344rem;font-weight:600;color:#fff;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:6ch;text-align:right;display:inline-block;}
+.idx-pill-val{font-size:var(--fs-base);font-weight:600;color:#fff;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:6ch;text-align:right;display:inline-block;}
 
-.idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:0.8625rem;font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
+.idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:var(--fs-base);font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
 
 .idx-pill-chg.up{color:#20C997;}
 
@@ -69,7 +69,7 @@
   min-height:44px;
   position:sticky;
   top:var(--topbar-top, 10px);
-  z-index:997;
+  z-index:var(--z-sticky);
   backdrop-filter:blur(12px);
   background:rgba(22,24,29,0.95);
   box-shadow:0 2px 12px rgba(0,0,0,0.30);
@@ -106,12 +106,12 @@
 }
 
 .expiry-pill-label{
-  font-size:0.7906rem;font-weight:600;color:var(--text-tertiary);
+  font-size:var(--fs-sm);font-weight:600;color:var(--text-tertiary);
   text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;
 }
 
 .expiry-pill-val{
-  font-size:0.7906rem;font-weight:700;color:var(--text-primary);
+  font-size:var(--fs-sm);font-weight:700;color:var(--text-primary);
   font-family:var(--font-mono);white-space:nowrap;
 }
 
@@ -124,7 +124,7 @@
    inside the same pill the DTE readout lives in. */
 
 #expirySelect{
-  font-family:var(--font-mono);font-size:0.8625rem;font-weight:700;color:var(--text-primary);
+  font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);
   background:transparent;border:none;outline:none;cursor:pointer;
   -webkit-appearance:none;appearance:none;
   padding:0 14px 0 0;
@@ -134,7 +134,7 @@
 
 #expirySelect:focus{color:var(--info);}
 
-.time-val{color:var(--info);font-size:0.8625rem;}
+.time-val{color:var(--info);font-size:var(--fs-base);}
 
 .expiry-divider{width:1px;height:28px;background:var(--border);flex-shrink:0;}
 
@@ -154,7 +154,7 @@
   border-left:1px solid var(--border);
 }
 
-.symbol{font-family:var(--font-display);font-size:0.9344rem;font-weight:700;color:var(--text-tertiary);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;}
+.symbol{font-family:var(--font-display);font-size:var(--fs-base);font-weight:700;color:var(--text-tertiary);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;}
 
 /* .symbol is also reused on the top-bar's symbol <select> (picking a
    value switches the active index/stock — see onSymbolPicked() in
@@ -165,7 +165,7 @@
    above for a consistent "this is a dropdown" cue. */
 
 .symbol-select{
-  font-size:1.0781rem;
+  font-size:var(--fs-lg);
   color:var(--info);
   background:#15171c;
   border:2px solid var(--info);
@@ -186,7 +186,7 @@
    session; FUT only matters in the last ~15min before close) and
    shouldn't visually compete with the symbol picker for attention. */
 .price-source-select{
-  font-size:0.8125rem;
+  font-size:var(--fs-sm);
   font-weight:700;
   color:var(--text-tertiary);
   background:#15171c;
@@ -202,7 +202,7 @@
   background-position:right 8px center;
 }
 
-.price-source-tag{font-size:0.6875rem;font-weight:700;color:var(--text-tertiary);vertical-align:middle;}
+.price-source-tag{font-size:var(--fs-xs);font-weight:700;color:var(--text-tertiary);vertical-align:middle;}
 
 .spot{font-size:1.8687rem;font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
 
@@ -211,7 +211,7 @@
 .badges{display:flex;gap: var(--space-1);flex-wrap:nowrap;align-items:center;}
 
 .badge{
-  font-size:0.8625rem;font-weight:500;
+  font-size:var(--fs-base);font-weight:500;
   padding:2px 8px;border-radius:20px;
   font-family:var(--font-sans);letter-spacing:0.01em;
   white-space:nowrap;flex-shrink:0;
@@ -225,14 +225,14 @@
 
 .badge-info{background:rgba(51,154,240,0.12);color:var(--info);border:1px solid rgba(51,154,240,0.25);}
 
-.spot-line{margin:16px 0;padding: var(--space-4);text-align:center;background:rgba(61,139,253,.08);border-radius:var(--radius-md);font-size:1.0781rem;font-weight:700;}
+.spot-line{margin:16px 0;padding: var(--space-4);text-align:center;background:rgba(61,139,253,.08);border-radius:var(--radius-md);font-size:var(--fs-lg);font-weight:700;}
 
 /* ── TABS ── */
 
 .tab-group{display:flex;gap: var(--space-1);}
 
 .tab-btn{
-  font-size:0.7906rem;font-weight:500;padding:4px 11px;
+  font-size:var(--fs-sm);font-weight:500;padding:4px 11px;
   border-radius:var(--radius-sm);
   border:1px solid var(--border);
   background:var(--bg-2);color:var(--text-tertiary);
@@ -252,7 +252,7 @@
 /* ── PCR TOGGLE ── */
 
 .pcr-toggle{
-  font-size:0.8625rem;font-weight:500;padding:3px 10px;
+  font-size:var(--fs-base);font-weight:500;padding:3px 10px;
   border-radius:var(--radius-sm);border:1px solid var(--border);
   background:var(--bg-2);color:var(--text-tertiary);cursor:pointer;
   display:flex;align-items:center;gap:5px;transition:all 0.15s;
@@ -279,7 +279,7 @@
   position:fixed;
   left:10px;top:10px;bottom:10px;
   width:72px;
-  z-index:999;
+  z-index:var(--z-sticky);
   box-shadow:0 4px 20px rgba(0,0,0,0.40);
   overflow-y:auto;
   backdrop-filter:blur(12px);
@@ -288,7 +288,7 @@
 
 .sec-nav-label{
   font-family:var(--font-display);
-  font-size:0.7188rem;font-weight:700;color:var(--text-tertiary);
+  font-size:var(--fs-sm);font-weight:700;color:var(--text-tertiary);
   text-transform:uppercase;letter-spacing:.08em;
   white-space:nowrap;
   padding: var(--space-1) var(--space-2);
@@ -300,7 +300,7 @@
 
 .sec-btn{
   font-family:var(--font-display);
-  font-size:0.7906rem;font-weight:600;padding:10px 6px;
+  font-size:var(--fs-sm);font-weight:600;padding:10px 6px;
   border-radius:10px;border:1.5px solid var(--border);
   background:var(--bg-2);color:var(--text-secondary);
   cursor:pointer;transition:all 0.25s ease;
@@ -313,7 +313,7 @@
   line-height:1.15;
 }
 
-.sec-btn span{font-size:1.15rem;line-height:1;}
+.sec-btn span{font-size:var(--fs-lg);line-height:1;}
 
 /* "Range Vel" is a two-word label crammed into the same 72px rail width
    as one-word buttons like "Chain" — inheriting .sec-btn's word-break:
@@ -324,7 +324,7 @@
 #ctrl-sidebar-toggle-btn{
   word-break:normal;
   overflow-wrap:normal;
-  font-size:0.7188rem;
+  font-size:var(--fs-sm);
 }
 
 .sec-btn:hover{
@@ -411,7 +411,7 @@
 
 .ctrl-sidebar{
   position:fixed;
-  z-index:1000;
+  z-index:var(--z-popover);
 }
 
 .ctrl-sidebar-panel{
@@ -438,7 +438,7 @@
 .ctrl-sidebar-group{display:flex;align-items:center;gap: var(--space-2);flex-shrink:0;}
 
 .ctrl-sidebar-group-label{
-  font-size:0.7906rem;font-weight:700;color:var(--text-tertiary);
+  font-size:var(--fs-sm);font-weight:700;color:var(--text-tertiary);
   text-transform:uppercase;letter-spacing:.08em;margin-bottom:0;
 }
 
@@ -461,7 +461,7 @@
 /* ── STICKY REFRESH BUTTON ── */
 
 #sticky-refresh-btn{
-  font-size:0.8625rem;font-weight:700;
+  font-size:var(--fs-base);font-weight:700;
   padding:5px 14px;
   border-radius:20px;
   border:1.5px solid rgba(51,154,240,0.40);

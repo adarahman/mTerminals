@@ -8,7 +8,7 @@
 
 /* ── TOP 3 DRIVERS / DRAGGERS (rendered as 3rd column of exec-grid) ── */
 
-.dd-subtitle{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;font-size:0.7906rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:8px 0 4px;}
+.dd-subtitle{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;font-size:var(--fs-sm);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:8px 0 4px;}
 
 .dd-subtitle span:nth-child(3), .dd-subtitle span:nth-child(4){text-align:right;}
 
@@ -18,31 +18,31 @@
 
 .dd-subtitle:first-child{margin-top:0;}
 
-.dd-header-row{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;padding:4px 0 8px;font-size:0.8625rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.02em;}
+.dd-header-row{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;padding:4px 0 8px;font-size:var(--fs-base);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.02em;}
 
-.dd-row{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;padding:4px 0;font-size:0.8625rem;}
+.dd-row{display:grid;grid-template-columns:18px 1fr 50px 62px;gap:10px;align-items:center;padding:4px 0;font-size:var(--fs-base);}
 
-.dd-rank{color:var(--text-tertiary);font-family:var(--font-mono);font-size:0.8625rem;flex-shrink:0;}
+.dd-rank{color:var(--text-tertiary);font-family:var(--font-mono);font-size:var(--fs-base);flex-shrink:0;}
 
 .dd-sym{font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-.dd-pct{font-family:var(--font-mono);font-size:0.8625rem;text-align:right;flex-shrink:0;}
+.dd-pct{font-family:var(--font-mono);font-size:var(--fs-base);text-align:right;flex-shrink:0;}
 
-.dd-pts{font-family:var(--font-mono);font-weight:700;font-size:0.8625rem;text-align:right;flex-shrink:0;}
+.dd-pts{font-family:var(--font-mono);font-weight:700;font-size:var(--fs-base);text-align:right;flex-shrink:0;}
 
-.dd-empty{font-size:0.7906rem;color:var(--text-tertiary);padding:3px 0;}
+.dd-empty{font-size:var(--fs-sm);color:var(--text-tertiary);padding:3px 0;}
 
 /* ── FII/DII/Pro/Retail comparison table (rows=metrics, cols=participants) ── */
 
-.dd-tbl{width:100%;border-collapse:collapse;margin-top: var(--space-2);font-size:0.8625rem;}
+.dd-tbl{width:100%;border-collapse:collapse;margin-top: var(--space-2);font-size:var(--fs-base);}
 
 .dd-tbl th,.dd-tbl td{padding:7px 10px;text-align:right;white-space:nowrap;}
 
 .dd-tbl th:first-child,.dd-tbl td:first-child{text-align:left;}
 
-.dd-tbl thead th{font-family:var(--font-mono);font-weight:700;font-size:0.8125rem;letter-spacing:.04em;border-bottom:1px solid var(--border);padding-bottom: var(--space-3);}
+.dd-tbl thead th{font-family:var(--font-mono);font-weight:700;font-size:var(--fs-sm);letter-spacing:.04em;border-bottom:1px solid var(--border);padding-bottom: var(--space-3);}
 
-.dd-tbl tbody td.dd-tbl-metric,.dd-tbl tbody th.dd-tbl-metric{color:var(--text-tertiary);font-size:0.8125rem;}
+.dd-tbl tbody td.dd-tbl-metric,.dd-tbl tbody th.dd-tbl-metric{color:var(--text-tertiary);font-size:var(--fs-sm);}
 
 .dd-tbl tbody tr{border-bottom:1px solid rgba(255,255,255,0.05);}
 
@@ -83,7 +83,7 @@
 .t thead{background:var(--bg-2);}
 
 .t th{
-  color:var(--text-tertiary);font-weight:500;font-size:0.8625rem;
+  color:var(--text-tertiary);font-weight:500;font-size:var(--fs-base);
   text-transform:uppercase;letter-spacing:0.05em;
   padding:7px 5px;text-align:right;
   border-bottom:1px solid var(--border);
@@ -97,7 +97,7 @@
 .t td{padding:5px 5px;text-align:right;color:var(--text-primary);vertical-align:middle;overflow:hidden;max-width:0;}
 
 .t td.sc{
-  text-align:center;font-weight:600;font-size:0.8625rem;font-family:var(--font-mono);
+  text-align:center;font-weight:600;font-size:var(--fs-base);font-family:var(--font-mono);
   background:var(--bg-2);color:var(--text-secondary);
 }
 
@@ -105,7 +105,7 @@
 
 .t td.atm-sc{
   background:rgba(18,184,134,0.12);
-  font-weight:700;font-size:0.8625rem;font-family:var(--font-mono);
+  font-weight:700;font-size:var(--fs-base);font-family:var(--font-mono);
   text-align:center;color:var(--pos);
 }
 
@@ -136,7 +136,7 @@
 
 .oi-bfly-head span:nth-child(4){grid-column:6;text-align:right;}
 
-.oi-bfly-fig{font-family:var(--font-mono);font-size:0.8625rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.oi-bfly-fig{font-family:var(--font-mono);font-size:var(--fs-base);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
 .oi-bfly-ce-track{display:flex;justify-content:flex-end;overflow:hidden;min-width:0;}
 
@@ -146,9 +146,9 @@
 
 .oi-pe-bar{background:var(--pe);border-radius:0 3px 3px 0;height:10px;}
 
-.oi-bfly-strike{text-align:center;color:var(--text-tertiary);font-size:0.8625rem;font-family:var(--font-mono);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.oi-bfly-strike{text-align:center;color:var(--text-tertiary);font-size:var(--fs-base);font-family:var(--font-mono);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
-.oi-bfly-pcr{font-family:var(--font-mono);font-weight:600;font-size:0.8625rem;text-align:right;min-width:0;white-space:nowrap;overflow:visible;padding-left: var(--space-1);}
+.oi-bfly-pcr{font-family:var(--font-mono);font-weight:600;font-size:var(--fs-base);text-align:right;min-width:0;white-space:nowrap;overflow:visible;padding-left: var(--space-1);}
 
 .sdt-table-wrap{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
 
@@ -170,42 +170,75 @@
   100%{background:transparent;}
 }
 
-#pt-panel table{width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed;}
+/* ── Paper Trading — Positions / Order-Log "blotter" tables ──
+   Scoped to .pt-table (both #pt-positions-table and #pt-orders-table
+   carry this class — see paper-trading.js's ptMountPanel). Previously
+   this whole block was scoped to `#pt-panel`, an id that has never
+   existed in the DOM (the real containers are #pt-order-panel /
+   #pt-portfolio-panel) — so none of border-collapse, table-layout:fixed,
+   nowrap, or padding ever actually applied, and cells wrapped onto
+   multiple lines inside the (also too-narrow) popover. Fixed here, plus
+   each table now sits in a .pt-table-scroll wrapper (paper-trading.js)
+   that scrolls horizontally rather than forcing a wrap if the panel is
+   ever narrower than the table's min-width (e.g. small viewports). */
 
-#pt-panel th,#pt-panel td{padding: var(--space-1) var(--space-2); text-align:right; border-bottom:1px solid rgba(255,255,255,.05);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.pt-table-scroll{overflow-x:auto; border:1px solid var(--border); border-radius:8px;}
 
-#pt-panel th:first-child,#pt-panel td:first-child{text-align:left;}
+.pt-table{width:100%; min-width:640px; border-collapse:collapse; font-size:11.5px; table-layout:fixed;}
 
-/* Fixed column widths for the orders table so the Sym cell (which can
-   run long, e.g. "NIFTY 24200 CE") has a hard stop and never crowds
-   into the Side cell next to it. Expiry gets its own column — for
-   CE/PE/FUT orders and calendar spreads especially, expiry is not
-   optional context, it's part of what instrument was actually traded. */
+.pt-table th,.pt-table td{
+  padding:7px 9px; text-align:right; vertical-align:middle;
+  border-bottom:1px solid var(--border-2, rgba(255,255,255,.05));
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
 
-#pt-orders-table th:nth-child(1),#pt-orders-table td:nth-child(1){width:16%;}
+.pt-table th:first-child,.pt-table td:first-child{text-align:left;}
 
-#pt-orders-table th:nth-child(2),#pt-orders-table td:nth-child(2){width:9%;}
+.pt-table thead{position:sticky; top:0; z-index:1;}
 
-#pt-orders-table th:nth-child(3),#pt-orders-table td:nth-child(3){width:9%;}
+.pt-table thead th{
+  background:var(--bg-2); color:var(--text-tertiary); font-weight:700;
+  font-size:9.5px; text-transform:uppercase; letter-spacing:.06em;
+  border-bottom:1px solid var(--border); padding-top:8px; padding-bottom:8px;
+}
 
-#pt-orders-table th:nth-child(4),#pt-orders-table td:nth-child(4){width:5%;}
+.pt-table tbody tr:nth-child(even){background:rgba(255,255,255,.015);}
 
-#pt-orders-table th:nth-child(5),#pt-orders-table td:nth-child(5){width:9%;}
+.pt-table tbody tr:hover{background:rgba(255,255,255,.035);}
 
-#pt-orders-table th:nth-child(6),#pt-orders-table td:nth-child(6){width:9%;}
+.pt-table tbody tr:last-child td{border-bottom:none;}
 
-#pt-orders-table th:nth-child(7),#pt-orders-table td:nth-child(7){width:10%;}
+/* Numeric/ticker columns read as a broker terminal — tabular figures in
+   monospace, everything else (symbol name, status text) stays in the
+   panel's normal sans font for legibility. */
+.pt-table td:not(:first-child){font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
 
-#pt-orders-table th:nth-child(8),#pt-orders-table td:nth-child(8){width:16%;}
+/* Fixed column widths so the Sym cell (which can run long, e.g. "NIFTY
+   24200 CE") has a hard stop and never crowds neighboring columns.
+   Expiry gets its own column — for CE/PE/FUT orders and calendar
+   spreads especially, expiry is not optional context, it's part of what
+   instrument was actually traded. Widths are generous now that both
+   panels are wide enough (paper-trading.css) to host them without
+   forcing text onto a second line. */
 
-#pt-orders-table th:nth-child(9),#pt-orders-table td:nth-child(9){width:17%;}
+#pt-orders-table th:nth-child(1),#pt-orders-table td:nth-child(1){width:16%; text-align:left;}
+#pt-orders-table th:nth-child(2),#pt-orders-table td:nth-child(2){width:10%; text-align:center;}
+#pt-orders-table th:nth-child(3),#pt-orders-table td:nth-child(3){width:8%; text-align:center;}
+#pt-orders-table th:nth-child(4),#pt-orders-table td:nth-child(4){width:6%;}
+#pt-orders-table th:nth-child(5),#pt-orders-table td:nth-child(5){width:9%; text-align:center;}
+#pt-orders-table th:nth-child(6),#pt-orders-table td:nth-child(6){width:10%;}
+#pt-orders-table th:nth-child(7),#pt-orders-table td:nth-child(7){width:11%;}
+#pt-orders-table th:nth-child(8),#pt-orders-table td:nth-child(8){width:14%; text-align:center;}
+#pt-orders-table th:nth-child(9),#pt-orders-table td:nth-child(9){width:16%;}
 
-#pt-positions-table th:nth-child(1),#pt-positions-table td:nth-child(1){width:14%;}
-
-#pt-positions-table th:nth-child(2),#pt-positions-table td:nth-child(2){width:13%;}
-
-#pt-positions-table th:nth-child(3),#pt-positions-table td:nth-child(3){width:14%;}
+#pt-positions-table th:nth-child(1),#pt-positions-table td:nth-child(1){width:15%; text-align:left;}
+#pt-positions-table th:nth-child(2),#pt-positions-table td:nth-child(2){width:11%; text-align:center;}
+#pt-positions-table th:nth-child(3),#pt-positions-table td:nth-child(3){width:14%; text-align:center;}
+#pt-positions-table th:nth-child(4),#pt-positions-table td:nth-child(4){width:9%;}
+#pt-positions-table th:nth-child(5),#pt-positions-table td:nth-child(5){width:11%;}
+#pt-positions-table th:nth-child(6),#pt-positions-table td:nth-child(6){width:11%;}
+#pt-positions-table th:nth-child(7),#pt-positions-table td:nth-child(7){width:12%;}
+#pt-positions-table th:nth-child(8),#pt-positions-table td:nth-child(8){width:8%; text-align:center;}
 
 /* ── STRIKE DETAIL v2 ──
    Restyle of the Strike Detail table (institutional near/far band report)

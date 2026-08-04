@@ -385,7 +385,7 @@ function ptMountPanel(){
   const orderPanel = document.createElement('div');
   orderPanel.id = 'pt-order-panel';
   orderPanel.innerHTML = `
-    <h4><span id="pt-panel-title">Order GUI</span> <span id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Click to switch between Paper and Live trading">📝 PAPER</span> <span class="pt-close" onclick="$i('pt-order-panel').classList.remove('open')">✕</span></h4>
+    <h4><span id="pt-panel-title">Order GUI</span> <span id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Click to switch between Paper and Live trading">📝 PAPER</span> <span class="pt-close" onclick="ptClosePanel('pt-order-panel','pt-order-toggle-btn')">✕</span></h4>
     <div class="pt-section">
       <div class="pt-row">
         <select id="pt-symbol"></select>
@@ -443,7 +443,7 @@ function ptMountPanel(){
       <div id="pt-ltp-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">LTP: —</div>
       <div class="pt-row">
         <button class="pt-submit" id="pt-submit-btn" style="flex:2;">Place Order</button>
-        <button class="pt-submit" id="pt-add-basket-btn" style="flex:1;background:var(--bg2,#1a1a1a);color:var(--text,#eee);border:1px solid var(--border,#333);" title="Stage this leg into a basket instead of sending it now">+ Basket</button>
+        <button class="pt-submit" id="pt-add-basket-btn" style="flex:1;background:var(--bg-2,#1a1a1a);color:var(--text-primary,#eee);border:1px solid var(--border,#333);" title="Stage this leg into a basket instead of sending it now">+ Basket</button>
       </div>
       <div id="pt-err"></div>
       <div id="pt-basket-wrap" style="display:none;margin-top:8px;">
@@ -451,7 +451,7 @@ function ptMountPanel(){
         <div id="pt-basket-list"></div>
         <div class="pt-row" style="margin-top:6px;">
           <button class="pt-submit" id="pt-place-basket-btn" style="flex:2;">Place Basket</button>
-          <button class="pt-submit" id="pt-clear-basket-btn" style="flex:1;background:var(--bg2,#1a1a1a);color:var(--red,#e74c3c);border:1px solid var(--border,#333);">Clear</button>
+          <button class="pt-submit" id="pt-clear-basket-btn" style="flex:1;background:var(--bg-2,#1a1a1a);color:var(--neg,#e74c3c);border:1px solid var(--border,#333);">Clear</button>
         </div>
       </div>
     </div>
@@ -461,7 +461,7 @@ function ptMountPanel(){
   const portfolioPanel = document.createElement('div');
   portfolioPanel.id = 'pt-portfolio-panel';
   portfolioPanel.innerHTML = `
-    <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <span class="pt-close" onclick="$i('pt-portfolio-panel').classList.remove('open')">✕</span></h4>
+    <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <span class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')">✕</span></h4>
     <div class="pt-section">
       <div class="pt-summary"><span>Realized</span><span id="pt-realized">—</span></div>
       <div class="pt-summary"><span>Unrealized</span><span id="pt-unrealized">—</span></div>
@@ -481,27 +481,31 @@ function ptMountPanel(){
       <div class="pt-summary" style="font-weight:800;border-top:1px solid var(--border,#333);padding-top:4px;margin-top:2px;">
         <span title="₹1,00,000 starting paper capital ± net P&amp;L, minus margin currently used above.">Fund (available)</span><span id="pt-fund">—</span>
       </div>
-      <div id="pt-fund-warn" style="display:none;font-size:10px;color:var(--red,#e74c3c);margin-top:4px;">⚠ Fund running low — consider squaring off open positions.</div>
+      <div id="pt-fund-warn" style="display:none;font-size:10px;color:var(--neg,#e74c3c);margin-top:4px;">⚠ Fund running low — consider squaring off open positions.</div>
     </div>
     <div class="pt-section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-        <span style="font-size:10px;font-weight:700;color:var(--muted,#888);text-transform:uppercase;letter-spacing:.05em;">Positions</span>
+        <span style="font-size:10px;font-weight:700;color:var(--text-muted,#888);text-transform:uppercase;letter-spacing:.05em;">Positions</span>
         <button id="pt-squareoff-all-btn" onclick="ptSquareOffAll()" title="Send an opposite-side MARKET order to flatten every open position"
-          style="font-size:10px;font-weight:700;padding:3px 8px;border:none;border-radius:4px;background:var(--red,#e74c3c);color:#fff;cursor:pointer;">Square Off All</button>
+          style="font-size:10px;font-weight:700;padding:3px 8px;border:none;border-radius:4px;background:var(--neg,#e74c3c);color:#fff;cursor:pointer;">Square Off All</button>
       </div>
-      <table id="pt-positions-table"><thead><tr>
+      <div class="pt-table-scroll">
+      <table id="pt-positions-table" class="pt-table"><thead><tr>
         <th>Sym</th><th>Expiry</th><th>Strike/Ty</th><th>Net</th><th>Avg</th><th>LTP</th><th>uPnL</th><th></th>
       </tr></thead><tbody></tbody></table>
+      </div>
     </div>
     <div class="pt-section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-        <span style="font-size:10px;font-weight:700;color:var(--muted,#888);text-transform:uppercase;letter-spacing:.05em;">Order / Trade Log</span>
+        <span style="font-size:10px;font-weight:700;color:var(--text-muted,#888);text-transform:uppercase;letter-spacing:.05em;">Order / Trade Log</span>
         <button id="pt-reset-log-btn" onclick="ptResetOrderLog()" title="Clear the order/trade log shown below (does not affect open positions or P&amp;L)"
-          style="font-size:10px;font-weight:700;padding:3px 8px;border:none;border-radius:4px;background:var(--muted,#555);color:#fff;cursor:pointer;">Reset</button>
+          style="font-size:10px;font-weight:700;padding:3px 8px;border:none;border-radius:4px;background:var(--bg-2,#555);color:var(--text-primary,#fff);border:1px solid var(--border,#333);cursor:pointer;">Reset</button>
       </div>
-      <table id="pt-orders-table"><thead><tr>
+      <div class="pt-table-scroll">
+      <table id="pt-orders-table" class="pt-table"><thead><tr>
         <th>Sym</th><th>Expiry</th><th>Side</th><th>Qty</th><th>Type</th><th>Price</th><th>Charges</th><th>Status</th><th>Time</th>
       </tr></thead><tbody></tbody></table>
+      </div>
     </div>
   `;
   document.body.appendChild(portfolioPanel);
@@ -649,11 +653,39 @@ function ptMountPanel(){
 // off-screen. Extracted from the old single-panel togglePtPanel() when
 // the panel was split 2026-08-04; #pt-order-panel/#pt-portfolio-panel
 // are each min(660px, 96vw) wide, so this is what most needs the clamp.
+// Keeps the rail button's .active state in sync with whether its panel is
+// currently open. Previously #pt-order-toggle-btn / #pt-toggle-btn looked
+// identical whether the panel was open or closed — the only way to tell
+// which (if either) was open was to spot the floating panel itself, easy
+// to lose track of since panels are positioned dynamically next to the
+// rail rather than docked to it. Reuses .sec-btn.active (navigation.css) —
+// the same left-edge accent bar + glow already used for section-nav
+// selection — so both buttons get a "this window is open" indicator for
+// free, no new CSS needed, as long as they carry the shared .sec-btn class
+// (see DashboardPro.html; they're documented as sec-btns in #sec-nav-bar).
+function ptSyncToggleBtnActive(panelId, btnId){
+  const panel = $i(panelId), btn = $i(btnId);
+  if(!panel || !btn) return;
+  btn.classList.toggle('active', panel.classList.contains('open'));
+}
+
+// Single close path for both panels' ✕ buttons, so closing always also
+// clears the rail button's .active state — closing used to be a bare
+// classList.remove('open') inline on the panel only, which would have
+// left the button showing "open" after the user explicitly closed it.
+function ptClosePanel(panelId, btnId){
+  const panel = $i(panelId);
+  if(panel) panel.classList.remove('open');
+  ptSyncToggleBtnActive(panelId, btnId);
+}
+window.ptClosePanel = ptClosePanel;
+
 function ptTogglePanelNear(panelId, btnId){
   const el = $i(panelId);
   if(!el) return;
   const opening = !el.classList.contains('open');
   el.classList.toggle('open');
+  ptSyncToggleBtnActive(panelId, btnId);
   if(opening){
     const btn = $i(btnId);
     if(btn){
@@ -947,7 +979,7 @@ function ptGatherOrderFromForm(){
 
 function ptSubmitOrder(){
   const errEl = $i('pt-err');
-  errEl.style.color = 'var(--red,#e74c3c)';
+  errEl.style.color = 'var(--neg,#e74c3c)';
   errEl.textContent = '';
   const { order, error } = ptGatherOrderFromForm();
   if(error){ errEl.textContent = error; return; }
@@ -963,13 +995,13 @@ let _ptBasket = [];
 
 function ptAddToBasket(){
   const errEl = $i('pt-err');
-  errEl.style.color = 'var(--red,#e74c3c)';
+  errEl.style.color = 'var(--neg,#e74c3c)';
   errEl.textContent = '';
   const { order, error } = ptGatherOrderFromForm();
   if(error){ errEl.textContent = error; return; }
   _ptBasket.push(order);
   ptRenderBasket();
-  errEl.style.color = 'var(--green,#2ecc71)';
+  errEl.style.color = 'var(--pos,#2ecc71)';
   errEl.textContent = 'Added to basket';
   setTimeout(()=>{ if(errEl.textContent==='Added to basket') errEl.textContent=''; }, 1500);
 }
@@ -996,18 +1028,19 @@ function ptRenderBasket(){
 
 function ptPlaceBasket(){
   const errEl = $i('pt-err');
-  errEl.style.color = 'var(--red,#e74c3c)';
+  errEl.style.color = 'var(--neg,#e74c3c)';
   if(!_ptBasket.length){ errEl.textContent = 'Basket is empty'; return; }
   const ok = sendWsMessage('place_basket_order', { legs: _ptBasket });
   if(ok){
     ptToast('Basket sent — ' + _ptBasket.length + ' leg' + (_ptBasket.length===1?'':'s'), 'ok');
-    errEl.style.color = 'var(--green,#2ecc71)';
+    errEl.style.color = 'var(--pos,#2ecc71)';
     errEl.textContent = 'Basket sent';
     setTimeout(()=>{ if(errEl.textContent==='Basket sent') errEl.textContent=''; }, 2000);
     _ptBasket = [];
     ptRenderBasket();
     const panel = $i('pt-order-panel');
     if(panel) panel.classList.add('open');
+    ptSyncToggleBtnActive('pt-order-panel', 'pt-order-toggle-btn');
   } else {
     ptToast('Basket failed to send (WS not connected)', 'err');
     errEl.textContent = 'WS not connected — basket not sent';
@@ -1138,7 +1171,7 @@ function _ptSendOrderNow(payload, errEl){
     }, 10000);
     ptToast((payload.live ? '🔴 LIVE — ' : '') + label + ' — sent', 'ok');
     if(errEl){
-      errEl.style.color = 'var(--green,#2ecc71)';
+      errEl.style.color = 'var(--pos,#2ecc71)';
       errEl.textContent = 'Order sent';
       setTimeout(()=>{ if(errEl.textContent==='Order sent') errEl.textContent=''; }, 2000);
     }
@@ -1148,6 +1181,7 @@ function _ptSendOrderNow(payload, errEl){
     // closed the whole time.
     const panel = $i('pt-order-panel');
     if(panel) panel.classList.add('open');
+    ptSyncToggleBtnActive('pt-order-panel', 'pt-order-toggle-btn');
     if(AppState.wsState) renderPaperTradingPanel(AppState.wsState);
   } else {
     ptToast(label + ' — failed to send (WS not connected)', 'err');
@@ -1179,7 +1213,7 @@ function ptDispatchOrder(payload, errEl){
              + ' (valid ' + payload.gtt_expiry_days + 'd)',
   }[payload.order_type] || 'MKT';
   const label = payload.symbol + ' ' + (payload.strike ? payload.strike+' '+payload.instrument_type : payload.instrument_type);
-  const sideColor = payload.side === 'BUY' ? 'var(--green,#2ecc71)' : 'var(--red,#e74c3c)';
+  const sideColor = payload.side === 'BUY' ? 'var(--pos,#2ecc71)' : 'var(--neg,#e74c3c)';
 
   const body = $i('pt-live-confirm-body');
   if(body){
@@ -1660,9 +1694,9 @@ function ptRenderPositionsTable(view){
       + (p.strike==null?'null':p.strike) + ',\''+p.instrument_type+'\','+p.net_qty_lots+')" '
       + 'title="Exit this position (opposite-side MARKET order)" '
       + 'style="cursor:pointer;font-size:9px;font-weight:800;padding:1px 6px;border-radius:4px;'
-      + 'background:var(--red,#e74c3c);color:#fff;">✕</span>';
+      + 'background:var(--neg,#e74c3c);color:#fff;">✕</span>';
     return '<tr><td>'+p.symbol+'</td><td title="'+(p.expiry||'')+'">'+expCell+'</td><td>'+label+'</td><td>'+p.net_qty_lots+'</td>'
-      + '<td>'+ptFmtN(p.avg_price)+'</td><td>'+ptFmtN(p.last_price)+(p._live?' <span title="live" style="color:var(--green,#2ecc71);">●</span>':'')+'</td>'
+      + '<td>'+ptFmtN(p.avg_price)+'</td><td>'+ptFmtN(p.last_price)+(p._live?' <span title="live" style="color:var(--pos,#2ecc71);">●</span>':'')+'</td>'
       + '<td class="'+ptPnlClass(p.unrealized_pnl)+'">'+ptFmtN(p.unrealized_pnl)+'</td>'
       + '<td>'+exitBtn+'</td></tr>';
   }).join('') || '<tr><td colspan="8" style="text-align:center;opacity:.5">No open positions</td></tr>';
@@ -1707,7 +1741,7 @@ function ptRenderOrdersTable(view, wsState){
     } else if(isPending){
       const cancelBtn = '<span onclick="ptCancelOrder(\''+o.id+'\')" title="Cancel this pending order" '
         + 'style="cursor:pointer;margin-left:6px;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;'
-        + 'background:var(--red,#e74c3c);color:#fff;">✕</span>';
+        + 'background:var(--neg,#e74c3c);color:#fff;">✕</span>';
       statusTd = '<td>'+o.status + cancelBtn + '</td>';
     }
 

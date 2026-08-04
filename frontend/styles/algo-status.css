@@ -21,7 +21,7 @@
   width:min(340px, calc(100vw - 32px)); max-height:78vh; overflow-y:auto; display:none;
   background:var(--bg-1); color:var(--text-primary);
   border:1px solid var(--border); border-radius:10px;
-  padding:var(--space-4); font:12px/1.4 inherit; box-shadow:var(--shadow-md);
+  padding:var(--space-4); font:var(--fs-sm)/1.4 inherit; box-shadow:var(--shadow-md);
 }
 #algo-panel.open{display:block;}
 #algo-panel h4{margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;}
@@ -32,7 +32,7 @@
 .algo-alert{
   background:rgba(231,76,60,.14); border:1px solid var(--neg); color:var(--neg);
   border-radius:6px; padding:var(--space-2) var(--space-3); margin-bottom:var(--space-3);
-  font-weight:700; font-size:11px; line-height:1.4;
+  font-weight:700; font-size:var(--fs-xs); line-height:1.4;
 }
 
 .algo-section-title{
@@ -60,7 +60,7 @@
 .algo-last-decision{
   margin-top:var(--space-2); padding:var(--space-2); border-radius:6px;
   background:var(--bg-2); border:1px solid var(--border);
-  font-size:11px; font-style:italic; opacity:.85; line-height:1.4;
+  font-size:var(--fs-xs); font-style:italic; opacity:.85; line-height:1.4;
 }
 .algo-last-decision.algo-pos{border-color:var(--pos); opacity:1;}
 
@@ -68,11 +68,11 @@
    distinct from the manual paper/live orders table's rows, so it gets
    its own compact card look instead of reusing .algo-row's single-line
    layout (a reason string needs its own line to be legible). */
-.algo-history-empty{opacity:.6; padding:var(--space-2) 0; font-size:11px;}
+.algo-history-empty{opacity:.6; padding:var(--space-2) 0; font-size:var(--fs-xs);}
 .algo-history-list{display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;}
 .algo-history-item{
   padding:6px 8px; border-radius:6px; background:var(--bg-2);
-  border:1px solid var(--border); font-size:11px; line-height:1.4;
+  border:1px solid var(--border); font-size:var(--fs-xs); line-height:1.4;
 }
 .algo-history-item.algo-history-executed{border-left:3px solid var(--pos);}
 .algo-history-item.algo-history-rejected{border-left:3px solid var(--neg); opacity:.85;}

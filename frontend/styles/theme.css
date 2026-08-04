@@ -58,6 +58,30 @@
   --font-sans:    'Inter', system-ui, sans-serif;
   --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
 
+  /* Font-size scale — new, not yet adopted anywhere. Existing files use
+     one of two untokenized systems instead: odd baked-in rem values in
+     tables.css/layout.css (0.7906rem/0.8125rem/0.8625rem/0.9344rem/
+     1.0062rem, leftovers from a 15%-bump px->rem conversion script), or
+     raw px in newer files (algo-status.css/fiidii-report.css/
+     paper-trading.css/backtest-view.css: 10/11/12/13/14/16px). Migrate
+     call sites to these tokens over time rather than adding new raw
+     values; do not batch-replace existing rem/px values automatically —
+     each one needs a human check against which of the sizes it should
+     become.
+
+     --fs-2xs added (2026-08-04) for a recurring 9.5–10.5px micro-label
+     tier (section titles, badges, meta text) that sat below --fs-xs
+     with no token of its own — algo-status.css/fiidii-report.css/
+     tables.css's .sdt-oi-legend all use it as genuine hierarchy, one
+     step below --fs-xs, not a one-off. 9px/9.5px/10px/10.5px all
+     collapse onto this single token; the quarter-pixel differences
+     between them aren't meaningful. */
+  --fs-2xs:  0.625rem;  /* 10px — micro labels, badges, meta text */
+  --fs-xs:   0.6875rem; /* 11px — table cell text */
+  --fs-sm:   0.75rem;   /* 12px — controls, labels, badges */
+  --fs-base: 0.875rem;  /* 14px — body text */
+  --fs-lg:   1.125rem;  /* 18px — section titles */
+
   /* ── Shadows ── */
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.16);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.30);
@@ -245,6 +269,82 @@
      var(--up-color,#20C997)       -> var(--pos)             [fallback happened to already match --pos]
      var(--down-color,#FF6B6B)     -> var(--neg)             [fallback happened to already match --neg]
      var(--text-secondary,#8A8F98) -> var(--text-secondary)  [fallback was a different gray than the real --txt2 #ADB5BD]
+
+   FONT-SIZE TOKENS (--fs-2xs/xs/sm/base/lg — see Typography section
+   above).
+     tables.css — MIGRATED (2026-08-04):
+       0.7906rem (12.65px), 0.8125rem (13px) -> --fs-sm  (labels/headers:
+                  dd-subtitle, dd-empty, dd-tbl thead th, dd-tbl-metric)
+       0.8625rem (13.8px)                    -> --fs-base (everything
+                  else: dd-header-row/dd-row/dd-rank/dd-pct/dd-pts,
+                  dd-tbl, .t th, .t td.sc/.atm-sc, oi-bfly-fig/-strike/
+                  -pcr) — turned out to be a clean 1:1 split by actual
+                  computed px, no per-site ambiguity once checked.
+       NOTE: .pt-table / .sdt-* / #sim-strike-table further down this
+       same file (the paper-trading-table and strike-detail-v2 additions)
+       still carry their own raw 11/11.5/12/13/16/34px values — those
+       were added after this migration pass and were not touched by it;
+       still open, same as the algo-status.css-era files below.
+     algo-status.css — MIGRATED (2026-08-02, prior pass).
+     fiidii-report.css / paper-trading.css / backtest-view.css —
+     MIGRATED (2026-08-04): raw px collapsed onto --fs-2xs (9–10.5px
+     micro tier) / --fs-xs (11px) / --fs-sm (11.5–13px) / --fs-base
+     (14px). Left as intentional raw px, oversized beyond the current
+     scale, same open gap as layout.css's 16.1px body text below:
+       fiidii-report.css:  .fd-gauge-pct 24px (big stat readout)
+       backtest-view.css:  .bt-close 16px (icon glyph), .bt-stat-value 15px
+     navigation.css — MIGRATED (2026-08-04): same baked-rem values as
+     tables.css's original set, plus 0.7188rem (11.5px, tie between
+     --fs-xs/--fs-sm, rounded up to --fs-sm) and 0.9344rem/1.0781rem/
+     1.15rem, mapped to nearest of --fs-base/--fs-lg. Left raw, same
+     "beyond current scale" reason as above:
+       navigation.css: .spot 1.8687rem (29.9px, top-bar spot price)
+     panels.css — MIGRATED (2026-08-04, per-value review, not batch
+     sed — largest file, 108 call sites repointed):
+       --fs-2xs: 0.6/0.65/0.6531/0.625rem (dd-trap .lbl, .micro .k,
+                 .dd-col-title, .metric-cell .k/.d, .arp-vratio-side)
+       --fs-xs:  0.6875/0.7rem, 11px (verdict-fut, .chev, dd-trap .txt,
+                 mg-bar-text, oi-snap-label, oi-flow-win, etc.)
+       --fs-sm:  0.75/0.775/0.78/0.7188/0.7906/0.8125rem, 11.5px
+                 (.verdict-label, tie rounded up — matches
+                 navigation.css's 11.5px precedent), 12px/13px (.section-
+                 icon, .card-head .ic, .dd-trap .ic, .oic-tile-icon —
+                 13px tie rounded down, matches tables.css's 0.8125rem
+                 precedent)
+       --fs-base: 0.8281/0.8625/0.9344/0.9375/0.95rem
+       --fs-lg:  1.0625/1.0781/1.15rem, 16px / 1rem (.oc-modal-back,
+                 .oic-icon, .oic-signal-icon, .verdict-stat .v — four
+                 exact base/lg ties, rounded UP to --fs-lg; icon glyphs
+                 sit in visibly larger chips (28–36px) than the 22–26px
+                 chips using --fs-sm icons, so lg reads more consistent
+                 with their container size than base would)
+     Left raw — oversized outliers, no current token fits within ~1px,
+     same open gap as the .fd-gauge-pct/.bt-close/.bt-stat-value/.spot/
+     body-text outliers noted above. Now that panels.css has been
+     reviewed too, the full outlier set across all files is:
+       layout.css:        body{font-size} 1.0062rem (16.1px)
+       fiidii-report.css: .fd-gauge-pct 24px
+       backtest-view.css: .bt-close 16px, .bt-stat-value 15px
+       navigation.css:    .spot 1.8687rem (29.9px)
+       panels.css:        .oi-snap-value/.oi-flow-val 1.2rem (19.2px),
+                           .exec-badge/.dec-badge 1.2219rem (19.55px),
+                           .oic-atm-figs .fig 1.375rem (22px),
+                           .verdict-icon 1.4375rem (23px),
+                           .load-btn i 1.725rem (27.6px),
+                           .verdict-conf-big/.verdict-grade-big 1.75rem
+                           (28px), .verdict-call 34px,
+                           .exec-score-num 2.1562rem (34.5px)
+     This set now clusters into two clear bands — ~15–19px (body/spot/
+     bt-stat-value/oi-snap/exec-badge territory) and ~22–35px (hero
+     numbers, icons, .verdict-call/.exec-score-num territory) — worth
+     adding as --fs-xl (~1.0625–1.1875rem, i.e. 17–19px, though note
+     1.0625/1.0781/1.15rem above already went to --fs-lg since they sat
+     close enough to 18px) and --fs-2xl (~1.375–2.25rem, i.e. 22–36px)
+     rather than one value each. Not added yet — picking exact rem
+     values for those two tokens is a design decision (how many hero-
+     number sizes the system actually needs) better made once, looking
+     at the whole ~15-value outlier set above together, not file-by-
+     file.
 
    NOTE ON --blue / --info CONFLICT:
    Three different values currently claim to be "the accent blue":

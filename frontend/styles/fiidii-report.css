@@ -26,7 +26,7 @@
 }
 
 .fd-report-status{
-  font-size:10.5px;
+  font-size:var(--fs-2xs);
   color:var(--text-tertiary);
   letter-spacing:.04em;
   margin-bottom:10px;
@@ -53,8 +53,8 @@
   border-bottom:1px solid var(--border-2);
   padding-bottom:8px;
 }
-.fd-panel-title{font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--text-tertiary);}
-.fd-panel-meta{font-size:10px; color:var(--text-tertiary);}
+.fd-panel-title{font-size:var(--fs-xs); font-weight:700; letter-spacing:.08em; color:var(--text-tertiary);}
+.fd-panel-meta{font-size:var(--fs-2xs); color:var(--text-tertiary);}
 
 .fd-up{color:var(--green);} .fd-down{color:var(--red);} .fd-flat{color:var(--text-tertiary);}
 
@@ -63,35 +63,35 @@
 .fd-flow-chart{flex:1; height:140px;}
 .fd-flow-legend{display:flex; flex-direction:column; gap:10px; min-width:104px; padding-top:4px;}
 .fd-legend-item{display:flex; flex-direction:column; gap:2px;}
-.fd-legend-key{display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text-tertiary); letter-spacing:.05em;}
+.fd-legend-key{display:flex; align-items:center; gap:6px; font-size:var(--fs-2xs); color:var(--text-tertiary); letter-spacing:.05em;}
 .fd-swatch{width:9px; height:9px; border-radius:2px;}
-.fd-legend-val{font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;}
+.fd-legend-val{font-size:var(--fs-base); font-weight:700; font-variant-numeric:tabular-nums;}
 
 /* --- ratio gauge --- */
 .fd-gauge-wrap{display:flex; flex-direction:column; gap:8px;}
-.fd-gauge-scale{display:flex; justify-content:space-between; font-size:9px; color:var(--text-tertiary); margin-top:2px;}
+.fd-gauge-scale{display:flex; justify-content:space-between; font-size:var(--fs-2xs); color:var(--text-tertiary); margin-top:2px;}
 .fd-gauge-readout{display:flex; align-items:baseline; gap:10px;}
 .fd-gauge-pct{font-size:24px; font-weight:800; color:var(--amber);}
-.fd-gauge-bias{font-size:12px; font-weight:700; color:var(--red); letter-spacing:.03em;}
-.fd-gauge-sub{font-size:10px; color:var(--text-tertiary);}
+.fd-gauge-bias{font-size:var(--fs-sm); font-weight:700; color:var(--red); letter-spacing:.03em;}
+.fd-gauge-sub{font-size:var(--fs-2xs); color:var(--text-tertiary);}
 
 /* --- ASCII block bar (ratio gauge + OI participation) --- */
 .fd-ascii-bar{
   font-family:var(--font-mono);
-  font-size:14px;
+  font-size:var(--fs-base);
   letter-spacing:0;
   white-space:pre;
   line-height:1;
 }
 .fd-ascii-bar .fd-fill{color:var(--amber);}
 .fd-ascii-bar .fd-void{color:var(--border);}
-.fd-ascii-bar.fd-small{font-size:11px;}
+.fd-ascii-bar.fd-small{font-size:var(--fs-xs);}
 
 /* --- OI breakdown --- */
 .fd-oi-rows{display:flex; flex-direction:column; gap:8px; padding-top:8px; border-top:1px solid var(--border-2);}
 .fd-oi-row{display:grid; grid-template-columns:60px 1fr 90px; align-items:center; gap:10px;}
-.fd-oi-name{font-size:11px; color:var(--text-tertiary); letter-spacing:.05em; font-weight:600;}
-.fd-oi-trend{font-size:9px; font-weight:700; letter-spacing:.05em; text-align:right; white-space:nowrap;}
+.fd-oi-name{font-size:var(--fs-xs); color:var(--text-tertiary); letter-spacing:.05em; font-weight:600;}
+.fd-oi-trend{font-size:var(--fs-2xs); font-weight:700; letter-spacing:.05em; text-align:right; white-space:nowrap;}
 
 /* --- sector heatmap --- */
 .fd-heat-panel{grid-column:1 / -1;}
@@ -100,9 +100,9 @@
 .fd-sector-head{
   display:flex; justify-content:space-between; align-items:center;
   padding:7px 10px; border-bottom:1px solid var(--border-2);
-  font-size:10px; font-weight:700; letter-spacing:.07em;
+  font-size:var(--fs-2xs); font-weight:700; letter-spacing:.07em;
 }
-.fd-sector-tag{padding:1px 6px; border-radius:2px; font-size:9px; font-weight:700; letter-spacing:.05em;}
+.fd-sector-tag{padding:1px 6px; border-radius:2px; font-size:var(--fs-2xs); font-weight:700; letter-spacing:.05em;}
 .fd-tag-long{background:var(--pos-dim); color:var(--green);}
 .fd-tag-short{background:var(--neg-dim); color:var(--red);}
 .fd-tag-cover{background:var(--warn-dim); color:var(--amber);}
@@ -111,8 +111,8 @@
 .fd-sector-body{display:grid; grid-template-columns:1fr 1fr;}
 .fd-stock{padding:9px 10px; display:flex; flex-direction:column; gap:3px; border-right:1px solid var(--border-2);}
 .fd-stock:last-child{border-right:none;}
-.fd-stock-name{font-size:10px; color:var(--text-tertiary); letter-spacing:.04em;}
-.fd-stock-chg{font-size:13px; font-weight:700; font-variant-numeric:tabular-nums;}
+.fd-stock-name{font-size:var(--fs-2xs); color:var(--text-tertiary); letter-spacing:.04em;}
+.fd-stock-chg{font-size:var(--fs-sm); font-weight:700; font-variant-numeric:tabular-nums;}
 
 @media (max-width:880px){
   .fd-grid{grid-template-columns:1fr;}
@@ -136,13 +136,13 @@
   display:flex; align-items:center; flex-wrap:wrap;
   gap:10px; margin-bottom:8px;
 }
-.fd-bias-label{font-size:13px; font-weight:800; letter-spacing:.05em; text-transform:uppercase;}
-.fd-bias-score{font-size:12px; font-weight:700; font-variant-numeric:tabular-nums;}
-.fd-bias-confidence{font-size:10.5px; color:var(--text-tertiary); margin-left:auto;}
+.fd-bias-label{font-size:var(--fs-sm); font-weight:800; letter-spacing:.05em; text-transform:uppercase;}
+.fd-bias-score{font-size:var(--fs-sm); font-weight:700; font-variant-numeric:tabular-nums;}
+.fd-bias-confidence{font-size:var(--fs-2xs); color:var(--text-tertiary); margin-left:auto;}
 .fd-bias-narrative{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px;}
-.fd-bias-narrative li{font-size:11.5px; color:var(--text-secondary, var(--text-tertiary)); line-height:1.45; padding-left:14px; position:relative;}
+.fd-bias-narrative li{font-size:var(--fs-sm); color:var(--text-secondary, var(--text-tertiary)); line-height:1.45; padding-left:14px; position:relative;}
 .fd-bias-narrative li::before{content:"›"; position:absolute; left:0; color:var(--fd-violet);}
 .fd-bias-caveats{list-style:none; margin:8px 0 0; padding:8px 0 0; border-top:1px dashed var(--border-2); display:flex; flex-direction:column; gap:4px;}
 .fd-bias-caveats:empty{display:none; border-top:none; margin:0; padding:0;}
-.fd-bias-caveats li{font-size:10.5px; color:var(--amber); line-height:1.4; padding-left:14px; position:relative;}
-.fd-bias-caveats li::before{content:"⚠"; position:absolute; left:0; font-size:9px;}
+.fd-bias-caveats li{font-size:var(--fs-2xs); color:var(--amber); line-height:1.4; padding-left:14px; position:relative;}
+.fd-bias-caveats li::before{content:"⚠"; position:absolute; left:0; font-size:var(--fs-2xs);}
