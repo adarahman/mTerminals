@@ -324,6 +324,26 @@ window.renderIndexTicker = renderIndexTicker;
 // quotes, etc.) — that 0x80-0x9F range is exactly where ₹/—/× land, so a
 // plain "codepoint & 0xFF" byte reconstruction silently mangles them. This
 // table maps those codepoints back to their original byte value.
+// Manual futures-expiry selector — "NEAR"/"NEXT"/"FAR", only meaningful
+// once priceSource=FUT is picked. Mirrors setPriceSource() exactly:
+// preserves whatever other params (symbol, priceSource) are already on
+// the URL instead of dropping them.
+function setFuturesExpiry(exp) {
+  if (exp !== 'NEAR' && exp !== 'NEXT' && exp !== 'FAR') return;
+  const [base, query] = (_wsUrl || '').split('?');
+  const params = new URLSearchParams(query || '');
+  params.set('futuresExpiry', exp);
+  connectWebSocket(`${base}?${params.toString()}`);
+  if (window.eventBus) window.eventBus.emit('futuresExpiry:change', { exp });
+}
+window.setFuturesExpiry = setFuturesExpiry;
+
+// Called by the top-bar <select onchange> next to the price-source picker.
+function onFuturesExpiryPicked(val){
+  setFuturesExpiry(val);
+}
+window.onFuturesExpiryPicked = onFuturesExpiryPicked;
+
 const _CP1252_REV = {0x20AC:0x80,0x201A:0x82,0x0192:0x83,0x201E:0x84,0x2026:0x85,0x2020:0x86,0x2021:0x87,
   0x02C6:0x88,0x2030:0x89,0x0160:0x8A,0x2039:0x8B,0x0152:0x8C,0x017D:0x8E,0x2018:0x91,0x2019:0x92,
   0x201C:0x93,0x201D:0x94,0x2022:0x95,0x2013:0x96,0x2014:0x97,0x02DC:0x98,0x2122:0x99,0x0161:0x9A,

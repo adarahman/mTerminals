@@ -145,6 +145,12 @@ SYMBOL       = ARGS.symbol.strip().upper()
 # the WS URL, see ws_handler() — and read fresh into RuntimeConfig every
 # tick by run_pipeline_once() -> _configure_pipeline_globals().
 PRICE_SOURCE = "EQ"
+# Manual futures-expiry selector — "NEAR" (default), "NEXT", or "FAR".
+# Only meaningful when PRICE_SOURCE="FUT" (see fetch_futures_wide's
+# `which` param). Switched the same way PRICE_SOURCE is — via
+# ?futuresExpiry= on the WS URL, see ws_handler() — and read fresh into
+# RuntimeConfig every tick by run_pipeline_once() -> _configure_pipeline_globals().
+FUTURES_EXPIRY = "NEAR"
 EXPIRY       = ARGS.expiry
 POLL_SECONDS = ARGS.poll_seconds
 MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
@@ -540,8 +546,19 @@ async def ws_handler(request):
                 PRICE_SOURCE = src
         else:
             print(f"[ws] ignoring invalid ?priceSource={requested_price_source!r} (must be EQ or FUT)", flush=True)
+        requested_futures_expiry = request.query.get("futuresExpiry")
 
+        if requested_futures_expiry:
+            fexp = requested_futures_expiry.strip().upper()
+            if fexp in ("NEAR", "NEXT", "FAR"):
+                global FUTURES_EXPIRY
+                if fexp != FUTURES_EXPIRY:
+                    print(f"[ws] futures expiry switch requested: {FUTURES_EXPIRY} -> {fexp}", flush=True)
+                    FUTURES_EXPIRY = fexp
+        else:
+            print(f"[ws] ignoring invalid ?futuresExpiry={requested_futures_expiry!r} (must be NEAR, NEXT, or FAR)", flush=True)
     try:
+
         # New clients need a full snapshot before they can apply deltas.
         # (If switch_symbol() just cleared LAST_PAYLOAD above, this is
         # skipped on purpose — better to wait for the next tick's real data
@@ -1427,7 +1444,7 @@ async def bridge_loop():
         await asyncio.sleep(2)
 
 
-def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, strict_expiry=None, no_virtual_oi=None, price_source=None):
+def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, strict_expiry=None, no_virtual_oi=None, price_source=None, futures_expiry=None):
     """Point option_chain_json's runtime config at `symbol`, via
     option_chain_json.set_runtime_config() (see pipeline_config.py). Used
     only by run_pipeline_once() for the primary --symbol's full
@@ -1453,6 +1470,7 @@ def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, stric
         strict_expiry=strict_expiry,
         no_virtual_oi=no_virtual_oi,
         price_source=price_source,
+        futures_expiry=futures_expiry,   # add this line too
     ))
 
 
@@ -1989,6 +2007,7 @@ def run_pipeline_once():
         strict_expiry=ARGS.strict_expiry,
         no_virtual_oi=ARGS.no_virtual_oi,
         price_source=PRICE_SOURCE,
+        futures_expiry=FUTURES_EXPIRY,
     )
 
     _CAPTURED.clear()
