@@ -364,25 +364,50 @@ def _get_futures_contract(underlying: str, expiry_dash: str | None = None,
     already treat as "this is a futures contract" elsewhere in this
     codebase. Previously filtered to "FUTIDX" only, so this always
     silently returned None (empty futures fetch, PRICE_SOURCE=FUT
-    quietly no-op'd back to EQ) for any single-stock underlying."""
+    quietly no-op'd back to EQ) for any single-stock underlying.
+
+    Rows with an unparseable `expiry` are skipped rather than raising —
+    one malformed row in a ~160k-row master shouldn't take down futures
+    resolution for every underlying.
+
+    For the relative-position (`which`) path only, already-expired
+    contracts are dropped before indexing. _load_scrip_master() has a
+    stale-cache fallback (network failure -> reuse yesterday's file on
+    disk) — without this filter, hitting that fallback on or after a
+    contract's expiry date would resolve NEAR to a dead contract instead
+    of rolling to what should now be NEAR. The exact-date path
+    (expiry_dash set) is left unfiltered: nothing in this codebase calls
+    it with a value today, but a future caller doing a historical/backtest
+    lookup should still be able to ask for a specific past expiry."""
     from brokers.smartapi_instruments import _FNO_FUT_TYPES
+
+    def _parse_expiry(row):
+        try:
+            return datetime.strptime(row["expiry"], "%d%b%Y")
+        except (KeyError, ValueError, TypeError):
+            return None
+
     data = _load_scrip_master()
     cands = [row for row in data
              if row.get("exch_seg") == exchange
              and row.get("name") == underlying.upper()
              and row.get("instrumenttype") in _FNO_FUT_TYPES]
+    cands = [(row, _parse_expiry(row)) for row in cands]
+    cands = [(row, exp) for row, exp in cands if exp is not None]
     if not cands:
         return None
-    cands.sort(key=lambda r: datetime.strptime(r["expiry"], "%d%b%Y"))
+    cands.sort(key=lambda pair: pair[1])
     if expiry_dash:
         target = _to_smartapi_expiry(expiry_dash)
-        cands = [c for c in cands if c["expiry"] == target]
-        if not cands:
+        matches = [row for row, _exp in cands if row["expiry"] == target]
+        if not matches:
             return None
-        return cands[0]
+        return matches[0]
+    today = datetime.combine(date.today(), datetime.min.time())
+    live = [(row, exp) for row, exp in cands if exp >= today] or cands
     idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
-    idx = min(idx, len(cands) - 1)
-    return cands[idx]
+    idx = min(idx, len(live) - 1)
+    return live[idx][0]
 
 
 def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
