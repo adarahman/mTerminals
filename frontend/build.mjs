@@ -37,7 +37,7 @@ const pages = [
     html: "Dashboard/DashboardPro.html",
     out: "dashboard",
     css: [
-      "styles/theme.css", "styles/animations.css", "styles/layout.css", "styles/tables.css",
+      "styles/theme.css", "styles/backtest-view.css", "styles/components.css", "styles/animations.css", "styles/layout.css", "styles/tables.css",
       "styles/navigation.css", "styles/panels.css", "PriceChart/price-chart-components.css",
       "styles/paper-trading.css", "styles/algo-status.css", "styles/responsive.css", "styles/fiidii-report.css",
       "PriceChart/pc-order-panel.css",
@@ -79,7 +79,7 @@ const pages = [
   {
     html: "OptionChain/option-chain.html",
     out: "option-chain",
-    css: ["styles/theme.css", "OptionChain/option-chain.css"],
+    css: ["styles/theme.css", "styles/backtest-view.css", "OptionChain/option-chain.css"],
     js: [["engines/smart-money.js", "engines/market-structure.js", "OptionChain/option-chain.js"]],
   },
   {

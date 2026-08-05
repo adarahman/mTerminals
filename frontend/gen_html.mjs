@@ -25,7 +25,7 @@ const jobs = [
   },
   {
     src: "OptionChain/option-chain.html", out: "OptionChain/option-chain.html",
-    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">\s*<link rel="stylesheet" href="option-chain\.css">/,
+    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">[\s\S]*?<link rel="stylesheet" href="option-chain\.css">/,
     cssReplacement: `<link rel="stylesheet" href="option-chain.bundle.css">`,
     jsBlock: /<script src="\.\.\/engines\/smart-money\.js"><\/script>\s*<script src="\.\.\/engines\/market-structure\.js"><\/script>\s*<script src="option-chain\.js"><\/script>/,
     jsReplacement: `<script src="option-chain.bundle.1.js"></script>`,
