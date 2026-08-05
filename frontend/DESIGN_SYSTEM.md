@@ -235,12 +235,19 @@ Trading semantics remain consistent throughout the application.
 
 Use a restrained typography scale.
 
-| Usage          | Size |
-| -------------- | ---- |
-| Tables         | 11px |
-| Controls       | 12px |
-| Body           | 14px |
-| Section Titles | 18px |
+| Usage          | Size  | Token       |
+| -------------- | ----- | ----------- |
+| Micro labels   | 10px  | `--fs-2xs`  |
+| Tables         | 11px  | `--fs-xs`   |
+| Controls       | 12px  | `--fs-sm`   |
+| Body           | 14px  | `--fs-base` |
+| Section Titles | 18px  | `--fs-lg`   |
+| Hero (small)   | 19px  | `--fs-xl`   |
+| Hero (medium)  | 22px  | `--fs-2xl`  |
+| Hero (large)   | 28px  | `--fs-3xl`  |
+| Hero (largest) | 34px  | `--fs-4xl`  |
+
+The first five sizes cover ordinary UI text. The four "hero" sizes are for headline numbers only — verdict calls, exec scores, confidence grades — not for general content.
 
 Avoid unnecessary font-size variations.
 
@@ -516,7 +523,27 @@ Trade Log enhancements include filtering, search, expandable rows, export, and d
 
 # 20. Component Library
 
-The application should be built on reusable components.
+**Status (2026-08-05): aspirational, not implemented.** No `MT`-prefixed
+component classes exist anywhere in the codebase. What actually exists is
+feature-scoped, one-off CSS — each module defines its own button/card/
+badge/table/modal rather than sharing a base component. This section
+documents the current reality so the doc stops promising something the
+CSS doesn't deliver; unifying these into a real shared library (the
+original `MTButton`/`MTCard`/etc. vision below) remains a valid future
+goal, just not yet started.
+
+| Concept | Actual classes in use | Notes |
+| --- | --- | --- |
+| Button | `.sec-btn`, `.pt-submit`, `.bt-field-run button`, `.pt-toggle-btn` | Each styled independently, no shared base |
+| Card | `.section-card`, `.exec-card`, `.bt-stat`, `.algn-card` | Different padding/radius/border per feature |
+| Modal / panel | `.u-modal-overlay` (theme.css) is the closest shared base | `#algo-panel`, `#pt-order-panel`, `#pt-portfolio-panel`, `.bt-panel` each redefine their own chrome instead of extending it |
+| Badge / chip | **`.uc-badge` (theme.css) + `.algo-badge`/`.pt-side-badge`/`.fd-sector-tag`, unified via `components.css` (2026-08-05)** | Structure (shape/size) now shared in one place; color variants stay per-feature. `.dec-badge` intentionally excluded — different size tier, see components.css |
+| Toast | `.pt-toast`, `.recon-toast` | Two separate toast systems, different positioning/z-index |
+| Table | `.t`, `.pt-table`, `.dd-tbl`, `.bt-table` | Four separate table implementations |
+| Stat card | `.bt-stat`, `.dd-tbl-metric` | Similar idea, not unified |
+| Input / dropdown / tooltip / order card / position row | — | No equivalent found anywhere |
+
+## Original vision (not yet built)
 
 ```text
 MTButton
@@ -534,7 +561,7 @@ MTOrderCard
 MTPositionRow
 ```
 
-Each component should define appearance, behaviour, states, spacing, accessibility, and usage.
+Each component should define appearance, behaviour, states, spacing, accessibility, and usage — see Section 15's default/hover/active/focus/disabled/loading/error states, which today are each implemented ad hoc per feature rather than enforced by a shared base.
 
 ---
 

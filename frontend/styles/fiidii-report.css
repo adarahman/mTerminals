@@ -71,7 +71,8 @@
 .fd-gauge-wrap{display:flex; flex-direction:column; gap:8px;}
 .fd-gauge-scale{display:flex; justify-content:space-between; font-size:var(--fs-2xs); color:var(--text-tertiary); margin-top:2px;}
 .fd-gauge-readout{display:flex; align-items:baseline; gap:10px;}
-.fd-gauge-pct{font-size:24px; font-weight:800; color:var(--amber);}
+/* 24px -> --fs-2xl (22.4px): closer than --fs-3xl (28px) by 1.6px vs 4px. */
+.fd-gauge-pct{font-size:var(--fs-2xl); font-weight:800; color:var(--amber);}
 .fd-gauge-bias{font-size:var(--fs-sm); font-weight:700; color:var(--red); letter-spacing:.03em;}
 .fd-gauge-sub{font-size:var(--fs-2xs); color:var(--text-tertiary);}
 
@@ -102,7 +103,10 @@
   padding:7px 10px; border-bottom:1px solid var(--border-2);
   font-size:var(--fs-2xs); font-weight:700; letter-spacing:.07em;
 }
-.fd-sector-tag{padding:1px 6px; border-radius:2px; font-size:var(--fs-2xs); font-weight:700; letter-spacing:.05em;}
+/* .fd-sector-tag's structural properties (display/padding/radius/
+   font-size/weight/letter-spacing) moved to components.css — shared now
+   with .uc-badge (theme.css) and .algo-badge/.pt-side-badge. Only the
+   color variants stay here. */
 .fd-tag-long{background:var(--pos-dim); color:var(--green);}
 .fd-tag-short{background:var(--neg-dim); color:var(--red);}
 .fd-tag-cover{background:var(--warn-dim); color:var(--amber);}

@@ -7,6 +7,7 @@
      type was reading soft/blurry at normal zoom. -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles/theme.css">
+<link rel="stylesheet" href="../styles/components.css">
 <link rel="stylesheet" href="../styles/animations.css">
 <link rel="stylesheet" href="../styles/layout.css">
 <link rel="stylesheet" href="../styles/tables.css">
@@ -657,7 +658,15 @@
 <script src="panel-manager.js"></script>
 <script src="dashboard-panels.js"></script>
 <script src="dashboard.js"></script>
-<script src="paper-trading.js"></script>
+<!-- Split 2026-08-05 from the old monolithic paper-trading.js: shared
+     state/helpers first, then order-entry.js (#pt-order-panel), then
+     portfolio-tracker.js (#pt-portfolio-panel + mount orchestrator +
+     renderPaperTradingPanel entry point). Order matters at call time
+     only (renderPaperTradingPanel/ptMountPanel run on DOMContentLoaded,
+     after all three have loaded), not at parse time. -->
+<script src="paper-trading-shared.js"></script>
+<script src="order-entry.js"></script>
+<script src="portfolio-tracker.js"></script>
 <script src="algo-status.js"></script>
 <script src="backtest-view.js"></script>
 </body></html>

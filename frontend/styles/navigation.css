@@ -24,7 +24,10 @@
 
 .idx-pill{
   display:flex;align-items:center;gap: var(--space-3);
-  background:#15171c;
+  /* #15171c was an unmigrated near-copy of --bg-1 (#16181D), off by
+     ~1 hex unit per channel — repointed, same pattern as
+     paper-trading.css's #0f1116/--bg-0 fix. */
+  background:var(--bg-1);
   border:2px solid transparent;
   border-radius:999px;
   padding:6px 14px;
@@ -47,11 +50,12 @@
 
 .idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:var(--fs-base);font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
 
-.idx-pill-chg.up{color:#20C997;}
+/* Exact copies of --pos/--neg/--text-tertiary, unmigrated. Repointed. */
+.idx-pill-chg.up{color:var(--pos);}
 
-.idx-pill-chg.down{color:#FF6B6B;}
+.idx-pill-chg.down{color:var(--neg);}
 
-.idx-pill-chg.na{color:#6C757D;font-weight:500;}
+.idx-pill-chg.na{color:var(--text-tertiary);font-weight:500;}
 
 .idx-pill-vix{border-color:rgba(255,212,59,0.35);}
 
@@ -121,15 +125,20 @@
    top-bar's DTE pill slot (see #expirySelect in DashboardPro.html — it's
    moved here via JS on each top-bar re-render, not rebuilt, so its
    selection state/option list survive live ticks). Styled to sit flush
-   inside the same pill the DTE readout lives in. */
+   inside the same pill the DTE readout lives in.
+
+   outline/cursor/appearance-reset/caret-image/background-repeat moved
+   to components.css (2026-08-05) — merged with .symbol-select/
+   .price-source-select below, which share this exact same caret SVG.
+   What stays here is genuinely this control's own: transparent/
+   borderless background (sits flush inside .expiry-strip rather than
+   drawing its own pill) and the tighter, offset-free caret position. */
 
 #expirySelect{
   font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);
-  background:transparent;border:none;outline:none;cursor:pointer;
-  -webkit-appearance:none;appearance:none;
+  background:transparent;border:none;
   padding:0 14px 0 0;
-  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
-  background-repeat:no-repeat;background-position:right center;
+  background-position:right center;
 }
 
 #expirySelect:focus{color:var(--info);}
@@ -162,49 +171,52 @@
    13px label size with no cursor/caret affordance, so it read as tiny
    static text buried next to the spot price instead of a control.
    Sized up and given the same SVG-caret treatment as #expirySelect
-   above for a consistent "this is a dropdown" cue. */
+   above for a consistent "this is a dropdown" cue.
+
+   outline/cursor/appearance-reset/caret-image/background-repeat, plus
+   the pill fill+radius shared with .price-source-select below, moved
+   to components.css (2026-08-05) — see its CARET SELECTS block. Border
+   color/width, font-size/color, padding, background-position offset,
+   and box-shadow stay here — this select's own larger, brighter accent
+   tier. */
 
 .symbol-select{
   font-size:var(--fs-lg);
   color:var(--info);
-  background:#15171c;
   border:2px solid var(--info);
-  border-radius:999px;
   outline:none;
   cursor:pointer;
-  -webkit-appearance:none;
-  appearance:none;
   padding:6px 22px 6px 14px;
   box-shadow:0 2px 8px rgba(0,0,0,0.16);
-  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
-  background-repeat:no-repeat;
   background-position:right 14px center;
 }
 
 /* Same visual language as .symbol-select, deliberately smaller/muted —
    this is a secondary control (EQ is the correct default almost all
    session; FUT only matters in the last ~15min before close) and
-   shouldn't visually compete with the symbol picker for attention. */
+   shouldn't visually compete with the symbol picker for attention.
+
+   Shared pill/caret mechanics now live in components.css alongside
+   .symbol-select above — see that file's comment for why these two
+   were already understood as one component with two accent tiers, just
+   never shared in code until now. Fixed one real gap on merge: the
+   border below used to read var(--border, #2a2d34), an unmigrated
+   fallback that didn't match --border's real value — removed, since
+   theme.css (which defines --border) is always loaded first. */
 .price-source-select{
   font-size:var(--fs-sm);
   font-weight:700;
   color:var(--text-tertiary);
-  background:#15171c;
-  border:1.5px solid var(--border, #2a2d34);
-  border-radius:999px;
-  outline:none;
-  cursor:pointer;
-  -webkit-appearance:none;
-  appearance:none;
+  border:1.5px solid var(--border);
   padding:4px 20px 4px 10px;
-  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" viewBox="0 0 10 7"><path d="M1 1l4 4 4-4" stroke="%23868E96" stroke-width="1.5" fill="none" stroke-linecap="round"></path></svg>');
-  background-repeat:no-repeat;
   background-position:right 8px center;
 }
 
 .price-source-tag{font-size:var(--fs-xs);font-weight:700;color:var(--text-tertiary);vertical-align:middle;}
 
-.spot{font-size:1.8687rem;font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
+/* 1.8687rem (29.9px) -> --fs-3xl (28px): closer than --fs-4xl (34.4px)
+   by 1.9px vs 4.5px. */
+.spot{font-size:var(--fs-3xl);font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
 
 .spot.bearish{color:var(--neg);}
 

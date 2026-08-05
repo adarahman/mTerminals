@@ -10,22 +10,32 @@
    button actually is, same approach as ui-controls.js's
    toggleControlSidebar()/.ctrl-sidebar-panel. */
 
+/* Structural properties (display/padding/radius/font-size/weight/
+   letter-spacing) moved to components.css — shared now with .uc-badge
+   (theme.css) and .pt-side-badge/.fd-sector-tag. Only the color/state
+   variants stay here. */
 #algo-toggle-btn.algo-live{border-color:var(--neg); color:var(--neg);}
 #algo-toggle-btn.algo-tripped{
   border-color:var(--neg); background:rgba(231,76,60,.14); color:var(--neg);
   animation:pt-mode-pulse 1.6s ease-in-out infinite; /* reuses paper-trading.css's existing pulse keyframes */
 }
 
+/* #algo-panel's shared popover mechanics (position/z-index/max-height/
+   overflow/display/color/padding/font + .open toggle) moved to
+   components.css — merged with #pt-order-panel/#pt-portfolio-panel.
+   Width, plain background/border, and box-shadow stay here — this is
+   a small plain utility panel, not carrying an accent identity like
+   the two pt- panels. */
 #algo-panel{
-  position:fixed; z-index:var(--z-popover);
-  width:min(340px, calc(100vw - 32px)); max-height:78vh; overflow-y:auto; display:none;
-  background:var(--bg-1); color:var(--text-primary);
+  width:min(340px, calc(100vw - 32px));
+  background:var(--bg-1);
   border:1px solid var(--border); border-radius:10px;
-  padding:var(--space-4); font:var(--fs-sm)/1.4 inherit; box-shadow:var(--shadow-md);
+  box-shadow:var(--shadow-md);
 }
-#algo-panel.open{display:block;}
 #algo-panel h4{margin:0 0 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;}
-#algo-panel .algo-close{cursor:pointer; opacity:.6; font-weight:400;}
+/* .algo-close's cursor/opacity/font-weight moved to components.css —
+   merged with .pt-close (paper-trading.css), byte-identical rule found
+   while sweeping for cross-file duplicates (2026-08-05). */
 
 .algo-empty{opacity:.6; padding:var(--space-2) 0;}
 
@@ -46,12 +56,19 @@
 .algo-limit{opacity:.5; font-size:10.5px; margin-left:auto;}
 .algo-row .algo-limit{margin-left:var(--space-2);}
 
-.algo-badge{
-  display:inline-block; padding:2px 8px; border-radius:10px;
-  font-weight:800; font-size:10px; letter-spacing:.03em;
-}
-.algo-badge-ok{background:rgba(46,204,113,.16); color:var(--pos);}
-.algo-badge-bad{background:rgba(231,76,60,.2); color:var(--neg); animation:pt-mode-pulse 1.6s ease-in-out infinite;}
+/* .algo-badge's structural properties (display/padding/radius/font-size/
+   weight/letter-spacing) moved to components.css — shared now with
+   .uc-badge (theme.css) and .pt-side-badge/.fd-sector-tag. Only the
+   color/state variants stay here. */
+/* .algo-badge-ok/.algo-badge-bad were on the same unmigrated legacy
+   rgba(46,204,113,*)/rgba(231,76,60,*) values as paper-trading.css's
+   .pt-side-buy/.pt-side-sell — see that file's comment (2026-08-05).
+   Repointed to --pos-dim/--neg-dim. .algo-badge-bad's alpha (.2) moves
+   further than .pt-side-sell's did (.16 -> --neg-dim's .14) since it
+   was already off by more to begin with; still the same direction and
+   the same token, not a new value invented for this file. */
+.algo-badge-ok{background:var(--pos-dim); color:var(--pos);}
+.algo-badge-bad{background:var(--neg-dim); color:var(--neg); animation:pt-mode-pulse 1.6s ease-in-out infinite;}
 .algo-badge-live{background:var(--neg); color:#fff;}
 
 .algo-pos{color:var(--pos);}
@@ -88,9 +105,13 @@
    — same fixed toast-stack pattern as paper-trading.css's #pt-toast-wrap,
    kept as an independent host so mount order between the two files'
    DOMContentLoaded listeners doesn't matter. */
+/* #recon-toast-wrap's shared stack mechanics (position/z-index/display/
+   flex-direction/gap/align-items/pointer-events) moved to components.css
+   — merged with #pt-toast-wrap. right/bottom offset stays here — recon
+   alerts sit at the page's bottom-right corner, above the paper-trading
+   toast stack (which sits higher up, see paper-trading.css). */
 #recon-toast-wrap{
-  position:fixed; z-index:var(--z-toast, 9999); right:16px; bottom:16px;
-  display:flex; flex-direction:column; gap:8px; align-items:flex-end; pointer-events:none;
+  right:16px; bottom:16px;
 }
 .recon-toast{
   pointer-events:auto; max-width:360px; padding:10px 14px; border-radius:8px;

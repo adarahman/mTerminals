@@ -7,12 +7,15 @@
 
 *{box-sizing:border-box;margin:0;padding:0;}
 
+/* .exec-card's shared card shell (background/border/position) and its
+   ::before accent-strip geometry moved to components.css — merged with
+   .section-card, which used the exact same "top accent strip driven by
+   a CSS var" technique independently. Padding/radius/flex layout and
+   the accent color itself stay here — this is the flatter, denser
+   exec-grid tile, not the elevated primary module .section-card is. */
 .exec-card{
-  background:var(--bg-1);
-  border:1px solid var(--border);
   border-radius:var(--radius);
   padding:8px 10px;
-  position:relative;
   overflow-x:hidden;
   overflow-y:auto !important;
   display:flex;
@@ -20,7 +23,6 @@
 }
 
 .exec-card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:2px;
   background:var(--exec-accent, var(--bg-2));
 }
 
@@ -47,16 +49,12 @@
   text-transform:uppercase;color:var(--text-primary);margin-bottom:10px;
 }
 
-.exec-badge{
-  display:inline-block;padding: var(--space-2) var(--space-5);border-radius:30px;
-  font-weight:700;font-size:var(--fs-xl);font-family:var(--font-mono);
-}
-
-.exec-badge.bull{background:rgba(18,184,134,0.15);color:var(--pos);border:1.5px solid rgba(18,184,134,0.35);}
-
-.exec-badge.bear{background:rgba(250,82,82,0.15);color:var(--neg);border:1.5px solid rgba(250,82,82,0.35);}
-
-.exec-badge.neutral{background:rgba(245,159,0,0.15);color:var(--warn);border:1.5px solid rgba(245,159,0,0.35);}
+/* .exec-badge's structural properties (display/padding/radius/font-size/
+   weight/family) moved to components.css — merged with .dec-badge, an
+   independent build of the same larger "hero badge" tier (2026-08-05).
+   Color variants stay here, merged with .dec-badge's below since both
+   badges live in this one file — see components.css for why a separate
+   "structure here, color local" file split doesn't apply in this case. */
 
 .exec-header{display:flex;justify-content:space-between;align-items:flex-start;gap: var(--space-4);margin-bottom: var(--space-4);}
 
@@ -251,18 +249,16 @@
 
 .section-card{
   --sc-violet: #8B7FFF;
-  background:var(--bg-1);
-  border:1px solid var(--border);
   border-radius:var(--radius-md);
   padding:16px 18px;
-  position:relative;
   box-shadow:var(--shadow-sm);
 }
 
+/* .section-card's shared card shell (background/border/position) and
+   its ::before accent-strip geometry (including border-radius, now
+   `inherit` — see components.css) moved there, merged with .exec-card.
+   Accent color stays here, plus this card's own domain-color set. */
 .section-card::before{
-  content:'';
-  position:absolute;top:0;left:0;right:0;height:2px;
-  border-radius:var(--radius-md) var(--radius-md) 0 0;
   background:var(--section-accent, var(--border));
 }
 
@@ -645,20 +641,11 @@ details.card summary .card-head{margin:0;}
    entirely at option-chain.html, one click away via the "Full Chain"
    button on the Option Chain Snapshot card. */
 
-.oc-modal{
-  display:none;
-  position:fixed;
-  inset:0;
-  z-index:9999;
-  background:rgba(0,0,0,0.55);
-  padding:2vh 2vw;
-}
-
-.oc-modal.open{
-  display:flex;
-  align-items:stretch;
-  justify-content:center;
-}
+/* .oc-modal's shared overlay mechanics (display/position/inset/z-index/
+   background/justify-content + .open toggle) moved to components.css —
+   merged with .u-modal-overlay (theme.css). align-items:stretch and the
+   2vh/2vw outer padding stay here — this modal's children fill nearly
+   the full viewport, unlike .u-modal-overlay's smaller centered box. */
 
 .oc-modal-panel{
   width:100%;
@@ -941,13 +928,17 @@ details.card summary .card-head{margin:0;}
 
 .leg-pill.sell{background:rgba(250,82,82,.10);border:1px solid rgba(250,82,82,.30);}
 
-.dec-badge{display:inline-block;padding:5px 16px;border-radius:20px;font-size:var(--fs-xl);font-weight:700;font-family:var(--font-mono);}
+/* .dec-badge's structural properties moved to components.css alongside
+   .exec-badge above (2026-08-05). Color variants merged below — the two
+   badges' rgba values were already identical except border opacity
+   (.exec-badge used .35, .dec-badge used .4); resolved to .4, the more
+   visible of the two, rather than picking one file's value over the
+   other arbitrarily. */
+.exec-badge.bull, .dec-badge.bull{background:rgba(18,184,134,.15);color:var(--pos);border:1.5px solid rgba(18,184,134,.4);}
 
-.dec-badge.bull{background:rgba(18,184,134,.15);color:var(--pos);border:1.5px solid rgba(18,184,134,.4);}
+.exec-badge.bear, .dec-badge.bear{background:rgba(250,82,82,.15);color:var(--neg);border:1.5px solid rgba(250,82,82,.4);}
 
-.dec-badge.bear{background:rgba(250,82,82,.15);color:var(--neg);border:1.5px solid rgba(250,82,82,.4);}
-
-.dec-badge.neutral{background:rgba(245,159,0,.15);color:var(--warn);border:1.5px solid rgba(245,159,0,.4);}
+.exec-badge.neutral, .dec-badge.neutral{background:rgba(245,159,0,.15);color:var(--warn);border:1.5px solid rgba(245,159,0,.4);}
 
 .vrd-chip{display:grid;grid-template-columns:56px 1fr;gap: var(--space-1);align-items:start;padding:4px 0;border-bottom:1px solid var(--border);}
 

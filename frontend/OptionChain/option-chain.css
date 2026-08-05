@@ -7,7 +7,19 @@
    not just parsed.
    ════════════════════════════════════════════════════════════════════ */
 
-/* Requires theme.css loaded first. --call/--put/--spine and their -dim
+/* Requires theme.css loaded first, and — as of 2026-08-05 — components.css
+   loaded after theme.css and before this file: .oc-drawer/.oc-trade-modal's
+   shared overlay mechanics now live there (merged with .oc-modal/
+   .u-modal-overlay, see components.css's MODAL OVERLAYS block). This page
+   did not link components.css before now; add
+     <link rel="stylesheet" href="components.css">
+   to its HTML, in the same position theme.css -> components.css -> ...
+   is already ordered on DashboardPro.html, or .oc-drawer/.oc-trade-modal
+   will silently lose their position/background/display mechanics (only
+   the align-items/backdrop-filter/z-index rules that stayed local to
+   this file will still apply).
+
+   --call/--put/--spine and their -dim
    variants, plus --font-display/--font-sans/--font-mono, now come from
    theme.css (values were already identical here, so nothing changes
    visually — this just removes the duplicate declaration).
@@ -485,12 +497,16 @@ tr.oc-row.oc-selected{outline:1px solid var(--oc-blue);outline-offset:-1px;}
 .oc-legend b{color:var(--oc-text-2);font-weight:600;}
 .oc-legend-atm{color:var(--spine);margin-left:auto;}
 
-/* ── DRAWER (Greeks / depth on strike click) ── */
-.oc-drawer{
-  position:fixed;inset:0;background:rgba(6,7,10,.6);backdrop-filter:blur(2px);
-  display:none;align-items:flex-end;justify-content:center;z-index:50;
-}
-.oc-drawer.open{display:flex;}
+/* ── DRAWER (Greeks / depth on strike click) ──
+   .oc-drawer's overlay mechanics (position/inset/background/display+
+   .open/justify-content/z-index) moved to components.css — merged with
+   .oc-modal/.u-modal-overlay/.oc-trade-modal (2026-08-05). align-items
+   (bottom-sheet) and backdrop-filter stay there too, as this page's own
+   local variant — genuinely different from the other two, not decor.
+   Background rgba(6,7,10,.6) was folded into the shared rgba(0,0,0,.6)
+   as part of the merge (same call already made for .oc-modal's own
+   rgba(0,0,0,.55) -> .6). This page must link components.css (after
+   theme.css) for the rule to apply — see this file's header. */
 .oc-drawer-panel{
   width:min(680px,94vw);max-height:74vh;overflow-y:auto;
   background:var(--oc-panel);border:1px solid var(--oc-hairline);
@@ -501,12 +517,11 @@ tr.oc-row.oc-selected{outline:1px solid var(--oc-blue);outline-offset:-1px;}
 }
 @keyframes oc-drawer-up{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
 
-/* ── BUY/SELL QUICK-ORDER MODAL (LTP click) ── */
-.oc-trade-modal{
-  position:fixed;inset:0;background:rgba(6,7,10,.6);backdrop-filter:blur(2px);
-  display:none;align-items:center;justify-content:center;z-index:60;
-}
-.oc-trade-modal.open{display:flex;}
+/* ── BUY/SELL QUICK-ORDER MODAL (LTP click) ──
+   .oc-trade-modal's overlay mechanics moved to components.css alongside
+   .oc-drawer above (2026-08-05) — see that comment. z-index there is
+   pinned one step above .oc-drawer's via calc(var(--z-modal) + 1),
+   preserving this file's original 60-vs-50 relationship. */
 .oc-trade-panel{
   width:min(360px,90vw);background:var(--oc-panel);border:1px solid var(--oc-hairline);
   border-radius:var(--oc-r-lg);padding:20px 22px 22px;

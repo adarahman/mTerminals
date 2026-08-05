@@ -33,15 +33,18 @@
    relying on the border alone, and Order vs Portfolio read as visually
    distinct from each other too, not just from the dashboard. */
 
+/* #pt-order-panel/#pt-portfolio-panel's shared popover mechanics
+   (position/z-index/max-height/overflow/display/color/padding/font +
+   .open toggle) moved to components.css — merged with #algo-panel.
+   Width, border-radius, and backdrop-filter stay here, along with each
+   panel's own accent background/border/box-shadow below — these two
+   panels are wider than #algo-panel and carry their own violet/olive
+   accent identity (see this file's header comment). */
 #pt-order-panel, #pt-portfolio-panel{
-  position:fixed; z-index:var(--z-popover);
-  width:min(660px, 96vw); max-height:78vh; overflow-y:auto; display:none;
-  color:var(--text-primary);
+  width:min(660px, 96vw);
   border-radius:12px;
-  padding:var(--space-4); font:var(--fs-sm)/1.4 inherit;
   backdrop-filter:blur(14px);
 }
-#pt-order-panel.open, #pt-portfolio-panel.open{display:block;}
 
 #pt-order-panel{
   /* First attempt (2026-08-04) only nudged lightness (bg-1 -> near bg-0,
@@ -60,25 +63,47 @@
   box-shadow:0 8px 32px rgba(139,92,246,0.32), var(--shadow-lg);
 }
 #pt-portfolio-panel{
+  /* Was orange (--pe) — switched to the same olive used on the paper-mode
+     badge above, so the whole Portfolio window reads as the deprecated/
+     legacy surface it's flagged as, not an active accent color. */
   background:
-    linear-gradient(160deg, rgba(255,159,67,0.30), rgba(255,159,67,0.14)),
-    #1f160c;
-  border:2px solid var(--pe); /* #FF9F43 — same reasoning, distinct from --retail and from every other rail-button accent */
-  box-shadow:0 8px 32px rgba(255,159,67,0.32), var(--shadow-lg);
+    linear-gradient(160deg, rgba(124,124,30,0.30), rgba(124,124,30,0.14)),
+    #1a1a0c;
+  border:2px solid #7C7C1E;
+  box-shadow:0 8px 32px rgba(124,124,30,0.32), var(--shadow-lg);
 }
 #pt-order-panel h4, #pt-portfolio-panel h4{margin:0 0 8px; font-size:var(--fs-sm); display:flex; justify-content:space-between; align-items:center;}
 #pt-order-panel .pt-section, #pt-portfolio-panel .pt-section{margin-bottom:var(--space-4); border-top:1px solid var(--border); padding-top:var(--space-3);}
 #pt-order-panel .pt-pos, #pt-portfolio-panel .pt-pos{color:var(--pos);}
 #pt-order-panel .pt-neg, #pt-portfolio-panel .pt-neg{color:var(--neg);}
+/* .pt-side-badge's shared structural properties (display/padding/radius/
+   font-size/weight/letter-spacing) plus its min-width/centering modifier
+   moved to components.css — shared now with .uc-badge (theme.css) and
+   .algo-badge/.fd-sector-tag. Only the color variants stay here. */
+/* .pt-side-buy/.pt-side-sell were still on raw rgba(46,204,113,*)/
+   rgba(231,76,60,*) — the pre-migration --green (#2ecc71) and --red
+   (#e74c3c) values from before theme.css's token pass, never actually
+   updated even though color:var(--pos)/var(--neg) right next to them
+   already were. Found while sweeping for cross-file duplicates
+   (2026-08-05) — same "unmigrated legacy value" issue theme.css has
+   already fixed a dozen times elsewhere (#0f1116, #15171c, the
+   var(--border,#2a2d34) fallback, etc.), just missed here since it was
+   sitting on a fully-formed value rather than an obviously-wrong
+   fallback. Repointed to --pos-dim/--neg-dim, the tokens these values
+   were already approximating. Real, visible change: --pos-dim is
+   rgba(32,201,151,0.14) vs the old rgba(46,204,113,.16) — slightly
+   less saturated, 2 points less opaque; --neg-dim is
+   rgba(255,107,107,0.14) vs rgba(231,76,60,.16), same direction. */
+.pt-side-buy{background:var(--pos-dim); color:var(--pos);}
+.pt-side-sell{background:var(--neg-dim); color:var(--neg);}
 
-.pt-side-badge{display:inline-block; min-width:36px; text-align:center; padding:1px 6px; border-radius:3px; font-weight:800; font-size:var(--fs-2xs); letter-spacing:.02em;}
-.pt-side-buy{background:rgba(46,204,113,.16); color:var(--pos);}
-.pt-side-sell{background:rgba(231,76,60,.16); color:var(--neg);}
-
-.pt-toggle-group{display:flex; flex:1; border-radius:6px; overflow:hidden; border:1px solid var(--border);}
-.pt-toggle-btn{flex:1; padding:7px 0; border:none; background:var(--bg-2); color:var(--text-muted); font-weight:800; font-size:var(--fs-xs); letter-spacing:.02em; cursor:pointer; transition:background .12s,color .12s;}
-.pt-toggle-btn:not(:last-child){border-right:1px solid var(--border);}
-.pt-toggle-btn.active{color:#fff;}
+/* .pt-toggle-group/.pt-toggle-btn's shared structure now lives in
+   components.css, merged with theme.css's .u-toggle-group/.u-toggle-btn
+   (which duplicated this same shape, unused elsewhere). pt-toggle-group
+   keeps its own flex:1 here — that's this panel's layout need (sits
+   inside a .pt-row flex container), not part of "what a toggle group
+   is". */
+.pt-toggle-group{flex:1;}
 .pt-toggle-buy.active{background:var(--pos);}
 .pt-toggle-sell.active{background:var(--neg);}
 #pt-ordtype-toggle .pt-toggle-btn.active{background:var(--info);}
@@ -93,11 +118,26 @@
 .pt-basket-leg-remove:hover{opacity:1; color:var(--neg);}
 .pt-status-tap{cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px;}
 
-#pt-order-panel input,#pt-order-panel select,#pt-portfolio-panel input,#pt-portfolio-panel select{width:100%; box-sizing:border-box; margin:2px 0 6px; padding:var(--space-1) var(--space-2); background:#0f1116; color:var(--text-primary); border:1px solid var(--border); border-radius:4px;}
+/* Shared field look (box-sizing/color/border/border-radius) moved to
+   components.css — merged with .bt-field's inputs and
+   #pt-quick-popover's below. width/margin/padding stay here. background
+   was a hardcoded #0f1116 (an unmigrated near-copy of --bg-0, chosen for
+   contrast against this panel's own tinted fill, not the same as
+   bt-field's lighter --bg-2 — see components.css) — repointed to the
+   token it was already approximating. */
+#pt-order-panel input,#pt-order-panel select,#pt-portfolio-panel input,#pt-portfolio-panel select{width:100%; margin:2px 0 6px; padding:var(--space-1) var(--space-2); background:var(--bg-0);}
 #pt-order-panel .pt-row, #pt-portfolio-panel .pt-row{display:flex; gap:var(--space-2);}
 #pt-order-panel .pt-row > *, #pt-portfolio-panel .pt-row > *{flex:1;}
-#pt-order-panel button.pt-submit, #pt-portfolio-panel button.pt-submit{width:100%; padding:var(--space-2); margin-top:var(--space-1); border:none; border-radius:4px; background:var(--info); color:#fff; font-weight:600; cursor:pointer;}
-#pt-order-panel .pt-close, #pt-portfolio-panel .pt-close{cursor:pointer; opacity:.6; font-weight:400;}
+/* .pt-submit's shared structure (width/padding/radius/background/color/
+   weight/font-size/hover/disabled) moved to components.css's
+   .mt-btn-primary — merged with .bt-field-run button (backtest-view.css),
+   which was an independent near-duplicate. Note: text color changed from
+   white to dark (#0b0e14) as part of that merge — see components.css's
+   BUTTONS section for why. */
+/* .pt-close's cursor/opacity/font-weight moved to components.css —
+   merged with .algo-close (algo-status.css), byte-identical rule found
+   while sweeping for cross-file duplicates (2026-08-05). */
+#pt-order-panel button.pt-submit, #pt-portfolio-panel button.pt-submit{margin-top:var(--space-1);}
 #pt-order-panel .pt-summary, #pt-portfolio-panel .pt-summary{display:flex; justify-content:space-between; font-size:var(--fs-xs); margin-bottom:var(--space-2);}
 #pt-err{font-size:var(--fs-xs); min-height:14px; margin-top:var(--space-1); color:var(--neg);}
 #pt-order-panel select:disabled, #pt-portfolio-panel select:disabled{opacity:.4;}
@@ -109,19 +149,44 @@
 #pt-quick-popover .pt-qp-close{cursor:pointer; opacity:.6;}
 #pt-quick-popover .pt-qp-ltp{font-size:var(--fs-xs); opacity:.75; margin-bottom:var(--space-2);}
 #pt-quick-popover .pt-qp-row{display:flex; gap:var(--space-2); margin-bottom:var(--space-2);}
-#pt-quick-popover .pt-qp-row input,#pt-quick-popover .pt-qp-row select{flex:1; box-sizing:border-box; padding:4px 5px; background:#0f1116; color:var(--text-primary); border:1px solid var(--border); border-radius:4px;}
+/* Shared field look moved to components.css — merged with .bt-field's
+   and #pt-order-panel/#pt-portfolio-panel's inputs above. Padding
+   normalized from 4px 5px to var(--space-1) var(--space-2) (4px 6px) —
+   a 1px near-miss of the identical rule above, in this same file.
+   background hardcode fixed the same way as above. */
+#pt-quick-popover .pt-qp-row input,#pt-quick-popover .pt-qp-row select{flex:1; padding:var(--space-1) var(--space-2); background:var(--bg-0);}
 #pt-quick-popover .pt-qp-btns{display:flex; gap:var(--space-2);}
 #pt-quick-popover button{flex:1; border:none; border-radius:4px; padding:7px 0; font-weight:700; cursor:pointer; color:#fff;}
 #pt-quick-popover button.pt-qp-buy{background:var(--pos);}
 #pt-quick-popover button.pt-qp-sell{background:var(--neg);}
 
-#pt-toast-wrap{position:fixed; right:16px; bottom:60px; z-index:var(--z-toast); display:flex; flex-direction:column; gap:var(--space-2); align-items:flex-end; pointer-events:none;}
-.pt-toast{max-width:280px; background:var(--bg-1); border:1px solid var(--border); border-left:3px solid var(--info); border-radius:6px; padding:8px 10px; font:var(--fs-xs)/1.4 inherit; color:var(--text-primary); box-shadow:var(--shadow-md); animation:pt-toast-in .15s ease-out;}
+/* #pt-toast-wrap's shared stack mechanics (position/z-index/display/
+   flex-direction/gap/align-items/pointer-events) moved to components.css
+   — merged with #recon-toast-wrap. right/bottom offset stays here — this
+   stack sits higher up than the recon alert stack, see algo-status.css. */
+#pt-toast-wrap{right:16px; bottom:60px;}
+/* pointer-events:auto was missing here — the wrapper above sets
+   pointer-events:none (so the toast stack doesn't block clicks on
+   whatever's behind it), and each toast needs to opt back in to be
+   clickable itself. #recon-toast's .recon-toast already did this;
+   .pt-toast never had it, so paper-trading toasts were silently
+   unclickable. Fixed as part of the toast-wrap merge. */
+.pt-toast{pointer-events:auto; max-width:280px; background:var(--bg-1); border:1px solid var(--border); border-left:3px solid var(--info); border-radius:6px; padding:8px 10px; font:var(--fs-xs)/1.4 inherit; color:var(--text-primary); box-shadow:var(--shadow-md); animation:pt-toast-in .15s ease-out;}
 .pt-toast.pt-toast-err{border-left-color:var(--neg);}
 .pt-toast.pt-toast-ok{border-left-color:var(--pos);}
 
 .pt-mode-toggle{cursor:pointer; font-size:var(--fs-2xs); font-weight:800; letter-spacing:.04em; padding:2px 8px; border-radius:10px; margin-left:var(--space-3); user-select:none;}
-.pt-mode-toggle.paper{background:rgba(255,255,255,.08); color:var(--text-muted); border:1px solid var(--border);}
+/* Was neutral grey, then blue per DESIGN_SYSTEM.md's PAPER=Blue spec —
+   changed to olive per direct request, since paper trading is being
+   treated as a deprecated/legacy mode rather than an active blue state.
+   Scoped local var (--pt-paper-olive), same pattern as fd-violet/
+   sc-violet/oic-purple elsewhere — one-off accent, not promoted to
+   theme.css since it doesn't map to any existing --pos/--neg/--info/
+   --warn semantic. */
+.pt-mode-toggle.paper{
+  --pt-paper-olive: #7C7C1E;
+  background:var(--pt-paper-olive); color:#fff; border:1px solid var(--pt-paper-olive);
+}
 .pt-mode-toggle.live{background:var(--neg); color:#fff; animation:pt-mode-pulse 1.6s ease-in-out infinite;}
 #pt-order-panel.live-mode{border-color:var(--neg); box-shadow:0 4px 20px rgba(231,76,60,.35);}
 
@@ -156,8 +221,8 @@
 #pt-order-toggle-btn.active::after{background:#8b5cf6;}
 
 #pt-toggle-btn.active{
-  background:linear-gradient(135deg, rgba(255,159,67,0.22), rgba(255,159,67,0.08));
-  color:var(--pe); border-color:var(--pe); font-weight:700;
-  box-shadow:0 2px 16px rgba(255,159,67,0.30);
+  background:linear-gradient(135deg, rgba(124,124,30,0.22), rgba(124,124,30,0.08));
+  color:#7C7C1E; border-color:#7C7C1E; font-weight:700;
+  box-shadow:0 2px 16px rgba(124,124,30,0.30);
 }
-#pt-toggle-btn.active::after{background:var(--pe);}
+#pt-toggle-btn.active::after{background:#7C7C1E;}

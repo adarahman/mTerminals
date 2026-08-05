@@ -17,7 +17,12 @@
   position:sticky; top:0; background:var(--bg-1); z-index:1;
 }
 .bt-title{font-weight:800; font-size:var(--fs-base);}
-.bt-close{cursor:pointer; opacity:.6; font-size:16px;}
+/* 16px sits exactly between --fs-base (14px) and --fs-lg (18px) — an
+   exact tie, resolved the same way theme.css's migration map already
+   resolved four other base/lg ties (.oc-modal-back etc.): rounded up
+   to --fs-lg, since this is an icon glyph (✕) that reads better sized
+   with its container than snapped down to body-text size. */
+.bt-close{cursor:pointer; opacity:.6; font-size:var(--fs-lg);}
 .bt-close:hover{opacity:1;}
 
 .bt-body{padding:var(--space-5);}
@@ -29,20 +34,27 @@
 }
 .bt-field{display:flex; flex-direction:column; gap:4px;}
 .bt-field label{font-size:var(--fs-2xs); text-transform:uppercase; letter-spacing:.04em; opacity:.6;}
+/* .bt-field input's shared field look (box-sizing/color/border/
+   border-radius) moved to components.css — merged with
+   #pt-order-panel/#pt-portfolio-panel/#pt-quick-popover's inputs
+   (paper-trading.css). Background stays here on its own token
+   (var(--bg-2), the documented "nested panel/input" surface — the two
+   pt-panels use a different, darker background for contrast against
+   their own tinted panel fill, see components.css). Padding/font/width
+   also stay here — this form's fields are roomier than the compact
+   order-panel/quick-popover ones. */
 .bt-field input[type="text"], .bt-field input[type="number"], .bt-field input[type="date"]{
-  background:var(--bg-2); border:1px solid var(--border); color:var(--text-primary);
-  border-radius:var(--radius-sm); padding:6px 8px; font-size:var(--fs-sm); font-family:var(--font-mono);
+  background:var(--bg-2);
+  padding:6px 8px; font-size:var(--fs-sm); font-family:var(--font-mono);
   width:100%;
 }
 .bt-field-checkbox{flex-direction:row; align-items:center; gap:6px;}
 .bt-field-checkbox label{display:flex; align-items:center; gap:6px; text-transform:none; font-size:var(--fs-xs); opacity:.85;}
 .bt-field-run{grid-column:span 1;}
-.bt-field-run button{
-  width:100%; padding:8px 10px; border-radius:var(--radius-sm); border:none;
-  background:var(--info); color:#0b0e14; font-weight:800; font-size:var(--fs-sm); cursor:pointer;
-}
-.bt-field-run button:hover{background:var(--info-strong);}
-.bt-field-run button:disabled{opacity:.6; cursor:default;}
+/* .bt-field-run button's structure (width/padding/radius/background/
+   color/weight/font-size/hover/disabled) moved to components.css's
+   .mt-btn-primary — merged with .pt-submit (paper-trading.css), which
+   was an independent near-duplicate. */
 
 .bt-empty, .bt-loading{opacity:.6; padding:var(--space-4) 0; font-size:var(--fs-sm); text-align:center;}
 .bt-error{
@@ -73,12 +85,22 @@
 .bt-equity-pos .bt-equity-line, .bt-equity-pos .bt-equity-area{stroke:var(--pos); fill:var(--pos);}
 .bt-equity-neg .bt-equity-line, .bt-equity-neg .bt-equity-area{stroke:var(--neg); fill:var(--neg);}
 
-.bt-table{width:100%; border-collapse:collapse; font-size:var(--fs-sm);}
-.bt-table th{
-  text-align:left; padding:6px 8px; font-size:var(--fs-2xs); text-transform:uppercase;
-  letter-spacing:.04em; opacity:.55; border-bottom:1px solid var(--border);
-}
-.bt-table td{padding:6px 8px; border-bottom:1px solid var(--border-2); vertical-align:top;}
+/* .bt-table's shared structure (width/border-collapse/font-size, th/td
+   padding+alignment, header look, hover, last-row border) moved to
+   components.css — merged with .t/.dd-tbl/.pt-table. This table's rows
+   can wrap onto multiple lines (trade entries), so it keeps its own
+   vertical-align:top instead of the shared middle-align. Two real gaps
+   this table had — no hover state, no last-row border removal — are
+   fixed by the merge rather than carried forward. */
+
+.bt-table td{vertical-align:top;}
+
+/* All headers stay left-aligned here (unlike the shared default of
+   right-aligned except the first column) — this table is mostly
+   descriptive text (symbol, side, reason), not numeric columns like
+   .t/.pt-table, so left-align reads better across the row. */
+.bt-table th{text-align:left;}
+
 .bt-table .bt-price{opacity:.55; font-family:var(--font-mono); font-size:var(--fs-2xs);}
 .bt-row-open{opacity:.7;}
 .bt-open-tag{color:var(--info); font-weight:800; font-size:var(--fs-2xs);}

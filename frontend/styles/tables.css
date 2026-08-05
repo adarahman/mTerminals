@@ -34,21 +34,18 @@
 
 /* ── FII/DII/Pro/Retail comparison table (rows=metrics, cols=participants) ── */
 
-.dd-tbl{width:100%;border-collapse:collapse;margin-top: var(--space-2);font-size:var(--fs-base);}
+/* .dd-tbl's shared structure (width/border-collapse/font-size, th/td
+   padding+alignment, header look, hover, last-row border) moved to
+   components.css — merged with .t/.pt-table/.bt-table. margin-top stays
+   here (this table's own placement need), along with the nowrap-cells
+   requirement and the metric-column color/size, since those aren't
+   shared shape. */
 
-.dd-tbl th,.dd-tbl td{padding:7px 10px;text-align:right;white-space:nowrap;}
+.dd-tbl{margin-top: var(--space-2);}
 
-.dd-tbl th:first-child,.dd-tbl td:first-child{text-align:left;}
-
-.dd-tbl thead th{font-family:var(--font-mono);font-weight:700;font-size:var(--fs-sm);letter-spacing:.04em;border-bottom:1px solid var(--border);padding-bottom: var(--space-3);}
+.dd-tbl td{white-space:nowrap;}
 
 .dd-tbl tbody td.dd-tbl-metric,.dd-tbl tbody th.dd-tbl-metric{color:var(--text-tertiary);font-size:var(--fs-sm);}
-
-.dd-tbl tbody tr{border-bottom:1px solid rgba(255,255,255,0.05);}
-
-.dd-tbl tbody tr:last-child{border-bottom:none;}
-
-.dd-tbl tbody tr:hover{background:rgba(255,255,255,0.02);}
 
 /* Simulator strike detail table */
 #sim-strike-table{
@@ -80,21 +77,20 @@
 #sim-strike-table td:nth-child(3){
     width:110px;
 }
-.t thead{background:var(--bg-2);}
+/* .t's shared structure (width/border-collapse/font-size, th/td padding+
+   alignment, header look, hover, last-row border) moved to
+   components.css — merged with .dd-tbl/.pt-table/.bt-table. What stays
+   here is genuinely specific to the option chain table: extra edge
+   padding on the first/last header cell, the overflow/max-width:0 cell
+   truncation this table's tight column count needs, and the .sc/.atm/
+   .atm-sc strike-column modifiers (including their own hover state,
+   which needs to override the shared hover background). */
 
-.t th{
-  color:var(--text-tertiary);font-weight:500;font-size:var(--fs-base);
-  text-transform:uppercase;letter-spacing:0.05em;
-  padding:7px 5px;text-align:right;
-  border-bottom:1px solid var(--border);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
+.t th:first-child{padding-left: var(--space-4);}
 
-.t th:first-child{text-align:left;padding-left: var(--space-4);}
+.t th:last-child{padding-right: var(--space-4);}
 
-.t th:last-child{text-align:right;padding-right: var(--space-4);}
-
-.t td{padding:5px 5px;text-align:right;color:var(--text-primary);vertical-align:middle;overflow:hidden;max-width:0;}
+.t td{overflow:hidden;max-width:0;}
 
 .t td.sc{
   text-align:center;font-weight:600;font-size:var(--fs-base);font-family:var(--font-mono);
@@ -109,13 +105,7 @@
   text-align:center;color:var(--pos);
 }
 
-.t tr:hover td{background:var(--bg-2);transition:background 0.1s;}
-
 .t tr:hover td.atm-sc{background:rgba(18,184,134,0.18);}
-
-.t tbody tr{border-bottom:1px solid var(--border);}
-
-.t tbody tr:last-child{border-bottom:none;}
 
 /* ── OI BUTTERFLY BARS ── */
 
@@ -182,31 +172,28 @@
    that scrolls horizontally rather than forcing a wrap if the panel is
    ever narrower than the table's min-width (e.g. small viewports). */
 
+/* .pt-table's shared structure (width/border-collapse/font-size, th/td
+   padding+alignment, header look, last-row border) moved to
+   components.css — merged with .t/.dd-tbl/.bt-table. What stays here is
+   genuinely functional, not shared shape: min-width/table-layout:fixed
+   (needed for the horizontal-scroll wrapper below), the ellipsis
+   truncation + nowrap cells that layout requires, the sticky header,
+   the zebra striping, and the tabular-nums monospace numeric columns.
+   Hover now uses the shared background instead of this table's own
+   stronger rgba(255,255,255,.035) — part of the full-merge normalization
+   requested. */
+
 .pt-table-scroll{overflow-x:auto; border:1px solid var(--border); border-radius:8px;}
 
-.pt-table{width:100%; min-width:640px; border-collapse:collapse; font-size:var(--fs-sm); table-layout:fixed;}
+.pt-table{min-width:640px; table-layout:fixed;}
 
 .pt-table th,.pt-table td{
-  padding:7px 9px; text-align:right; vertical-align:middle;
-  border-bottom:1px solid var(--border-2, rgba(255,255,255,.05));
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 
-.pt-table th:first-child,.pt-table td:first-child{text-align:left;}
-
 .pt-table thead{position:sticky; top:0; z-index:1;}
 
-.pt-table thead th{
-  background:var(--bg-2); color:var(--text-tertiary); font-weight:700;
-  font-size:var(--fs-2xs); text-transform:uppercase; letter-spacing:.06em;
-  border-bottom:1px solid var(--border); padding-top:8px; padding-bottom:8px;
-}
-
 .pt-table tbody tr:nth-child(even){background:rgba(255,255,255,.015);}
-
-.pt-table tbody tr:hover{background:rgba(255,255,255,.035);}
-
-.pt-table tbody tr:last-child td{border-bottom:none;}
 
 /* Numeric/ticker columns read as a broker terminal — tabular figures in
    monospace, everything else (symbol name, status text) stays in the

@@ -81,6 +81,25 @@
   --fs-sm:   0.75rem;   /* 12px — controls, labels, badges */
   --fs-base: 0.875rem;  /* 14px — body text */
   --fs-lg:   1.125rem;  /* 18px — section titles */
+  /* --fs-xl/2xl/3xl/4xl added (2026-08-05): the "hero number" tier flagged
+     in the outlier note below (search "Not added yet") — panels.css's
+     verdict/exec-score/OI-snap elements were referencing these four
+     tokens with no fallback and no definition anywhere, so they were
+     silently rendering at inherited size instead of their intended
+     hero size. Values below restore the original pre-bake-in pixel
+     sizes recorded in that same note, clustered into 4 tiers instead of
+     the 2 originally sketched there, since the actual usage split that
+     way:
+       --fs-xl  covers  .oi-snap-value/.oi-flow-val (19.2px),
+                        .exec-badge/.dec-badge (19.55px)
+       --fs-2xl covers  .oic-atm-figs .fig (22px), .verdict-icon (23px)
+       --fs-3xl covers  .load-btn i (27.6px),
+                        .verdict-conf-big/.verdict-grade-big (28px)
+       --fs-4xl covers  .verdict-call (34px), .exec-score-num (34.5px) */
+  --fs-xl:   1.2rem;    /* 19.2px */
+  --fs-2xl:  1.4rem;    /* 22.4px */
+  --fs-3xl:  1.75rem;   /* 28px */
+  --fs-4xl:  2.15rem;   /* 34.4px */
 
   /* ── Shadows ── */
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.16);
@@ -160,14 +179,11 @@
 }
 
 .uc-badge{
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .02em;
+  /* structural properties (display/padding/radius/font-size/weight/
+     letter-spacing) moved to components.css, shared with .algo-badge/
+     .pt-side-badge/.fd-sector-tag — see that file's header comment.
+     Only the dot-indicator stays here, since it's specific to how
+     uc-badge is used (the other three chips render without a dot). */
 }
 .uc-badge::before{
   content: '';
@@ -182,35 +198,19 @@
 .uc-badge-neutral{ background: rgba(255,255,255,.06); color: var(--text-secondary); }
 .uc-badge-neutral::before{ background: var(--text-tertiary); }
 
-.u-toggle-group{
-  display: flex;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-.u-toggle-btn{
-  flex: 1;
-  padding: 7px 0;
-  border: none;
-  background: var(--bg-2);
-  color: var(--text-secondary);
-  font-weight: 800;
-  font-size: 11px;
-  letter-spacing: .02em;
-  cursor: pointer;
-  transition: background .12s, color .12s;
-}
-.u-toggle-btn:not(:last-child){ border-right: 1px solid var(--border); }
-.u-toggle-btn.active{ color: #fff; }
+/* .u-toggle-group / .u-toggle-btn moved to components.css — merged with
+   .pt-toggle-group / .pt-toggle-btn (paper-trading.css), which had
+   independently duplicated this exact primitive. See components.css's
+   BUTTONS section header comment. */
 
+/* .u-modal-overlay's shared overlay mechanics (display/position/inset/
+   z-index/background/justify-content + .open toggle) moved to
+   components.css — merged with .oc-modal (panels.css). align-items:
+   center stays here — this overlay's child (.bt-panel) floats as a
+   smaller centered box, unlike .oc-modal's near-fullscreen children. */
 .u-modal-overlay{
-  position: fixed; inset: 0;
-  z-index: var(--z-modal);
-  display: none;
-  background: rgba(0,0,0,.6);
-  align-items: center; justify-content: center;
+  align-items: center;
 }
-.u-modal-overlay.open{ display: flex; }
 
 .u-toast{
   max-width: 280px;
@@ -269,6 +269,21 @@
      var(--up-color,#20C997)       -> var(--pos)             [fallback happened to already match --pos]
      var(--down-color,#FF6B6B)     -> var(--neg)             [fallback happened to already match --neg]
      var(--text-secondary,#8A8F98) -> var(--text-secondary)  [fallback was a different gray than the real --txt2 #ADB5BD]
+
+   FOUND VIA CROSS-FILE DUPLICATE SWEEP (2026-08-05) — raw legacy values
+   still in place, not fallbacks this time but fully-formed rgba() calls
+   that were simply never repointed when --green/#2ecc71 and --red/
+   #e74c3c were renamed to --pos/#20C997 and --neg/#FF6B6B elsewhere:
+     paper-trading.css  .pt-side-buy   rgba(46,204,113,.16)  -> var(--pos-dim)
+     paper-trading.css  .pt-side-sell  rgba(231,76,60,.16)   -> var(--neg-dim)
+     algo-status.css    .algo-badge-ok  rgba(46,204,113,.16) -> var(--pos-dim)
+     algo-status.css    .algo-badge-bad rgba(231,76,60,.2)   -> var(--neg-dim)
+   All four found only because they were byte-identical across two
+   files (a duplicate-body scan catches this; a token-fallback scan
+   like the entries above does not) — worth another pass over the rest
+   of the codebase for the same raw-rgba-of-an-old-hex pattern on
+   values that never duplicate elsewhere, since those wouldn't surface
+   this way.
 
    FONT-SIZE TOKENS (--fs-2xs/xs/sm/base/lg — see Typography section
    above).
@@ -332,33 +347,38 @@
                  sit in visibly larger chips (28–36px) than the 22–26px
                  chips using --fs-sm icons, so lg reads more consistent
                  with their container size than base would)
-     Left raw — oversized outliers, no current token fits within ~1px,
-     same open gap as the .fd-gauge-pct/.bt-close/.bt-stat-value/.spot/
-     body-text outliers noted above. Now that panels.css has been
-     reviewed too, the full outlier set across all files is:
-       layout.css:        body{font-size} 1.0062rem (16.1px)
-       fiidii-report.css: .fd-gauge-pct 24px
-       backtest-view.css: .bt-close 16px
-       navigation.css:    .spot 1.8687rem (29.9px)
-       panels.css:        .oi-snap-value/.oi-flow-val 1.2rem (19.2px),
-                           .exec-badge/.dec-badge 1.2219rem (19.55px),
-                           .oic-atm-figs .fig 1.375rem (22px),
-                           .verdict-icon 1.4375rem (23px),
-                           .load-btn i 1.725rem (27.6px),
-                           .verdict-conf-big/.verdict-grade-big 1.75rem
-                           (28px), .verdict-call 34px,
-                           .exec-score-num 2.1562rem (34.5px)
+     Oversized outliers, no current token fit within ~1px at the time —
+     status as of 2026-08-05:
+       panels.css hero numbers — NOT raw: .oi-snap-value/.oi-flow-val,
+         .exec-badge/.dec-badge, .oic-atm-figs .fig, .verdict-icon,
+         .load-btn i, .verdict-conf-big/.verdict-grade-big,
+         .verdict-call, .exec-score-num already call var(--fs-xl/2xl/
+         3xl/4xl) directly (no fallback). Until today those four tokens
+         had no definition anywhere, so all nine were silently
+         rendering at inherited size — a live bug, not a naming gap.
+         Fixed by adding the token definitions above (original px
+         values that anchored each tier: --fs-xl 19.2/19.55px,
+         --fs-2xl 22/23px, --fs-3xl 27.6/28px, --fs-4xl 34/34.5px). No
+         panels.css edit was needed once the tokens existed.
+       layout.css: body{font-size} 1.0062rem (16.1px) — kept raw
+         intentionally, see layout.css's own comment (page-specific
+         base size, not a design-system concept).
+       MIGRATED (2026-08-05), per-value human call, ties rounded up
+       for icon glyphs per the four base/lg ties above:
+         fiidii-report.css: .fd-gauge-pct 24px -> --fs-2xl (22.4px)
+         backtest-view.css: .bt-close 16px -> --fs-lg (18px), exact
+                             base/lg tie, rounded up (icon glyph)
+         navigation.css:    .spot 1.8687rem (29.9px) -> --fs-3xl (28px)
      This set now clusters into two clear bands — ~15–19px (body/spot/
      bt-stat-value/oi-snap/exec-badge territory) and ~22–35px (hero
      numbers, icons, .verdict-call/.exec-score-num territory) — worth
      adding as --fs-xl (~1.0625–1.1875rem, i.e. 17–19px, though note
      1.0625/1.0781/1.15rem above already went to --fs-lg since they sat
      close enough to 18px) and --fs-2xl (~1.375–2.25rem, i.e. 22–36px)
-     rather than one value each. Not added yet — picking exact rem
-     values for those two tokens is a design decision (how many hero-
-     number sizes the system actually needs) better made once, looking
-     at the whole ~15-value outlier set above together, not file-by-
-     file.
+     rather than one value each. ADDED (2026-08-05) as four tiers, not
+     two — see --fs-xl/2xl/3xl/4xl in the token block above — since the
+     ~15-value outlier set actually clustered into 4 bands once looked
+     at together, not 2.
 
    NOTE ON --blue / --info CONFLICT:
    Three different values currently claim to be "the accent blue":
