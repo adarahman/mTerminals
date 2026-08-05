@@ -564,7 +564,7 @@ function ptFindMatchingConfirmedOrder(pending, orders){
   });
 }
 
-function _ptSendOrderNow(payload, errEl){
+function _ptSendOrderNow(payload, errEl, btn){
   const ok = sendWsMessage('place_order', payload);
   const priceBit = {
     'LIMIT': ptFmtN(payload.limit_price,2),
@@ -619,6 +619,7 @@ function _ptSendOrderNow(payload, errEl){
   } else {
     ptToast(label + ' — failed to send (WS not connected)', 'err');
     if(errEl) errEl.textContent = 'WS not connected — order not sent';
+    if(btn && btn.setError) btn.setError('WS not connected');
   }
   return ok;
 }
@@ -632,9 +633,9 @@ function _ptSendOrderNow(payload, errEl){
 // person explicitly clicks "Place Real Order". Cancelling sends nothing
 // at all — not even a paper order — since the person's intent was to
 // place a live order and back out, not to silently fall back to paper.
-function ptDispatchOrder(payload, errEl){
+function ptDispatchOrder(payload, errEl, btn){
   if(!_ptLiveMode){
-    return _ptSendOrderNow(payload, errEl);
+    return _ptSendOrderNow(payload, errEl, btn);
   }
 
   const priceBit = {
@@ -665,6 +666,7 @@ function ptDispatchOrder(payload, errEl){
     // Modal DOM missing somehow — fail SAFE: do not place a live order
     // without the confirmation step ever having been shown.
     ptToast('Live confirmation dialog unavailable — order NOT sent', 'err');
+    if(btn && btn.setError) btn.setError('Confirm dialog unavailable');
     return false;
   }
 
@@ -678,7 +680,7 @@ function ptDispatchOrder(payload, errEl){
     cleanup();
     payload.live = true;
     payload.confirmed = true;
-    _ptSendOrderNow(payload, errEl);
+    _ptSendOrderNow(payload, errEl, btn);
   };
   noBtn.onclick = () => {
     cleanup();

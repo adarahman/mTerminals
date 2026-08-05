@@ -91,8 +91,7 @@ function ptMountOrderPanel(){
         <input id="pt-gtt-expiry" type="number" min="1" value="30" placeholder="GTT valid for (days)">
       </div>
       <div id="pt-ltp-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">LTP: —</div>
-      <div class="pt-row">
-        <button class="pt-submit" id="pt-submit-btn" style="flex:2;">Place Order</button>
+      <div class="pt-row" id="pt-submit-row">
         <button class="pt-submit" id="pt-add-basket-btn" style="flex:1;background:var(--bg-2,#1a1a1a);color:var(--text-primary,#eee);border:1px solid var(--border,#333);" title="Stage this leg into a basket instead of sending it now">+ Basket</button>
       </div>
       <div id="pt-err"></div>
@@ -170,7 +169,18 @@ function ptMountOrderPanel(){
   $i('pt-symbol').onchange  = ()=>{ _ptSymbolTouched = true; ptRefreshExpiryStrikeOptions(); ptUpdateLotSizeHint(); };
   $i('pt-qty').addEventListener('input', ptUpdateLotSizeHint);
 
-  $i('pt-submit-btn').onclick = ptSubmitOrder;
+  // First live call site for MTButton (components/mt-button.js) — see
+  // DESIGN_SYSTEM.md section 20. Replaces the static `<button
+  // id="pt-submit-btn">` that used to sit in the innerHTML template
+  // above; #pt-submit-row is the empty slot left for it. Kept the same
+  // id and the same flex:2 sizing so nothing else in this file (or
+  // paper-trading.css) needs to change. setError() below gives failed
+  // submits a real button-level state instead of only the small #pt-err
+  // line underneath — see ptSubmitOrder()/_ptSendOrderNow()'s new `btn`
+  // param.
+  const submitBtn = MTButton({ id: 'pt-submit-btn', label: 'Place Order', onClick: ptSubmitOrder });
+  submitBtn.style.flex = '2';
+  $i('pt-submit-row').prepend(submitBtn);
 
   // Prefill symbol/expiry/ATM strike from whatever the dashboard is
   // currently showing, so the common case (order the ATM strike on the
@@ -457,7 +467,7 @@ function ptSubmitOrder(){
   errEl.textContent = '';
   const { order, error } = ptGatherOrderFromForm();
   if(error){ errEl.textContent = error; return; }
-  ptDispatchOrder(order, errEl);
+  ptDispatchOrder(order, errEl, $i('pt-submit-btn'));
 }
 
 // ── Basket orders ─────────────────────────────────────────────────────

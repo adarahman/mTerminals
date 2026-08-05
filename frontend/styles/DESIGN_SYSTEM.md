@@ -523,39 +523,26 @@ Trade Log enhancements include filtering, search, expandable rows, export, and d
 
 # 20. Component Library
 
-**Status (2026-08-05): CSS unification essentially complete; first real
-JS component built.** `components.css` now gives nearly every row below
-a shared lowercase `mt-`/`u-`-prefixed structural base: badges (two
-tiers), buttons, tables, modal overlays, floating popovers, the toast
-wrapper, cards, form fields, caret selects, and stat cards. Only
-shape/structure is shared in each case — color variants, sizing tiers,
-and feature-specific behavior stay local. Checked and confirmed NOT
-duplicates, by design: `.sec-btn` (a distinct nav-rail button archetype,
-already single-sourced), `.dd-tbl-metric` (a table-cell modifier, not a
-stat block), and the toast cards themselves, `.pt-toast` vs
-`.recon-toast` (genuinely different visual languages).
-
-The real component library (`MTButton`/`MTCard`/etc.) is still mostly
-future work, but has its first entry: **`components/mt-button.js`**
-(2026-08-05) — `MTButton()`/`MTButtonToggleGroup()`, real factory
-functions returning wired `<button>` elements with a full default/
-hover/active/focus/disabled/loading/error state API per section 15,
-built on top of `.mt-btn-primary`/`.u-toggle-btn`. Not yet wired into
-DashboardPro.html — existing `.pt-submit`/`.bt-field-run`/
-`.pt-toggle-btn` markup is unchanged; adopting MTButton at each call
-site is separate follow-up work.
+**Status (2026-08-05): aspirational, not implemented.** No `MT`-prefixed
+component classes exist anywhere in the codebase. What actually exists is
+feature-scoped, one-off CSS — each module defines its own button/card/
+badge/table/modal rather than sharing a base component. This section
+documents the current reality so the doc stops promising something the
+CSS doesn't deliver; unifying these into a real shared library (the
+original `MTButton`/`MTCard`/etc. vision below) remains a valid future
+goal, just not yet started.
 
 | Concept | Actual classes in use | Notes |
 | --- | --- | --- |
-| Button | `.pt-submit`/`.bt-field-run button` unified into **`.mt-btn-primary`**, `.pt-toggle-btn` unified into **`.u-toggle-btn`**, both via `components.css` (2026-08-05). `.sec-btn` (navigation.css) checked separately (2026-08-05) and found NOT a duplicate — a single, already-shared nav-rail icon button used consistently across ~15 buttons (DashboardPro.html, algo-status.js, chain-greeks.js, exec-view.js, advanced-analytics-view.js), structurally distinct from `.mt-btn-primary` (vertical icon+label rail item vs. full-width solid submit action) | Primary-action and toggle buttons share a base; picked up a real contrast fix (dark-on-blue text) as part of the merge. `.sec-btn` is out of scope, not outstanding work — merging it into `.mt-btn-primary` would be a category error, same reasoning as `.dec-badge` staying out of the inline-badge merge |
-| Card | `.section-card` + `.exec-card` unified onto shared **`.mt-card`** shell via `components.css` (2026-08-05) | Shared background/border/position + the accent-strip `::before` geometry (picked up a `border-radius:inherit` fix `.exec-card` was missing); each keeps its own padding/radius/box-shadow and its own accent-variable palette. `.algn-card` (layout.css) is a sizing/scroll modifier layered on top of `.section-card` in markup, not a third card — left alone |
-| Modal / panel | `.oc-modal`, `.u-modal-overlay`, `.oc-drawer`, `.oc-trade-modal` unified onto shared **`.mt-modal-overlay`** via `components.css` (2026-08-05); `#algo-panel`/`#pt-order-panel`/`#pt-portfolio-panel` (non-backdrop floating popovers) unified separately onto **`.mt-popover-panel`** | Modal merge picked up two real fixes: z-index moved off raw `9999`/`50`/`60` onto `var(--z-modal)`, and backdrop opacity normalized to `.6`. Popover merge also deduped a byte-identical close (×) glyph rule across all three into `.mt-popover-close`. Each panel keeps its own width/radius/accent styling |
-| Badge / chip | **`.uc-badge` (theme.css) + `.algo-badge`/`.pt-side-badge`/`.fd-sector-tag`, unified via `components.css` (2026-08-05)** | Structure (shape/size) now shared in one place; color variants stay per-feature. `.dec-badge` was excluded from this pass as a different size tier, then merged separately with its duplicate `.exec-badge` into a second "hero badge" base, also in `components.css` (2026-08-05) |
-| Toast | Wrapper (`#pt-toast-wrap`/`#recon-toast-wrap`) unified onto **`.mt-toast-wrap`** via `components.css` (2026-08-05); toast cards (`.pt-toast` vs `.recon-toast`) deliberately left separate | Wrappers shared fixed-position/flex/z-index mechanics, each keeping its own offset so the two stacks don't collide. Cards themselves judged genuinely different (inline slide-in accent card vs. full tinted fade-in banner), not a dedup — merging picked up one real bug fix though: `.pt-toast` was missing `pointer-events:auto` and was unclickable inside its `pointer-events:none` wrapper. `.u-toast` (theme.css) is a third, still-unconsumed attempt, left out of scope |
-| Table | `.t`, `.pt-table`, `.dd-tbl`, `.bt-table`, unified onto shared **`.mt-table`** base via `components.css` (2026-08-05) | Header sizing standardized to Section 8's 11px body / 2xs header spec; two real bugs fixed in the process (`.bt-table` gained row-hover, lost a stray bottom border). Sticky headers, zebra striping, and other feature-specific behavior stay local to each file |
-| Stat card | `.bt-stat-label`/`.bt-stat-value` (backtest-view.css) and `.sdt-stat-label`/`.sdt-stat-value` (tables.css, strike-detail-v2) unified onto **`.mt-stat-label`**/**`.mt-stat-value`** via `components.css` (2026-08-05). `.dd-tbl-metric` (tables.css) checked and found NOT a duplicate — it colors a `<td>`/`<th>` inside `.dd-tbl`, not a standalone stat block | Label/value typography (fs-2xs uppercase / fs-base mono) already matched via theme.css's earlier font-size migration, just never written as one rule. Container shells stay separate: `.bt-stat` is a bordered standalone card, `.sdt-stat` is an unbordered segment inside its own parent bar |
-| Input / dropdown | Text/number/date inputs across `.bt-field`, `#pt-order-panel`, `#pt-portfolio-panel`, `#pt-quick-popover` unified onto **`.mt-field`** via `components.css` (2026-08-05); `<select>` carets (`#expirySelect`, `.symbol-select`, `.price-source-select`) unified onto **`.mt-select-caret`** (+ `.mt-select-caret-pill` for the two that share a pill treatment) | Field merge fixed two hardcoded values drifting from tokens (radius, background). Caret merge found all three used a byte-identical SVG data URI despite looking like independent builds; `#strat-select`/`#strat-strike-select` use a genuinely different icon and were left out |
-| Tooltip / order card / position row | — | No equivalent found anywhere |
+| Button | **`.u-toggle-btn`/`.pt-toggle-btn` unified via components.css; `.mt-btn-primary` (new) shared by `.pt-submit`/`.bt-field-run button`, both 2026-08-05** | `.sec-btn` (nav rail) intentionally excluded — different shape (icon-over-label), not a generic action button |
+| Card | `.section-card`, `.exec-card`, `.bt-stat`, `.algn-card` | Different padding/radius/border per feature |
+| Modal / panel | **`.oc-modal`/`.u-modal-overlay`/`.oc-drawer`/`.oc-trade-modal` (fullscreen backdrop) and `#algo-panel`/`#pt-order-panel`/`#pt-portfolio-panel` (floating popover, no backdrop) each unified via components.css (2026-08-05)** | Two genuinely different patterns kept as two shared bases, not one — a fullscreen modal and a positioned popover aren't the same shape. `align-items`/padding (stretch+padding vs centered vs bottom-sheet) and each panel's own width/accent/backdrop-filter stay per-feature. Fixed 2 real gaps: `.oc-modal` was still on a raw `z-index:9999` never migrated to the `--z-modal` scale; `.oc-drawer`/`.oc-trade-modal` (option-chain.css's standalone ledger page) were two more independent builds of the same shape, also on raw z-index (50/60). **Action required:** that page never linked `components.css` before this merge — add `<link rel="stylesheet" href="components.css">` after `theme.css` on whatever HTML serves it, or these two lose their overlay mechanics. No HTML file was available to make that edit directly. Also unified the popovers' close (×) glyph — `.algo-close`/`.pt-close` were byte-identical, now `.mt-popover-close`. |
+| Badge / chip | **`.uc-badge` (theme.css) + `.algo-badge`/`.pt-side-badge`/`.fd-sector-tag`, unified via `components.css` (2026-08-05)** | Structure (shape/size) now shared in one place; color variants stay per-feature. |
+| Badge (hero tier) | **`.exec-badge` + `.dec-badge` (both panels.css), unified via `components.css` (2026-08-05)** | Second, larger badge tier — deliberately separate from the inline chips above (19px text vs ~10.5px). Found to be two independent builds of the same thing, not two shapes: color variants matched almost exactly (one border-opacity tie, resolved to the more visible value). Structure now shared in components.css; color variants merged in panels.css since both badges already lived in that one file. |
+| Toast | `.pt-toast`, `.recon-toast` | **Wrapper stack (`#pt-toast-wrap`/`#recon-toast-wrap`) unified via components.css (2026-08-05)**; the toast cards themselves intentionally stay separate — accent-border inline notification vs. tinted-background alert banner is a real visual-language difference, not a dedup candidate (`.u-toast` in theme.css is a third, still-unused attempt at this card, left alone). Fixed 1 real gap: `.pt-toast` was missing `pointer-events:auto`, silently unclickable inside its `pointer-events:none` wrapper |
+| Table | **`.t`/`.dd-tbl`/`.pt-table`/`.bt-table` unified via components.css (2026-08-05)** | Shared shape/header/hover/last-row-border now common; sticky header, zebra stripe, cell truncation, and option-chain cell modifiers stay feature-specific. Fixed 2 real gaps: `.bt-table` had no hover state and no last-row border removal |
+| Stat card | `.bt-stat`, `.dd-tbl-metric` | Similar idea, not unified |
+| Input / dropdown / tooltip / order card / position row | **Dropdown: `#expirySelect`/`.symbol-select`/`.price-source-select` (navigation.css) unified via components.css (2026-08-05)** | Tooltip / order card / position row still have no equivalent anywhere. The dropdown row was closer to a real gap than the original "no equivalent found" note suggested — the three selects turned out to share a byte-identical SVG caret, and `.price-source-select`'s own comment already called itself "the same visual language" as `.symbol-select`; just never actually shared in code. `#strat-select`/`#strat-strike-select` use a visibly different, larger caret icon and were left out of the merge. |
 
 ## Original vision (not yet built)
 

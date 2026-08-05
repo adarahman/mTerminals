@@ -172,6 +172,42 @@
 .bt-field-run button:hover{
   background:var(--info-strong);
 }
+.mt-btn-primary:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+.mt-btn-primary:focus-visible{
+  outline:2px solid var(--info);
+  outline-offset:1px;
+}
+
+/* Loading/error states — new with mt-button.js (components/mt-button.js),
+   the first real MT* JS component (DESIGN_SYSTEM.md section 20). Only
+   .mt-btn-primary consumes these; the legacy .pt-submit/.bt-field-run
+   selectors above don't reference them since neither call site has been
+   moved onto MTButton yet. */
+.mt-btn-primary{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:var(--space-2);
+}
+.mt-btn-spinner{
+  width:14px; height:14px;
+  border:2px solid rgba(11,14,20,.35);
+  border-top-color:#0b0e14;
+  border-radius:var(--radius-pill);
+  animation:mt-btn-spin .6s linear infinite;
+}
+@keyframes mt-btn-spin{
+  to{ transform:rotate(360deg); }
+}
+.mt-btn-error{
+  background:var(--neg) !important;
+  color:#fff !important;
+  transition:background .15s;
+}
 /* ══════════════════════════════════════════════════════════════════
    TABLES
    Four independent implementations found: .t (tables.css — the generic/
@@ -578,5 +614,49 @@
 .price-source-select{
   background:var(--bg-1);
   border-radius:var(--radius-pill);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   STAT CARDS
+   .bt-stat-label/.bt-stat-value (backtest-view.css — summary grid) and
+   .sdt-stat-label/.sdt-stat-value (tables.css — strike-detail-v2 stat
+   bar) are two independent builds of the same "label above value"
+   typography pattern. Both had already converged on --fs-2xs/uppercase
+   for the label and --fs-base/var(--font-mono) for the value via
+   theme.css's 2026-08-04 font-size migration pass (see that file's own
+   comment) — that convergence just hadn't been written as one shared
+   rule until now.
+
+   Kept local: label font-weight (600 vs 800/700 on value), letter-
+   spacing (.04em vs .07em), color, and .sdt-stat-label's own overflow/
+   ellipsis handling — real, needed only because it sits in a narrower
+   bar segment than .bt-stat-label's wider grid cell.
+
+   The CONTAINER around each is deliberately NOT merged: .bt-stat is a
+   standalone bordered/backgrounded card (one cell in a grid — see
+   DESIGN_SYSTEM.md section 20's `.mt-card`, if this shell is ever
+   revisited), while .sdt-stat is an unbordered flex segment whose
+   parent `.sdt-statbar` owns the border/radius/background. Same
+   "share what's actually shared, not more" rule the rest of this file
+   follows for cards/badges/etc.
+
+   DESIGN_SYSTEM.md's "Stat card" row previously also paired this with
+   `.dd-tbl-metric` (tables.css) as a third near-duplicate — checked
+   here and it isn't one: that class colors a <td>/<th>'s text inside
+   `.dd-tbl`, not a standalone stat block. Excluded as a category
+   mismatch, not an oversight. */
+
+.mt-stat-label,
+.bt-stat-label,
+.sdt-stat-label{
+  font-size:var(--fs-2xs);
+  text-transform:uppercase;
+}
+
+.mt-stat-value,
+.bt-stat-value,
+.sdt-stat-value{
+  font-size:var(--fs-base);
+  font-family:var(--font-mono);
 }
 
