@@ -272,27 +272,41 @@
 
    FONT-SIZE TOKENS (--fs-2xs/xs/sm/base/lg — see Typography section
    above).
-     tables.css — MIGRATED (2026-08-04):
-       0.7906rem (12.65px), 0.8125rem (13px) -> --fs-sm  (labels/headers:
-                  dd-subtitle, dd-empty, dd-tbl thead th, dd-tbl-metric)
-       0.8625rem (13.8px)                    -> --fs-base (everything
-                  else: dd-header-row/dd-row/dd-rank/dd-pct/dd-pts,
-                  dd-tbl, .t th, .t td.sc/.atm-sc, oi-bfly-fig/-strike/
-                  -pcr) — turned out to be a clean 1:1 split by actual
-                  computed px, no per-site ambiguity once checked.
-       NOTE: .pt-table / .sdt-* / #sim-strike-table further down this
-       same file (the paper-trading-table and strike-detail-v2 additions)
-       still carry their own raw 11/11.5/12/13/16/34px values — those
-       were added after this migration pass and were not touched by it;
-       still open, same as the algo-status.css-era files below.
+     tables.css — MIGRATED (2026-08-04, two passes):
+       Pass 1: 0.7906rem (12.65px), 0.8125rem (13px) -> --fs-sm
+                  (labels/headers: dd-subtitle, dd-empty, dd-tbl thead
+                  th, dd-tbl-metric)
+               0.8625rem (13.8px) -> --fs-base (everything else:
+                  dd-header-row/dd-row/dd-rank/dd-pct/dd-pts, dd-tbl,
+                  .t th, .t td.sc/.atm-sc, oi-bfly-fig/-strike/-pcr) —
+                  clean 1:1 split by actual computed px, no per-site
+                  ambiguity once checked.
+       Pass 2 (.pt-table / .sdt-* — the paper-trading-table and
+       strike-detail-v2 additions that landed after pass 1 and were
+       left raw): 9px/9.5px/10px -> --fs-2xs (.sdt-sort-arrows,
+                  .pt-table thead th, .sdt-oi-legend, .sdt-stat-label)
+                  11px -> --fs-xs (.sdt-head-cell)
+                  11.5px -> --fs-sm (.pt-table, tie rounded up — same
+                  precedent as navigation.css's 11.5px and panels.css's
+                  .verdict-label)
+                  12px -> --fs-sm (.sdt-oi-fig, exact)
+                  15px -> --fs-base (.sdt-stat-value) — same 15px value
+                  backtest-view.css's .bt-stat-value carried; both now
+                  map to --fs-base for consistency (backtest-view.css
+                  fixed 2026-08-04 too, see its own entry above).
+       #sim-strike-table has no font-size declarations of its own (only
+       padding/width) — nothing to migrate there.
      algo-status.css — MIGRATED (2026-08-02, prior pass).
      fiidii-report.css / paper-trading.css / backtest-view.css —
      MIGRATED (2026-08-04): raw px collapsed onto --fs-2xs (9–10.5px
      micro tier) / --fs-xs (11px) / --fs-sm (11.5–13px) / --fs-base
-     (14px). Left as intentional raw px, oversized beyond the current
-     scale, same open gap as layout.css's 16.1px body text below:
+     (14px). backtest-view.css's .bt-stat-value (15px) was revisited
+     2026-08-04 once panels.css/tables.css established 15px as a clean
+     --fs-base fit -> --fs-base. Left as intentional raw px, oversized
+     beyond the current scale, same open gap as layout.css's 16.1px
+     body text below:
        fiidii-report.css:  .fd-gauge-pct 24px (big stat readout)
-       backtest-view.css:  .bt-close 16px (icon glyph), .bt-stat-value 15px
+       backtest-view.css:  .bt-close 16px (icon glyph)
      navigation.css — MIGRATED (2026-08-04): same baked-rem values as
      tables.css's original set, plus 0.7188rem (11.5px, tie between
      --fs-xs/--fs-sm, rounded up to --fs-sm) and 0.9344rem/1.0781rem/
@@ -324,7 +338,7 @@
      reviewed too, the full outlier set across all files is:
        layout.css:        body{font-size} 1.0062rem (16.1px)
        fiidii-report.css: .fd-gauge-pct 24px
-       backtest-view.css: .bt-close 16px, .bt-stat-value 15px
+       backtest-view.css: .bt-close 16px
        navigation.css:    .spot 1.8687rem (29.9px)
        panels.css:        .oi-snap-value/.oi-flow-val 1.2rem (19.2px),
                            .exec-badge/.dec-badge 1.2219rem (19.55px),
