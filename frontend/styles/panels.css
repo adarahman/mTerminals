@@ -762,14 +762,9 @@ details.card summary .card-head{margin:0;}
   padding: var(--space-1) var(--space-4);letter-spacing:.03em;white-space:nowrap;
 }
 
-.oi-snap-fullchain{
-  display:inline-flex;align-items:center;gap: var(--space-2);
-  font-family:var(--font-display);font-weight:600;font-size:var(--fs-sm);
-  color:var(--text-primary);background:var(--bg-2);
-  border:1px solid var(--border);border-radius:999px;
-  padding:7px 14px;cursor:pointer;white-space:nowrap;
-}
-.oi-snap-fullchain:hover{border-color:var(--info);color:var(--info);}
+/* .oi-snap-fullchain (the old standalone "Full Chain →" pill button) is
+   removed — the card header itself is now the click target (see
+   components.css's NAVIGABLE CARD HEADERS block, .nav-card-header). */
 
 .oi-snap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;}
 

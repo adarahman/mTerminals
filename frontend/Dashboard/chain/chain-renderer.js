@@ -1222,10 +1222,11 @@ ChainView.prototype._rerenderChainPanels = function() {
   // getFilteredChain(_data) source. Same fix as oi-flow-summary-card /
   // greeks-alerts-card / atm-greeks-card just below: outerHTML-diff it in
   // here too, so all four summary cards stay in lockstep tick-to-tick.
-  // FIX: this card's "Full Chain" button (.oi-snap-fullchain) was getting
-  // torn out from under an in-progress click by the outerHTML swap below —
-  // same freeze bug the Decision Detail guard exists for. guardKey skips
-  // the destructive rebuild while a click on this card is mid-gesture;
+  // FIX: this card's header (now a .nav-card-header link, previously the
+  // "Full Chain" button — see components.css) was getting torn out from
+  // under an in-progress click by the outerHTML swap below — same freeze
+  // bug the Decision Detail guard exists for. guardKey skips the
+  // destructive rebuild while a click on this card is mid-gesture;
   // dataset.lastHtml stays stale so the very next tick retries once the
   // click has committed, same as refreshDecisionBoxGuarded.
   patchOuterHtmlIfChanged('chain-summary-card', () => app.chain.buildChainSummaryHtml(_data), {
@@ -1318,10 +1319,11 @@ ChainView.prototype._rerenderChainPanels = function() {
   // Same gap as above — this block was only ever built once, during the
   // full renderDashboard() pass, so GEX/PCR/theta figures in these three
   // cards went stale after an expiry-only switch.
-  // This wrapper contains the Chain Snapshot's "Full Chain" action — reuses
-  // the 'chainSummary' guard key so it doesn't get replaced out from under
-  // that click either. Doesn't bind its own guard (no action buttons of
-  // its own), only checks the one chain-summary-card already owns.
+  // This wrapper sits alongside the Chain Snapshot card's nav-card-header
+  // link — reuses the 'chainSummary' guard key so it doesn't get replaced
+  // out from under that click either. Doesn't bind its own guard (no
+  // action buttons of its own), only checks the one chain-summary-card
+  // already owns.
   patchOuterHtmlIfChanged('exec-section-wrap', () => {
     _data.totalGEX = greeks.reduce((s,g)=>s+(g.netGEX||0),0);
     return renderExecutiveDashboard(_data);

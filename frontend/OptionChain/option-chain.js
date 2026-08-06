@@ -800,9 +800,10 @@
   function wireEvents() {
     $("ocBack").addEventListener("click", () => {
       if (window.opener) { window.close(); }
-      // DashboardPro.html lives one level up now that this page moved
-      // into OptionChain/ — was a same-folder "DashboardPro.html" before.
-      else { history.length > 1 ? history.back() : (location.href = "../DashboardPro.html"); }
+      // DashboardPro.html lives in its own sibling folder (Dashboard/),
+      // not directly in the shared root, now that this page moved into
+      // OptionChain/ — was a same-folder "DashboardPro.html" before.
+      else { history.length > 1 ? history.back() : (location.href = "../Dashboard/DashboardPro.html"); }
     });
 
     $("ocExpiry").addEventListener("change", (e) => {

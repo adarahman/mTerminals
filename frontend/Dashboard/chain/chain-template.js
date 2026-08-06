@@ -521,7 +521,13 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   if(!chain.length){
     return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <div class="section-header"><span class="section-title"><span class="section-icon">📊</span>Option Chain Snapshot</span></div>
+    <a class="section-header nav-card-header"
+       href="../OptionChain/option-chain.html" target="_blank" rel="opener"
+       aria-label="Open Option Chain Snapshot — view full option chain"
+       title="Open full option chain">
+      <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </a>
     <div class="dd-empty">Awaiting chain data…</div>
   </div>`;
   }
@@ -596,17 +602,17 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <div class="section-header">
-      <span class="oi-snap-heading">
+    <a class="section-header nav-card-header"
+       href="../OptionChain/option-chain.html" target="_blank" rel="opener"
+       aria-label="Open Option Chain Snapshot — view full option chain"
+       title="Open full option chain">
+      <span class="oi-snap-heading nav-card-header-label">
         <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="0" y="8" width="4" height="8" rx="1" fill="var(--neg)"/><rect x="6" y="4" width="4" height="12" rx="1" fill="var(--warn)"/><rect x="12" y="0" width="4" height="16" rx="1" fill="var(--pos)"/></svg>
         Option Chain Snapshot
       </span>
       <span class="oi-snap-badge">${rngLabel}</span>
-      <button class="oi-snap-fullchain" onclick="window.open('../OptionChain/option-chain.html','_blank')">
-        Full Chain
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-      </button>
-    </div>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </a>
 
     <div class="oi-snap-grid">
 

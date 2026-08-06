@@ -518,6 +518,112 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════
+   NAVIGABLE CARD HEADERS
+   Reusable pattern for .section-card headers that link out to a
+   dedicated detail page — e.g. "Option Chain Snapshot" -> the full
+   option-chain.html tab. Replaces the old "standalone pill button
+   inside the header" approach (.oi-snap-fullchain's "Full Chain",
+   and any future "View"/"Open" button following the same shape):
+   instead of a button competing for space next to the title, the
+   whole header becomes the click target and the button goes away.
+   The card BODY (table/chart/controls) is deliberately left outside
+   this element, so nothing there becomes accidentally clickable —
+   only apply this to the header, never wrap a whole card in an <a>.
+
+   Markup (see chain-template.js's buildChainSummaryHtml for the first
+   real usage):
+     <a class="section-header nav-card-header"
+        href="../OptionChain/option-chain.html" target="_blank" rel="noopener"
+        aria-label="Open Option Chain Snapshot — view full option chain"
+        title="Open full option chain">
+       <span class="oi-snap-heading nav-card-header-label">…title…</span>
+       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+     </a>
+   Any card using the plain .section-title heading instead of a bespoke
+   one (like .oi-snap-heading) just adds nav-card-header-label onto
+   .section-title the same way. Extra header content (e.g. a range
+   badge) can sit between the label and the arrow — .section-header's
+   own flex/justify-content:space-between (panels.css) keeps the arrow
+   pinned to the far right exactly like the old button was.
+
+   .section-header already supplies the layout (flex/gap/space-between)
+   and the plain bottom hairline; nav-card-header only adds the
+   *interactive* half — cursor, hover/focus tint, accent glow, and the
+   arrow's motion — reusing each card's own --section-accent custom
+   property (set per-card via .sc-blue/.sc-green/etc — see panels.css
+   "SECTION CARDS") so e.g. a violet Greeks card would glow violet on
+   hover and a green chain card glows green, rather than every
+   navigable header defaulting to one fixed color. Falls back to
+   --info if a card sets no accent. */
+
+a.nav-card-header{
+  text-decoration:none;
+  color:inherit;
+  cursor:pointer;
+
+  /* Bleed the hover tint out to the card's own edges — section-card's
+     padding is 16px 18px, radius var(--radius-md) (this file's CARDS
+     block above / panels.css SECTION CARDS) — instead of the tint
+     stopping short inside the card's padding, which reads as a stray
+     highlighted box floating in the corner rather than a header bar.
+     The negative margin exactly cancels the card's own padding on the
+     three sides that touch it, landing flush with the card's border;
+     the matching top-corner radius keeps it from squaring off the
+     card's own rounded corners. */
+  /* top | right | bottom | left — bottom stays var(--space-5), the same
+     gap .section-header's own margin-bottom already used, so removing
+     that rule's margin here (overridden by this shorthand) doesn't
+     collapse the space before the card body underneath. */
+  margin:-16px -18px var(--space-5) -18px;
+  padding:14px 18px 9px;
+  border-top-left-radius:var(--radius-md);
+  border-top-right-radius:var(--radius-md);
+
+  /* Starts transparent/plain — .section-header's own border-bottom
+     (var(--border-2)) still applies underneath until hover/focus
+     swaps it for the accent color below. */
+  background-color:transparent;
+  box-shadow:0 1px 0 0 transparent;
+
+  transition:background-color .18s ease, border-color .18s ease,
+             box-shadow .18s ease;
+}
+
+.nav-card-header:hover,
+.nav-card-header:focus-visible{
+  background-color:color-mix(in srgb, var(--section-accent, var(--info)) 8%, transparent);
+  border-bottom-color:var(--section-accent, var(--info));
+  /* Thin accent line right on the header's own bottom edge, plus a
+     soft glow bleeding a few px below it — reads as "this bar lifted
+     toward you" rather than a hard rule. */
+  box-shadow:0 1px 0 0 var(--section-accent, var(--info)),
+             0 0 12px -4px var(--section-accent, var(--info));
+}
+
+.nav-card-header:focus-visible{
+  outline:2px solid var(--section-accent, var(--info));
+  outline-offset:-2px;
+}
+
+.nav-card-header:hover .nav-card-header-label,
+.nav-card-header:focus-visible .nav-card-header-label{
+  color:var(--section-accent, var(--info));
+}
+
+.nav-card-header-arrow{
+  display:inline-flex; align-items:center; justify-content:center;
+  margin-left:auto; flex-shrink:0;
+  font-size:var(--fs-sm);
+  color:var(--text-tertiary);
+  transition:transform .18s ease, color .18s ease;
+}
+.nav-card-header:hover .nav-card-header-arrow,
+.nav-card-header:focus-visible .nav-card-header-arrow{
+  transform:translateX(3px);
+  color:var(--section-accent, var(--info));
+}
+
+/* ══════════════════════════════════════════════════════════════════
    FORM FIELDS
    Last row of DESIGN_SYSTEM.md's component table said "no equivalent
    found anywhere" for inputs/dropdowns — not quite true: `.bt-field`'s
@@ -659,4 +765,3 @@
   font-size:var(--fs-base);
   font-family:var(--font-mono);
 }
-
