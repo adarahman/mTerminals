@@ -419,6 +419,20 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           </div>` : ''}
           ${wallBuild.ceStrike===null && wallBuild.peStrike===null ? '<div class="oic-empty">—</div>' : ''}
         </div>
+        <!-- ₹ Wall = highest-PREMIUM strike (oi.capital_metrics'
+             ce_capital_wall_strike/pe_capital_wall_strike — OI x LTP), as
+             opposed to CE/PE Wall above (highest raw OI). Always shown
+             (not just on divergence) so the capital-weighted view is
+             visible on the dashboard at a glance; when it matches the
+             raw-OI wall that's itself useful confirmation, not noise. -->
+        ${(() => {
+          const capCe = d.capitalCeWallStrike, capPe = d.capitalPeWallStrike;
+          if (!capCe && !capPe) return '';
+          return `<div class="oic-tile" style="padding:0;border:0;background:transparent;margin-top:2px;" title="Highest premium-locked strike — OI x LTP, can differ from the raw-OI wall above">
+            ${capCe ? `<div class="oic-build-row"><span>₹ CE Wall</span><span class="val ce">${fmtI(capCe)}</span></div>` : ''}
+            ${capPe ? `<div class="oic-build-row"><span>₹ PE Wall</span><span class="val pe">${fmtI(capPe)}</span></div>` : ''}
+          </div>`;
+        })()}
         ${(() => {
           const wallExplain = [explainVal(vrd.ceWall), explainVal(vrd.peWall)].filter(Boolean).join(' · ');
           const wallTitle = [vrd.ceWall, vrd.peWall].filter(Boolean).join(' · ');
@@ -600,6 +614,19 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
 
+  // ── Capital flow summary ─────────────────────────────────────────
+  // Chain-wide capital flow (ChgOI x LTP, day-session — see cell comment
+  // below) aggregated over the same range-filtered `chain` array as OI
+  // Summary/Chg OI Summary above. Previously this block also computed
+  // totalCePrem/totalPePrem (cumulative premium LOCKED, OI x LTP) and
+  // displayed those next to a Net Flow figure derived from the FLOW
+  // series instead — two unrelated quantities that never reconciled.
+  // Dropped here; premium-locked totals belong in a "how much capital
+  // is parked here" card, not a flow card, if/when that's wanted.
+  const totalCeFlow = chain.reduce((s,r)=>s+(r.ceCapitalFlow||0),0);
+  const totalPeFlow = chain.reduce((s,r)=>s+(r.peCapitalFlow||0),0);
+  const netFlow = totalPeFlow - totalCeFlow;
+
   return `
   <div class="section-card sc-green" id="chain-summary-card">
     <a class="section-header nav-card-header"
@@ -689,6 +716,38 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
         <button class="oi-flow-open-btn" onclick="openOIDashboardModal('butterfly')" title="Open full OI Flow view">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,17 9,11 13,15 21,5"/></svg>
         </button>
+      </div>
+    </div>
+
+    <!-- Capital Flow strip — premium-weighted counterpart to the raw-OI
+         "OI Flow" strip above; same oi-flow-card/-col markup reused so no
+         new CSS is needed. All three cells now read off the SAME series
+         (ceCapitalFlow/peCapitalFlow — day-session ChgOI x LTP) so Net
+         Flow reconciles with what's shown beside it (PE - CE). Previously
+         CE ₹/PE ₹ showed cePremiumLocked/pePremiumLocked (cumulative OI x
+         LTP, a different quantity entirely) while Net Flow was computed
+         from the flow series — the two numbers never matched. -->
+    <div class="oi-flow-card">
+      <div class="oi-flow-head">
+        <div class="oi-flow-icon">₹</div>
+        <div class="oi-snap-title">Capital Flow</div>
+      </div>
+      <div class="oi-flow-body">
+        <div class="oi-flow-cols">
+          <div class="oi-flow-col">
+            <span class="oi-flow-win">CE ₹</span>
+            <span class="oi-flow-val" style="color:${signColor(totalCeFlow)};">${signedFmt(totalCeFlow)}</span>
+          </div>
+          <div class="oi-flow-col">
+            <span class="oi-flow-win">PE ₹</span>
+            <span class="oi-flow-val" style="color:${signColor(totalPeFlow)};">${signedFmt(totalPeFlow)}</span>
+          </div>
+          <div class="oi-flow-col">
+            <span class="oi-flow-win">Net Flow</span>
+            <span class="oi-flow-val" style="color:${signColor(netFlow)};">${signedFmt(netFlow)}</span>
+          </div>
+        </div>
+        <div class="oi-flow-divider"></div>
       </div>
     </div>
   </div>`;

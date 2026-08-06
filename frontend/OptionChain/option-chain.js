@@ -105,6 +105,11 @@
         bid: r.ceBid, bidQty: r.ceBidQty, ask: r.ceAsk, askQty: r.ceAskQty,
         totalBidQty: r.ceTotBidQty, totalAskQty: r.ceTotAskQty,
         delta: r.ceDelta, gamma: r.ceGamma, theta: r.ceTheta, vega: r.ceVega,
+        // Demo-only approximation (OI x LTP) so the Premium ₹ column isn't
+        // blank before a live payload arrives — real data overwrites this
+        // via applyLivePayload()/mapPayloadToRows(), which read the actual
+        // cePremiumLocked/pePremiumLocked backend fields instead.
+        premiumLocked: (r.ceOI || 0) * (r.ceLTP || 0),
       },
       pe: {
         iv: r.peIV, ivChg: r.peIVchg, vol: r.peVol, ltp: r.peLTP, chg: r.peChg, chgPct: r.peChgPct,
@@ -112,6 +117,7 @@
         bid: r.peBid, bidQty: r.peBidQty, ask: r.peAsk, askQty: r.peAskQty,
         totalBidQty: r.peTotBidQty, totalAskQty: r.peTotAskQty,
         delta: r.peDelta, gamma: r.peGamma, theta: r.peTheta, vega: r.peVega,
+        premiumLocked: (r.peOI || 0) * (r.peLTP || 0),
       },
     }));
   }
@@ -451,6 +457,12 @@
           <span class="ce">${fmt(r.ce.vol)}</span>
         </div>
       </td>
+      <td class="oc-vol-cell" title="Premium locked (OI x LTP) — oi.capital_metrics">
+        <div class="oc-stack">
+          <span class="pe">₹${fmt(r.pe.premiumLocked)}</span>
+          <span class="ce">₹${fmt(r.ce.premiumLocked)}</span>
+        </div>
+      </td>
       <td class="oc-ltp-cell" onclick="event.stopPropagation();window.ocOpenTradeModal(${r.strike},'CE',${r.ce.ltp != null ? r.ce.ltp : "null"})" title="Click to trade this strike">
         <span class="oc-ltp-main oc-call-c">${fmtNum(r.ce.ltp)}</span>
         <span class="oc-ltp-sub ${signClass(r.ce.chg)}">${ltpChgStr(r.ce.chg, r.ce.chgPct)}</span>
@@ -503,7 +515,7 @@
       <div class="oc-greek-item"><span>Vega</span> ${fmtNum(leg.vega, 2)}</div>`;
     return `
     <tr class="oc-greek-row" data-strike="${r.strike}">
-      <td colspan="11">
+      <td colspan="12">
         <div class="oc-greek-wrap">
           <div class="oc-greek-side pe"><b>PE</b>${g(r.pe)}</div>
           <div class="oc-greek-side ce"><b>CE</b>${g(r.ce)}</div>
@@ -778,7 +790,9 @@
             LTP <b style="color:var(--text);">${fmtNum(r.ce.ltp)}</b><br>
             IV <b style="color:var(--text);">${fmtNum(r.ce.iv)}%</b><br>
             OI <b style="color:var(--text);">${fmt(r.ce.oi)}</b> &nbsp; Chg <b style="color:var(--text);">${sign(r.ce.oiChg)}${fmt(r.ce.oiChg)}</b><br>
-            Volume <b style="color:var(--text);">${fmt(r.ce.vol)}</b>
+            Volume <b style="color:var(--text);">${fmt(r.ce.vol)}</b><br>
+            Premium Locked <b style="color:var(--text);">₹${fmt(r.ce.premiumLocked)}</b><br>
+            Capital Flow <b style="color:${(r.ce.capitalFlow||0)>=0?'var(--call)':'var(--put)'};">${sign(r.ce.capitalFlow)}₹${fmt(r.ce.capitalFlow)}</b>
           </div>
         </div>
         <div>
@@ -787,12 +801,15 @@
             LTP <b style="color:var(--text);">${fmtNum(r.pe.ltp)}</b><br>
             IV <b style="color:var(--text);">${fmtNum(r.pe.iv)}%</b><br>
             OI <b style="color:var(--text);">${fmt(r.pe.oi)}</b> &nbsp; Chg <b style="color:var(--text);">${sign(r.pe.oiChg)}${fmt(r.pe.oiChg)}</b><br>
-            Volume <b style="color:var(--text);">${fmt(r.pe.vol)}</b>
+            Volume <b style="color:var(--text);">${fmt(r.pe.vol)}</b><br>
+            Premium Locked <b style="color:var(--text);">₹${fmt(r.pe.premiumLocked)}</b><br>
+            Capital Flow <b style="color:${(r.pe.capitalFlow||0)>=0?'var(--call)':'var(--put)'};">${sign(r.pe.capitalFlow)}₹${fmt(r.pe.capitalFlow)}</b>
           </div>
         </div>
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--hairline);font-family:var(--mono);font-size:12px;color:var(--text-2);">
-        PCR <b style="color:var(--spine);">${r.pcr}</b> (${r.pcrChg}) — put OI share ${((r.pe.oi/(r.pe.oi+r.ce.oi||1))*100).toFixed(0)}% of this strike
+        PCR <b style="color:var(--spine);">${r.pcr}</b> (${r.pcrChg}) — put OI share ${((r.pe.oi/(r.pe.oi+r.ce.oi||1))*100).toFixed(0)}% of this strike<br>
+        Capital PCR <b style="color:var(--spine);">${((r.pe.premiumLocked||0)/((r.ce.premiumLocked||0)||1)).toFixed(2)}</b> — put premium share ${(((r.pe.premiumLocked||0)/((r.pe.premiumLocked||0)+(r.ce.premiumLocked||0)||1))*100).toFixed(0)}% of this strike's locked capital
       </div>`;
   }
 

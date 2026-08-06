@@ -184,9 +184,21 @@ ChainView.prototype.renderGreeksGex = function(view) {
     gamma:{ceKey:'cGamma',peKey:'pGamma',label:'Gamma×10⁴',ceClr:'var(--amber)',peClr:'var(--amber)',fmt:v=>fmtN(v,4)},
     theta:{ceKey:'cTheta',peKey:'pTheta',label:'Theta/day',ceClr:'var(--red)',peClr:'var(--red)',fmt:v=>fmtN(v,2)},
     vega:{ceKey:'cVega',peKey:'pVega',label:'Vega/1%',ceClr:'var(--green)',peClr:'var(--green)',fmt:v=>fmtN(v,2)},
+    // Capital-weighted premium locked (OI x LTP) — pulled from the CHAIN
+    // row (cePremiumLocked/pePremiumLocked, wired in via
+    // oi.capital_metrics.compute_capital_metrics), not the greeks array,
+    // which never carries capital fields. fromChain:true tells the value
+    // lookup below to read cRow instead of g.
+    capital:{ceKey:'cePremiumLocked',peKey:'pePremiumLocked',label:'Premium ₹',ceClr:'var(--red)',peClr:'var(--green)',fmt:v=>'₹'+fmtK(v),fromChain:true},
   };
   const f=fieldMap[view]||fieldMap.delta;
-  const grkVals=greeks.map(g=>Math.max(Math.abs(g[f.ceKey]||0),Math.abs(g[f.peKey]||0)));
+  // capital view reads off chain rows (cRow, looked up per-strike below),
+  // every other view off the greeks array — see fromChain above.
+  const valSource = f.fromChain ? chainByStrike : null;
+  const grkVals=greeks.map(g=>{
+    const src = valSource ? (chainByStrike[g.strike]||{}) : g;
+    return Math.max(Math.abs(src[f.ceKey]||0),Math.abs(src[f.peKey]||0));
+  });
   const maxGrk=Math.max(...grkVals,0.0001);
   const gexVals=greeks.map(g=>Math.abs(g.netGEX||0));
   const maxGex=Math.max(...gexVals,0.0001);
@@ -214,8 +226,9 @@ ChainView.prototype.renderGreeksGex = function(view) {
   </tr></thead><tbody>`;
   greeks.forEach(g=>{
     const ia=g.strike===atm;const sc=ia?' atm-sc':'sc';
-    const ceV=g[f.ceKey]||0;const peV=g[f.peKey]||0;const gexV=g.netGEX||0;
     const cRow=chainByStrike[g.strike]||{};
+    const valSrc=f.fromChain?cRow:g;
+    const ceV=valSrc[f.ceKey]||0;const peV=valSrc[f.peKey]||0;const gexV=g.netGEX||0;
     // Flip strike (regime transition row) gets a dashed top border as a
     // visual anchor — it now sits inline with delta/greek data too.
     const isFlip=flipStrikeVal!=null&&g.strike===flipStrikeVal;

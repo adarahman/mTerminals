@@ -264,7 +264,7 @@ body{
 /* c-ltp is shared by BOTH the PE and CE LTP <col> elements, so its width
    counts twice toward the row total — that's the arithmetic that has to
    add up to ~100%, not the number of CSS rules below. */
-.c-iv{width:7%;} .c-vol{width:8%;} .c-ltp{width:11%;}
+.c-iv{width:7%;} .c-vol{width:8%;} .c-prem{width:8%;} .c-ltp{width:11%;}
 .c-strike{width:12%;} .c-oi{width:10%;} .c-chg{width:11%;}
 .c-vel{width:9%;} .c-sig{width:9%;}
 .c-smart{width:4%;} .c-struct{width:5%;}

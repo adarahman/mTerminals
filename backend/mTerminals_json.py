@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from storage.caches import ListSlot, MemoCache
 from oi.pricing import DEFAULT_BASE_IV
+from oi.capital_metrics import compute_chain_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -282,17 +283,42 @@ def _build_bid_ask_map(df_clean):
     return bid_ask_map
 
 
-def _build_chain_rows(master, atm_strike, bid_ask_map):
+def _build_capital_map(capital_df):
+    """
+    Keys oi.capital_metrics.compute_capital_metrics()'s output by int
+    strike so _build_chain_rows can look up each row's capital-weighted
+    fields alongside its master-table fields. Returns {} if capital_df is
+    None/empty (e.g. an extra_chains expiry whose ctx_dict predates
+    engine.py wiring capital_metrics in, or a symbol where compute_capital_
+    metrics raised and the caller swallowed it) — every lookup then falls
+    back to _build_chain_rows' own 0-defaults rather than KeyError'ing.
+    """
+    if capital_df is None or getattr(capital_df, "empty", True):
+        return {}
+    return {_to_int(r["strike"]): r for r in capital_df.to_dict("records")}
+
+
+def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
     """
     Builds the list of chain-row dicts (one per strike) from a master
     dataframe, an ATM strike, and a bid/ask lookup (from
     _build_bid_ask_map). Shared by the primary chain and every
     extra_chains entry.
+
+    capital_map (optional): {strike: row-dict} from _build_capital_map(),
+    i.e. oi.capital_metrics.compute_capital_metrics()'s per-strike output.
+    Adds the capital-weighted fields (premium locked, capital flow,
+    premium turnover, delta/gamma exposure) alongside the existing OI/IV
+    fields. NaN values on illiquid strikes (see compute_capital_metrics'
+    NaN HANDLING docstring) round-trip through _r() to 0.0, same as every
+    other numeric field here.
     """
+    capital_map = capital_map or {}
     rows = []
     for r in master.to_dict("records"):
         sk = _to_int(r["strike"])
         ba = bid_ask_map.get(sk, {})
+        cm = capital_map.get(sk, {})
         rows.append({
             "strike":    sk,
             "atm":       sk == atm_strike,
@@ -323,6 +349,20 @@ def _build_chain_rows(master, atm_strike, bid_ask_map):
             "peVol":    _to_int(r.get("pe_volume", 0)),
             "peIV":     _r(r.get("pe_iv",     0), 2),
             "peSignal": str(r.get("pe_signal", "")),
+            # ── capital-weighted fields (oi.capital_metrics) ────────────
+            # Rupee premium locked = OI x LTP, day-session capital flow =
+            # ChgOI x LTP (NOT intraday — see capital_metrics.py module
+            # docstring), and delta/gamma exposure = OI x Greek x spot(^2).
+            "cePremiumLocked":  _r(cm.get("ce_premium_locked",   0), 2),
+            "pePremiumLocked":  _r(cm.get("pe_premium_locked",   0), 2),
+            "ceCapitalFlow":    _r(cm.get("ce_capital_flow",     0), 2),
+            "peCapitalFlow":    _r(cm.get("pe_capital_flow",     0), 2),
+            "cePremiumTurnover": _r(cm.get("ce_premium_turnover", 0), 2),
+            "pePremiumTurnover": _r(cm.get("pe_premium_turnover", 0), 2),
+            "ceDeltaExposure":  _r(cm.get("ce_delta_exposure",   0), 2),
+            "peDeltaExposure":  _r(cm.get("pe_delta_exposure",   0), 2),
+            "ceGammaExposure":  _r(cm.get("ce_gamma_exposure",   0), 2),
+            "peGammaExposure":  _r(cm.get("pe_gamma_exposure",   0), 2),
         })
     return rows
 
@@ -878,7 +918,8 @@ def export_dashboard_json(
     bid_ask_map = _build_bid_ask_map(df_clean)
 
     # ── 4. Chain rows ─────────────────────────────────────────────────
-    chain_rows = _build_chain_rows(master, atm_strike, bid_ask_map)
+    capital_map = _build_capital_map(ctx_dict.get("capital_metrics"))
+    chain_rows = _build_chain_rows(master, atm_strike, bid_ask_map, capital_map)
 
     # ── 5. Compute Volume Changes ──────────────────────────────────────
     vol_changes = _compute_vol_changes(master, 5)   # 5-min window
@@ -1092,7 +1133,8 @@ def export_dashboard_json(
                         ex_atm = _to_int(
                             valid_strikes.iloc[(valid_strikes - ex_spot).abs().argmin()]
                         )
-                ex_rows = _build_chain_rows(ex_master, ex_atm, ex_ba)
+                ex_capital_map = _build_capital_map(ex_ctx.get("capital_metrics"))
+                ex_rows = _build_chain_rows(ex_master, ex_atm, ex_ba, ex_capital_map)
                 # extra_chains entries don't run the volume-change snapshot
                 # pass (that's only computed for the primary chain) — keep
                 # the fields present so the frontend shape stays consistent.
@@ -1167,6 +1209,18 @@ def export_dashboard_json(
     strategies = _build_strategies(ctx_dict, engine_result, chain_rows=chain_rows)
     risk       = _build_risk(ctx_dict, engine_result)
 
+    # ── 9c. Chain-wide capital-weighted rollup (Executive Card) ────────
+    # oi.capital_metrics.compute_chain_metrics() off the same capital_metrics
+    # DataFrame chain_rows was built from above — one dict, not a 400-strike
+    # table. {} when unavailable so the frontend gets a consistently-shaped
+    # (empty) object instead of a missing key.
+    capital_df_for_rollup = ctx_dict.get("capital_metrics")
+    capital_summary = (
+        compute_chain_metrics(capital_df_for_rollup)
+        if capital_df_for_rollup is not None and not capital_df_for_rollup.empty
+        else {}
+    )
+
     # ── 10. Full payload ──────────────────────────────────────────────
     payload = {
         "symbol":        str(SYMBOL),
@@ -1206,6 +1260,28 @@ def export_dashboard_json(
         "totalPCR":      _r(ctx_dict.get("total_pcr",    1.0), 2),
         "oiChgPCR":      _r(ctx_dict.get("oi_chg_pcr",   0.0), 2),
         "pcrSentiment":  str(ctx_dict.get("pcr_sentiment", "Balanced")),
+
+        # ── capital-weighted chain rollup (Executive Card / Smart Money) ──
+        # PE/CE ratio weighted by premium locked rather than raw OI count —
+        # compare against totalPCR above; divergence between the two is
+        # itself a signal (see oi.capital_metrics.compute_chain_metrics
+        # docstring). netGammaExposureCapital is CE-minus-PE (same
+        # differencing convention as the existing raw-OI netGEX), NOT a sum.
+        # capitalCeWallStrike/capitalPeWallStrike are the highest-premium
+        # strikes and can differ from ceWall/peWall above (highest raw OI) —
+        # frontend should label the two distinctly, not overwrite one with
+        # the other.
+        "capitalPCR":            _r(capital_summary.get("capital_pcr", 0.0), 2),
+        "netPremiumLocked":      _r(capital_summary.get("net_premium_locked", 0.0), 2),
+        "netCapitalFlow":        _r(capital_summary.get("net_capital_flow", 0.0), 2),
+        "netGammaExposureCapital": _r(capital_summary.get("net_gamma_exposure", 0.0), 2),
+        "netDeltaExposureCapital": _r(capital_summary.get("net_delta_exposure", 0.0), 2),
+        "totalPremiumLockedCapital": _r(
+            capital_summary.get("total_ce_premium_locked", 0.0)
+            + capital_summary.get("total_pe_premium_locked", 0.0), 2
+        ),
+        "capitalCeWallStrike":   _to_int(capital_summary.get("ce_capital_wall_strike") or 0),
+        "capitalPeWallStrike":   _to_int(capital_summary.get("pe_capital_wall_strike") or 0),
 
         "atmIV":         _r(ctx_dict.get("base_iv", DEFAULT_BASE_IV) * 100, 2),
         "atmCeIV":       atm_ce_iv,

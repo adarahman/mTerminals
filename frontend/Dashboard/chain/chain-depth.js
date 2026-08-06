@@ -68,6 +68,9 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
         oiVel: vel.ceVel, velTrend: vel.ceTrend, volVel: ceVolVel, signal: row.ceSignal,
         bid: row.ceBid, bidQty: row.ceBidQty, ask: row.ceAsk, askQty: row.ceAskQty,
         totalBidQty: row.ceTotalBidQty, totalAskQty: row.ceTotalAskQty,
+        // oi.capital_metrics fields (see mTerminals_json.py's _build_chain_rows) —
+        // premiumLocked = OI x LTP, capitalFlow = day-session ChgOI x LTP.
+        premiumLocked: row.cePremiumLocked, capitalFlow: row.ceCapitalFlow,
       };
       const pe = {
         iv: row.peIV, ivChg: peIvChg, vol: row.peVol, volChg: row.peVolChg,
@@ -76,6 +79,7 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
         oiVel: vel.peVel, velTrend: vel.peTrend, volVel: peVolVel, signal: row.peSignal,
         bid: row.peBid, bidQty: row.peBidQty, ask: row.peAsk, askQty: row.peAskQty,
         totalBidQty: row.peTotalBidQty, totalAskQty: row.peTotalAskQty,
+        premiumLocked: row.pePremiumLocked, capitalFlow: row.peCapitalFlow,
       };
 
       let pcr = ce.oi && pe.oi ? pe.oi / Math.max(ce.oi, 1) : null;
