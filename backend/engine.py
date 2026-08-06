@@ -86,6 +86,11 @@ from oi.chain_metrics import (
     _compute_iv_rank_hv30,
 )
 
+# Capital-weighted per-strike metrics (notional, premium locked, capital
+# flow, delta/gamma exposure) — computed once off `master` here so every
+# consumer reads the same numbers instead of re-deriving them.
+from oi.capital_metrics import compute_capital_metrics
+
 # Strategy definitions, rule-based scoring, and scenario P&L — moved to
 # strategy/strategies.py (Step 4b). build_engine_result() calls these three
 # directly; _STRATEGY_DIRECTION/_STRATEGY_MAX_SCORE are internal to
@@ -340,6 +345,12 @@ class EngineResult:
     # _summarize_gex(). See _build_greeks_table's docstring for the
     # live-IV-per-leg convention this is now built on.
     gex_summary: dict = field(default_factory=dict)
+    # Per-strike capital-weighted metrics (notional_exposure, premium_locked,
+    # capital_flow, premium_turnover, delta_exposure, gamma_exposure — CE/PE
+    # each), computed once via oi.capital_metrics.compute_capital_metrics()
+    # off `master`. capital_flow here is day-session (ce_oi_chg-based), not
+    # intraday — see capital_metrics.py's module docstring for why.
+    capital_metrics: "pd.DataFrame | None" = None
 
     def to_ctx_dict(self) -> dict:
         """Adapter so existing render_*.py functions written for a plain
@@ -379,6 +390,7 @@ class EngineResult:
             "near_expiry": self.near_expiry,
             "far_expiry":  self.far_expiry,
             "gex_summary": self.gex_summary,
+            "capital_metrics": self.capital_metrics,
         }
 
 
@@ -421,6 +433,11 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     # Expiry, with an intraday fraction on expiry day) — no longer takes a
     # dte argument here.
     master = build_master_table_nse(df, spot, lot_size=lot_size, dividend_yield=q)
+
+    # ── capital-weighted metrics (notional, premium locked, capital flow,
+    # delta/gamma exposure) — one pass off `master`, consumed by every
+    # downstream panel via EngineResult.capital_metrics ──────────────────
+    capital_metrics = compute_capital_metrics(master, spot, lot_size)
 
     atm_rows = (
         master[master["strike"] == atm]
@@ -630,4 +647,5 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
         near_expiry=near_expiry, far_expiry=far_expiry,
         oi_history_snapshot=df_full_history,
         gex_summary=gex_summary,
+        capital_metrics=capital_metrics,
     )

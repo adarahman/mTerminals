@@ -27,7 +27,19 @@
      #grkgex-footer — the same nodes ChainView.renderGreeksGex() already
      writes into), which needs scroll + padding rather than iframe sizing,
      so it gets its own class instead of reusing .oc-modal-iframe on a div. */
-  .greeks-modal-body{ flex:1; min-height:0; overflow-y:auto; padding:12px 14px; }
+  .greeks-modal-body{ flex:1; min-height:0; display:flex; flex-direction:column; padding:12px 14px; }
+  /* #grkgex-content already carries .algn-body (layout.css: flex:1 1 auto;
+     min-height:0; overflow-y:auto), which only does anything useful
+     inside a flex-column parent — this was missing display:flex above,
+     so .greeks-modal-body's own overflow-y:auto was the one actually
+     scrolling, and #grkgex-footer just got pushed down inside that
+     scroll instead of staying pinned. Bug: at the default 10-strike ATM
+     range the table happened to fit the visible height so the footer
+     looked fine; any other range (5/15/20 strikes) grew or shrank the
+     table and pushed the footer out of view. flex:0 0 auto here is the
+     same treatment .algn-card .section-footer gets for the OI Flow
+     card — this modal just never got wrapped in .algn-card. */
+  .greeks-modal-body .section-footer{ flex:0 0 auto; }
 
   /* Click-to-expand affordance shared by the Strategy Payoff canvas and the
      Institutional F&O Simulator's GEX canvas — both now open a lightbox-

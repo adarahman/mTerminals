@@ -73,6 +73,20 @@ _ACTION_INSTRUMENT_SIDE = {
     "SELL_CE": ("CE", "SELL"), "SELL_PE": ("PE", "SELL"),
 }
 
+# NSE cash/derivatives trading session. Snapshot/LTP logs have been
+# observed to contain ticks well outside this window (server left
+# running past close, dev/test sessions, etc.) — those are NOT real
+# market prints and must never be used as a day-boundary settlement
+# price, or an after-hours artifact silently becomes the "close" price
+# for a position that should have squared off at the real 15:30 close.
+MARKET_OPEN_TIME = "09:15:00"
+MARKET_CLOSE_TIME = "15:30:00"
+
+
+def _in_market_hours(ts: pd.Timestamp) -> bool:
+    day = ts.normalize()
+    return (day + pd.Timedelta(MARKET_OPEN_TIME)) <= ts <= (day + pd.Timedelta(MARKET_CLOSE_TIME))
+
 
 class _NoOpGuard:
     """Used when use_account_guard=False — never trips, so the backtest
@@ -181,14 +195,23 @@ class LtpHistory:
             return None
         return row["snapshot_time"], float(price)
 
-    def last_price_before(self, expiry: str, strike: int, instrument_type: str, ts) -> Optional[tuple]:
+    def last_price_before(self, expiry: str, strike: int, instrument_type: str, ts,
+                           session_start=None, session_end=None) -> Optional[tuple]:
         """Latest tick STRICTLY BEFORE `ts` (day-boundary square-off
-        semantics). Returns (timestamp, price) or None."""
+        semantics). If `session_start`/`session_end` are given, only ticks
+        within [session_start, session_end) are eligible — prevents a
+        logging gap from letting this reach back across a session
+        boundary (either direction) and returning a stale price from a
+        different trading day. Returns (timestamp, price) or None."""
         g = self._series(expiry, strike)
         if g is None:
             return None
         col = "CE_LTP" if instrument_type == "CE" else "PE_LTP"
         before = g[g["snapshot_time"] < ts]
+        if session_start is not None:
+            before = before[before["snapshot_time"] >= session_start]
+        if session_end is not None:
+            before = before[before["snapshot_time"] < session_end]
         if before.empty:
             return None
         row = before.iloc[-1]
@@ -307,7 +330,17 @@ async def run_backtest(
             # incorrectly match the new day's own opening price if one
             # happens to exist for this strike, so it's deliberately
             # skipped here rather than tried first.
-            priced = ltp.last_price_before(position.expiry, position.strike, position.instrument_type, ts)
+            # Bound the search to the entry day's actual TRADING SESSION
+            # (09:15–15:30), not the full calendar day: without this, an
+            # after-hours artifact in the log (server left running past
+            # close, dev/test tick, etc.) can be picked up as if it were
+            # the real close price — see replay.py module history for the
+            # 23:10 PM tick that motivated this.
+            entry_day = pd.Timestamp(position.entry_time).normalize()
+            session_start = entry_day + pd.Timedelta(MARKET_OPEN_TIME)
+            session_end = entry_day + pd.Timedelta(MARKET_CLOSE_TIME)
+            priced = ltp.last_price_before(position.expiry, position.strike, position.instrument_type, ts,
+                                            session_start=session_start, session_end=session_end)
         else:
             priced = ltp.price_at(position.expiry, position.strike, position.instrument_type, ts)
             if priced is None:
@@ -356,7 +389,14 @@ async def run_backtest(
         # algo changed its mind and got back in on the next read." The
         # next tick is free to re-enter, subject to AutoExecutor's own
         # cooldown, exactly as it would live.
-        if open_position is None and not exited_this_tick:
+        # Entries are also gated to the real trading session: live, the
+        # broker WS simply has no ticks outside 09:15-15:30, so no order
+        # could ever fire then. The replay must not enter trades on
+        # after-hours artifacts in the decision-snapshot log (server left
+        # running past close, dev/test ticks, etc.) — see replay.py
+        # module history for the concrete bogus after-hours entry
+        # (16:37 IST) this guard was added to stop.
+        if open_position is None and not exited_this_tick and _in_market_hours(ts):
             _submit.current_ts = ts
             _submit.current_lot_size = row.get("lot_size")
             await executor.maybe_execute(decision, symbol, expiry)

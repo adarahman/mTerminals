@@ -109,6 +109,92 @@ def test_day_boundary_forces_square_off(tmp_path):
     assert trade.exit_price == 110.0  # last known price BEFORE the day boundary, not the new day's
 
 
+def test_day_boundary_ignores_stale_price_across_logging_gap(tmp_path):
+    """Regression test: if the decision-snapshot log has a gap (server
+    wasn't running) so the next logged row for this symbol lands TWO
+    calendar days after entry, last_price_before() must not reach past
+    entry's own day and grab a tick from the day AFTER entry — that
+    produces a nonsensical fill (e.g. next morning's open price) mislabeled
+    as a same-day close. With no in-session tick available, the trade
+    should come back unpriced instead of fabricating an exit."""
+    db_path = str(tmp_path / "snapshots.db")
+    ltp_path = str(tmp_path / "ltp.parquet")
+
+    rows = [
+        ("2026-08-05T12:18:00", "07AUG2026", _decision(action_type="BUY_CE", strike=20000)),
+        # gap: nothing logged for the rest of 08-05 or all of 08-06
+        ("2026-08-07T09:15:00", "07AUG2026", _decision(action_type="WAIT")),
+    ]
+    _seed_snapshots(db_path, "NIFTY", rows)
+    _seed_ltp(ltp_path, "NIFTY", "07AUG2026", 20000, [
+        ("2026-08-05T12:18:00", 102.9, 80.0),
+        ("2026-08-06T09:42:00", 122.5, 60.0),  # next day's tick — must NOT be used as the exit fill
+    ])
+
+    result = run_backtest_sync("NIFTY", db_path=db_path, ltp_log_path=ltp_path)
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    # No tick after entry exists within entry's own day (08-05) — the
+    # 08-06 tick must be rejected as out-of-session. Falls back to the
+    # entry's own fill as the last known in-session price (flat exit),
+    # which is honest about the data gap instead of fabricating a loss
+    # from the next day's open.
+    assert trade.exit_price == 102.9
+    assert trade.pnl == 0.0
+    assert trade.exit_reason == "day_boundary_square_off"
+
+
+def test_day_boundary_ignores_after_hours_tick(tmp_path):
+    """Regression test: an LTP tick logged after the real market close
+    (e.g. server left running / dev session past 15:30) must not be used
+    as the day-boundary settlement price, even though it's on the same
+    calendar day as entry — this was reproducing Mo's actual trade 2
+    (23:10 PM tick used as an intraday close)."""
+    db_path = str(tmp_path / "snapshots.db")
+    ltp_path = str(tmp_path / "ltp.parquet")
+
+    rows = [
+        ("2026-08-05T12:18:00", "07AUG2026", _decision(action_type="BUY_CE", strike=20000)),
+        ("2026-08-06T09:15:00", "07AUG2026", _decision(action_type="WAIT")),
+    ]
+    _seed_snapshots(db_path, "NIFTY", rows)
+    _seed_ltp(ltp_path, "NIFTY", "07AUG2026", 20000, [
+        ("2026-08-05T12:18:00", 102.9, 80.0),
+        ("2026-08-05T14:50:00", 90.3, 65.0),   # real intraday tick, within session
+        ("2026-08-05T23:10:00", 122.5, 60.0),  # after-hours artifact — must NOT be used
+    ])
+
+    result = run_backtest_sync("NIFTY", db_path=db_path, ltp_log_path=ltp_path)
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.exit_price == 90.3
+    assert trade.exit_reason == "day_boundary_square_off"
+
+
+def test_after_hours_decision_never_enters(tmp_path):
+    """Regression test: a decision row logged outside the real trading
+    session (09:15-15:30) must not open a position — live, the broker WS
+    has no ticks after close, so no order could ever fire then. This was
+    reproducing Mo's actual trade 1 (entered 16:37 IST, an hour past
+    close, likely from a dev/test session left running)."""
+    db_path = str(tmp_path / "snapshots.db")
+    ltp_path = str(tmp_path / "ltp.parquet")
+
+    rows = [
+        ("2026-08-04T16:37:36", "07AUG2026", _decision(action_type="SELL_CE", strike=24650)),
+    ]
+    _seed_snapshots(db_path, "NIFTY", rows)
+    _seed_ltp(ltp_path, "NIFTY", "07AUG2026", 24650, [
+        ("2026-08-04T16:37:36", 446.0, 300.0),
+    ])
+
+    result = run_backtest_sync("NIFTY", db_path=db_path, ltp_log_path=ltp_path)
+
+    assert result.trades == []
+
+
 def test_low_confidence_signal_never_enters(tmp_path):
     db_path = str(tmp_path / "snapshots.db")
     ltp_path = str(tmp_path / "ltp.parquet")

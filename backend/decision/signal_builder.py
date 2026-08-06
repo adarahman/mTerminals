@@ -212,9 +212,24 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
 
 def score_oi_velocity(vel_df, spot: float, step: int,
                        out: DecisionResult,
-                       vol_oi_ratios: dict | None = None) -> float:
+                       vol_oi_ratios: dict | None = None,
+                       window: int = 5) -> float:
     """
-    vel_df columns: Strike, CE_OI, CE_OI_Delta, PE_OI, PE_OI_Delta, Signal, IsATM
+    vel_df is oi_analysis.get_oi_velocity()'s actual output: one row per
+    strike PER WINDOW (5/15/30 min by default), columns window/strike/
+    ceNow/ceDOI/ceLTP/peNow/peDOI/peLTP/signal/actual_age_min.
+
+    FIX (was silently no-op): this used to read row.get("Strike")/
+    row.get("CE_OI_Delta")/row.get("IsATM") — columns that don't exist on
+    that output (wrong case, wrong names, and no per-window filter at
+    all). Every .get() call fell through to its default, so ce_doi/pe_doi
+    were always 0 for every row and this function always returned 0.0 —
+    the OI-velocity sub-score never actually contributed to the composite
+    decision score. `window` selects which of the 5/15/30-min slices to
+    score (default 5, the most responsive to "writing right now").
+    IsATM never existed on the real data either; is_atm is now computed
+    locally from strike/spot/step, matching the proximity weighting
+    already done below.
 
     Per-strike normalised score:
         CE writing → resistance building → BEARISH (–)
@@ -229,17 +244,21 @@ def score_oi_velocity(vel_df, spot: float, step: int,
     if vel_df is None or vel_df.empty:
         return 0.0
 
+    wdf = vel_df[vel_df["window"] == window] if "window" in vel_df.columns else vel_df
+    if wdf.empty:
+        return 0.0
+
     vol_map = vol_oi_ratios or {}
     annotations = {}
     strike_scores: list[float] = []
 
-    for _, row in vel_df.iterrows():
-        strike = int(row.get("Strike", 0))
-        ce_oi  = float(row.get("CE_OI", 0) or 0)
-        pe_oi  = float(row.get("PE_OI", 0) or 0)
-        ce_doi = float(row.get("CE_OI_Delta", 0) or 0)
-        pe_doi = float(row.get("PE_OI_Delta", 0) or 0)
-        is_atm = bool(row.get("IsATM", False))
+    for _, row in wdf.iterrows():
+        strike = int(row.get("strike", 0))
+        ce_oi  = float(row.get("ceNow", 0) or 0)
+        pe_oi  = float(row.get("peNow", 0) or 0)
+        ce_doi = float(row.get("ceDOI", 0) or 0)
+        pe_doi = float(row.get("peDOI", 0) or 0)
+        is_atm = abs(strike - spot) <= step if step > 0 else False
 
         ce_pct = ce_doi / ce_oi if ce_oi > 0 else 0.0
         pe_pct = pe_doi / pe_oi if pe_oi > 0 else 0.0
@@ -489,7 +508,16 @@ def detect_traps(
     bull_trap_iv_spike: float = 0.03,
     bear_trap_pcr_min:  float = T.PCR_BEAR,
     wall_proximity_pts: int   = 2,
+    window: int = 5,
 ) -> dict:
+    """
+    vel_df schema/window handling: see score_oi_velocity()'s docstring —
+    same fix applies here. This previously read row.get("Strike")/
+    row.get("CE_OI_Delta") (don't exist on get_oi_velocity()'s real
+    output), so ce_writing_near_wall/pe_writing_near_wall/
+    both_sides_building were always False and wall-writing-based trap
+    detection never fired.
+    """
     traps_active: list[str] = []
     warnings:     list[str] = []
 
@@ -497,19 +525,21 @@ def detect_traps(
     pe_writing_near_wall = False
     both_sides_building  = False
 
-    if vel_df is not None and not vel_df.empty:
-        for _, row in vel_df.iterrows():
-            strike = float(row.get("Strike", 0))
-            ce_doi = float(row.get("CE_OI_Delta", 0) or 0)
-            pe_doi = float(row.get("PE_OI_Delta", 0) or 0)
-            ce_oi  = float(row.get("CE_OI", 1) or 1)
-            pe_oi  = float(row.get("PE_OI", 1) or 1)
+    wdf = vel_df[vel_df["window"] == window] if (vel_df is not None and "window" in vel_df.columns) else vel_df
+
+    if wdf is not None and not wdf.empty:
+        for _, row in wdf.iterrows():
+            strike = float(row.get("strike", 0))
+            ce_doi = float(row.get("ceDOI", 0) or 0)
+            pe_doi = float(row.get("peDOI", 0) or 0)
+            ce_oi  = float(row.get("ceNow", 1) or 1)
+            pe_oi  = float(row.get("peNow", 1) or 1)
             if abs(strike - ce_wall) <= strike_step * wall_proximity_pts and ce_doi > 0 and ce_doi / ce_oi > 0.05:
                 ce_writing_near_wall = True
             if abs(strike - pe_wall) <= strike_step * wall_proximity_pts and pe_doi > 0 and pe_doi / pe_oi > 0.05:
                 pe_writing_near_wall = True
-        net_ce = vel_df["CE_OI_Delta"].fillna(0).sum() if "CE_OI_Delta" in vel_df.columns else 0
-        net_pe = vel_df["PE_OI_Delta"].fillna(0).sum() if "PE_OI_Delta" in vel_df.columns else 0
+        net_ce = wdf["ceDOI"].fillna(0).sum() if "ceDOI" in wdf.columns else 0
+        net_pe = wdf["peDOI"].fillna(0).sum() if "peDOI" in wdf.columns else 0
         both_sides_building = (net_ce > 0 and net_pe > 0)
 
     ce_dist_pts  = ce_wall - spot

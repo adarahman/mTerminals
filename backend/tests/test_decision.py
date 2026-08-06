@@ -8,8 +8,10 @@ reintroduce without a test.
 
 import pandas as pd
 
-from decision.signal_builder import score_pcr, score_engine_bias, score_futures, detect_traps
-from decision.types import T
+from decision.signal_builder import (
+    score_pcr, score_engine_bias, score_futures, score_oi_velocity, detect_traps,
+)
+from decision.types import T, DecisionResult
 from oi.pricing import DEFAULT_BASE_IV
 
 
@@ -66,9 +68,15 @@ def test_futures_basis_nudge_is_bounded():
 # silently diverging again.
 
 def _pe_wall_writing_vel_df(pe_wall):
+    # Matches oi_analysis.get_oi_velocity()'s REAL output schema (window/
+    # strike/ceNow/ceDOI/peNow/peDOI/...) — the fixture previously used
+    # Strike/CE_OI_Delta/PE_OI_Delta/CE_OI/PE_OI, which is what the old
+    # (buggy) detect_traps() code read, not what get_oi_velocity() ever
+    # actually produces. That let this test pass without ever exercising
+    # the real column-mismatch bug fixed in signal_builder.py.
     return pd.DataFrame([
-        {"Strike": pe_wall, "CE_OI_Delta": 0, "PE_OI_Delta": 1_000_000,
-         "CE_OI": 1, "PE_OI": 1_000_000},
+        {"window": 5, "strike": pe_wall, "ceDOI": 0, "peDOI": 1_000_000,
+         "ceNow": 1, "peNow": 1_000_000},
     ])
 
 
@@ -117,3 +125,68 @@ def test_trade_grade_penalized_further_above_24_vix():
     extreme = detect_traps(india_vix=25.0, **kwargs)
     assert moderate["trade_grade"] == "B"
     assert extreme["trade_grade"] == "C"
+
+
+# ── score_oi_velocity() ──────────────────────────────────────────────────
+# No coverage existed for this function before — it was silently returning
+# 0.0 for every real vel_df (see signal_builder.py's fix docstring), so
+# there was nothing here to catch it. These pin the real
+# get_oi_velocity()-shaped schema (window/strike/ceNow/ceDOI/peNow/peDOI)
+# so a future schema drift breaks a test instead of silently zeroing out
+# the sub-score again.
+
+def _vel_df(window=5, rows=None):
+    return pd.DataFrame(rows or [])
+
+
+def test_oi_velocity_zero_on_empty_or_none():
+    out = DecisionResult()
+    assert score_oi_velocity(None, spot=24100, step=50, out=out) == 0.0
+    assert score_oi_velocity(_vel_df(), spot=24100, step=50, out=out) == 0.0
+
+
+def test_ce_writing_is_bearish():
+    vel_df = _vel_df(rows=[
+        {"window": 5, "strike": 24150, "ceNow": 1_000_000, "ceDOI": 200_000,
+         "peNow": 500_000, "peDOI": 0},
+    ])
+    out = DecisionResult()
+    score = score_oi_velocity(vel_df, spot=24100, step=50, out=out)
+    assert score < 0
+
+
+def test_pe_writing_is_bullish():
+    vel_df = _vel_df(rows=[
+        {"window": 5, "strike": 24050, "ceNow": 500_000, "ceDOI": 0,
+         "peNow": 1_000_000, "peDOI": 200_000},
+    ])
+    out = DecisionResult()
+    score = score_oi_velocity(vel_df, spot=24100, step=50, out=out)
+    assert score > 0
+
+
+def test_window_filter_selects_only_matching_rows():
+    # Same strike, opposite signals at the 5-min vs 15-min window — proves
+    # the `window` param actually filters rather than averaging everything
+    # in the DataFrame together (which is what happened before the fix,
+    # since no window filtering existed at all).
+    vel_df = _vel_df(rows=[
+        {"window": 5,  "strike": 24150, "ceNow": 1_000_000, "ceDOI": 200_000,
+         "peNow": 500_000, "peDOI": 0},
+        {"window": 15, "strike": 24150, "ceNow": 1_000_000, "ceDOI": -200_000,
+         "peNow": 500_000, "peDOI": 0},
+    ])
+    out = DecisionResult()
+    score_5min  = score_oi_velocity(vel_df, spot=24100, step=50, out=out, window=5)
+    score_15min = score_oi_velocity(vel_df, spot=24100, step=50, out=out, window=15)
+    assert score_5min < 0
+    assert score_15min > 0
+
+
+def test_unknown_window_returns_zero_not_all_rows():
+    vel_df = _vel_df(rows=[
+        {"window": 5, "strike": 24150, "ceNow": 1_000_000, "ceDOI": 200_000,
+         "peNow": 500_000, "peDOI": 0},
+    ])
+    out = DecisionResult()
+    assert score_oi_velocity(vel_df, spot=24100, step=50, out=out, window=30) == 0.0
