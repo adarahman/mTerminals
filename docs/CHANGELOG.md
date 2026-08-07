@@ -1,5 +1,19 @@
 # Architecture Changelog
 
+## Unreleased — mTerminals v1.1.0 production hardening
+
+- Added `GET /health` as the operational health contract for the HTTP
+  service, connected Dashboard WebSocket clients, market session, canonical
+  payload freshness and SmartAPI overlay state.
+- Added explicit Dashboard feed states and reasons for connecting,
+  recovering, partial, stale and disconnected operation.
+- Added deterministic WebSocket recovery coverage for disconnect,
+  reconnect, stale detection and recovery to live data.
+- Fixed obsolete reconnect timers replacing a newer healthy socket.
+- Added CI gates for health/feed-status and reconnect/recovery contracts.
+- Added deployment verification, rollback guidance and a v1.1.0 release
+  checklist to the engineering documentation.
+
 ## 2026-08-07 — Complete Architecture Package 1.0
 
 - Added master index and package guide.

@@ -32,7 +32,11 @@ reconciliation, backtest and strategy paths.
 - modal keyboard close;
 - D-05 scroll preservation;
 - no conflicting shared metrics;
-- responsive order.
+- responsive order;
+- WebSocket disconnect and single delayed reconnect;
+- `RECOVERING` until the first coherent message;
+- `LIVE` → `STALE` → `LIVE` feed recovery;
+- shared feed-state recovery propagation to Option Chain.
 
 ### Regression fixtures
 Maintain representative snapshots for:
@@ -47,3 +51,15 @@ Maintain representative snapshots for:
 
 No architecture-critical behavior is considered complete without regression coverage
 or a documented manual verification checklist.
+
+Current automated commands include:
+
+```bash
+cd backend && ../.venv/bin/python -m pytest
+cd ../frontend && npm run test:health-status
+npm run test:feed-recovery
+npm run test:e2e
+```
+
+GitHub Actions is authoritative for Browser E2E when the local execution
+environment cannot bind the temporary static-server port.
