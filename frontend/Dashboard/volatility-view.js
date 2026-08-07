@@ -52,10 +52,11 @@ ChainView.prototype.buildVolatilityHtml = function(d) {
     </summary>
     <div class="detail-body">
       <div class="section-card sc-neutral" style="min-width:0;">
-        <div class="section-header">
-          <span class="section-title"><span class="section-icon">📉</span>IV Rank Details</span>
-          <button class="sec-btn" style="padding:3px 9px;font-size:10.5px;" onclick="openIvSurfaceModal()" title="Full Surface →">Full Surface →</button>
-        </div>
+        <button class="section-header nav-card-header" onclick="openIvSurfaceModal()"
+           aria-label="Open IV Rank Details — view full surface" title="Open full IV surface">
+          <span class="section-title nav-card-header-label"><span class="section-icon">📉</span>IV Rank Details</span>
+          <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+        </button>
         <div style="padding:2px 0;">${_volIvRankHtml(d)}</div>
       </div>
     </div>

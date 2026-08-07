@@ -148,28 +148,28 @@ class OiFlowView {
   // Velocity inside .oic-merged-card (chain-renderer.js) with no header
   // of its own.
 
-  // Block Detection tile: #oi-flow-block-summary is a plain placeholder
-  // here, not a computed value — this card doesn't scan for block prints
-  // itself. simRenderVolGrid() (simulator-view.js) already runs that scan
-  // every tick/scenario-slider move for the Vol/OI Velocity by Strike
-  // (Block Detection) panel; it now writes its "N block prints flagged •
-  // strongest STRIKE SIDE" result straight into this element instead of
-  // its old home (#sdt-voi-summary), so the content moved here rather than
-  // being duplicated. See the tick pipeline in chain-renderer.js: this
-  // card's outerHTML is patched before simInit()/simRenderVolGrid() runs
-  // in the same tick, so the element below always exists by the time the
-  // real content is written into it.
+  // Block Detection readout: #oi-flow-block-summary is a plain
+  // placeholder here, not a computed value — this card doesn't scan for
+  // block prints itself. simRenderVolGrid() (simulator-view.js) already
+  // runs that scan every tick/scenario-slider move for the Vol/OI
+  // Velocity by Strike (Block Detection) panel; it now writes its "N
+  // block prints flagged • strongest STRIKE SIDE" result straight into
+  // this element instead of its old home (#sdt-voi-summary), so the
+  // content moved here rather than being duplicated. See the tick
+  // pipeline in chain-renderer.js: this card's outerHTML is patched
+  // before simInit()/simRenderVolGrid() runs in the same tick, so the
+  // element below always exists by the time the real content is written
+  // into it.
+  //
+  // Renders as a plain caption line now, not a boxed .oic-tile (own
+  // background/border/icon-chip/uppercase label) — that nested-card
+  // treatment made this read as its own alienated block sitting below
+  // Vol/OI Velocity rather than that panel's own block-print readout,
+  // even though #sdt-panel's header above already says "(Block
+  // Detection)" so the tile's icon+label were pure duplication anyway.
   return `
   <div class="oic-card" id="oi-flow-summary-card">
-    <div class="oic-tiles" style="grid-template-columns:1fr;">
-      <div class="oic-tile">
-        <div class="oic-tile-head">
-          <span class="oic-tile-icon">⚡</span>
-          <span class="oic-tile-label">Block Detection</span>
-        </div>
-        <div class="oic-pcr" id="oi-flow-block-summary" style="font-size:12px;color:var(--txt2);">Loading…</div>
-      </div>
-    </div>
+    <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading…</div>
   </div>`;
 }
 }

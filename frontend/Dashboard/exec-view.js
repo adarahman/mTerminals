@@ -180,13 +180,14 @@ class ExecView {
   if(!chain.length || !atm){
     return `
   <div class="oic-card" id="inst-activity-summary-card">
-    <div class="oic-head">
+    <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal()"
+       aria-label="Open Institutional Activity Crux — view Strike Detail report" title="Open Strike Detail report">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>
-        <span class="oic-title">Institutional Activity Crux</span>
+        <span class="oic-title nav-card-header-label">Institutional Activity Crux</span>
       </div>
-      <button class="oic-action" onclick="openStrikeDetailReportModal()" title="Open Strike Detail report">📄 Strike Detail Report →</button>
-    </div>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     <div class="oic-empty">Awaiting chain data…</div>
   </div>`;
   }
@@ -233,22 +234,19 @@ class ExecView {
 
   return `
   <div class="oic-card" id="inst-activity-summary-card">
-    <div class="oic-head">
+    <!-- Whole header line is now the click target (no separate
+         .oic-action button) — same nav-card-header pattern as Option
+         Chain Snapshot / Greeks / FII/DII, adapted for a modal trigger
+         via panels.css's button.oic-head.nav-card-header. .oic-head
+         keeps flex-wrap as a safety net for narrow viewports. -->
+    <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal()"
+       aria-label="Open Institutional Activity Crux — view Strike Detail report" title="Open Strike Detail report">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>
-        <span class="oic-title">Institutional Activity Crux <span class="oic-sub">Near-ATM Ledger &bull; ±${INST_NEAR_BAND_STRIKES} strikes</span></span>
+        <span class="oic-title nav-card-header-label">Institutional Activity Crux <span class="oic-sub">Near-ATM Ledger &bull; ±${INST_NEAR_BAND_STRIKES} strikes</span></span>
       </div>
-      <!-- Moved back onto the header line (was pulled out to a bottom
-           .oic-footer previously — see removed comment history — because
-           at that time this card still shared a narrow column with
-           another card and the button wrapped onto its own line). It no
-           longer shares a column with anything (Institutional zone,
-           full-width standalone card), so there's room for title +
-           subtitle + action on one row, matching the Greeks/Net GEX
-           "Full Table →" and Option Chain Snapshot header pattern.
-           .oic-head keeps flex-wrap as a safety net for narrow viewports. -->
-      <button class="oic-action" onclick="openStrikeDetailReportModal()" title="Open Strike Detail report">📄 Strike Detail Report →</button>
-    </div>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     ${flagged.length===0 ? `
     <div class="oic-empty">No strikes currently clear the institutional threshold.</div>
     ` : `
@@ -452,10 +450,11 @@ class ExecView {
   if(!hasData){
     return `
   <div class="section-card sc-green" id="fiidii-summary-card" style="min-width:0;">
-    <div class="section-header">
-      <span class="section-title"><span class="section-icon">🏦</span>FII / DII / Pro / Retail Sentiment</span>
-      ${biasHtml ? `<button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openFiiDiiModal()" title="Open full participant OI table">Full Table →</button>` : ''}
-    </div>
+    <button class="section-header nav-card-header" onclick="openFiiDiiModal()"
+       aria-label="Open FII / DII / Pro / Retail Sentiment — view full participant OI table" title="Open full participant OI table">
+      <span class="section-title nav-card-header-label"><span class="section-icon">🏦</span>FII / DII / Pro / Retail Sentiment</span>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     ${biasHtml}
     <div class="dd-empty">Awaiting EOD participant-OI feed — populates after the first two post-close fetches.</div>
   </div>`;
@@ -509,11 +508,12 @@ class ExecView {
 
   return `
   <div class="section-card sc-green" id="fiidii-summary-card" style="min-width:0;">
-    <div class="section-header">
-      <span class="section-title"><span class="section-icon">🏦</span>FII / DII / Pro / Retail Sentiment</span>
+    <button class="section-header nav-card-header" onclick="openFiiDiiModal()"
+       aria-label="Open FII / DII / Pro / Retail Sentiment — view full participant OI table" title="Open full participant OI table">
+      <span class="section-title nav-card-header-label"><span class="section-icon">🏦</span>FII / DII / Pro / Retail Sentiment</span>
       <span style="font-size:10px;color:var(--txt3);">EOD ${s.source_date} vs ${s.compare_date||'—'}</span>
-      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openFiiDiiModal()" title="Open full participant OI table">Full Table →</button>
-    </div>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     ${biasHtml}
     <div style="padding:2px 0;">
       ${rows}

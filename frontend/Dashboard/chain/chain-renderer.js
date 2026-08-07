@@ -474,22 +474,29 @@ ChainView.prototype.renderDashboard = function(d) {
   // Institutional F&O Simulator both moved to the Confirmation zone,
   // appended at the end of this function (see "ZONE: CONFIRMATION"
   // below) — they're Tier-3 exploration/scenario tooling (§3 of the IA
-  // redesign proposal), not Structure & Positioning. renderSimRangeRow /
-  // velControl stay defined here since the Capital Flow zone's Vol/OI
-  // Velocity panel (below) needs them before the Confirmation zone's
-  // Simulator card does.
+  // redesign proposal), not Structure & Positioning. renderSimRangeRow
+  // stays defined here since the Spot/IV sliders further down (still
+  // inside `if(strats.length)`) are its only remaining call site.
   const strats=d.strategies||[];
 
-  // renderSimRangeRow()/velControl hoisted out of the (formerly)
-  // strategies-gated Institutional F&O Simulator block below, since the
-  // Vol/OI Velocity by Strike (Block Detection) section that uses them
-  // now renders unconditionally next to OI Flow Snapshot instead of
-  // living inside `if(strats.length)` — a strategies-only gate never made
-  // sense for it anyway ("Always inject it - uses live greeks data +
-  // simulation sliders", per the comment that used to sit just above it).
-  // This is the single definition of both; the Spot/IV sliders further
-  // down (still inside `if(strats.length)`) reuse this same
-  // renderSimRangeRow() rather than a second copy.
+  // renderSimRangeRow() hoisted out of the (formerly) strategies-gated
+  // Institutional F&O Simulator block below, since other callers
+  // (previously the Vol/OI Velocity slider, now just the Spot/IV sliders
+  // further down) need it before that `if(strats.length)` block runs.
+  // This is the single definition; the Spot/IV sliders further down
+  // (still inside `if(strats.length)`) are its only remaining caller —
+  // the Vol/OI Velocity slider that used to reuse it here moved into the
+  // Vol/OI Velocity modal itself (DashboardPro.html's
+  // #vol-oi-velocity-modal, static markup) so it lives alongside the
+  // full block-detection grid it actually controls, rather than sitting
+  // on the always-visible dashboard card as a second, easy-to-miss
+  // control duplicating what the header's click target now opens.
+  // _simVelOverride (the value it writes) is a plain window global
+  // (dashboard.js), so moving the input element doesn't change how
+  // simUpdate()/_simUpdateNow() (simulator-view.js) reads it — that
+  // function already tolerates the element being absent from any given
+  // template pass (falls back to this.simState.vel) for exactly this
+  // kind of relocation.
   function renderSimRangeRow(cfg) {
     const raw = cfg.override != null ? parseFloat(cfg.override) : cfg.base;
     const value = cfg.clamp ? Math.min(cfg.max, Math.max(cfg.min, Math.round(raw))) : raw;
@@ -500,14 +507,6 @@ ChainView.prototype.renderDashboard = function(d) {
           <span class="sim-ctrl-val" id="sim-${cfg.id}-val">${cfg.fmt(value)}</span>
         </div>`;
   }
-  // This slider scales the CE/PE Vol/OI Ratio bars in the block-detection
-  // panel (see simRenderVolGrid in simulator-view.js, which multiplies
-  // each ratio by simVel).
-  const velControl = {
-    id: 'vel', label: 'Vol/OI Velocity',
-    min: 0.1, max: 5, step: 0.1,
-    override: _simVelOverride, overrideVar: '_simVelOverride',
-    base: (d.ctx || {}).baseVel || 1.2, fmt: v => fmtN(v, 1) };
 
   // Strategy Payoff / Institutional F&O Simulator markup is built here
   // (needs strats/spot/greeksData in scope) but appended to `h` later, in
@@ -741,21 +740,31 @@ ChainView.prototype.renderDashboard = function(d) {
 
     <div class="oic-merged-card">
       <div id="sdt-panel" class="oic-merged-vel">
-        <div class="section-header" style="margin-bottom:12px;">
-          <span class="section-title"><span class="section-icon">⚡</span>Vol/OI Velocity by Strike <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;">(Block Detection)</span></span>
-        </div>
-        <div class="sim-controls" style="grid-template-columns:1fr;margin-bottom:10px;">
-          ${renderSimRangeRow(velControl)}
-        </div>
-        <div class="chart-expand-wrap" onclick="openVolOiVelocityModal()" title="Click to open the block-detection chart" style="cursor:zoom-in;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;position:relative;">
-          <span class="chart-expand-icon" title="Expand">⤢</span>
-          <!-- Block-print summary line ("N block prints flagged • strongest
-               STRIKE SIDE") lives at #oi-flow-block-summary inside the OI
-               Flow Snapshot card right below, written by simRenderVolGrid()
-               (simulator-view.js) every tick/scenario-slider move — this
-               wrap just opens the full block-detection chart. -->
-          <div style="font-size:12px;color:var(--txt3);">Tap to view the block-detection breakdown &rarr;</div>
-        </div>
+        <button class="section-header nav-card-header" onclick="openVolOiVelocityModal()"
+           aria-label="Open Vol/OI Velocity by Strike — view block-detection chart" title="Open the block-detection chart">
+          <span class="section-title nav-card-header-label"><span class="section-icon">⚡</span>Vol/OI Velocity by Strike <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;">(Block Detection)</span></span>
+          <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+        </button>
+        <!-- The Vol/OI Velocity slider that used to sit here has moved
+             into the Vol/OI Velocity modal itself (opened by the header
+             above) — see the renderSimRangeRow() comment near the top of
+             this function for why. The dashboard card is now just the
+             header + block-prints readout below; dragging the velocity
+             slider happens inside the modal, next to the grid it
+             actually controls. -->
+
+        <!-- The chart-expand-wrap box that used to sit here (zoom-in
+             cursor, expand icon, opened the same modal on click) has been
+             removed outright rather than left as an empty bordered box —
+             once its click target and icon were stripped (the header
+             above is now the single click target for this card), the
+             leftover background/border/radius box had no content and no
+             function, just a visual remnant of the old click affordance.
+             Block-print summary line ("N block prints flagged •
+             strongest STRIKE SIDE") lives at #oi-flow-block-summary
+             inside the OI Flow Snapshot card right below, written by
+             simRenderVolGrid() (simulator-view.js) every tick/scenario-
+             slider move. -->
 
         <!-- Strike Detail table itself lives only in the Strike Detail
              Report modal now (opened via the "📄 Strike Detail Report →"

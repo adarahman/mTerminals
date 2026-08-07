@@ -133,10 +133,11 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
     : `<div class="dd-empty">No Greek alerts right now — γ regime stable, theta normal.</div>`;
 
   return `<div class="section-card sc-violet" id="greeks-alerts-card" style="min-width:0;">
-    <div class="section-header">
-      <span class="section-title"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Live, Visible Range</span></span>
-      <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openGreeksModal()" title="Open full Greeks &amp; GEX table">Full Table →</button>
-    </div>
+    <button class="section-header nav-card-header" onclick="openGreeksModal()"
+       aria-label="Open Greeks &amp; GEX — view full table" title="Open full Greeks &amp; GEX table">
+      <span class="section-title nav-card-header-label"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Live, Visible Range</span></span>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     <div style="display:flex;flex-direction:column;padding:2px 0;">
       ${rows}
     </div>

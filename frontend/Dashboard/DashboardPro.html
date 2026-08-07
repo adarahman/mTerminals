@@ -356,7 +356,22 @@
      by simRenderVolGrid() in the same tick pass as every other simulator
      panel regardless of whether this modal is open, so it's already
      current the instant it opens — it lives only here now, not
-     duplicated on the main dashboard. -->
+     duplicated on the main dashboard.
+
+     The Vol/OI Velocity slider (id="sim-vel-slider") lives here too now,
+     not on the dashboard card — it used to sit on the always-visible
+     card as a second, easy-to-miss control duplicating this modal's own
+     job. It's plain static markup (this file isn't template-rendered
+     per tick like chain-renderer.js's cards are), but that's fine: this
+     modal panel is a permanent DOM node toggled via the 'open' class
+     (see ModalManager._openModal/closeVolOiVelocityModal), never
+     recreated, so the slider's dragged position survives close/reopen
+     on its own — no per-tick value sync needed the way #sdt-voi-grid's
+     content does. oninput writes straight to the same window-level
+     _simVelOverride global (dashboard.js) the old dashboard-card slider
+     used, so simUpdate()/_simUpdateNow() (simulator-view.js) picks it up
+     identically regardless of which template the input element came
+     from. -->
 <div id="vol-oi-velocity-modal" class="oc-modal" onclick="if(event.target===this) closeVolOiVelocityModal()">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
@@ -366,6 +381,13 @@
       </div>
     </div>
     <div class="chart-modal-body">
+      <div class="sim-controls" style="grid-template-columns:1fr;margin:0 4px 14px;">
+        <div class="sim-ctrl-row">
+          <span class="sim-ctrl-label">Vol/OI Velocity</span>
+          <input type="range" class="sim-ctrl-slider" id="sim-vel-slider" min="0.1" max="5" step="0.1" value="1.2" oninput="_simVelOverride=parseFloat(this.value);simUpdate()">
+          <span class="sim-ctrl-val" id="sim-vel-val">1.2</span>
+        </div>
+      </div>
       <div class="sim-vol-grid" id="sdt-voi-grid"></div>
     </div>
   </div>

@@ -623,6 +623,29 @@ a.nav-card-header{
   color:var(--section-accent, var(--info));
 }
 
+/* Modal-trigger variant — same "whole header is the click target" pattern
+   as a.nav-card-header above, but for headers that open a modal
+   (Greeks/Net GEX "Full Table", FII/DII "Full Table", IV Rank "Full
+   Surface") rather than navigate to another page. A <button> is the
+   correct element here (it triggers an in-page action, not a
+   navigation), so this resets the browser's default button chrome and
+   reuses .section-header's own bleed geometry (16px 18px padding /
+   var(--radius-md), see a.nav-card-header's comment above) rather than
+   panels.css's button.oic-head.nav-card-header, which is tuned for the
+   .oic-card family's own 18px 20px / var(--radius-lg) geometry instead.
+   Hover/focus tint, arrow motion, and label color all come free from the
+   shared .nav-card-header rules above — this block only supplies the
+   layout + button reset. */
+button.section-header.nav-card-header{
+  width:100%;
+  color:inherit; cursor:pointer;
+  border:none; background-color:transparent; font:inherit; text-align:left;
+  margin:-16px -18px var(--space-5) -18px;
+  padding:14px 18px 9px;
+  border-top-left-radius:var(--radius-md);
+  border-top-right-radius:var(--radius-md);
+}
+
 /* ══════════════════════════════════════════════════════════════════
    FORM FIELDS
    Last row of DESIGN_SYSTEM.md's component table said "no equivalent

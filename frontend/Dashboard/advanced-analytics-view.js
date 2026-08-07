@@ -42,23 +42,30 @@
 
 // ── shared sub-card shell ──
 // icon/title/body match the .section-card / .section-header look every
-// other dashboard card uses; linkFn/linkLabel (optional) render as the
-// same .sec-btn "Full X →" pattern buildGreeksAlertsHtml already uses,
-// so a sub-card can point at an existing full-page modal instead of
-// re-implementing it. subtitle (optional, IA redesign step 2) renders as
-// a .section-sub next to the title — same purpose as Institutional
-// Activity Crux's .oic-sub: scope this card against others that answer
-// a similarly-titled question differently (see dashboard-redesign-
-// proposal.md §1's fragmentation table).
+// other dashboard card uses. When linkFn/linkLabel are given, the whole
+// header line becomes the click target — same nav-card-header pattern as
+// Option Chain Snapshot / Greeks / FII/DII / IV Rank (components.css's
+// button.section-header.nav-card-header), rather than a separate "Full
+// X →" button sitting next to a static header — so a sub-card can point
+// at an existing full-page modal without adding a second click target.
+// subtitle (optional, IA redesign step 2) renders as a .section-sub next
+// to the title — same purpose as Institutional Activity Crux's .oic-sub:
+// scope this card against others that answer a similarly-titled question
+// differently (see dashboard-redesign-proposal.md §1's fragmentation
+// table).
 function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel, subtitle) {
-  const link = linkFn
-    ? `<button class="sec-btn" style="padding:3px 9px;font-size:10.5px;" onclick="${linkFn}" title="${linkLabel}">${linkLabel}</button>`
-    : '';
+  const titleHtml = `<span class="section-icon">${icon}</span>${title}${subtitle ? ` <span class="section-sub">${subtitle}</span>` : ''}`;
+  const header = linkFn
+    ? `<button class="section-header nav-card-header" onclick="${linkFn}"
+         aria-label="Open ${title} — view full table" title="Open full ${title.toLowerCase()}">
+        <span class="section-title nav-card-header-label">${titleHtml}</span>
+        <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+      </button>`
+    : `<div class="section-header">
+        <span class="section-title">${titleHtml}</span>
+      </div>`;
   return `<div class="section-card sc-neutral" style="min-width:0;">
-    <div class="section-header">
-      <span class="section-title"><span class="section-icon">${icon}</span>${title}${subtitle ? ` <span class="section-sub">${subtitle}</span>` : ''}</span>
-      ${link}
-    </div>
+    ${header}
     <div style="padding:2px 0;">${bodyHtml}</div>
     ${footnote ? `<div class="legend-foot" style="margin-top:6px;">${footnote}</div>` : ''}
   </div>`;

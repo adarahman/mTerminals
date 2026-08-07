@@ -1110,6 +1110,24 @@ details.card summary .card-head{margin:0;}
   background:var(--text-tertiary);
 }
 
+/* Vol/OI Velocity's header as a nav-card-header, adapted for this
+   merged-card's own padding (14px 20px, vs .section-card's 16px 18px
+   the base button.section-header.nav-card-header rule in components.css
+   is tuned for) — using those numbers verbatim here would leave a
+   visible seam on hover instead of a flush bleed. No border-radius
+   needed on the header itself: .oic-merged-card (the actual rounded
+   ancestor) already clips via overflow:hidden, so the hover tint's top
+   corners come pre-rounded for free. */
+/* Neutral gray glow on hover/focus, matching this panel's own ::before
+   accent bar color and .sc-neutral's convention elsewhere — Vol/OI
+   Velocity has no bull/bear/domain lean of its own to color it by. */
+#sdt-panel{ --section-accent: var(--text-tertiary); }
+
+.oic-merged-vel button.section-header.nav-card-header{
+  margin:-14px -20px 12px -20px;
+  padding:12px 20px 9px;
+}
+
 .oic-merged-card #oi-flow-summary-card{
   border:none;
   border-radius:0;
@@ -1117,6 +1135,22 @@ details.card summary .card-head{margin:0;}
   background:transparent;
   height:auto;
   flex:1;
+  /* Tightened from .oic-card's default 18px 20px — this card is now just
+     the Block Detection line continuing directly under #sdt-panel's
+     chart, not a boxed sub-card of its own, so it doesn't need a full
+     card's worth of top padding pushing it away from the divider above. */
+  padding:10px 20px 14px;
+}
+
+/* Plain caption line for the Block Detection readout — deliberately NOT
+   a boxed .oic-tile (own background/border/icon-chip/uppercase label);
+   see the "alienated" note in oi-flow-view.js's buildOiFlowSummaryHtml.
+   Reads as this panel's own trailing readout, matching the same weight
+   as .legend-foot captions used elsewhere on the dashboard. */
+.oi-flow-block-line{
+  font-size:var(--fs-xs);
+  color:var(--text-secondary);
+  line-height:1.5;
 }
 
 .oic-head{
@@ -1143,6 +1177,7 @@ details.card summary .card-head{margin:0;}
    usage. */
 button.oic-head.nav-card-header{
   border:none;background-color:transparent;font:inherit;text-align:left;width:100%;
+  color:inherit;cursor:pointer;
   margin:-18px -20px var(--space-5) -20px;
   padding:16px 20px 11px;
   border-top-left-radius:var(--radius-lg);
