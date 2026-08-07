@@ -43,7 +43,7 @@ dev = [
 where = ["."]
 include = [
     "decision*", "oi*", "risk*", "brokers*", "storage*", "strategy*",
-    "ml*", "analytics*",
+    "ml*", "analytics*", "backtest*",
 ]
 
 [tool.setuptools]

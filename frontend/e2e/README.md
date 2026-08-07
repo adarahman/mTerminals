@@ -3,10 +3,13 @@
 These tests exercise the production frontend served by the running
 `ws_server_live.py` process.
 
-1. Start the backend normally and confirm the Dashboard is available at
-   `http://127.0.0.1:5500/dist/Dashboard/DashboardPro.html`.
-2. Build the frontend after source changes with `npm run build`.
-3. Run `npm run test:e2e` from `frontend/`.
+1. Build the frontend after source changes with `npm run build`.
+2. Run `npm run test:e2e` from `frontend/`.
+
+The suite reuses the live backend when port 5500 is already available. If it
+is not, Playwright starts a local static server automatically. The Option
+Chain handoff test injects a deterministic chain snapshot in the browser, so
+CI never needs broker credentials or an external market-data connection.
 
 Environment overrides:
 
@@ -16,5 +19,4 @@ Environment overrides:
 
 Failure traces and screenshots are written under ignored Playwright artifact
 directories. Video is intentionally disabled so the suite does not require
-Playwright's optional FFmpeg download. The Option Chain handoff test requires
-the running backend to provide at least one live or last-known chain row.
+Playwright's optional FFmpeg download.

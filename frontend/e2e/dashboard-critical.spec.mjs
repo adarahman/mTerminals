@@ -48,10 +48,44 @@ test('Backtest modal uses the shared accessible modal contract', async ({ page }
 
 test('Option Chain hands Strike Detail back to the Dashboard', async ({ page }) => {
   await openDashboard(page);
+  const strike = 24_600;
+  const chainRow = {
+    strike,
+    footprintScore: 72,
+    footprintFactors: { capitalActivity: 90, oiChangeActivity: 80, turnoverActivity: 70 },
+    ceOI: 1_200_000, ceChgOI: 80_000, ceVol: 2_400_000, ceLTP: 120,
+    ceSignal: 'Short build', ceCapitalFlow: 9_600_000,
+    peOI: 1_000_000, peChgOI: 60_000, peVol: 1_800_000, peLTP: 105,
+    peSignal: 'Long build', peCapitalFlow: 6_300_000,
+  };
+  await page.evaluate(({ row }) => {
+    const fixture = {
+      symbol: 'NIFTY', expiry: '31-DEC-2099', spot: row.strike,
+      atm: row.strike, chain: [row], greeks: [], oiVelocity: [],
+      lastUpdated: new Date().toISOString(),
+    };
+    window.parseAndRender(JSON.stringify(fixture));
+  }, { row: chainRow });
+
   const popupPromise = page.waitForEvent('popup');
-  await page.evaluate(() => window.openOptionChain());
+  await page.evaluate((selectedStrike) => window.openOptionChainAtStrike(selectedStrike), strike);
   const optionChain = await popupPromise;
   await optionChain.waitForLoadState('domcontentloaded');
+
+  await page.evaluate(({ row }) => {
+    const chan = new BroadcastChannel('oc-live-sync');
+    chan.postMessage({
+      rows: [{
+        strike: row.strike, isAtm: true, pcr: '0.83', pcrChg: '+0.02',
+        ce: { oi: row.ceOI, oiChg: row.ceChgOI, vol: row.ceVol, ltp: row.ceLTP, signal: row.ceSignal },
+        pe: { oi: row.peOI, oiChg: row.peChgOI, vol: row.peVol, ltp: row.peLTP, signal: row.peSignal },
+      }],
+      symbol: 'NIFTY', spot: row.strike, expiry: '31-DEC-2099',
+      expiryDates: ['31-DEC-2099'], range: 10,
+      feedState: { status: 'LIVE', quality: 'FULL', marketSession: 'LIVE' },
+    });
+    chan.close();
+  }, { row: chainRow });
 
   const firstRow = optionChain.locator('#ocBody .oc-row').first();
   await expect(firstRow).toBeVisible({ timeout: 20_000 });
