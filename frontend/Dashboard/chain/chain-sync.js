@@ -13,18 +13,9 @@
   // posts {type:'oc-request-snapshot'} on load,
   // {type:'oc-request-expiry', expiry} when its dropdown changes, and
   // {type:'oc-request-range', range} when its own ±3/±5/±10/±15/All buttons
-  // change — but nothing on this side ever opened that channel (the
-  // constructor call was commented out), so every message went nowhere:
-  // the tab stayed on 5 rows of demo data forever. With only 5 demo
-  // strikes, ±3/±5/±10/All all render the exact same visible rows, which
-  // is why the tab's own range button looked broken — it was actually
-  // never receiving real data to filter in the first place.
-  //
-  // _initBroadcast() opens the channel once (from the ChainDenseView
-  // constructor) and wires the message listener once — the old code
-  // re-added a listener inside _broadcastToOptionChainTab itself, which
-  // would have leaked a duplicate listener on every single tick had the
-  // channel ever actually been open.
+  // change. _initBroadcast() owns the channel for the lifetime of the
+  // Dashboard view and also forwards shared feed/session state so D-05
+  // uses the same LIVE/PARTIAL/MARKET CLOSED/HOLIDAY semantics as D-00.
 ChainDenseView.prototype._initBroadcast = function() {
     if (!("BroadcastChannel" in window)) return;
     this._ocChan = new BroadcastChannel("oc-live-sync");
@@ -51,14 +42,21 @@ ChainDenseView.prototype._initBroadcast = function() {
         // action opens the Dashboard Strike Detail Report.
         if (window.openStrikeDetailReportModal) window.openStrikeDetailReportModal(msg.strike);
       } else if (msg.type === "oc-place-order") {
-        // Buy/Sell from the standalone tab's quick-order modal — see
-        // option-chain.js's placeOrder(). That tab has no parent window to
-        // call ptDispatchOrder() through directly (unlike the embedded-
-        // iframe path in panels-views.js), so it routes the request over
-        // this same channel instead; answer it here.
+        // Buy/Sell from the standalone tab routes over this same channel;
+        // answer it through the Dashboard's canonical order dispatcher.
         this._handleOcPlaceOrder(msg);
       }
     });
+
+    // Feed/session state can change without a new option-chain snapshot
+    // (for example MARKET CLOSED, HOLIDAY or PARTIAL). Forward those
+    // transitions independently so D-05 never has to re-infer exchange
+    // session semantics from message age.
+    if (window.eventBus && typeof window.eventBus.on === 'function') {
+      this._ocUnsubFeed = window.eventBus.on('feed:status', (feedState) => {
+        if (this._ocChan) this._ocChan.postMessage({ type:'oc-feed-state', feedState });
+      });
+    }
 };
 
 ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
@@ -115,6 +113,7 @@ ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
       // included in this postMessage.
       maxPain: payload.maxPain,
       volOiRatios: payload.volOiRatios,
+      feedState: (window.AppState && AppState.feedState) ? { ...AppState.feedState } : null,
     });
 };
 

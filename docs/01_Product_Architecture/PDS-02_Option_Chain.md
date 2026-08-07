@@ -3,7 +3,8 @@
 
 > **Product:** mTerminals  
 > **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Version:** 1.1
+> **Status:** Implemented — P0/P1/P2 closure aligned 2026-08-07
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -48,14 +49,17 @@ Per strike:
 ## Layout contract
 
 The strike column is the visual anchor. Call and Put data SHALL remain
-unambiguously separated. ATM SHALL be visually distinct but not so dominant
-that neighboring strikes become unreadable.
+unambiguously separated. The dense ledger MAY use paired bilateral PE/CE stacks
+inside a metric column instead of literal left/right CALL and PUT halves, provided
+that PE/CE text labels remain explicit and side identity never relies on color alone.
+ATM SHALL be visually distinct but not so dominant that neighboring strikes become unreadable.
 
 The table SHALL maintain stable column order during a session.
 
 ## Context contract
 
 - Expiry follows the shared/global selection when launched from Dashboard.
+- Feed/session semantics SHALL reuse shared application state, including PARTIAL, MARKET CLOSED and HOLIDAY where available.
 - A standalone Option Chain MAY expose context controls, but it SHALL synchronize
   them through the application state model rather than maintain contradictory state.
 - Range selection changes visibility, not analytics.
@@ -122,3 +126,7 @@ A strike row MAY remain visible with partial fields.
 6. Expiry is synchronized with Dashboard context.
 7. Per-strike metrics agree with Dashboard consumers at the same state version.
 8. Compact viewport does not force the entire application page to table width.
+
+## Implementation closure
+
+As of 2026-08-07, PDS-02 acceptance criteria are implemented. Net OI Flow 5m/15m/30m belongs to Dashboard D-07 rather than the D-05 strike ledger. D-05 retains OI, ΔOI, volume, LTP, IV, premium locked, canonical footprint, signal/structure, inline Greeks and deliberate Strike Detail drill-down. Further field-level row-patching is performance hardening and SHOULD be driven by profiling rather than a redesign.

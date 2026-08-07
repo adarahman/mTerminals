@@ -67,6 +67,7 @@
     volOiRatios: {},
     maxPain: null,
     feedState: DEMO_MODE ? "DEMO" : "CONNECTING",
+    sharedFeedState: null,
     bootAt: Date.now(),
     lastLiveAt: null,
   };
@@ -163,14 +164,37 @@
   const sortExpiryDates = (dates) => (Array.isArray(dates) ? dates.slice().sort((a, b) => parseExpiryDate(a) - parseExpiryDate(b)) : dates);
 
   // ── FEED STATE ──
+  function feedVisualState() {
+    const transport = state.feedState || "DISCONNECTED";
+    if (DEMO_MODE) return { visual: "DEMO", label: "DEMO", title: "Explicit demo mode" };
+    const shared = state.sharedFeedState || {};
+    const session = shared.marketSession || "UNKNOWN";
+    let visual = transport;
+    let label = transport;
+    if (session === "HOLIDAY") {
+      visual = "HOLIDAY";
+      label = transport === "DISCONNECTED" ? "HOLIDAY · OFFLINE" : "HOLIDAY";
+    } else if (session === "MARKET_CLOSED") {
+      visual = "MARKET_CLOSED";
+      label = transport === "DISCONNECTED" ? "MARKET CLOSED · OFFLINE" : "MARKET CLOSED";
+    } else if (transport === "LIVE" && shared.quality === "PARTIAL") {
+      visual = "PARTIAL";
+      label = "PARTIAL";
+    }
+    const missing = Array.isArray(shared.missing) && shared.missing.length ? ` Missing: ${shared.missing.join(', ')}.` : '';
+    const title = (shared.reason || label) + missing;
+    return { visual, label, title };
+  }
+
   function renderFeedState() {
-    const status = state.feedState || "DISCONNECTED";
+    const { visual, label, title } = feedVisualState();
     const eyebrow = $("ocEyebrow");
     const pill = $("ocFeedStatus");
-    if (eyebrow) eyebrow.dataset.feedState = status;
+    if (eyebrow) eyebrow.dataset.feedState = visual;
     if (pill) {
-      pill.textContent = status;
-      pill.className = "oc-feed-status is-" + status.toLowerCase().replace(/\s+/g, "-");
+      pill.textContent = label;
+      pill.title = title;
+      pill.className = "oc-feed-status is-" + visual.toLowerCase().replace(/[_\s]+/g, "-");
     }
   }
 
@@ -335,14 +359,17 @@
     if (!Number.isFinite(score)) {
       return { label: "—", color: "var(--text-3)", title: "Institutional footprint unavailable" };
     }
-    const ceFlow = Math.abs(Number(r.ce && r.ce.capitalFlow) || 0);
-    const peFlow = Math.abs(Number(r.pe && r.pe.capitalFlow) || 0);
-    const dominantSide = ceFlow >= peFlow ? "CE" : "PE";
+    const ceRaw = r.ce && r.ce.capitalFlow;
+    const peRaw = r.pe && r.pe.capitalFlow;
+    const ceFlow = ceRaw == null ? null : Number(ceRaw);
+    const peFlow = peRaw == null ? null : Number(peRaw);
+    const hasComparableFlow = Number.isFinite(ceFlow) && Number.isFinite(peFlow);
+    const dominantSide = hasComparableFlow ? (Math.abs(ceFlow) >= Math.abs(peFlow) ? "CE" : "PE") : null;
     const color = score >= 70 ? "var(--put)" : score >= 40 ? "var(--spine)" : "var(--text-3)";
     return {
       label: `FP ${score.toFixed(0)}`,
       color,
-      title: `Canonical footprint ${score.toFixed(1)}/100 · ${dominantSide}-led`,
+      title: `Canonical footprint ${score.toFixed(1)}/100${dominantSide ? ` · ${dominantSide}-led` : ""}`,
     };
   }
 
@@ -408,7 +435,7 @@
     const ceChgCls = ceOiCls(r.ce.oiChg);
     const peChgCls = peOiCls(r.pe.oiChg);
     const rowHtml = `
-    <tr class="oc-row${r.isAtm ? " oc-atm" : ""}${state.focusStrike === r.strike ? " oc-focus-target" : ""}${state.selectedStrike === r.strike ? " oc-selected" : ""}" data-strike="${r.strike}" tabindex="0" aria-label="${state.symbol} ${r.strike} strike row; press Enter for summary">
+    <tr class="oc-row${r.isAtm ? " oc-atm" : ""}${state.focusStrike === r.strike ? " oc-focus-target" : ""}${state.selectedStrike === r.strike ? " oc-selected" : ""}" data-strike="${r.strike}" tabindex="0" aria-label="${state.symbol} ${r.strike} strike${r.isAtm ? ", ATM" : ""}${state.selectedStrike === r.strike ? ", selected" : ""}; press Enter for summary">
       <td class="oc-iv-cell">
         <div class="oc-stack">
           <span class="pe">${fmtPct(r.pe.iv)}</span>
@@ -905,8 +932,22 @@
       <button class="oc-drawer-action" data-oc-drawer-action="detail" onclick="window.ocOpenStrikeDetail(${r.strike})">Open Strike Detail ↗</button>`;
   }
 
+  function capitalSummary(r) {
+    const ceRaw = r && r.ce ? r.ce.premiumLocked : null;
+    const peRaw = r && r.pe ? r.pe.premiumLocked : null;
+    if (ceRaw == null || peRaw == null) return { pcr: "—", share: "—" };
+    const ce = Number(ceRaw);
+    const pe = Number(peRaw);
+    if (!Number.isFinite(ce) || !Number.isFinite(pe)) return { pcr: "—", share: "—" };
+    const pcr = ce === 0 ? (pe > 0 ? "∞" : "—") : (pe / ce).toFixed(2);
+    const total = ce + pe;
+    const share = total > 0 ? `${((pe / total) * 100).toFixed(0)}%` : "—";
+    return { pcr, share };
+  }
+
   function buildSummaryDrawerHtml(r) {
     const strike = r.strike;
+    const cap = capitalSummary(r);
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-family:var(--display);font-weight:700;font-size:17px;">${state.symbol} ${strike}${r.isAtm ? ' <span style="color:var(--spine);font-size:11px;">ATM</span>' : ""}</div>
@@ -938,7 +979,7 @@
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--hairline);font-family:var(--mono);font-size:12px;color:var(--text-2);">
         PCR <b style="color:var(--spine);">${r.pcr}</b> (${r.pcrChg}) — put OI share ${((r.pe.oi/(r.pe.oi+r.ce.oi||1))*100).toFixed(0)}% of this strike<br>
-        Capital PCR <b style="color:var(--spine);">${((r.pe.premiumLocked||0)/((r.ce.premiumLocked||0)||1)).toFixed(2)}</b> — put premium share ${(((r.pe.premiumLocked||0)/((r.pe.premiumLocked||0)+(r.ce.premiumLocked||0)||1))*100).toFixed(0)}% of this strike's locked capital
+        Capital PCR <b style="color:var(--spine);">${cap.pcr}</b> — put premium share ${cap.share} of this strike's locked capital
       </div>
       <button class="oc-drawer-action" data-oc-drawer-action="detail" onclick="window.ocOpenStrikeDetail(${strike})">Open Strike Detail ↗</button>`;
   }
@@ -1066,7 +1107,7 @@
     $("ocTradePanel").innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
         <div style="font-family:var(--display);font-weight:700;font-size:16px;">${state.symbol} ${strike} <span style="color:var(${colorVar});">${side}</span></div>
-        <button onclick="window.ocCloseTradeModal()" style="background:none;border:none;color:var(--text-2);font-size:18px;cursor:pointer;">✕</button>
+        <button onclick="window.ocCloseTradeModal()" aria-label="Close quick order" style="background:none;border:none;color:var(--text-2);font-size:18px;cursor:pointer;">✕</button>
       </div>
       <div style="font-family:var(--mono);font-size:12px;color:var(--text-3);margin-bottom:14px;">LTP <b style="color:var(--text);">${ltp != null ? fmtNum(leg.ltp) : "—"}</b></div>
       <label style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);">Lots</label>
@@ -1106,27 +1147,10 @@
       return;
     }
 
-    // Path 1: embedded in the dashboard's iframe (see panels-views.js's
-    // toggleFullChainFocus()) — direct call into the real paper-trading
-    // engine. No fill/reject comes back through this call itself (the
-    // dashboard's own Order/Trade Log updates independently over its
-    // existing WS connection), so this stays an optimistic "sent" message,
-    // same as before.
-    if (window._ocPlaceOrder) {
-      window._ocPlaceOrder(orderPayload);
-      if (el) {
-        el.textContent = `${action === "BUY" ? "Bought" : "Sold"} ${qty} lot${qty > 1 ? "s" : ""} of ${state.symbol} ${ctx.strike} ${ctx.side} @ ${fmtNum(ctx.ltp)} — sent`;
-        el.classList.remove("oc-trade-confirm-err");
-        el.classList.add("show");
-      }
-      setTimeout(closeTradeModal, 900);
-      return;
-    }
-
-    // Path 2: opened standalone (its own tab/window, no parent to call
-    // into) — route the request over the same "oc-live-sync"
-    // BroadcastChannel already used for live chain data, and wait for a
-    // real {type:"oc-order-result"} reply (see handleOrderResult()) before
+    // Standalone D-05 routes the request over the same "oc-live-sync"
+    // BroadcastChannel used for live chain data and waits for an explicit
+    // {type:"oc-order-result"} lifecycle reply from the Dashboard order
+    // dispatcher (see handleOrderResult()) before
     // showing anything. Requires chain-sync.js on the dashboard side to
     // listen for {type:"oc-place-order", reqId, order} and post back
     // {type:"oc-order-result", reqId, status, fill_price|reason} — same
@@ -1157,7 +1181,7 @@
       return;
     }
 
-    // Path 3: no live order route at all. Never fabricate a trade or a
+    // No live order route at all. Never fabricate a trade or a
     // fill in demo/offline mode.
     if (el) {
       el.textContent = DEMO_MODE ? "DEMO ONLY — order not sent" : "DISCONNECTED — order not sent";
@@ -1205,6 +1229,7 @@
     if (!msg || !Array.isArray(msg.rows)) return;
     state.lastLiveAt = Date.now();
     state.feedState = "LIVE";
+    if (msg.feedState) state.sharedFeedState = { ...msg.feedState };
     const nextSymbol = msg.symbol || state.symbol;
     const nextExpiry = msg.expiry || state.expiry;
     const nextContextKey = `${nextSymbol}|${nextExpiry}`;
@@ -1256,6 +1281,11 @@
         // otherwise just silently drop it (no `rows` field).
         if (data && data.type === "oc-order-result") { handleOrderResult(data); return; }
         if (data && data.type === "oc-focus-strike") { focusStrike(data.strike); return; }
+        if (data && data.type === "oc-feed-state") {
+          state.sharedFeedState = data.feedState ? { ...data.feedState } : null;
+          renderFeedState();
+          return;
+        }
         applyLivePayload(data);
       });
       // ask the dashboard tab (if any) to replay its last snapshot immediately

@@ -93,6 +93,7 @@ body{
 .oc-eyebrow[data-feed-state="DISCONNECTED"]::before{background:var(--neg);box-shadow:0 0 8px var(--neg);}
 .oc-eyebrow[data-feed-state="DEMO"]::before{background:var(--warn);box-shadow:0 0 8px var(--warn);}
 .oc-eyebrow[data-feed-state="CONNECTING"]::before{background:var(--oc-blue);box-shadow:0 0 8px var(--oc-blue);}
+.oc-eyebrow[data-feed-state="PARTIAL"]::before,.oc-eyebrow[data-feed-state="MARKET_CLOSED"]::before,.oc-eyebrow[data-feed-state="HOLIDAY"]::before{background:var(--warn);box-shadow:0 0 8px var(--warn);}
 .oc-feed-status{
   display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;
   border:1px solid var(--oc-hairline);font-size:9px;font-weight:700;letter-spacing:.08em;
@@ -102,6 +103,7 @@ body{
 .oc-feed-status.is-stale,.oc-feed-status.is-demo{color:var(--warn);border-color:var(--warn);}
 .oc-feed-status.is-disconnected{color:var(--neg);border-color:var(--neg);}
 .oc-feed-status.is-connecting{color:var(--oc-blue);border-color:var(--oc-blue);}
+.oc-feed-status.is-partial,.oc-feed-status.is-market-closed,.oc-feed-status.is-holiday{color:var(--warn);border-color:var(--warn);}
 @keyframes oc-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 .oc-head h1{
   font-family:var(--font-display);font-weight:700;font-size:1.7rem;
