@@ -63,7 +63,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   margin-bottom:18px;
 }
 
-.dd-split{display:grid;grid-template-columns:1fr 1fr;gap: var(--space-4);align-items:start;}
+.dd-split{display:grid;grid-template-columns:1fr;gap: var(--space-4);align-items:start;}
 
 .dd-col{min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.02);}
 
@@ -211,4 +211,4 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   padding-top:10px;
   margin:4px 0 8px;
   border-top-color:var(--border-2);
-}  
+}
