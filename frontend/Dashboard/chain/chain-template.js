@@ -747,11 +747,11 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
         <div class="oi-flow-cols">
           <div class="oi-flow-col">
             <span class="oi-flow-win">CE ₹</span>
-            <span class="oi-flow-val" style="color:${signColor(totalCeFlow)};">${signedFmt(totalCeFlow)}</span>
+            <span class="oi-flow-val" style="color:var(--ce);">${signedFmt(totalCeFlow)}</span>
           </div>
           <div class="oi-flow-col">
             <span class="oi-flow-win">PE ₹</span>
-            <span class="oi-flow-val" style="color:${signColor(totalPeFlow)};">${signedFmt(totalPeFlow)}</span>
+            <span class="oi-flow-val" style="color:var(--pe);">${signedFmt(totalPeFlow)}</span>
           </div>
           <div class="oi-flow-col">
             <span class="oi-flow-win">Net Flow</span>

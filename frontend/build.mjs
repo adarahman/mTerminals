@@ -68,7 +68,10 @@ const pages = [
         "Dashboard/fiidii-report.js",
         "shared/services/ws-manager.js", "shared/stores/market-store.js", "shared/services/data-service.js",
         "Dashboard/ui-controls.js", "Dashboard/panel-manager.js", "Dashboard/dashboard-panels.js",
-        "Dashboard/dashboard.js", "Dashboard/paper-trading.js", "Dashboard/algo-status.js",
+        "Dashboard/dashboard.js",
+        "Dashboard/components/mt-button.js",
+        "Dashboard/paper-trading-shared.js", "Dashboard/order-entry.js", "Dashboard/portfolio-tracker.js",
+        "Dashboard/algo-status.js",
         "Dashboard/backtest-view.js",
       ],
     ],
@@ -82,7 +85,7 @@ const pages = [
   {
     html: "OptionChain/option-chain.html",
     out: "option-chain",
-    css: ["styles/theme.css", "styles/backtest-view.css", "OptionChain/option-chain.css"],
+    css: ["styles/theme.css", "styles/components.css", "OptionChain/option-chain.css"],
     js: [["engines/smart-money.js", "engines/market-structure.js", "OptionChain/option-chain.js"]],
   },
   {

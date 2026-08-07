@@ -873,6 +873,20 @@
     $("ocTradeModal").addEventListener("click", (e) => {
       if (e.target.id === "ocTradeModal") closeTradeModal();
     });
+    // Close on click anywhere outside the trade panel, or on Escape —
+    // the LTP cells that open this modal already call
+    // event.stopPropagation() on their own click, so that opening click
+    // never reaches this listener and can't immediately close what it
+    // just opened.
+    document.addEventListener("click", (e) => {
+      const modal = $("ocTradeModal");
+      if (modal.classList.contains("open") && !$("ocTradePanel").contains(e.target)) {
+        closeTradeModal();
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $("ocTradeModal").classList.contains("open")) closeTradeModal();
+    });
 
     // set initial toggle button active states
     $("ocRangeGroup").querySelector(`button[data-val="${state.range}"]`)?.classList.add("active");
