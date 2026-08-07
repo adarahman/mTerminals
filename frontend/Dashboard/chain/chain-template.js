@@ -581,10 +581,12 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const clockIcon = `<svg class="oi-flow-clock" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`;
 
   // ── OI summary ──
-  const totalCe = chain.reduce((s,r)=>s+(r.ceOI||0),0);
-  const totalPe = chain.reduce((s,r)=>s+(r.peOI||0),0);
+  // computeRangeChainTotals (metrics.js, IA redesign step 6) — this is
+  // the Range PCR figure (PROJECT-ARCHITECTURE.md §13: frontend-only,
+  // distinct from full-chain PCR), same computation this file's Volume
+  // Analytics block below used to redo independently.
+  const {totalCe, totalPe, pcr} = computeRangeChainTotals(chain);
   const oiTotal = totalCe+totalPe || 1;
-  const pcr = totalPe/(totalCe||1);
 
   // ── Chg OI summary (+ how much that shifted PCR) ──
   const totalCeChg = chain.reduce((s,r)=>s+(r.ceChgOI||0),0);
@@ -792,8 +794,10 @@ ChainView.prototype.buildVolOiDetailHtml = function(d) {
     return s+a.toFixed(0);
   };
 
-  const totalCe = chain.reduce((s,r)=>s+(r.ceOI||0),0);
-  const totalPe = chain.reduce((s,r)=>s+(r.peOI||0),0);
+  // computeRangeChainTotals (metrics.js, IA redesign step 6) — same OI
+  // totals as buildChainSummaryHtml above; only totalCe/totalPe are used
+  // here (as vol-ratio denominators), .pcr is unused in this function.
+  const {totalCe, totalPe} = computeRangeChainTotals(chain);
   const totalCeVol = chain.reduce((s,r)=>s+(r.ceVol||0),0);
   const totalPeVol = chain.reduce((s,r)=>s+(r.peVol||0),0);
   const ratioCap = 3;

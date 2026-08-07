@@ -52,12 +52,21 @@ function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel, subtitl
 // ── 1. Smart Money ranking ──
 // Reuses the same isInst/badge heuristic SimulatorView's Institutional
 // Activity table already applies per strike (see simulator-view.js's
-// rowHtml), but ranks the WHOLE visible chain by strength of ΔOI among
+// rowHtml), but ranks the visible chain by strength of ΔOI among
 // institutional-flagged strikes instead of grouping by near/far band —
 // a "who's doing the most right now" list rather than a strike ledger.
+//
+// CORRECTION (step 6 audit): was labeled "Whole-Chain Ranking" (and this
+// comment said "the WHOLE visible chain," the exact same conflation)
+// despite ranking getFilteredChain(d) — the user's ±N chain-range
+// selection, same scope Range PCR is honest about, not the true full
+// chain. Relabeled to "Visible-Range Ranking" so this card's scope
+// matches what it actually computes. See PROJECT-ARCHITECTURE.md §13/
+// dashboard-redesign-proposal.md §4 for the authoritative-source table
+// this is keeping consistent with.
 function _aaSmartMoneyRankingHtml(d) {
   const chain = getFilteredChain(d);
-  if (!chain.length) return _aaCardWrap('🧠', 'Smart Money Ranking', `<div class="dd-empty">No chain data yet.</div>`, null, null, null, 'Whole-Chain Ranking');
+  if (!chain.length) return _aaCardWrap('🧠', 'Smart Money Ranking', `<div class="dd-empty">No chain data yet.</div>`, null, null, null, 'Visible-Range Ranking');
 
   const ratios = d.volOiRatios || {};
   const totals = chain.map(r => (r.ceOI || 0) + (r.peOI || 0)).sort((a, b) => a - b);
@@ -92,7 +101,7 @@ function _aaSmartMoneyRankingHtml(d) {
 
   return _aaCardWrap('🧠', 'Smart Money Ranking', body,
     'Ranked by strongest ΔOI among institutional-flagged strikes (ACC / DIST / HEDGE / ROLL).',
-    null, null, 'Whole-Chain Ranking');
+    null, null, 'Visible-Range Ranking');
 }
 
 // ── 2. IV Rank details ──

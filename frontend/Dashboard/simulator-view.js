@@ -95,9 +95,13 @@ class SimulatorView {
     return { strike: g.strike, netGEX: adjGex, iv: ivPct, cDelta: g.cDelta, pDelta: g.pDelta, cGamma: g.cGamma };
   });
 
-  var totalGEX = simGEX.reduce(function(s, g) { return s + g.netGEX; }, 0);
+  // computeNetGEX/computeGammaFlip (metrics.js, IA redesign step 6) —
+  // simGEX is the slider-adjusted array (Scenario-Adjusted scope, see
+  // metrics.js's own doc comment), a legitimately different input from
+  // the live-figure call sites elsewhere, not a duplicate of them.
+  var totalGEX = computeNetGEX(simGEX);
   var vannaMultiplier = 1.0 + Math.abs(totalGEX) / (30 * ivRatio);
-  var flipRow = findGammaFlipStrike(simGEX, simSpot);
+  var flipRow = computeGammaFlip(simGEX, simSpot);
 
   var gexEl = document.getElementById('sim-stat-gex');
   if (gexEl) {

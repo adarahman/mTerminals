@@ -59,15 +59,20 @@ function _convictionPillarFiiDii(d) {
 
 // IA redesign step 2: label carries an explicit "(Regime Vote)" scope
 // tag, same treatment as _convictionPillarSmartMoneyLean's "(Aggregate
-// Vote)" above — this pillar reduces the live, whole-chain gamma-flip
+// Vote)" above — this pillar reduces the visible-range gamma-flip
 // strike (same one Greeks Alerts flags, see chain-greeks.js) down to a
 // single +1/0/-1 vote based on which side of it spot currently sits, so
 // it reads as distinct from that card's raw alert and from the
 // Simulator's scenario-adjusted GEX chart (dashboard-redesign-
 // proposal.md §1's "Same story for Gamma/GEX" fragmentation note).
+// CORRECTION (step 6 audit): this comment previously said "live,
+// whole-chain gamma-flip strike" — the `greeks` param passed in here is
+// visible-range (see computeConvictionGauge above), same scope as
+// Greeks Alerts itself since its own step-6 fix, not whole-chain.
 function _convictionPillarGammaFlip(d, greeks, atm) {
   const LABEL = 'Gamma Flip (Regime Vote)';
-  const flip = findGammaFlipStrike(greeks, atm);
+  // computeGammaFlip (metrics.js, IA redesign step 6)
+  const flip = computeGammaFlip(greeks, atm);
   const spot = d.spot;
   if (!flip || spot == null) {
     return { vote: 0, label: LABEL, detail: 'No flip in visible range' };
@@ -126,10 +131,11 @@ function _convictionPillarPcrExpansion(d) {
 // which read as the same fact shown twice even though it wasn't.
 // IA redesign step 2: label carries an explicit "(Aggregate Vote)" scope
 // tag so this pillar reads as distinct from Institutional Activity
-// Crux's "Near-ATM Ledger" and Smart Money Ranking's "Whole-Chain
-// Ranking" — same underlying per-strike score, three different
-// aggregations, no longer distinguishable only by which file each lives
-// in (dashboard-redesign-proposal.md §1's fragmentation table).
+// Crux's "Near-ATM Ledger" and Smart Money Ranking's "Visible-Range
+// Ranking" (renamed step 6 — see that file's comment) — same underlying
+// per-strike score, three different aggregations, no longer
+// distinguishable only by which file each lives in (dashboard-redesign-
+// proposal.md §1's fragmentation table).
 function _convictionPillarSmartMoneyLean(chain, greeks) {
   const LABEL = 'Smart Money Lean (Aggregate Vote)';
   if (!chain.length) {
@@ -157,9 +163,11 @@ function _convictionPillarSmartMoneyLean(chain, greeks) {
 function computeConvictionGauge(d) {
   const atm = activeAtm(d);
   const chain = getFilteredChain(d);
-  const chainStrikeSet = new Set(chain.map(r => r.strike));
-  const greeksAll = d.greeks || [];
-  const greeks = greeksAll.filter(g => chainStrikeSet.has(g.strike));
+  // getVisibleRangeGreeks (metrics.js, IA redesign step 6) — same
+  // visible-range filter as the Greeks Alerts card / Smart Money
+  // Ranking / Greeks modal, replacing this file's own independent copy
+  // of the identical filter logic.
+  const greeks = getVisibleRangeGreeks(d, chain);
 
   const pillars = [
     _convictionPillarFiiDii(d),

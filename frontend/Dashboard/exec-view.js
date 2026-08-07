@@ -92,9 +92,11 @@ class ExecView {
        global helpers chain-renderer.js uses ahead of this same call. -->
   ${(() => {
     const gAtm = activeAtm(d);
-    const gChain = getFilteredChain(d);
-    const gStrikeSet = new Set(gChain.map(r=>r.strike));
-    const gGreeks = (d.greeks||[]).filter(g=>gStrikeSet.has(g.strike));
+    // getVisibleRangeGreeks (metrics.js, IA redesign step 6) — same
+    // visible-range filter chain-renderer.js's renderDashboard/
+    // _rerenderChainPanels use for this same card's per-tick patch, so
+    // the initial render and every subsequent tick agree on scope.
+    const gGreeks = getVisibleRangeGreeks(d);
     return app.chain.buildGreeksAlertsHtml(gGreeks, gAtm, d);
   })()}
 

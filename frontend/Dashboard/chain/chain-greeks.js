@@ -11,15 +11,29 @@
 // ============================================================
 
   // ── GREEKS ALERTS (main-dashboard summary card) ──
-  // IA redesign step 2: "Live, Whole-Chain" scope tag added to the title
-  // so this card's raw, un-adjusted totalGEX (summed straight off the
-  // live greeks array) reads as distinct from the other two GEX-themed
-  // cards flagged in dashboard-redesign-proposal.md §1's "Same story for
-  // Gamma/GEX" paragraph — Advanced Analytics' GEX Table ("Top |GEX|
-  // Strikes", per-strike ranked view) and the Institutional Simulator's
-  // Net GEX Profile chart ("Scenario-Adjusted", vanna/IV-slider-adjusted,
-  // not the live figure). Same underlying greeks array, three different
+  // IA redesign step 2: scope tag added to the title so this card's raw,
+  // un-adjusted totalGEX (summed off the live greeks array) reads as
+  // distinct from the other two GEX-themed cards flagged in
+  // dashboard-redesign-proposal.md §1's "Same story for Gamma/GEX"
+  // paragraph — Advanced Analytics' GEX Table ("Top |GEX| Strikes",
+  // per-strike ranked view) and the Institutional Simulator's Net GEX
+  // Profile chart ("Scenario-Adjusted", vanna/IV-slider-adjusted, not the
+  // live figure). Same underlying greeks array, three different
   // treatments of it.
+  //
+  // CORRECTION (step 6 audit): this card was labeled "Live, Whole-Chain"
+  // but both call sites (exec-view.js's renderExecutiveDashboard and
+  // chain-renderer.js's patchOuterHtmlIfChanged('greeks-alerts-card', ...))
+  // actually pass it `greeks` filtered through getFilteredChain(d) — the
+  // same user-controlled ±N strike range Range PCR uses, not the true
+  // full chain (getFilteredChain only returns the unfiltered chain when
+  // the range selector is set to "All", _chainRange===9999). Relabeled to
+  // "Live, Visible Range" to match what's actually computed, same honesty
+  // Range PCR already gets on the neighboring Chain Snapshot card,
+  // instead of silently changing a live gamma/GEX alert's scope as a
+  // side effect of a labeling fix. If true whole-chain GEX is wanted
+  // here later, that's a deliberate follow-up (pass d.greeks unfiltered),
+  // not this one.
   // The full per-strike Greeks/GEX table (Δ/Γ/Θ/Vega tabs + Net GEX +
   // Regime columns) moved out of the main dashboard into its own modal —
   // openGreeksModal()/closeGreeksModal() in ModalManager, mirroring the
@@ -34,8 +48,12 @@
 ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
   const GREEKS_ALERT_THETA_PCT = 5; // ATM theta/day as % of ATM straddle premium
   const straddle = (d.callPremium||0) + (d.putPremium||0);
-  const totalGEX = greeks.reduce((s,g)=>s+(g.netGEX||0),0);
-  const flipRow  = findGammaFlipStrike(greeks, atm);
+  // computeNetGEX/computeGammaFlip (metrics.js, IA redesign step 6) —
+  // `greeks` is whatever scope the caller passed in (currently always
+  // visible-range, see the callers' own comments); this function doesn't
+  // decide the scope, it just computes off whatever array it's given.
+  const totalGEX = computeNetGEX(greeks);
+  const flipRow  = computeGammaFlip(greeks, atm);
   const thetaPct = straddle>0 ? Math.abs(d.atmTheta||0)/straddle*100 : 0;
 
   const alerts=[];
@@ -116,7 +134,7 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
 
   return `<div class="section-card sc-violet" id="greeks-alerts-card" style="min-width:0;">
     <div class="section-header">
-      <span class="section-title"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Live, Whole-Chain</span></span>
+      <span class="section-title"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Live, Visible Range</span></span>
       <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openGreeksModal()" title="Open full Greeks &amp; GEX table">Full Table →</button>
     </div>
     <div style="display:flex;flex-direction:column;padding:2px 0;">
@@ -175,7 +193,6 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
 ChainView.prototype.renderGreeksGex = function(view) {
   const el=$i('grkgex-content');if(!el||!_data)return;
   const filteredChain=getFilteredChain(_data);
-  const grkStrikeSet=new Set(filteredChain.map(c=>c.strike));
   // IV lookup by strike, off the CHAIN row data (ceIV/peIV) rather than
   // the greeks payload — the greeks array here only ever carried
   // cDelta/pDelta/cGamma/... /netGEX, never a per-leg IV field, which is
@@ -185,7 +202,11 @@ ChainView.prototype.renderGreeksGex = function(view) {
   // depending on the backend adding a field to a different payload.
   const chainByStrike={};
   filteredChain.forEach(r=>{chainByStrike[r.strike]=r;});
-  const greeks=(_data.greeks||[]).filter(g=>grkStrikeSet.has(g.strike));
+  // getVisibleRangeGreeks (metrics.js, IA redesign step 6) — same
+  // visible-range filter as the Greeks/Net GEX Alerts card and Advanced
+  // Analytics' Smart Money Ranking; this modal shows the identical
+  // scope, just as a full per-strike table instead of a summary.
+  const greeks=getVisibleRangeGreeks(_data, filteredChain);
   if(!greeks.length){el.innerHTML='<div style="font-size:12px;color:var(--txt3);padding:8px 0;">No Greeks/GEX data.</div>';return;}
   const atm=activeAtm(_data);
   const fieldMap={
@@ -223,7 +244,8 @@ ChainView.prototype.renderGreeksGex = function(view) {
     const clr=color||(v>=0?'var(--green)':'var(--red)');
     return `<div style="display:flex;align-items:center;gap:6px;width:100%;min-width:0;"><div style="position:relative;flex:1 1 auto;min-width:24px;height:8px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;"><div style="position:absolute;left:0;top:0;bottom:0;width:${pct.toFixed(1)}%;background:${clr};border-radius:3px;"></div></div><span style="flex-shrink:0;font-weight:600;color:${clr};font-family:var(--mono);white-space:nowrap;">${fmt(v)}</span></div>`;
   }
-  const flipStrike=findGammaFlipStrike(greeks);
+  // computeGammaFlip (metrics.js, IA redesign step 6)
+  const flipStrike=computeGammaFlip(greeks);
   const flipStrikeVal=flipStrike?flipStrike.strike:null;
   let h=`<table class="t"><thead><tr>
     <th style="text-align:center;width:64px;">Strike</th>
@@ -253,7 +275,8 @@ ChainView.prototype.renderGreeksGex = function(view) {
   });
   h+=`</tbody></table>`;
   el.innerHTML=h;
-  const totalGEX=greeks.reduce((s,g)=>s+(g.netGEX||0),0);
+  // computeNetGEX (metrics.js, IA redesign step 6)
+  const totalGEX=computeNetGEX(greeks);
   const footEl=$i('grkgex-footer');
 if(footEl){
 

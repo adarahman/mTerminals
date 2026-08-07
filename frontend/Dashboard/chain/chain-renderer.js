@@ -336,12 +336,17 @@ ChainView.prototype.renderDashboard = function(d) {
   const straddle=(d.callPremium||0)+(d.putPremium||0);
   
   const chain=getFilteredChain(d);
-  const chainStrikeSet=new Set(chain.map(r=>r.strike));
-  const greeks=greeksAll.filter(g=>chainStrikeSet.has(g.strike));
+  // getVisibleRangeGreeks/computeNetGEX (metrics.js, IA redesign step 6)
+  // — this "greeks" var is the same visible-range filter
+  // _rerenderChainPanels and exec-view.js's Greeks/GEX card wiring each
+  // used to redo independently. totalGEX below feeds the Greeks/Net GEX
+  // Alerts card's "Live, Visible Range" figure (see chain-greeks.js's
+  // step-6 correction comment) — NOT whole-chain.
+  const greeks=getVisibleRangeGreeks(d, chain);
   const combinedMode=true;
   
   const maxOI=Math.max(...chain.map(r=>Math.max(r.ceOI||0,r.peOI||0)),1);
-  const totalGEX=greeks.reduce((s,g)=>s+(g.netGEX||0),0);
+  const totalGEX=computeNetGEX(greeks);
   // Market Story card (renderExecutiveDashboard) reads d.totalGEX directly —
   // it was only ever computed as a local variable here and in renderGEX(),
   // so d.totalGEX was always undefined and the card permanently showed "—".
@@ -379,7 +384,10 @@ ChainView.prototype.renderDashboard = function(d) {
   // Capital Concentration) that used to render as this grid's cards 4-6
   // moved out to the Institutional zone below — see exec-view.js's
   // renderInstitutionalGrid().
-  h += '<div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Structure &amp; Positioning</div>';
+  // Divider styling (was inline `style=`, repeated identically at all
+  // four zone boundaries) moved to .zone-divider/.zone-divider--* in
+  // layout.css as of step 5 — see that block for the weight rationale.
+  h += '<div class="zone-divider zone-divider--primary">Structure &amp; Positioning</div>';
 
   // ── LARGE EXECUTIVE BOXES (3-col grid: Market Health & Story | Greeks/GEX Alerts | Option Chain Snapshot) ──
   // Keep the exact markup so the live-refresh path can later compare it
@@ -525,8 +533,13 @@ ChainView.prototype.renderDashboard = function(d) {
     const spot = d.spot || simCtx.spot || 0;
     const atmStrike = d.atm || simCtx.atm || 0;
     const step = greeksData.length > 1 ? (greeksData[1].strike - greeksData[0].strike) : 50;
-    const totalGEX = greeksData.reduce((s,g)=>s+(g.netGEX||0),0);
-    const flipRow = findGammaFlipStrike(greeksData, atmStrike);
+    // computeNetGEX/computeGammaFlip (metrics.js, IA redesign step 6) —
+    // greeksData is d.greeks unfiltered (Live, Whole-Chain scope, same
+    // as Advanced Analytics' GEX Table), used here as the simulator's
+    // pre-slider baseline before simUpdate() applies the scenario
+    // adjustment (see simulator-view.js's own step-6 comment).
+    const totalGEX = computeNetGEX(greeksData);
+    const flipRow = computeGammaFlip(greeksData, atmStrike);
     const flipStrike = flipRow ? flipRow.strike : 0;
     const vannaMultiplier = 1.0 + Math.abs(totalGEX) / 30;
 
@@ -723,7 +736,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // further down.
   h += `<div id="oi-flow-section">
 
-  <div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Capital Flow</div>
+  <div class="zone-divider zone-divider--primary">Capital Flow</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;">
 
     <div class="oic-merged-card">
@@ -774,7 +787,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Gauge's Smart Money Lean pillar stay inside Advanced Analytics for
   // now — extracting them out is roadmap step 7 (Advanced Analytics
   // decomposition), not this layout-only pass.
-  h += '<div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Institutional</div>';
+  h += '<div class="zone-divider zone-divider--secondary">Institutional</div>';
   h += app.exec.renderInstitutionalGrid(d);
   h += app.exec.buildInstitutionalActivitySummaryCard(d);
 
@@ -790,9 +803,26 @@ ChainView.prototype.renderDashboard = function(d) {
   // Analytics' own Scenario P&L, not Structure & Positioning — built
   // earlier (stratSimulatorHtml, needs strats/spot/greeksData in scope)
   // but appended here so build order matches display order.
-  h += '<div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Confirmation</div>';
+  h += '<div class="zone-divider zone-divider--tertiary">Confirmation</div>';
   h += this.buildAdvancedAnalyticsHtml(d);
-  h += stratSimulatorHtml;
+  // Collapsed by default (no `open` attribute, matching Advanced Analytics'
+  // own <details class="card"> right above) — closes the gap where this
+  // block previously rendered as a plain, always-open <div>, undermining
+  // §3's "Confirmation collapses by default" for half the zone even though
+  // Advanced Analytics itself already got this right. Guarded on
+  // stratSimulatorHtml being non-empty (it's '' when d.strategies is empty)
+  // so an empty collapsible card never renders when there's nothing to show.
+  if (stratSimulatorHtml) {
+    h += `<details class="card" id="strategy-simulator-card">
+    <summary>
+      <div class="card-head"><span class="ic">🧪</span>Strategy Payoff &amp; Institutional F&amp;O Simulator<span class="fill"></span></div>
+      <span class="chev">▶</span>
+    </summary>
+    <div class="detail-body">
+      ${stratSimulatorHtml}
+    </div>
+  </details>`;
+  }
 
 
   // Risk Dashboard (Trade grade / IV regime / Trap warning / key levels)
@@ -1086,10 +1116,12 @@ ChainView.prototype._rerenderChainPanels = function() {
   if(!_data) return;
 
   const chain          = getFilteredChain(_data);
-  const chainStrikeSet = new Set(chain.map(r=>r.strike));
+  const chainStrikeSet = new Set(chain.map(r=>r.strike)); // still needed below (vol/OI velocity totals)
   const atm            = activeAtm(_data);
   const greeksAll      = _data.greeks || [];
-  const greeks         = greeksAll.filter(g=>chainStrikeSet.has(g.strike));
+  // getVisibleRangeGreeks (metrics.js, IA redesign step 6) — same
+  // visible-range filter as renderDashboard's `greeks`.
+  const greeks         = getVisibleRangeGreeks(_data, chain);
   const velBlock       = (_data.oiVelocity||[]).find(b=>b.window===_velWin)||(_data.oiVelocity||[])[0];
   const velByStrike    = {};
   if(velBlock&&velBlock.rows) velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
@@ -1372,7 +1404,10 @@ ChainView.prototype._rerenderChainPanels = function() {
   // action buttons of its own), only checks the one chain-summary-card
   // already owns.
   patchOuterHtmlIfChanged('exec-section-wrap', () => {
-    _data.totalGEX = greeks.reduce((s,g)=>s+(g.netGEX||0),0);
+    // computeNetGEX (metrics.js, IA redesign step 6) — `greeks` here is
+    // the same visible-range array as renderDashboard's, so this stays
+    // consistent with what the Greeks/Net GEX Alerts card itself shows.
+    _data.totalGEX = computeNetGEX(greeks);
     return renderExecutiveDashboard(_data);
   }, { guardKey: 'chainSummary' });
 

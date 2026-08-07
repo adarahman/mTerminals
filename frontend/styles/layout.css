@@ -163,3 +163,52 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    at the top — it's data-about-the-panel, not a per-strike row. */
 
 .algn-card .section-footer{flex:0 0 auto;margin-top:0;padding:8px 0 0;}
+
+/* ── DASHBOARD ZONES (IA redesign step 5, see
+   dashboard-redesign-proposal.md §2.4/§3) ──
+   Centralizes the zone-divider markup that chain-renderer.js's
+   renderDashboard() previously repeated inline, byte-for-byte identical,
+   at all four zone boundaries (Structure & Positioning / Capital Flow /
+   Institutional / Confirmation) — a single edit here now reaches all
+   four instead of a find-replace across the template.
+
+   §2.4 calls for decreasing visual weight going down the page. Decision
+   (Zone B) needs no divider of its own — the Tier-1 card already reads
+   as the page's heaviest element. The three modifiers below step the
+   remaining zones down from there:
+     --primary   Structure & Positioning, Capital Flow — first things a
+                 trader scans after the Decision call, so they read
+                 closest in weight to the divider above Decision itself.
+     --secondary Institutional — one step down; still always-open (§3)
+                 but not the first place a scan lands.
+     --tertiary  Confirmation — lightest divider, immediately followed by
+                 collapsed-by-default content (advanced-analytics-card),
+                 so the divider itself should read as "optional detail
+                 starts here" rather than compete with the zones above.
+   Base .zone-divider carries the shared type treatment; the border-top
+   is what actually draws the horizontal rule from the §2.4 diagram. */
+.zone-divider{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  margin:4px 0 10px;
+  padding-top:14px;
+  border-top:1px solid var(--border);
+  color:var(--text-tertiary);
+}
+
+.zone-divider--primary{
+  color:var(--text-secondary);
+}
+
+.zone-divider--secondary{
+  opacity:0.85;
+}
+
+.zone-divider--tertiary{
+  opacity:0.7;
+  padding-top:10px;
+  margin:4px 0 8px;
+  border-top-color:var(--border-2);
+}  

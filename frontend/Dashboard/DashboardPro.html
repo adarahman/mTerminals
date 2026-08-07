@@ -612,6 +612,12 @@
 <script src="../shared/utils/dom-utils.js"></script>
 <script src="range-tabs.js"></script>
 <script src="chain/chain-helpers.js"></script>
+<!-- metrics.js (IA redesign step 6) must load after chain-helpers.js
+     (getFilteredChain/findGammaFlipStrike) and before every view file
+     that consumes it — conviction-gauge.js is the earliest such
+     consumer below, so this goes right here rather than nearer the
+     bottom of the load order. -->
+<script src="chain/metrics.js"></script>
 <!-- chain-views.js split (Phase 2 chain-view decomposition) into 7 files.
      chain-view.js must load FIRST — it declares the ChainDenseView/
      RightPanelView/ChainView classes that the other 6 attach methods to
