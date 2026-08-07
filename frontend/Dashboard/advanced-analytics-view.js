@@ -118,9 +118,13 @@ function _aaIvRankHtml(d) {
 // Strikes ranked by |Net GEX| — the strongest dealer-hedging pressure
 // points, rather than the full strike-ordered ledger (that stays behind
 // "Full Table →", which opens the existing Greeks/GEX modal).
+// IA redesign step 2: "Top |GEX| Strikes" scope tag distinguishes this
+// per-strike ranked view from the Greeks Alerts card's whole-chain
+// summed total and the Simulator's scenario-adjusted profile — see the
+// scope note atop buildGreeksAlertsHtml (chain-greeks.js).
 function _aaGexTableHtml(d) {
   const greeks = (d.greeks || []).slice().sort((a, b) => Math.abs(b.netGEX || 0) - Math.abs(a.netGEX || 0)).slice(0, 6);
-  if (!greeks.length) return _aaCardWrap('\u03b3', 'GEX Table', `<div class="dd-empty">No GEX data yet.</div>`);
+  if (!greeks.length) return _aaCardWrap('\u03b3', 'GEX Table', `<div class="dd-empty">No GEX data yet.</div>`, null, null, null, 'Top |GEX| Strikes');
   const rows = greeks.map((g, i) => {
     const gex = g.netGEX || 0;
     const clr = gex >= 0 ? 'var(--blue)' : 'var(--red)';
@@ -130,7 +134,7 @@ function _aaGexTableHtml(d) {
         <span style="font-size:11px;font-weight:600;color:${clr};">${gex >= 0 ? 'Long \u03b3' : 'Short \u03b3'}</span>
       </div>`;
   }).join('');
-  return _aaCardWrap('\u03b3', 'GEX Table', rows, 'Strikes ranked by |Net GEX| magnitude.', 'openGreeksModal()', 'Full Table →');
+  return _aaCardWrap('\u03b3', 'GEX Table', rows, 'Strikes ranked by |Net GEX| magnitude.', 'openGreeksModal()', 'Full Table →', 'Top |GEX| Strikes');
 }
 
 // ── 4. OI Velocity ──

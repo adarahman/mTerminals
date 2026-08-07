@@ -609,10 +609,15 @@ ChainView.prototype.renderDashboard = function(d) {
       </div>
       <div class="sim-body" style="padding:10px 14px;">
 
-        <!-- GEX Chart -->
+        <!-- GEX Chart — IA redesign step 2: "Scenario-Adjusted" scope tag,
+             since this chart's netGEX is multiplied by the IV-ratio/vanna
+             adjustment driven by the sliders above (see simUpdate()'s
+             ivRatio/vannaAdj math in simulator-view.js), not the live
+             totalGEX the Greeks Alerts card and GEX Table both show —
+             same scope note as chain-greeks.js's buildGreeksAlertsHtml. -->
         <div class="sim-chart-area chart-expand-wrap" onclick="openSimGexModal()" title="Click to expand" style="cursor:zoom-in;padding-bottom:12px;position:relative;" id="sim-chart-container">
           <span class="chart-expand-icon" title="Expand">⤢</span>
-          <div class="sim-chart-label">Net GEX Profile ($B) &#8593;</div>
+          <div class="sim-chart-label">Net GEX Profile ($B) &#8593; <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;font-size:10px;">(Scenario-Adjusted)</span></div>
           <canvas id="sim-gex-canvas" height="180"></canvas>
           <div class="sim-annot" id="sim-annot"></div>
         </div>

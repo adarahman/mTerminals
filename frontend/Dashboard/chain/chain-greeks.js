@@ -11,6 +11,15 @@
 // ============================================================
 
   // ── GREEKS ALERTS (main-dashboard summary card) ──
+  // IA redesign step 2: "Live, Whole-Chain" scope tag added to the title
+  // so this card's raw, un-adjusted totalGEX (summed straight off the
+  // live greeks array) reads as distinct from the other two GEX-themed
+  // cards flagged in dashboard-redesign-proposal.md §1's "Same story for
+  // Gamma/GEX" paragraph — Advanced Analytics' GEX Table ("Top |GEX|
+  // Strikes", per-strike ranked view) and the Institutional Simulator's
+  // Net GEX Profile chart ("Scenario-Adjusted", vanna/IV-slider-adjusted,
+  // not the live figure). Same underlying greeks array, three different
+  // treatments of it.
   // The full per-strike Greeks/GEX table (Δ/Γ/Θ/Vega tabs + Net GEX +
   // Regime columns) moved out of the main dashboard into its own modal —
   // openGreeksModal()/closeGreeksModal() in ModalManager, mirroring the
@@ -107,7 +116,7 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
 
   return `<div class="section-card sc-violet" id="greeks-alerts-card" style="min-width:0;">
     <div class="section-header">
-      <span class="section-title"><span class="section-icon">Δ</span>Greeks / Net GEX</span>
+      <span class="section-title"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Live, Whole-Chain</span></span>
       <button class="sec-btn" style="padding:4px 10px;font-size:11px;" onclick="openGreeksModal()" title="Open full Greeks &amp; GEX table">Full Table →</button>
     </div>
     <div style="display:flex;flex-direction:column;padding:2px 0;">

@@ -463,3 +463,76 @@ action-type mapping, cooldown, daily cap, submit-failure handling).
 validated `decision_engine.py`'s output against history before this
 module can act on it live), broker session resilience, and position
 reconciliation.
+
+---
+
+## 13. Frontend — metric authoritative sources (IA redesign step 4)
+
+This is the write-down called for by `dashboard-redesign-proposal.md`
+§4/§8: the agreed ownership model for every metric that appears in more
+than one place on `DashboardPro.html`, produced *before* step 6's shared
+metrics utility so that refactor centralizes an agreed architecture
+instead of just relocating whatever each card happened to compute on its
+own. Two categories below aren't simple owner/reference pairs — they're
+**one shared computation, several legitimate aggregations of it** — and
+should stay that way in the shared-utility refactor rather than being
+forced into a single "authoritative value" cell each.
+
+### PCR (Full Chain)
+| | |
+|---|---|
+| Backend computation | `compute_total_pcr()` (`oi/chain_metrics.py`) → `engine.py`'s `self.total_pcr`, computed once per tick |
+| Payload representations | `d.totalPCR` (raw float, `mTerminals_json.py`) and `dec.verdicts.pcr` (narrative string, `verdict_pcr()` in `signal_builder.py`) — **same source value**, formatted two ways for two different UI needs, not a duplication |
+| Authoritative display | Decision Engine Tier-1 strip, narrative form (`vrd.pcr`) |
+| Read-only references (raw float) | Conviction Gauge's "PCR Expansion" pillar (`d.totalPCR` vs `d.oiChgPCR`); Executive Dashboard's Market Health "OI Flow" score (blends `d.totalPCR`/`d.oiChgPCR`) |
+
+### Range PCR (±N strikes)
+| | |
+|---|---|
+| Computation | Frontend-only, `buildChainSummaryHtml()` (`chain-template.js`) — `totalPe/totalCe` over `getFilteredChain(d)`, the range-filtered chain. **Not backend-supplied** — a distinct metric from full-chain PCR above, not a re-derivation of it |
+| Authoritative display | Option Chain Snapshot card, labeled "Range PCR (±N)" / "Range PCR Δ" (step 3) |
+| Deliberately not shown elsewhere | OI Flow Summary explicitly dropped its own range/ATM PCR tile (see `oi-flow-view.js` comment) to avoid a third instance of this same number |
+
+### Max Pain
+| | |
+|---|---|
+| Backend computation | Single `d.maxPain` payload field |
+| Authoritative display | Decision Engine Tier-1 strip |
+| Read-only reference | Institutional F&O Simulator (annotates the payoff chart against it) |
+
+### Gamma Flip Strike — two genuinely different computations sharing a name
+| | |
+|---|---|
+| **Live** | `findGammaFlipStrike(greeks, atm)` over the live `d.greeks` array. Authoritative: Greeks/Net GEX Alerts card. Read-only reference: Conviction Gauge's "Gamma Flip (Regime Vote)" pillar (step 2) — same function, same live array |
+| **Scenario-Adjusted** | `findGammaFlipStrike(simGEX, simSpot)` over the slider-adjusted `simGEX` array — Institutional F&O Simulator. **Not a reference to the live figure** — a legitimately different projection once spot/IV/dealer-bias sliders move away from their live defaults |
+
+### Net GEX — same split as Gamma Flip, same reason
+| | |
+|---|---|
+| **Live, whole-chain** | `totalGEX = greeks.reduce(...)` off the live payload. Authoritative: Greeks/Net GEX Alerts card ("Live, Whole-Chain", step 2). Read-only reference: Advanced Analytics' GEX Table ("Top \|GEX\| Strikes", step 2) — same per-strike `netGEX` values, just ranked/sliced, not recomputed |
+| **Scenario-Adjusted** | Institutional F&O Simulator's Net GEX Profile chart ("Scenario-Adjusted", step 2) — each strike's `netGEX` multiplied by the slider-driven `ivRatio`/`vannaAdj` factors (`simulator-view.js`'s `simUpdate()`). A different number by design, not a duplicate of the live total |
+
+### Smart-Money / Institutional Score (per-strike) — shared computation, three aggregations
+| | |
+|---|---|
+| Shared per-strike scorer | `buildInstitutionalView(r, g)` (`chain-view-models.js`) — the one function computing OI dominance + writing-vs-buying signal + GEX sign per strike. All three cards below read this same function; none re-derives its own version |
+| Shared badge/label helper | `smartMoneyBadge()` (`engines/smart-money.js`) — used by Institutional Activity Crux and Smart Money Ranking for their ACC/DIST/HEDGE/ROLL/RETAIL labels |
+| Near-ATM Ledger | Institutional Activity Crux — banded near/far flagging vs. median OI, full visible chain |
+| Whole-Chain Ranking | Smart Money Ranking (Advanced Analytics) — top 8 by \|ΔOI\| among institutional-flagged strikes |
+| Aggregate Vote | Conviction Gauge's "Smart Money Lean (Aggregate Vote)" pillar (step 2) — chain-averaged single score |
+| **Not part of this family** | Block-print detection (Vol/OI ratio spikes per strike) — Institutional F&O Simulator's Vol/OI Velocity panel. Historically shared the "Block Prints" label with Smart Money Lean despite measuring something unrelated; already renamed (see `conviction-gauge.js` comment) |
+
+### Implication for step 6 (shared metrics utility)
+The refactor should expose:
+- **One function per genuinely-shared value** (full-chain PCR, max pain,
+  live gamma flip, live net GEX, the per-strike institutional score) —
+  each called once, everywhere else takes its return value.
+- **Explicit `scope` parameters, not new functions,** for the legitimate
+  variants (`range` vs `full` PCR; `live` vs `scenario` gamma
+  flip/GEX) — collapsing these into one function that silently picks a
+  scope would recreate the exact "same label, different number" problem
+  step 3 just fixed for PCR.
+- **No forced single owner** for the institutional-score aggregations —
+  `buildInstitutionalView()` is already the correct shared primitive;
+  the three cards' aggregation logic (banding / ranking / averaging)
+  stays card-specific, only the per-strike input is centralized.

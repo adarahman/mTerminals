@@ -613,6 +613,15 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const net30 = netForWindow(30);
 
   const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
+  // IA redesign step 3 (dashboard-redesign-proposal.md §4): this card's
+  // PCR is independently recomputed from getFilteredChain(d) — the
+  // range-filtered chain, not the backend's full-chain vrd.pcr the
+  // Decision Engine strip shows. Same label on both used to imply they're
+  // the same number when they can legitimately disagree; "Range PCR (±N)"
+  // makes the scope explicit right on the card instead of only in code
+  // comments. rngTag mirrors rngLabel's ALL-STRIKES fallback so the badge
+  // and this footer label never show different range wording.
+  const rngTag = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All':'±'+rng; })();
 
   // ── Capital flow summary ─────────────────────────────────────────
   // Chain-wide capital flow (ChgOI x LTP, day-session — see cell comment
@@ -658,9 +667,9 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           ${buildSparkline('var(--pos)', netOi>=0)}
         </div>
         <div class="oi-snap-footer">
-          <span class="oi-snap-footer-label">PCR</span>
+          <span class="oi-snap-footer-label">Range PCR <span style="font-weight:400;text-transform:none;">(${rngTag})</span></span>
           <span class="oi-snap-footer-val warn">${fmtN(pcr,2)}</span>
-          <span class="oi-snap-footer-tag">Put Call Ratio</span>
+          <span class="oi-snap-footer-tag">Put Call Ratio, ${rngLabel.toLowerCase()}</span>
         </div>
       </div>
 
@@ -679,9 +688,9 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           ${buildSparkline('var(--info)', netChgOi>=0)}
         </div>
         <div class="oi-snap-footer">
-          <span class="oi-snap-footer-label">PCR Δ</span>
+          <span class="oi-snap-footer-label">Range PCR Δ</span>
           <span class="oi-snap-footer-val warn">${signedFmt(pcrShift)}</span>
-          <span class="oi-snap-footer-tag">Change in PCR</span>
+          <span class="oi-snap-footer-tag">Change in Range PCR</span>
         </div>
       </div>
 

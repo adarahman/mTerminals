@@ -57,24 +57,33 @@ function _convictionPillarFiiDii(d) {
   };
 }
 
+// IA redesign step 2: label carries an explicit "(Regime Vote)" scope
+// tag, same treatment as _convictionPillarSmartMoneyLean's "(Aggregate
+// Vote)" above — this pillar reduces the live, whole-chain gamma-flip
+// strike (same one Greeks Alerts flags, see chain-greeks.js) down to a
+// single +1/0/-1 vote based on which side of it spot currently sits, so
+// it reads as distinct from that card's raw alert and from the
+// Simulator's scenario-adjusted GEX chart (dashboard-redesign-
+// proposal.md §1's "Same story for Gamma/GEX" fragmentation note).
 function _convictionPillarGammaFlip(d, greeks, atm) {
+  const LABEL = 'Gamma Flip (Regime Vote)';
   const flip = findGammaFlipStrike(greeks, atm);
   const spot = d.spot;
   if (!flip || spot == null) {
-    return { vote: 0, label: 'Gamma Flip', detail: 'No flip in visible range' };
+    return { vote: 0, label: LABEL, detail: 'No flip in visible range' };
   }
   const dist = spot - flip.strike;
   if (Math.abs(dist) < GAMMA_FLIP_MIN_DISTANCE) {
     return {
       vote: 0,
-      label: 'Gamma Flip',
+      label: LABEL,
       detail: `Spot within ${GAMMA_FLIP_MIN_DISTANCE}pt of flip (${Math.round(flip.strike)})`,
     };
   }
   const vote = dist > 0 ? 1 : -1;
   return {
     vote,
-    label: 'Gamma Flip',
+    label: LABEL,
     detail: `Spot ${dist > 0 ? '+' : ''}${Math.round(dist)}pt vs flip ${Math.round(flip.strike)}`,
   };
 }
