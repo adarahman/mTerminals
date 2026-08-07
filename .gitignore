@@ -30,6 +30,8 @@ __pycache__/
 *.db
 mTerminals.json
 node_modules/
+frontend/playwright-report/
+frontend/test-results/
 logs/
 mTerminals/logs/
 data/
