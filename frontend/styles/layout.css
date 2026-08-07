@@ -69,18 +69,15 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 
 .levels-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-bottom:18px;}
 
-/* ── TIER-2 ROW: Chain Snapshot / Greeks Alerts / FII-DII Sentiment ──
-   Ported from the redesign mockup's row2 (1.3fr 1fr 1fr) — puts these
-   three "as per template" cards side by side directly under the Decision
-   Engine box, instead of scattered across separate sections (see
-   chain-renderer.js's renderDashboard()). Chain Snapshot originally got
-   the wider column because it carried the most sub-content (OI/Chg OI/
-   Volume grid); now that Volume & Vol/OI has moved out to its own Tier-3
-   collapsible (see chain-template.js's buildVolOiDetailHtml), Chain
-   Snapshot is back down to 2 sub-cards like its neighbors, so all three
-   columns are equal-width again. OI Flow Snapshot intentionally stays
-   outside this row, in its own section below. Narrow-viewport collapse
-   lives in responsive.css. */
+/* ── #sec-tier2 ROW ──
+   Originally a 3-col row (Chain Snapshot / Greeks Alerts / FII-DII
+   Sentiment); those moved out to the Structure & Positioning and Capital
+   Flow zones as each was built. #sec-tier2 (chain-renderer.js's
+   renderDashboard()) now holds only the Greeks by Moneyness card in the
+   Structure & Positioning zone, with an inline grid-template-columns:1fr
+   override on the element itself — the 3-col default below only applies
+   to any other .row2 usage. Narrow-viewport collapse lives in
+   responsive.css. */
 .row2{
   display:grid;
   grid-template-columns:1fr 1fr 1fr;

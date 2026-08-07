@@ -368,7 +368,20 @@ ChainView.prototype.renderDashboard = function(d) {
   // its own, so it doesn't need to compete with the Decision Engine for
   // always-visible space. See buildAdvancedAnalyticsHtml.
 
-  // ── LARGE EXECUTIVE BOXES (now a 3-col grid: Market Health | Market Story | Top Movers) ──
+  // ── ZONE: STRUCTURE & POSITIONING (IA redesign step 1, see
+  // dashboard-redesign-proposal.md §2.1/§5) ── Where is positioning
+  // concentrated, and what gamma regime are we in. Market Health & Story,
+  // Greeks/Net GEX Alerts, Option Chain Snapshot, the dense chain table,
+  // and Greeks by Moneyness all answer that same family of question, so
+  // they're grouped here as one zone instead of being split across the
+  // exec grid / chain-anchor / old #sec-tier2 in build order. Institutional
+  // Positioning cards (Market Regime & Smart Money / Footprint Score /
+  // Capital Concentration) that used to render as this grid's cards 4-6
+  // moved out to the Institutional zone below — see exec-view.js's
+  // renderInstitutionalGrid().
+  h += '<div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Structure &amp; Positioning</div>';
+
+  // ── LARGE EXECUTIVE BOXES (3-col grid: Market Health & Story | Greeks/GEX Alerts | Option Chain Snapshot) ──
   // Keep the exact markup so the live-refresh path can later compare it
   // without immediately rebuilding this entire section on its first tick.
   const executiveDashboardHtml = renderExecutiveDashboard(d);
@@ -378,33 +391,54 @@ ChainView.prototype.renderDashboard = function(d) {
   // The dense Option Chain table itself lives as a static block outside
   // this template (see #sec-chain in the HTML) so it never gets torn down
   // by a dashboard rebuild — chain-anchor just marks where that block
-  // gets moved to (right after the full-rebuild swap below), which is
-  // between the Decision/Executive boxes and OI Flow. The duplicate chain
-  // table + right analytics panel that used to be generated directly in
-  // this template have been removed: the main dense Option Chain table
-  // (see ChainDenseView.buildRowsHtml) now has the same click-a-row /
-  // "▶ Greeks" toggle-all reveal, and its own #rightPanel
+  // gets moved to (right after the full-rebuild swap below), still within
+  // the Structure & Positioning zone. The duplicate chain table + right
+  // analytics panel that used to be generated directly in this template
+  // have been removed: the main dense Option Chain table (see
+  // ChainDenseView.buildRowsHtml) now has the same click-a-row / "▶
+  // Greeks" toggle-all reveal, and its own #rightPanel
   // (RightPanelView.renderRightPanel) already carries the identical
   // Signal / OI Analytics / Volume Analytics boxes plus a Bid/Ask depth
-  // box. velByStrike/velMax below are still needed by the OI Flow panel
-  // further down this function.
-  // ── TIER 2: FII-DII Sentiment ──
-  // Moved to the very bottom of the page, below Strategy Payoff /
-  // Institutional F&O Simulator — see the end of this function, after the
-  // strategies block, where it's re-appended so it always renders even
-  // when d.strategies is empty (rather than being nested inside that
-  // conditional block).
-  // OI BUILDUP — no longer emitted here. #sec-oi-buildup (OI Flow Snapshot)
-  // now pairs with the Institutional Activity Crux card in a 2-column grid
-  // further down this function (right before #sdt-panel's Vol/OI
-  // Velocity/Strike Detail block), instead of rendering full-width up
-  // here right after the chain anchor. velByStrike/velMax are still
-  // computed here since that grid needs them too, just later.
+  // box. velByStrike/velMax below are needed by the Capital Flow zone's
+  // OI Flow panel further down this function.
   h += '<div id="chain-anchor"></div>';
   const velBlock=(d.oiVelocity||[]).find(b=>b.window===_velWin)||(d.oiVelocity||[])[0];
   const velByStrike={};
   if(velBlock&&velBlock.rows)velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
   const velMax=Math.max(...chain.map(r=>{const vr=velByStrike[r.strike]||{};return Math.max(Math.abs(vr.ceDOI||0),Math.abs(vr.peDOI||0));}),1);
+
+  // ── Greeks by Moneyness (Structure & Positioning zone) ──
+  // Moved here from the old #sec-tier2 row, where it was paired with
+  // Institutional Activity Crux for no reason tied to either card's
+  // question — Greeks by Moneyness answers "what gamma regime are we
+  // in," same family as Greeks/GEX Alerts above, not an institutional
+  // question. Institutional Activity Crux now renders in the
+  // Institutional zone instead (see below). Single-column now instead of
+  // paired 1fr/1fr, same #sec-greeks-moneyness id/markup so the
+  // interactive-subtree-preserving swap in _rerenderChainPanels below
+  // still finds it.
+  h += `<div id="sec-tier2" class="row2" style="grid-template-columns:1fr;align-items:stretch;">
+    <div id="sec-greeks-moneyness" class="section-card sc-violet" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
+      <div class="section-header"><span class="section-title"><span class="section-icon">Δ</span>Greeks by Moneyness</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;font-size:11px;color:var(--txt3);flex-shrink:0;">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#2a78d6;"></span>Delta (call)</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#1baf7a;"></span>Gamma</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#e34948;"></span>|Theta| decay</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#eda100;"></span>Vega</span>
+      </div>
+      <!-- flex:1 + min-height:0 is the standard fix for Chart.js (responsive +
+           maintainAspectRatio:false) inside a flex column: without min-height:0
+           the flex item's default min-height:auto fights the canvas's own
+           measurement and the box grows/shrinks abruptly on every render.
+           Click-to-expand (openGreeksChartModal()) — same treatment as the
+           Strategy Payoff / Net GEX charts, so all three chart-style cards
+           behave consistently instead of only two of them being expandable. -->
+      <div class="chart-expand-wrap" onclick="openGreeksChartModal()" title="Click to expand" style="cursor:zoom-in;position:relative;width:100%;flex:0.9;min-height:280px;">
+        <span class="chart-expand-icon" title="Expand">⤢</span>
+        <canvas id="greeksChart" role="img" aria-label="Line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain.">Delta rises steadily from OTM to ITM. Gamma, theta decay, and vega all peak at the at-the-money strike and fall off toward both deep ITM and deep OTM.</canvas>
+      </div>
+    </div>
+  </div>`;
 
   // NOTE: the old always-visible #sec-iv "IV Surface" alerts section, and
   // the Tier-3 "IV vs HV / Skew" collapsible it later merged into, are
@@ -428,14 +462,14 @@ ChainView.prototype.renderDashboard = function(d) {
   // aren't surfaced anywhere on the dashboard anymore. #sec-tier3 itself
   // is gone along with its last card; nothing else rendered into it.
 
-  // ── ADVANCED ANALYTICS (collapsed by default) ──
-  // Smart Money ranking / IV Rank / GEX table / OI Velocity / Per-strike
-  // Greeks / Scenario P&L, all tucked behind one collapsible so the main
-  // dashboard stays readable for new users — see
-  // advanced-analytics-view.js for each sub-card's builder.
-  h += this.buildAdvancedAnalyticsHtml(d);
-  
-  // ── STRATEGIES + SIMULATOR (2-column) ──
+  // Advanced Analytics (collapsed by default) and Strategy Payoff /
+  // Institutional F&O Simulator both moved to the Confirmation zone,
+  // appended at the end of this function (see "ZONE: CONFIRMATION"
+  // below) — they're Tier-3 exploration/scenario tooling (§3 of the IA
+  // redesign proposal), not Structure & Positioning. renderSimRangeRow /
+  // velControl stay defined here since the Capital Flow zone's Vol/OI
+  // Velocity panel (below) needs them before the Confirmation zone's
+  // Simulator card does.
   const strats=d.strategies||[];
 
   // renderSimRangeRow()/velControl hoisted out of the (formerly)
@@ -467,6 +501,12 @@ ChainView.prototype.renderDashboard = function(d) {
     override: _simVelOverride, overrideVar: '_simVelOverride',
     base: (d.ctx || {}).baseVel || 1.2, fmt: v => fmtN(v, 1) };
 
+  // Strategy Payoff / Institutional F&O Simulator markup is built here
+  // (needs strats/spot/greeksData in scope) but appended to `h` later, in
+  // the Confirmation zone — captured into a variable instead of an
+  // immediate `h+=` so the build order can move without moving this
+  // whole template literal. See "ZONE: CONFIRMATION" below.
+  let stratSimulatorHtml = '';
   if(strats.length){
     // Build dropdown options
     if(_selStratIdx>=strats.length) _selStratIdx=0;
@@ -509,7 +549,7 @@ ChainView.prototype.renderDashboard = function(d) {
         base: d.atmIV || simCtx.baseIv || 15, fmt: v => fmtN(v, 1) },
     ];
 
-  h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;">
+  stratSimulatorHtml+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;">
 
     <!-- LEFT: Strategy Payoff -->
     <div id="sec-strats" class="section-card sc-amber" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
@@ -668,20 +708,14 @@ ChainView.prototype.renderDashboard = function(d) {
   // still the same outerHTML-patch target), only how it looks once
   // nested here.
   //
-  // ── ZONE: CAPITAL FLOW (IA redesign, phase 1b) ──
-  // Second grid column used to hold Institutional Activity Crux; swapped
-  // with FII/DII Summary (previously in #sec-tier2 below) so this row is
-  // a coherent "where is money moving" zone — OI Flow + FII/DII — instead
-  // of pairing OI Flow with an institutional-positioning card. Purely a
-  // swap of which builder call sits in which existing 2-col slot (both
-  // rows already use the same 1fr/1fr grid shape), so no CSS changes
-  // needed. Institutional Activity Crux now sits in #sec-tier2 instead —
-  // see that block's comment for the reciprocal note. This pairing isn't
-  // its final home either (it belongs with Smart Money Ranking in a
-  // dedicated Institutional zone once that's extracted from Advanced
-  // Analytics — see the dashboard IA proposal, roadmap step 7) but it's
-  // no worse than the previous Greeks-by-Moneyness pairing and unblocks
-  // the Capital Flow fix now instead of waiting on that larger change.
+  // ── ZONE: CAPITAL FLOW ──
+  // Where is money moving intraday — OI Flow + FII/DII, a coherent
+  // "where is money moving" pair instead of OI Flow sitting next to an
+  // institutional-positioning card. Institutional Activity Crux (this
+  // grid's second column previously) now lives in its own Institutional
+  // zone below, alongside Market Regime & Smart Money / Institutional
+  // Footprint Score / Capital Concentration — see "ZONE: INSTITUTIONAL"
+  // further down.
   h += `<div id="oi-flow-section">
 
   <div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Capital Flow</div>
@@ -722,39 +756,38 @@ ChainView.prototype.renderDashboard = function(d) {
 
   </div>`;
 
-  // ── TIER 2: Greeks by Moneyness + Institutional Activity Crux ──
-  // Institutional Activity Crux (moved here — see the reciprocal note at
-  // #oi-flow-section above) is kept outside the `if(strats.length)` block
-  // above so it still renders even on days with no strategies, same as
-  // it already did in its previous slot. Greeks by Moneyness stays here
-  // unchanged — it's no longer gated behind `strats.length` the way it
-  // was as Strategy Payoff's neighbor, so it stays visible even on days
-  // with no strategies. row2's CSS (layout.css) still assumes 3 tracks
-  // (1.3fr 1fr 1fr), so the inline override below splits this row
-  // 1fr/1fr for these two cards instead of leaving a dead third column.
-  h += `<div id="sec-tier2" class="row2" style="grid-template-columns:1fr 1fr;align-items:stretch;">
-    <div id="sec-greeks-moneyness" class="section-card sc-violet" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
-      <div class="section-header"><span class="section-title"><span class="section-icon">Δ</span>Greeks by Moneyness</span></div>
-      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;font-size:11px;color:var(--txt3);flex-shrink:0;">
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#2a78d6;"></span>Delta (call)</span>
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#1baf7a;"></span>Gamma</span>
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#e34948;"></span>|Theta| decay</span>
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#eda100;"></span>Vega</span>
-      </div>
-      <!-- flex:1 + min-height:0 is the standard fix for Chart.js (responsive +
-           maintainAspectRatio:false) inside a flex column: without min-height:0
-           the flex item's default min-height:auto fights the canvas's own
-           measurement and the box grows/shrinks abruptly on every render.
-           Click-to-expand (openGreeksChartModal()) — same treatment as the
-           Strategy Payoff / Net GEX charts, so all three chart-style cards
-           behave consistently instead of only two of them being expandable. -->
-      <div class="chart-expand-wrap" onclick="openGreeksChartModal()" title="Click to expand" style="cursor:zoom-in;position:relative;width:100%;flex:0.9;min-height:280px;">
-        <span class="chart-expand-icon" title="Expand">⤢</span>
-        <canvas id="greeksChart" role="img" aria-label="Line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain.">Delta rises steadily from OTM to ITM. Gamma, theta decay, and vega all peak at the at-the-money strike and fall off toward both deep ITM and deep OTM.</canvas>
-      </div>
-    </div>
-    ${app.exec.buildInstitutionalActivitySummaryCard(d)}
-  </div>`;
+  // ── ZONE: INSTITUTIONAL (IA redesign step 1) ──
+  // Who is moving the market, and where. Market Regime & Smart Money /
+  // Institutional Footprint Score / Capital Concentration used to render
+  // as cards 4-6 of the Structure exec-grid (see exec-view.js's
+  // renderExecutiveDashboard — split out into renderInstitutionalGrid());
+  // Institutional Activity Crux used to pair with Greeks by Moneyness in
+  // this same #sec-tier2 slot for no reason tied to either card's
+  // question (Greeks by Moneyness moved to Structure & Positioning
+  // above). All four institutional-intent cards now sit together here.
+  // Smart Money Ranking (advanced-analytics-view.js) and Conviction
+  // Gauge's Smart Money Lean pillar stay inside Advanced Analytics for
+  // now — extracting them out is roadmap step 7 (Advanced Analytics
+  // decomposition), not this layout-only pass.
+  h += '<div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Institutional</div>';
+  h += app.exec.renderInstitutionalGrid(d);
+  h += app.exec.buildInstitutionalActivitySummaryCard(d);
+
+  // ── ZONE: CONFIRMATION ──
+  // Supporting evidence that validates or challenges the Decision
+  // Engine's call, opened after the Tier-1 verdict rather than competing
+  // with it for always-visible space (§3 of the IA redesign proposal).
+  // Advanced Analytics (Smart Money Ranking / IV Rank / GEX table / OI
+  // Velocity / per-strike Greeks / Scenario P&L) stays one collapsible
+  // for now — decomposing it into purpose-specific cards is roadmap step
+  // 7. Strategy Payoff / Institutional F&O Simulator moved here too:
+  // they're "what if" scenario tools (Tier 3), same family as Advanced
+  // Analytics' own Scenario P&L, not Structure & Positioning — built
+  // earlier (stratSimulatorHtml, needs strats/spot/greeksData in scope)
+  // but appended here so build order matches display order.
+  h += '<div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Confirmation</div>';
+  h += this.buildAdvancedAnalyticsHtml(d);
+  h += stratSimulatorHtml;
 
 
   // Risk Dashboard (Trade grade / IV regime / Trap warning / key levels)
@@ -1258,11 +1291,10 @@ ChainView.prototype._rerenderChainPanels = function() {
   // of waiting for the next tick.
   patchOuterHtmlIfChanged('greeks-alerts-card', () => app.chain.buildGreeksAlertsHtml(greeks, atm, _data));
 
-  // 4b-ii. FII/DII Sentiment card — now rendered at the very bottom of
-  // the page (see the h += ...sec-tier2... block after the Strategy/
-  // Simulator section in renderDashboard above), but this incremental
-  // patch still finds it fine via getElementById regardless of DOM
-  // position. Previously this card only ever rebuilt on a full
+  // 4b-ii. FII/DII Sentiment card — now rendered inside the Capital Flow
+  // zone (see the h += oi-flow-section block in renderDashboard above),
+  // but this incremental patch still finds it fine via getElementById
+  // regardless of DOM position. Previously this card only ever rebuilt on a full
   // renderDashboard() pass (it rendered near the Executive grid, outside
   // this incremental refresh function entirely) — it needs the same
   // per-tick treatment as its neighboring cards or it would visibly lag

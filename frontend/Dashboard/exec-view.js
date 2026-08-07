@@ -106,46 +106,49 @@ class ExecView {
        reuses the exact same builder/markup as the row2 Snapshot card. -->
   ${app.chain.buildChainSummaryHtml(d)}
 
-  <!-- ── CARD 4: MARKET REGIME & SMART MONEY ── -->
-  <!-- New for the Institutional Positioning Analytics layer (spec item #1
-       Market Regime + #12 Smart Money Summary). One merged card, not two —
-       d.smartMoneySummary already embeds d.marketRegime's own regime/
-       confidence, so a separate Market Regime card would just repeat the
-       same badge a second time (same "one canonical home per metric"
-       reasoning as the Health+Story merge above). Wraps to its own row
-       under the fixed 3-col .exec-grid (layout.css) rather than forcing a
-       4-column layout onto the other three cards. -->
-  ${this.buildMarketRegimeCard(d)}
-
-  <!-- ── CARD 5: INSTITUTIONAL FOOTPRINT SCORE ── -->
-  <!-- Spec item #5. d.footprintRanked is oi.footprint_score.
-       rank_footprint_strikes()'s top-8 list, already sorted; per-strike
-       footprintScore also rides on every d.chain row (see
-       _build_chain_rows in mTerminals_json.py) for the Option Chain
-       column — not duplicated here, this card is just the Executive
-       "who's loudest right now" glance. -->
-  ${this.buildFootprintScoreCard(d)}
-
-  <!-- ── CARD 6: CAPITAL CONCENTRATION ── -->
-  <!-- Spec item #10. d.capitalConcentration is oi.footprint_score.
-       compute_capital_concentration()'s output — top-5 strikes by
-       total premium locked and what share of the visible chain's total
-       capital they hold. -->
-  ${this.buildCapitalConcentrationCard(d)}
+  <!-- Cards 4-6 (Market Regime & Smart Money / Institutional Footprint
+       Score / Capital Concentration) moved out of this grid — IA redesign
+       step 1 (Zone reorg, see dashboard-redesign-proposal.md §2.1/§5).
+       Those three are Institutional-zone cards, not Structure &
+       Positioning; they now render from renderInstitutionalGrid() below,
+       called separately by chain-renderer.js's renderDashboard() so they
+       sit with Institutional Activity Crux / Smart Money Ranking instead
+       of wrapping onto this grid's second row. No computation changes —
+       same three builder calls, just moved to a different container. -->
 
 </div>
 
 <!-- FII/DII Sentiment used to render here, full-width below the exec
-     grid. It now lives in row2 (chain-renderer.js), grouped with Chain
-     Snapshot and Greeks Alerts per the redesign mockup's Tier-2 layout —
-     see chain-renderer.js's renderDashboard() and layout.css's .row2. -->
+     grid. It now lives in the Capital Flow zone (chain-renderer.js),
+     grouped with OI Flow — see renderDashboard() and layout.css's
+     .row2. -->
 <!-- Institutional Activity Crux used to render here too, full-width
-     below FII/DII. Moved down to sit directly beside the Vol/OI
-     Velocity + Strike Detail panel (chain-renderer.js's
-     buildSimulatorHtml) that its "Strike Detail →" button expands,
-     instead of being separated from it by the whole page. -->
+     below FII/DII. It now renders from renderInstitutionalGrid() below,
+     alongside the other Institutional-zone cards, instead of pairing
+     with Greeks by Moneyness in the old #sec-tier2 row. -->
 </div>
 `;}
+
+  // ── INSTITUTIONAL ZONE GRID (Zone E) ──
+  // IA redesign step 1: Market Regime & Smart Money / Institutional
+  // Footprint Score / Capital Concentration used to render as cards 4-6
+  // of the Structure exec-grid above, purely because that's where the
+  // Institutional Positioning Analytics layer was first added — not
+  // because they answer a "structure" question. They're institutional-
+  // intent cards, so they now render together with Institutional
+  // Activity Crux in their own zone (chain-renderer.js calls this right
+  // before the Institutional Activity Crux card). Same three builder
+  // calls as before, same .exec-grid CSS class (3-col, wraps to its own
+  // row for a 3-card set) — layout-only move, no computation changes.
+  renderInstitutionalGrid(d){
+    return `
+<div class="exec-grid">
+  ${this.buildMarketRegimeCard(d)}
+  ${this.buildFootprintScoreCard(d)}
+  ${this.buildCapitalConcentrationCard(d)}
+</div>
+`;
+  }
 
   // ── INSTITUTIONAL ACTIVITY CRUX (main dashboard card) ──
   // Same "always-visible read, full detail lives elsewhere" pattern as
@@ -223,7 +226,7 @@ class ExecView {
     <div class="oic-head">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>
-        <span class="oic-title">Institutional Activity Crux <span class="oic-sub">ATM ±${INST_NEAR_BAND_STRIKES} strikes • near band</span></span>
+        <span class="oic-title">Institutional Activity Crux <span class="oic-sub">Near-ATM Ledger &bull; ±${INST_NEAR_BAND_STRIKES} strikes</span></span>
       </div>
     </div>
     ${flagged.length===0 ? `

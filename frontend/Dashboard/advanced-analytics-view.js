@@ -30,14 +30,18 @@
 // other dashboard card uses; linkFn/linkLabel (optional) render as the
 // same .sec-btn "Full X →" pattern buildGreeksAlertsHtml already uses,
 // so a sub-card can point at an existing full-page modal instead of
-// re-implementing it.
-function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel) {
+// re-implementing it. subtitle (optional, IA redesign step 2) renders as
+// a .section-sub next to the title — same purpose as Institutional
+// Activity Crux's .oic-sub: scope this card against others that answer
+// a similarly-titled question differently (see dashboard-redesign-
+// proposal.md §1's fragmentation table).
+function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel, subtitle) {
   const link = linkFn
     ? `<button class="sec-btn" style="padding:3px 9px;font-size:10.5px;" onclick="${linkFn}" title="${linkLabel}">${linkLabel}</button>`
     : '';
   return `<div class="section-card sc-neutral" style="min-width:0;">
     <div class="section-header">
-      <span class="section-title"><span class="section-icon">${icon}</span>${title}</span>
+      <span class="section-title"><span class="section-icon">${icon}</span>${title}${subtitle ? ` <span class="section-sub">${subtitle}</span>` : ''}</span>
       ${link}
     </div>
     <div style="padding:2px 0;">${bodyHtml}</div>
@@ -53,7 +57,7 @@ function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel) {
 // a "who's doing the most right now" list rather than a strike ledger.
 function _aaSmartMoneyRankingHtml(d) {
   const chain = getFilteredChain(d);
-  if (!chain.length) return _aaCardWrap('🧠', 'Smart Money Ranking', `<div class="dd-empty">No chain data yet.</div>`);
+  if (!chain.length) return _aaCardWrap('🧠', 'Smart Money Ranking', `<div class="dd-empty">No chain data yet.</div>`, null, null, null, 'Whole-Chain Ranking');
 
   const ratios = d.volOiRatios || {};
   const totals = chain.map(r => (r.ceOI || 0) + (r.peOI || 0)).sort((a, b) => a - b);
@@ -87,7 +91,8 @@ function _aaSmartMoneyRankingHtml(d) {
     : `<div class="dd-empty">No institutional-grade activity flagged right now.</div>`;
 
   return _aaCardWrap('🧠', 'Smart Money Ranking', body,
-    'Ranked by strongest ΔOI among institutional-flagged strikes (ACC / DIST / HEDGE / ROLL).');
+    'Ranked by strongest ΔOI among institutional-flagged strikes (ACC / DIST / HEDGE / ROLL).',
+    null, null, 'Whole-Chain Ranking');
 }
 
 // ── 2. IV Rank details ──

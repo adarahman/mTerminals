@@ -282,6 +282,19 @@
   color:var(--text-primary);text-transform:uppercase;letter-spacing:0.06em;
 }
 
+/* Scope subtitle — IA redesign step 2 (header/subtitle clarification,
+   dashboard-redesign-proposal.md §1/§5). Mirrors .oic-sub's look (used
+   by the .oic-card family) so any .section-card can carry the same
+   "which of several similar-looking cards is this" scope label next to
+   its title — e.g. Smart Money Ranking's "Whole-Chain Ranking" vs.
+   Institutional Activity Crux's "Near-ATM Ledger". Not text-transformed
+   like the title itself (title is already uppercase; a redundant
+   uppercase-on-uppercase subtitle reads worse than mixed case here). */
+.section-title .section-sub{
+  font-size:var(--fs-xs);font-weight:600;color:var(--text-tertiary);
+  letter-spacing:.02em;text-transform:none;margin-left:2px;
+}
+
 /* Icon chip — wraps the emoji/glyph already inline in each card's title
    string (e.g. "🎯 Strategy Payoff" -> "<span class=section-icon>🎯</span>
    Strategy Payoff") so the same accent color used in the top strip also

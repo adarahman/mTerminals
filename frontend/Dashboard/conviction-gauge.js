@@ -115,9 +115,16 @@ function _convictionPillarPcrExpansion(d) {
 // Simulator's Vol/OI Velocity panel (simulator-view.js). The two used to
 // share the "Block Prints" label despite measuring different things,
 // which read as the same fact shown twice even though it wasn't.
+// IA redesign step 2: label carries an explicit "(Aggregate Vote)" scope
+// tag so this pillar reads as distinct from Institutional Activity
+// Crux's "Near-ATM Ledger" and Smart Money Ranking's "Whole-Chain
+// Ranking" — same underlying per-strike score, three different
+// aggregations, no longer distinguishable only by which file each lives
+// in (dashboard-redesign-proposal.md §1's fragmentation table).
 function _convictionPillarSmartMoneyLean(chain, greeks) {
+  const LABEL = 'Smart Money Lean (Aggregate Vote)';
   if (!chain.length) {
-    return { vote: 0, label: 'Smart Money Lean', detail: 'No data' };
+    return { vote: 0, label: LABEL, detail: 'No data' };
   }
   let totalScore = 0;
   chain.forEach(r => {
@@ -126,12 +133,12 @@ function _convictionPillarSmartMoneyLean(chain, greeks) {
   });
   const avgScore = totalScore / chain.length;
   if (avgScore >= 0.5) {
-    return { vote: 1, label: 'Smart Money Lean', detail: `Net institutional score +${avgScore.toFixed(2)}` };
+    return { vote: 1, label: LABEL, detail: `Net institutional score +${avgScore.toFixed(2)}` };
   }
   if (avgScore <= -0.5) {
-    return { vote: -1, label: 'Smart Money Lean', detail: `Net institutional score ${avgScore.toFixed(2)}` };
+    return { vote: -1, label: LABEL, detail: `Net institutional score ${avgScore.toFixed(2)}` };
   }
-  return { vote: 0, label: 'Smart Money Lean', detail: `Net institutional score ${avgScore.toFixed(2)} (flat)` };
+  return { vote: 0, label: LABEL, detail: `Net institutional score ${avgScore.toFixed(2)} (flat)` };
 }
 
 // Computes the full gauge: all 4 pillar reads + the aggregate verdict.
