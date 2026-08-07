@@ -387,7 +387,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Divider styling (was inline `style=`, repeated identically at all
   // four zone boundaries) moved to .zone-divider/.zone-divider--* in
   // layout.css as of step 5 — see that block for the weight rationale.
-  h += '<div class="zone-divider zone-divider--primary">Structure &amp; Positioning</div>';
+  h += '<div id="zone-structure" class="zone-divider zone-divider--primary">Structure &amp; Positioning</div>';
 
   // ── LARGE EXECUTIVE BOXES (3-col grid: Market Health & Story | Greeks/GEX Alerts | Option Chain Snapshot) ──
   // Keep the exact markup so the live-refresh path can later compare it
@@ -441,7 +441,7 @@ ChainView.prototype.renderDashboard = function(d) {
            Click-to-expand (openGreeksChartModal()) — same treatment as the
            Strategy Payoff / Net GEX charts, so all three chart-style cards
            behave consistently instead of only two of them being expandable. -->
-      <div class="chart-expand-wrap" onclick="openGreeksChartModal()" title="Click to expand" style="cursor:zoom-in;position:relative;width:100%;flex:0.9;min-height:280px;">
+      <div class="chart-expand-wrap" role="button" tabindex="0" aria-label="Expand Greeks by Moneyness chart" onclick="openGreeksChartModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openGreeksChartModal();}" title="Click to expand" style="cursor:zoom-in;position:relative;width:100%;flex:0.9;min-height:280px;">
         <span class="chart-expand-icon" title="Expand">⤢</span>
         <canvas id="greeksChart" role="img" aria-label="Line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain.">Delta rises steadily from OTM to ITM. Gamma, theta decay, and vega all peak at the at-the-money strike and fall off toward both deep ITM and deep OTM.</canvas>
       </div>
@@ -597,7 +597,7 @@ ChainView.prototype.renderDashboard = function(d) {
            (openStratPayoffModal(), see ModalManager). The modal's own
            canvas (#strat-payoff-canvas-modal) is redrawn by the same
            renderStratPayoff() pass as this one, so it's never stale. -->
-      <div class="chart-expand-wrap" onclick="openStratPayoffModal()" title="Click to expand" style="cursor:zoom-in;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 14px 10px;position:relative;">
+      <div class="chart-expand-wrap" role="button" tabindex="0" aria-label="Expand Strategy Payoff chart" onclick="openStratPayoffModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStratPayoffModal();}" title="Click to expand" style="cursor:zoom-in;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 14px 10px;position:relative;">
         <span class="chart-expand-icon" title="Expand">⤢</span>
         <canvas id="strat-payoff-canvas" style="width:100%;display:block;" height="280"></canvas>
       </div>
@@ -627,7 +627,7 @@ ChainView.prototype.renderDashboard = function(d) {
              ivRatio/vannaAdj math in simulator-view.js), not the live
              totalGEX the Greeks Alerts card and GEX Table both show —
              same scope note as chain-greeks.js's buildGreeksAlertsHtml. -->
-        <div class="sim-chart-area chart-expand-wrap" onclick="openSimGexModal()" title="Click to expand" style="cursor:zoom-in;padding-bottom:12px;position:relative;" id="sim-chart-container">
+        <div class="sim-chart-area chart-expand-wrap" role="button" tabindex="0" aria-label="Expand simulated Net GEX chart" onclick="openSimGexModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSimGexModal();}" title="Click to expand" style="cursor:zoom-in;padding-bottom:12px;position:relative;" id="sim-chart-container">
           <span class="chart-expand-icon" title="Expand">⤢</span>
           <div class="sim-chart-label">Net GEX Profile ($B) &#8593; <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;font-size:10px;">(Scenario-Adjusted)</span></div>
           <canvas id="sim-gex-canvas" height="180"></canvas>
@@ -735,7 +735,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // further down.
   h += `<div id="oi-flow-section">
 
-  <div class="zone-divider zone-divider--primary">Capital Flow</div>
+  <div id="zone-capital-flow" class="zone-divider zone-divider--primary">Capital Flow</div>
   <div class="capital-flow-grid">
 
     <div class="oic-merged-card">
@@ -798,7 +798,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Advanced Analytics for now; it's a derived input to that card's
   // verdict, not a standalone ranking, so it doesn't map to Probability
   // the way the ranking itself did.
-  h += '<div class="zone-divider zone-divider--secondary">Institutional</div>';
+  h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary">Institutional</div>';
   h += app.exec.renderInstitutionalGrid(d);
   h += app.exec.buildInstitutionalActivitySummaryCard(d);
 
@@ -824,7 +824,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // strategy payoff / GEX-scenario exposure) — built earlier
   // (stratSimulatorHtml, needs strats/spot/greeksData in scope) but
   // appended here so build order matches display order.
-  h += '<div class="zone-divider zone-divider--tertiary">Confirmation</div>';
+  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary">Confirmation</div>';
   h += this.buildVolatilityHtml(d);
   h += this.buildProbabilityHtml(d);
   h += this.buildScenarioAnalysisHtml(d);

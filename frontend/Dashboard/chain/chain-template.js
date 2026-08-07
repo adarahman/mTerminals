@@ -259,8 +259,9 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     }
 
     return `
-      <div id="verdict-mini-chart" class="verdict-mini-chart" title="Open price chart"
-           onclick="window.open('../PriceChart/price-chart.html?symbol=${encodeURIComponent(d.symbol||'NIFTY')}','_blank')">
+      <div id="verdict-mini-chart" class="verdict-mini-chart" role="button" tabindex="0" aria-label="Open price chart in a new tab" title="Open price chart"
+           onclick="window.open('../PriceChart/price-chart.html?symbol=${encodeURIComponent(d.symbol||'NIFTY')}','_blank')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.open('../PriceChart/price-chart.html?symbol=${encodeURIComponent(d.symbol||'NIFTY')}','_blank');}">
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
       </div>`;
 };

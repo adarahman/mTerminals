@@ -13,6 +13,9 @@
   // axis — but the tooltip should show the real Greek value the person is
   // actually hovering over, not the normalized fraction it's plotted at.
   let rawByDatasetIndex = [emptyData(), emptyData(), emptyData(), emptyData()];
+  let lastGreeksSignature = null;
+  let lastMainCanvas = null;
+  let lastModalCanvas = null;
 
   // The canvas now lives inside the dashboard's innerHTML template (next to
   // Strategy Payoff), which gets fully rebuilt on every live tick — so the
@@ -143,6 +146,17 @@
     const rows = payload && payload.greeks;
     const atm  = payload && payload.atm;
     if (!Array.isArray(rows) || rows.length === 0 || !atm) return;
+
+    // Live payloads contain many fields that do not affect this chart. Skip
+    // Chart.js work entirely when ATM + call Greeks are unchanged.
+    const signature = `${atm}|${rows.map(r => [r.strike,r.cDelta,r.cGamma,r.cTheta,r.cVega].join(':')).join(';')}`;
+    const mainCanvas = mainChart ? mainChart.canvas : null;
+    const modalCanvas = modalChart ? modalChart.canvas : null;
+    const canvasChanged = mainCanvas !== lastMainCanvas || modalCanvas !== lastModalCanvas;
+    if(signature === lastGreeksSignature && !canvasChanged) return;
+    lastGreeksSignature = signature;
+    lastMainCanvas = mainCanvas;
+    lastModalCanvas = modalCanvas;
 
     const strikes = [...new Set(rows.map(r => r.strike))].sort((a, b) => a - b);
     let step = Infinity;

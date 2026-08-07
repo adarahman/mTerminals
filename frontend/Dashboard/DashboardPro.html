@@ -169,9 +169,9 @@
         <div class="fd-report-status" id="fdReportStatus">CONNECTING…</div>
 
         <!-- UNIFIED MARKET BIAS card removed from here — it's the same
-             read (analytics/fii_dii_market_bias.py's payload.bias) already
-             rendered on the main dashboard by ExecView.buildFiiDiiBiasHtml()
-             inside buildFiiDiiSummaryCard()'s .fd-bias-card, visible above
+             read (analytics/fii_dii_market_bias.py's payload.bias) is
+             summarized on the main dashboard as an explicitly qualified
+             cash+F&O context line inside buildFiiDiiSummaryCard(), above
              the "Full Table →" button that opens this modal. Showing it a
              second time in here was a pure repeat of what the person just
              saw one click ago; the modal now starts straight at the raw
@@ -479,18 +479,13 @@
      top-bar's dedicated Expiry pill on every render instead of rebuilding it — so its
      option list and current selection survive live ticks). -->
 <div class="sec-nav" id="sec-nav-bar">
-  <span class="sec-nav-label">⚡ Jump</span>
+  <span class="sec-nav-label">⚡ Zones</span>
   <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
-  <!-- OI Flow and Simulator jump buttons removed (2026-08-02) — redundant
-       slots: the OI Flow summary card itself has an "Open full OI Flow
-       view" button (openOIDashboardModal()) that does the same job, and
-       Simulator is reached from there / the Institutional F&O Simulator
-       entry points elsewhere on the page. Freed slots reused for Algo/
-       Paper below instead of growing the rail further. -->
-  <button class="sec-btn sec-btn-strats" onclick="secJump('sec-strats')" style="display:none;"><span>🎯</span>Strategy</button>
-  <button class="sec-btn" onclick="secJump('greeks-alerts-card')"><span>Δ</span>Greeks</button>
-  <button class="sec-btn" onclick="secJump('fiidii-summary-card')"><span>🏦</span>FII/DII</button>
-  <button class="sec-btn" onclick="secJump('advanced-analytics-card')"><span>🔬</span>Advanced</button>
+  <button class="sec-btn" onclick="secJump('zone-structure')"><span>⌗</span>Structure</button>
+  <button class="sec-btn" onclick="secJump('zone-capital-flow')"><span>₹</span>Capital</button>
+  <button class="sec-btn" onclick="secJump('zone-institutional')"><span>🏦</span>Institutional</button>
+  <button class="sec-btn" onclick="secJump('zone-confirmation')"><span>✓</span>Confirm</button>
+  <span class="sec-nav-label sec-nav-label-tools">Tools</span>
   <!-- Range & velocity toggle — relocated here from its old floating
        .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
        there). Reuses the sec-btn styling so it sits inline with the other

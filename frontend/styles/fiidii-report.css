@@ -150,3 +150,11 @@
 .fd-bias-caveats:empty{display:none; border-top:none; margin:0; padding:0;}
 .fd-bias-caveats li{font-size:var(--fs-2xs); color:var(--amber); line-height:1.4; padding-left:14px; position:relative;}
 .fd-bias-caveats li::before{content:"⚠"; position:absolute; left:0; font-size:var(--fs-2xs);}
+
+/* PDS-01 P1 — visible D-08 is cash-market flow; participant OI stays Tier 3. */
+.fd-cash-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-2)}
+.fd-cash-cell{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-right:1px solid var(--border);min-width:0}
+.fd-cash-cell:last-child{border-right:0}
+.fd-cash-cell .k{font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary)}
+.fd-cash-cell .v{font-family:var(--font-mono);font-size:var(--fs-sm);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:1279px){.fd-cash-summary{grid-template-columns:1fr 1fr}.fd-cash-cell:nth-child(2){border-right:0}.fd-cash-cell:nth-child(-n+2){border-bottom:1px solid var(--border)}}

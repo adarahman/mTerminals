@@ -542,3 +542,7 @@
   border-color:var(--info);
   box-shadow:0 4px 16px rgba(51,154,240,0.25);
 }
+
+/* PDS-01 P1 — distinguish zone navigation from utility controls. */
+.sec-nav-label-tools{margin-top:var(--space-2);padding-top:var(--space-3);border-top:1px solid var(--border);background:transparent;border-radius:0;color:var(--text-tertiary)}
+.chart-expand-wrap[role="button"]:focus-visible,.verdict-mini-chart[role="button"]:focus-visible{outline:2px solid var(--info);outline-offset:2px}

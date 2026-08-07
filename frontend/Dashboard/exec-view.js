@@ -25,72 +25,43 @@ class ExecView {
 
   const pcr    = d.totalPCR || 1;
 
-  // Market health scores — driven by real backend data
-  // NOTE: Trend was removed from here — it was just re-deriving the same
-  // number the Decision Engine box already shows as "Confidence" (dec.confidence),
-  // so it was a pure duplicate rather than an independent signal.
-
-  // Momentum: spot day-change % + futures basis nudge
-  const basisNudge   = Math.max(-10, Math.min(10, Math.round((d.basis||0) / 5)));
-  const momScore     = Math.max(10, Math.min(90, Math.round(50 + (d.spotChgPct||0) * 6 + basisNudge)));
-
-  // OI Flow: blend total PCR + intraday OI-change PCR (d.oiChgPCR)
-  const oiChgPcr     = d.oiChgPCR || pcr;
-  const blendedPcr   = pcr * 0.5 + oiChgPcr * 0.5;
-  const oiScore      = Math.max(10, Math.min(90,
-                         Math.round(blendedPcr > 1 ? 50 + (blendedPcr-1)*30 : 50 - (1-blendedPcr)*30)));
-
-  // Theta Burn: actual atmTheta from Black-Scholes blended with DTE pressure
-  const thetaRaw     = Math.abs(d.atmTheta || 0);
-  const thetaNorm    = Math.min(thetaRaw / 15, 1);           // 15pts/day → 100%
-  const dtePressure  = Math.max(0, Math.min(1, 1 - (d.dte||7) / 10));
-  const thetaScore   = Math.max(10, Math.min(90, Math.round((thetaNorm * 0.6 + dtePressure * 0.4) * 90)));
 
   return `
 <div id="exec-section-wrap">
 <div class="exec-grid">
 
   <!-- ── CARD 1: MARKET HEALTH + STORY (merged) ── -->
-  <!-- Health's 3 progress bars and Story's narrative lines were two -->
-  <!-- separate cards; merged into one per the updated layout, freeing -->
-  <!-- the middle slot for Greeks/Net GEX (moved here from row2 so it -->
-  <!-- sits directly left of the Option Chain Snapshot card). Max Pain -->
-  <!-- lives in the Decision Engine's Verdicts column above — not -->
-  <!-- repeated here. -->
+  <!-- One narrative card: raw canonical context + a concise market story.
+       Presentation-layer Momentum/OI/Theta scores were removed in P1 so
+       this card explains the state instead of acting like a second
+       decision engine. Max Pain remains owned by D-04 Chain Snapshot. -->
   <div class="exec-card c-blue">
     <div class="exec-title">📊 Market Health &amp; Story</div>
-    ${progress("Momentum",  momScore,   d.spotChgPct>=0?'var(--green)':'var(--red)')}
-    ${progress("OI Flow",   oiScore,    oiScore>55?'var(--green)':oiScore<45?'var(--red)':'var(--amber)')}
-    ${progress("Theta Burn", thetaScore, thetaScore>=70?'var(--red)':thetaScore>=45?'var(--amber)':'var(--green)', `DTE ${d.dte||0} · ATM Θ ${fmtN(d.atmTheta,2)}/day — higher = more theta decay pressure.`)}
     ${(() => {
-      // Expected move is approximated from the ATM straddle premium (CE+PE).
-      // Using the SAME sum here and in the line below keeps the two numbers
-      // consistent — previously ±Move pulled an unrelated d.straddle field
-      // that could drift out of sync with the CE/PE premiums shown beneath it.
+      const oiChgPcr = d.oiChgPCR || pcr;
       const atmStraddlePrem = (d.callPremium||0) + (d.putPremium||0);
-      // The Decision Engine's actual recommended structure (may not be a straddle
-      // at all — e.g. Bull Call Spread, Iron Condor). Show it explicitly instead
-      // of letting the "Straddle" label imply that's the recommended trade.
       const stratName = dec.autoStrategy?.name || null;
+      const storyText = isBull
+        ? 'Put-side support and price structure remain constructive; prefer buying weakness while the thesis holds.'
+        : isBear
+          ? 'Call-side pressure and price structure remain defensive; prefer selling strength while the thesis holds.'
+          : 'Positioning is mixed; wait for clearer price/flow agreement before increasing conviction.';
       return `
-    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
-      <div class="story">±Expected Move <strong style="color:var(--blue);">${Math.round(atmStraddlePrem)}</strong></div>
-      <div class="story">ATM Straddle Prem <strong style="color:var(--txt);">CE ₹${fmtN(d.callPremium||0,1)} + PE ₹${fmtN(d.putPremium||0,1)}</strong></div>
-      ${stratName ? `<div class="story">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--txt3);line-height:1.6;">
-        ${isBull ? '🟢 Put writing continues — buy dips.' : isBear ? '🔴 Call writing heavy — sell rallies.' : '🟡 Mixed signals — wait for breakout.'}
-      </div>
-    </div>
-      `;
+        <div style="font-size:12px;line-height:1.55;color:var(--txt2);padding:2px 0 10px;">${storyText}</div>
+        <div class="kv-grid">
+          <div class="kv"><span class="k">Spot Move</span><span class="v" style="color:${signColor(d.spotChgPct,'var(--txt3)')};">${fmtSigned(d.spotChgPct||0,2)}%</span></div>
+          <div class="kv"><span class="k">Fut Basis</span><span class="v">${fmtSigned(d.basis||0,1)}</span></div>
+          <div class="kv"><span class="k">Total PCR</span><span class="v">${fmtN(pcr,2)}</span></div>
+          <div class="kv"><span class="k">ΔOI PCR</span><span class="v">${fmtN(oiChgPcr,2)}</span></div>
+          <div class="kv"><span class="k">ATM Θ / day</span><span class="v">${fmtN(d.atmTheta,2)}</span></div>
+          <div class="kv"><span class="k">DTE</span><span class="v">${d.dte||0}</span></div>
+        </div>
+        <div style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);">
+          <div class="story">±Expected Move <strong style="color:var(--blue);">${Math.round(atmStraddlePrem)}</strong></div>
+          <div class="story">ATM Straddle Prem <strong>CE ₹${fmtN(d.callPremium||0,1)} + PE ₹${fmtN(d.putPremium||0,1)}</strong></div>
+          ${stratName ? `<div class="story">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}
+        </div>`;
     })()}
-    <!-- Trimmed Top Movers (top 2 drivers/draggers) — fills the space the
-         full Top Movers card left behind when it moved out of this slot
-         (see history above buildTopMoversInlineHtml). Keeps Card 1's
-         height reasonable next to Greeks/GEX and Chain Snapshot without
-         forcing align-items:stretch to pad it with dead space. Full
-         3-each ranking is still available via buildDriversDraggersCard()
-         wherever Top Movers eventually gets its standalone home. -->
-    ${app.exec.buildTopMoversInlineHtml(d)}
   </div>
 
   <!-- ── CARD 2: GREEKS / NET GEX ── -->
@@ -211,7 +182,8 @@ class ExecView {
     // strike that just clears its (lower) bar doesn't automatically
     // outrank a near-band strike clearing its (higher) bar decisively.
     const strength = totalOI / (medianOI * th.oiMult);
-    flagged.push({ strike: r.strike, band, oiDominant, totalOI, volRatio, strength });
+    const dominantDOI = oiDominant === 'CE' ? (r.ceChgOI||0) : (r.peChgOI||0);
+    flagged.push({ strike: r.strike, band, oiDominant, totalOI, dominantDOI, volRatio, strength });
   });
 
   const nearCount = flagged.filter(f => f.band==='near').length;
@@ -224,6 +196,7 @@ class ExecView {
   else if(peCount > ceCount){ biasLabel = 'PE-heavy (bullish tilt)'; biasColor = 'var(--green)'; }
 
   const top = flagged.slice().sort((a,b) => b.strength - a.strength)[0];
+  const nearLedger = flagged.filter(f => f.band === 'near').sort((a,b) => b.strength - a.strength).slice(0,5);
 
   // Bias badge reuses --pos/--neg (not a dedicated purple) since CE-heavy/
   // PE-heavy here is a real bull/bear tilt read, same convention as the
@@ -263,6 +236,17 @@ class ExecView {
         <span class="lbl">BIAS</span>
         <span class="val" style="color:${biasColor};">${biasLabel}</span>
       </span>
+    </div>
+    <div class="oic-ledger" aria-label="Near-ATM institutional activity ledger">
+      <div class="oic-ledger-row oic-ledger-head"><span>Strike</span><span>Side</span><span>OI</span><span>ΔOI</span><span>Vol/OI</span></div>
+      ${nearLedger.length ? nearLedger.map(f => `
+        <button class="oic-ledger-row oic-ledger-link" onclick="event.stopPropagation();openOptionChainAtStrike(${f.strike})" aria-label="Open Option Chain at strike ${f.strike}">
+          <span>${fmtI(f.strike)}</span>
+          <span class="${f.oiDominant==='CE'?'bear':'bull'}">${f.oiDominant}</span>
+          <span>${fmtK(f.totalOI)}</span>
+          <span class="${f.dominantDOI>=0?'bull':'bear'}">${f.dominantDOI>=0?'+':''}${fmtK(f.dominantDOI)}</span>
+          <span>${fmtN(f.volRatio,1)}%</span>
+        </button>`).join('') : `<div class="oic-ledger-empty">No near-ATM institutional strikes currently flagged.</div>`}
     </div>
     ${top ? `
     <div class="oic-signal">
@@ -449,82 +433,34 @@ class ExecView {
 }
 
   buildFiiDiiSummaryCard(d){
-  const s = d.fiiDiiSentiment || {};
-  const hasData = s && s.source_date;
-  const biasHtml = this.buildFiiDiiBiasHtml(d.fiiDiiBias);
+  const bias = d.fiiDiiBias || {};
+  const cash = bias.cash || {};
+  const hasCash = !!cash.available;
+  const dateLabel = cash.latestDate || bias.asOf || '—';
 
-  if(!hasData){
-    return `
-  <div class="section-card sc-green" id="fiidii-summary-card" style="min-width:0;">
-    <button class="section-header nav-card-header" onclick="openFiiDiiModal()"
-       aria-label="Open FII / DII / Pro / Retail Sentiment — view full participant OI table" title="Open full participant OI table">
-      <span class="section-title nav-card-header-label"><span class="section-icon">🏦</span>FII / DII / Pro / Retail Sentiment</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
-    </button>
-    ${biasHtml}
-    <div class="dd-empty">Awaiting EOD participant-OI feed — populates after the first two post-close fetches.</div>
-  </div>`;
-  }
-
-  const participants = [
-    { p: 'fii',    label: 'FII Index Fut'    },
-    { p: 'dii',    label: 'DII Index Fut'    },
-    { p: 'pro',    label: 'PRO Index Fut'    },
-    { p: 'retail', label: 'RETAIL Index Fut' },
-  ];
-
-  // 4-across single row — the previous 2x2 grid used grid-template-
-  // columns:1fr 1fr, which on this card's actual (near-full-page) width
-  // stretched each quadrant into a mostly-empty cell with the label/value
-  // pinned to the left edge. A single row of 4 narrower columns uses that
-  // width proportionally instead of wasting it.
-  const rows = `<div style="display:grid;grid-template-columns:repeat(4,1fr);">` + participants.map(({p,label}, i) => {
-    const net = s[`${p}_index_fut_net`];
-    const isLast = i === participants.length - 1;
-    const bstyle = `padding:10px 14px;${isLast?'':'border-right:1px solid var(--border);'}`;
-    return `<div style="${bstyle}">
-      <div style="font-size:10px;color:var(--txt3);margin-bottom:4px;">${label}</div>
-      <div style="font-size:16px;font-weight:700;color:${signColor(net,'var(--txt3)')};">${fmtSigned(net,0)}</div>
-    </div>`;
-  }).join('') + `</div>`;
-
-  // Divergence flags now render as icon-badge rows — same treatment as
-  // Greeks/Net GEX Alerts (chain-greeks.js's buildGreeksAlertsHtml) — with
-  // the participant-pair readout kept as a bordered pill (matches the
-  // mockup's "PRO ⇄ FII+DII" chip) rather than a plain number, since it's
-  // a label pairing, not a magnitude.
-  const alerts=[];
-  if(s.fii_dii_divergence){
-    alerts.push({icon:'⇄', clr:'var(--amber)', title:'DIVERGENCE', text:'FII and DII index-future positioning diverged day-over-day', num:'FII ⇄ DII'});
-  }
-  if(s.pro_vs_fii_dii_divergence){
-    alerts.push({icon:'↗', clr:'var(--amber)', title:'DIVERGENCE', text:'Pro desk positioning diverged from combined FII+DII flow', num:'PRO ⇄ FII+DII'});
-  }
-  const alertRows = alerts.map((a,i)=>`
-    <div style="display:flex;align-items:center;gap:12px;padding:10px 2px;${i<alerts.length-1?'border-bottom:1px solid var(--border);':''}">
-      <div style="width:38px;height:38px;flex:0 0 38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, ${a.clr} 16%, transparent);border:1px solid color-mix(in srgb, ${a.clr} 45%, transparent);">
-        <span style="font-size:17px;color:${a.clr};line-height:1;">${a.icon}</span>
-      </div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:11.5px;font-weight:700;color:${a.clr};letter-spacing:.03em;">${a.title}</div>
-        <div style="font-size:11px;color:var(--txt3);line-height:1.4;margin-top:2px;">${a.text}</div>
-      </div>
-      <span style="font-size:12px;font-weight:700;color:var(--txt);padding:7px 14px;border:1px solid var(--border);border-radius:9px;background:var(--bg2);white-space:nowrap;flex:0 0 auto;">${a.num}</span>
-    </div>`).join('');
+  const cashVal = (v) => {
+    const n = Number(v);
+    if(!Number.isFinite(n)) return '—';
+    return `${n>=0?'+':''}₹${fmtN(n,0)} Cr`;
+  };
 
   return `
   <div class="section-card sc-green" id="fiidii-summary-card" style="min-width:0;">
     <button class="section-header nav-card-header" onclick="openFiiDiiModal()"
-       aria-label="Open FII / DII / Pro / Retail Sentiment — view full participant OI table" title="Open full participant OI table">
-      <span class="section-title nav-card-header-label"><span class="section-icon">🏦</span>FII / DII / Pro / Retail Sentiment</span>
-      <span style="font-size:10px;color:var(--txt3);">EOD ${s.source_date} vs ${s.compare_date||'—'}</span>
+       aria-label="Open FII/DII cash-flow and participant-positioning detail" title="Open full FII/DII report">
+      <span class="section-title nav-card-header-label"><span class="section-icon">🏦</span>FII / DII Cash Flow <span class="section-sub">Cash market</span></span>
+      <span style="font-size:10px;color:var(--txt3);">${dateLabel}</span>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
     </button>
-    ${biasHtml}
-    <div style="padding:2px 0;">
-      ${rows}
-    </div>
-    ${alertRows ? `<div style="display:flex;flex-direction:column;margin-top:8px;padding-top:2px;border-top:1px solid var(--border);">${alertRows}</div>` : ''}
+    ${hasCash ? `
+      <div class="fd-cash-summary">
+        <div class="fd-cash-cell"><span class="k">FII</span><span class="v" style="color:${signColor(cash.fiiLatest,'var(--txt3)')};">${cashVal(cash.fiiLatest)}</span></div>
+        <div class="fd-cash-cell"><span class="k">DII</span><span class="v" style="color:${signColor(cash.diiLatest,'var(--txt3)')};">${cashVal(cash.diiLatest)}</span></div>
+        <div class="fd-cash-cell"><span class="k">Combined</span><span class="v" style="color:${signColor(cash.netLatest,'var(--txt3)')};">${cashVal(cash.netLatest)}</span></div>
+        <div class="fd-cash-cell"><span class="k">Streak</span><span class="v">${cash.streakDays||0}d ${cash.streakDirection||'flat'}</span></div>
+      </div>
+      ${bias.overallLabel ? `<div class="legend-foot" style="margin-top:10px;"><b>Combined cash + F&amp;O context:</b> ${bias.overallLabel} · confidence ${fmtN(bias.overallConfidence||0,0)}%. Participant OI/divergence detail remains Tier 3.</div>` : `<div class="legend-foot" style="margin-top:10px;">Participant F&amp;O OI and divergence detail remain Tier 3.</div>`}
+    ` : `<div class="dd-empty">Awaiting FII/DII cash-market flow history. Participant F&amp;O detail remains available in the full report when published.</div>`}
   </div>`;
 }
 

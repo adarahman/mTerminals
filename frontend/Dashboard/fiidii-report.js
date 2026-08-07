@@ -223,8 +223,10 @@ function fdMarkLive() {
 function fdUpdateReport(payload = {}) {
   // payload.bias (analytics/fii_dii_market_bias.py) no longer renders here —
   // that card was a duplicate of the one already shown on the main
-  // dashboard (ExecView.buildFiiDiiBiasHtml, above the "Full Table →"
-  // button). Still counts toward "is this feed live" below.
+  // dashboard (ExecView.buildFiiDiiSummaryCard, explicitly qualified as
+  // combined cash+F&O context beneath the cash-flow summary). The modal
+  // therefore does not repeat the bias card. Still counts toward
+  // "is this feed live" below.
   if (payload.bias) { fdMarkLive(); }
   if (payload.flow) { fdFlowSeries = payload.flow; fdDrawFlow(); fdRenderFlowLegend(); fdMarkLive(); }
   if (typeof payload.ratio === 'number' || (payload.ratio && typeof payload.ratio === 'object')) {

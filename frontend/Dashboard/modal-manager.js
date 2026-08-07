@@ -31,6 +31,11 @@ class ModalManager {
   constructor() {
     this.oiDashboardWin = null;
     this.oiFrameLoaded = false;
+    this._activeModal = null;
+    this._activeCloseFn = null;
+    this._modalInvokers = new WeakMap();
+    this._modalKeyHandlers = new WeakMap();
+    this._modalBackdropHandlers = new WeakMap();
   }
 
   // Defensive guard shared by every open*Modal() method below: closes any
@@ -44,12 +49,100 @@ class ModalManager {
   // (which reads as "both panels expanded, one of them blank" — the
   // first modal isn't actually empty, it's just hidden behind the
   // second).
-  _openModal(modal){
+  _openModal(modal, closeFn){
   if(!modal) return;
-  document.querySelectorAll('.oc-modal.open').forEach(function(m){
-    if(m !== modal) m.classList.remove('open');
-  });
+
+  let invoker = document.activeElement && document.activeElement !== document.body
+    ? document.activeElement : null;
+
+  // Close the previously-active modal through its public close path so
+  // modal-specific cleanup (e.g. FII/DII relay disconnect) still runs.
+  // If focus currently sits inside that modal, carry forward its original
+  // invoker rather than remembering a soon-to-be-hidden close button.
+  if(this._activeModal && this._activeModal !== modal && typeof this._activeCloseFn === 'function'){
+    if(invoker && this._activeModal.contains(invoker)){
+      invoker = this._modalInvokers.get(this._activeModal) || null;
+    }
+    this._activeCloseFn();
+  }
+
+  if(invoker && invoker.isConnected) this._modalInvokers.set(modal, invoker);
+
+  this._activeModal = modal;
+  this._activeCloseFn = typeof closeFn === 'function' ? closeFn : null;
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
   modal.classList.add('open');
+
+  const oldKeyHandler = this._modalKeyHandlers.get(modal);
+  if(oldKeyHandler) modal.removeEventListener('keydown', oldKeyHandler);
+  const oldBackdropHandler = this._modalBackdropHandlers.get(modal);
+  if(oldBackdropHandler) modal.removeEventListener('click', oldBackdropHandler);
+
+  const panel = modal.querySelector('.oc-modal-panel') || modal;
+  if(!panel.hasAttribute('tabindex')) panel.setAttribute('tabindex', '-1');
+
+  const focusableSelector = [
+    'button:not([disabled])', 'a[href]', 'input:not([disabled])',
+    'select:not([disabled])', 'textarea:not([disabled])', 'iframe',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
+
+  const keyHandler = (e) => {
+    if(e.key !== 'Tab') return;
+    const focusables = Array.from(modal.querySelectorAll(focusableSelector))
+      .filter(el => !el.hidden && el.offsetParent !== null);
+    if(!focusables.length){
+      e.preventDefault();
+      panel.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if(e.shiftKey && document.activeElement === first){
+      e.preventDefault(); last.focus();
+    } else if(!e.shiftKey && document.activeElement === last){
+      e.preventDefault(); first.focus();
+    }
+  };
+  modal.addEventListener('keydown', keyHandler);
+  this._modalKeyHandlers.set(modal, keyHandler);
+
+  const backdropHandler = (e) => {
+    if(e.target !== modal || !modal.classList.contains('open')) return;
+    if(typeof closeFn === 'function') closeFn();
+  };
+  modal.addEventListener('click', backdropHandler);
+  this._modalBackdropHandlers.set(modal, backdropHandler);
+
+  requestAnimationFrame(() => {
+    const preferred = modal.querySelector('.oc-modal-back') || modal.querySelector(focusableSelector);
+    (preferred || panel).focus();
+  });
+}
+
+  _closeModal(modal){
+  if(!modal) return;
+  modal.classList.remove('open');
+
+  const keyHandler = this._modalKeyHandlers.get(modal);
+  if(keyHandler) modal.removeEventListener('keydown', keyHandler);
+  this._modalKeyHandlers.delete(modal);
+
+  const backdropHandler = this._modalBackdropHandlers.get(modal);
+  if(backdropHandler) modal.removeEventListener('click', backdropHandler);
+  this._modalBackdropHandlers.delete(modal);
+
+  if(this._activeModal === modal){
+    this._activeModal = null;
+    this._activeCloseFn = null;
+  }
+
+  const invoker = this._modalInvokers.get(modal);
+  this._modalInvokers.delete(modal);
+  if(invoker && invoker.isConnected){
+    requestAnimationFrame(() => invoker.focus());
+  }
 }
 
   openOIDashboardModal(tab){
@@ -90,14 +183,14 @@ class ModalManager {
   if (tab && frame.contentWindow) {
     frame.contentWindow.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
   }
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeOIDashboardModal());
   document.addEventListener('keydown', _oiEscHandler);
 }
 
   closeOIDashboardModal(){
   var modal = document.getElementById('oi-flow-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _oiEscHandler);
 }
 
@@ -119,7 +212,7 @@ class ModalManager {
   openGreeksModal(){
   var modal = document.getElementById('greeks-dashboard-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeGreeksModal());
   document.addEventListener('keydown', _greeksEscHandler);
   // Refresh immediately on open too, in case something changed the
   // underlying data without a live tick firing in between (e.g. a
@@ -130,7 +223,7 @@ class ModalManager {
   closeGreeksModal(){
   var modal = document.getElementById('greeks-dashboard-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _greeksEscHandler);
 }
 
@@ -172,7 +265,7 @@ class ModalManager {
   openFiiDiiModal(){
   var modal = document.getElementById('fiidii-dashboard-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeFiiDiiModal());
   document.addEventListener('keydown', _fiidiiEscHandler);
   if(app.data.store.state && app.exec.renderFiiDiiModal) app.exec.renderFiiDiiModal(app.data.store.state);
   if(window.FiiDiiReportFeed) FiiDiiReportFeed.connect();
@@ -181,7 +274,7 @@ class ModalManager {
   closeFiiDiiModal(){
   var modal = document.getElementById('fiidii-dashboard-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _fiidiiEscHandler);
   if(window.FiiDiiReportFeed) FiiDiiReportFeed.disconnect();
 }
@@ -202,7 +295,7 @@ class ModalManager {
   openIvSurfaceModal(){
   var modal = document.getElementById('iv-surface-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeIvSurfaceModal());
   document.addEventListener('keydown', _ivSurfaceEscHandler);
   if(typeof app !== 'undefined' && app.chain && app.chain.renderIvSurfaceModal) app.chain.renderIvSurfaceModal();
 }
@@ -210,7 +303,7 @@ class ModalManager {
   closeIvSurfaceModal(){
   var modal = document.getElementById('iv-surface-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _ivSurfaceEscHandler);
 }
 
@@ -232,7 +325,7 @@ class ModalManager {
   openStratPayoffModal(){
   var modal = document.getElementById('strat-payoff-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeStratPayoffModal());
   document.addEventListener('keydown', _stratPayoffEscHandler);
   if(window.renderStratPayoff) renderStratPayoff();
 }
@@ -240,7 +333,7 @@ class ModalManager {
   closeStratPayoffModal(){
   var modal = document.getElementById('strat-payoff-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _stratPayoffEscHandler);
 }
 
@@ -259,7 +352,7 @@ class ModalManager {
   openSimGexModal(){
   var modal = document.getElementById('sim-gex-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeSimGexModal());
   document.addEventListener('keydown', _simGexEscHandler);
   if(window.simUpdate) simUpdate();
 }
@@ -267,7 +360,7 @@ class ModalManager {
   closeSimGexModal(){
   var modal = document.getElementById('sim-gex-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _simGexEscHandler);
 }
 
@@ -285,7 +378,7 @@ class ModalManager {
   openVolOiVelocityModal(){
   var modal = document.getElementById('vol-oi-velocity-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeVolOiVelocityModal());
   document.addEventListener('keydown', _volOiVelocityEscHandler);
   if(window.simUpdate) simUpdate();
 }
@@ -293,7 +386,7 @@ class ModalManager {
   closeVolOiVelocityModal(){
   var modal = document.getElementById('vol-oi-velocity-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _volOiVelocityEscHandler);
 }
 
@@ -316,7 +409,7 @@ class ModalManager {
   openStrikeDetailReportModal(){
   var modal = document.getElementById('strike-detail-report-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeStrikeDetailReportModal());
   document.addEventListener('keydown', _strikeDetailReportEscHandler);
   if(window.simUpdate) simUpdate();
 }
@@ -324,7 +417,7 @@ class ModalManager {
   closeStrikeDetailReportModal(){
   var modal = document.getElementById('strike-detail-report-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _strikeDetailReportEscHandler);
 }
 
@@ -346,7 +439,7 @@ class ModalManager {
   openGreeksChartModal(){
   var modal = document.getElementById('greeks-chart-modal');
   if(!modal) return;
-  this._openModal(modal);
+  this._openModal(modal, () => this.closeGreeksChartModal());
   document.addEventListener('keydown', _greeksChartEscHandler);
   if(app.data.store.state && window.updateGreeksMoneynessChart){
     window.updateGreeksMoneynessChart(app.data.store.state);
@@ -356,7 +449,7 @@ class ModalManager {
   closeGreeksChartModal(){
   var modal = document.getElementById('greeks-chart-modal');
   if(!modal) return;
-  modal.classList.remove('open');
+  this._closeModal(modal);
   document.removeEventListener('keydown', _greeksChartEscHandler);
 }
 
