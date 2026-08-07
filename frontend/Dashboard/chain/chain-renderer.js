@@ -783,10 +783,12 @@ ChainView.prototype.renderDashboard = function(d) {
   // this same #sec-tier2 slot for no reason tied to either card's
   // question (Greeks by Moneyness moved to Structure & Positioning
   // above). All four institutional-intent cards now sit together here.
-  // Smart Money Ranking (advanced-analytics-view.js) and Conviction
-  // Gauge's Smart Money Lean pillar stay inside Advanced Analytics for
-  // now — extracting them out is roadmap step 7 (Advanced Analytics
-  // decomposition), not this layout-only pass.
+  // Smart Money Ranking now lives in its own Probability card
+  // (probability-view.js, Confirmation zone) as of step 7's second pass —
+  // not here. Conviction Gauge's Smart Money Lean pillar stays inside
+  // Advanced Analytics for now; it's a derived input to that card's
+  // verdict, not a standalone ranking, so it doesn't map to Probability
+  // the way the ranking itself did.
   h += '<div class="zone-divider zone-divider--secondary">Institutional</div>';
   h += app.exec.renderInstitutionalGrid(d);
   h += app.exec.buildInstitutionalActivitySummaryCard(d);
@@ -795,15 +797,28 @@ ChainView.prototype.renderDashboard = function(d) {
   // Supporting evidence that validates or challenges the Decision
   // Engine's call, opened after the Tier-1 verdict rather than competing
   // with it for always-visible space (§3 of the IA redesign proposal).
-  // Advanced Analytics (Smart Money Ranking / IV Rank / GEX table / OI
-  // Velocity / per-strike Greeks / Scenario P&L) stays one collapsible
-  // for now — decomposing it into purpose-specific cards is roadmap step
-  // 7. Strategy Payoff / Institutional F&O Simulator moved here too:
-  // they're "what if" scenario tools (Tier 3), same family as Advanced
-  // Analytics' own Scenario P&L, not Structure & Positioning — built
-  // earlier (stratSimulatorHtml, needs strats/spot/greeksData in scope)
-  // but appended here so build order matches display order.
+  // Volatility (IV Rank details), Probability (Smart Money Ranking), and
+  // Scenario Analysis (Scenario P&L) are the three sub-cards pulled out
+  // of Advanced Analytics into their own purpose-specific cards so far
+  // (roadmap step 7, dashboard-redesign-proposal.md §2.3 — see
+  // volatility-view.js / probability-view.js / scenario-analysis-view.js);
+  // mounted first since they now stand alone rather than living inside
+  // the Advanced Analytics grid. The rest of Advanced Analytics (GEX
+  // table / OI Velocity / per-strike Greeks / Capital Confirmation /
+  // Futures-Options Divergence) stays one collapsible — none of it maps
+  // cleanly to Volatility/Probability/Scenario Analysis, and the fourth
+  // named destination (Cross-Market) has no candidate content yet, so
+  // this is likely close to Advanced Analytics' final shape. Strategy
+  // Payoff / Institutional F&O Simulator sits right after Scenario
+  // Analysis: both are "what if" scenario tools (Tier 3) answering
+  // adjacent questions (single-straddle expiry payoff vs. multi-leg
+  // strategy payoff / GEX-scenario exposure) — built earlier
+  // (stratSimulatorHtml, needs strats/spot/greeksData in scope) but
+  // appended here so build order matches display order.
   h += '<div class="zone-divider zone-divider--tertiary">Confirmation</div>';
+  h += this.buildVolatilityHtml(d);
+  h += this.buildProbabilityHtml(d);
+  h += this.buildScenarioAnalysisHtml(d);
   h += this.buildAdvancedAnalyticsHtml(d);
   // Collapsed by default (no `open` attribute, matching Advanced Analytics'
   // own <details class="card"> right above) — closes the gap where this
@@ -1365,9 +1380,38 @@ ChainView.prototype._rerenderChainPanels = function() {
   // of that card's own outerHTML-diff block (4b, buildGreeksAlertsHtml)
   // instead of needing its own here.
 
+  // Volatility — new standalone Tier-3-style collapsible (IA redesign
+  // step 7, first Advanced Analytics sub-card extracted out), same
+  // open-state preservation as its siblings so an expanded panel
+  // survives a tick refresh instead of collapsing out from under the
+  // user.
+  patchOuterHtmlIfChanged('volatility-card', () => app.chain.buildVolatilityHtml(_data), {
+    preserveState: (el) => el.hasAttribute('open'),
+    restoreState: (fresh, wasOpen) => { if(wasOpen) fresh.setAttribute('open',''); }
+  });
+
+  // Probability — second standalone Tier-3-style collapsible extracted
+  // out of Advanced Analytics (IA redesign step 7, second pass — see
+  // probability-view.js), same open-state preservation as Volatility
+  // above.
+  patchOuterHtmlIfChanged('probability-card', () => app.chain.buildProbabilityHtml(_data), {
+    preserveState: (el) => el.hasAttribute('open'),
+    restoreState: (fresh, wasOpen) => { if(wasOpen) fresh.setAttribute('open',''); }
+  });
+
+  // Scenario Analysis — third standalone Tier-3-style collapsible
+  // extracted out of Advanced Analytics (IA redesign step 7, third pass
+  // — see scenario-analysis-view.js), same open-state preservation as
+  // Volatility/Probability above.
+  patchOuterHtmlIfChanged('scenario-analysis-card', () => app.chain.buildScenarioAnalysisHtml(_data), {
+    preserveState: (el) => el.hasAttribute('open'),
+    restoreState: (fresh, wasOpen) => { if(wasOpen) fresh.setAttribute('open',''); }
+  });
+
   // Advanced Analytics — fourth Tier-3-style collapsible, same open-state
-  // preservation as its siblings above (it re-derives all six sub-cards
-  // from live data every tick, so an open panel never goes stale).
+  // preservation as its siblings above (it re-derives all remaining
+  // sub-cards from live data every tick, so an open panel never goes
+  // stale).
   patchOuterHtmlIfChanged('advanced-analytics-card', () => app.chain.buildAdvancedAnalyticsHtml(_data), {
     preserveState: (el) => el.hasAttribute('open'),
     restoreState: (fresh, wasOpen) => { if(wasOpen) fresh.setAttribute('open',''); }

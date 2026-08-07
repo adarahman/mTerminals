@@ -1,12 +1,12 @@
 // ============================================================
 // advanced-analytics-view.js
 // "Advanced Analytics" — one collapsed-by-default <details class="card">
-// on the main dashboard, tucking nine deep-dive views behind a single
-// expand so the always-visible dashboard stays readable for new users:
-//   0. Conviction Multiplier  4. OI Velocity       8. Capital Confirmation
-//   1. Smart Money ranking    5. Per-strike Greeks 9. Futures-Options Divergence
-//   2. IV Rank details        6. Scenario P&L
-//   3. GEX table
+// on the main dashboard, tucking six remaining deep-dive views behind
+// a single expand so the always-visible dashboard stays readable for new
+// users:
+//   0. Conviction Multiplier  3. Per-strike Greeks
+//   1. GEX table              4. Capital Confirmation
+//   2. OI Velocity            5. Futures-Options Divergence
 // Each sub-card is a compact, self-contained read built off data already
 // on the payload / already computed elsewhere (chain, greeks, oiVelocity,
 // volOiRatios) — no new backend fields required. Where a fuller view
@@ -18,6 +18,21 @@
 // since it's a derived confirm/conflict check built entirely from data
 // shown elsewhere (FII/DII, gamma flip, PCR expansion, smart money lean),
 // not an at-a-glance fact of its own.
+//
+// IA redesign step 7 (dashboard-redesign-proposal.md §2.3/§5): decomposing
+// this card into purpose-specific ones is a multi-pass effort, not a
+// single refactor. Three passes done: IV Rank details moved out to its
+// own "Volatility" card (volatility-view.js), Smart Money Ranking moved
+// out to its own "Probability" card (probability-view.js), and Scenario
+// P&L moved out to its own "Scenario Analysis" card
+// (scenario-analysis-view.js) — three of the four destinations §2.3
+// names (Volatility / Scenario Analysis / Probability / Cross-Market).
+// A future Cross-Market destination has no candidate content yet in this
+// codebase, so nothing is pending extraction for it. GEX table /
+// OI Velocity / Per-strike Greeks / Capital Confirmation /
+// Futures-Options Divergence don't map cleanly to any of the four named
+// destinations and stay here for now — this is likely close to Advanced
+// Analytics' final shape unless a genuinely new question emerges.
 //
 // Must load after: formatters.js, chain-helpers.js (fmtI/fmtN/fmtK,
 // getFilteredChain, activeAtm), dashboard-thresholds.js (INST_THRESHOLDS),
@@ -49,81 +64,7 @@ function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel, subtitl
   </div>`;
 }
 
-// ── 1. Smart Money ranking ──
-// Reuses the same isInst/badge heuristic SimulatorView's Institutional
-// Activity table already applies per strike (see simulator-view.js's
-// rowHtml), but ranks the visible chain by strength of ΔOI among
-// institutional-flagged strikes instead of grouping by near/far band —
-// a "who's doing the most right now" list rather than a strike ledger.
-//
-// CORRECTION (step 6 audit): was labeled "Whole-Chain Ranking" (and this
-// comment said "the WHOLE visible chain," the exact same conflation)
-// despite ranking getFilteredChain(d) — the user's ±N chain-range
-// selection, same scope Range PCR is honest about, not the true full
-// chain. Relabeled to "Visible-Range Ranking" so this card's scope
-// matches what it actually computes. See PROJECT-ARCHITECTURE.md §13/
-// dashboard-redesign-proposal.md §4 for the authoritative-source table
-// this is keeping consistent with.
-function _aaSmartMoneyRankingHtml(d) {
-  const chain = getFilteredChain(d);
-  if (!chain.length) return _aaCardWrap('🧠', 'Smart Money Ranking', `<div class="dd-empty">No chain data yet.</div>`, null, null, null, 'Visible-Range Ranking');
-
-  const ratios = d.volOiRatios || {};
-  const totals = chain.map(r => (r.ceOI || 0) + (r.peOI || 0)).sort((a, b) => a - b);
-  const medianOI = totals[Math.floor(totals.length / 2)] || 1;
-  const th = INST_THRESHOLDS.near;
-
-  const rows = chain.map(r => {
-    const totalOI = (r.ceOI || 0) + (r.peOI || 0);
-    const rawRatio = ratios[String(r.strike)];
-    const hasRatioData = !!rawRatio;
-    const volRatio = hasRatioData ? ((rawRatio.ce || 0) + (rawRatio.pe || 0)) / 2 : 0;
-    const isInst = hasRatioData && totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax;
-    const dominant = (r.ceOI || 0) >= (r.peOI || 0) ? 'CE' : 'PE';
-    const oiDomChg = dominant === 'CE' ? (r.ceChgOI || 0) : (r.peChgOI || 0);
-    const badge = smartMoneyBadge(hasRatioData, isInst, oiDomChg, totalOI, volRatio, th);
-    return { strike: r.strike, dominant, oiDomChg, badge };
-  })
-    .filter(row => row.badge.label !== 'RETAIL')
-    .sort((a, b) => Math.abs(b.oiDomChg) - Math.abs(a.oiDomChg))
-    .slice(0, 8);
-
-  const body = rows.length
-    ? rows.map((row, i) => `
-      <div style="display:flex;align-items:center;gap:10px;padding:7px 2px;${i < rows.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
-        <span>${row.badge.dot}</span>
-        <span style="font-family:var(--mono);font-weight:600;flex:0 0 64px;">${fmtI(row.strike)}</span>
-        <span style="flex:0 0 26px;color:var(--txt3);font-size:11px;">${row.dominant}</span>
-        <span style="flex:1;font-weight:600;font-size:11px;color:${row.badge.color};">${row.badge.label}</span>
-        <span style="font-family:var(--mono);color:${row.oiDomChg >= 0 ? 'var(--green)' : 'var(--amber)'};">${row.oiDomChg >= 0 ? '+' : '\u2212'}${fmtK(Math.abs(row.oiDomChg))}</span>
-      </div>`).join('')
-    : `<div class="dd-empty">No institutional-grade activity flagged right now.</div>`;
-
-  return _aaCardWrap('🧠', 'Smart Money Ranking', body,
-    'Ranked by strongest ΔOI among institutional-flagged strikes (ACC / DIST / HEDGE / ROLL).',
-    null, null, 'Visible-Range Ranking');
-}
-
-// ── 2. IV Rank details ──
-// Distilled version of buildIvHvSkewDetailHtml's metric-strip (same
-// fields, same "Full Surface →" destination) without its alert rows —
-// this card's job is the raw numbers, the alerts already live inline
-// in the always-visible Tier-3 card.
-function _aaIvRankHtml(d) {
-  const rank = d.ivRank || 0;
-  const ivVsHv = (d.atmIV || 0) - (d.hv30 || 0);
-  const richCheap = ivVsHv >= 0 ? 'rich' : 'cheap';
-  const body = `<div class="metric-strip">
-      <div class="metric-cell"><div class="k">IV Rank</div><div class="v">${Math.round(rank)}/100</div></div>
-      <div class="metric-cell"><div class="k">ATM IV</div><div class="v">${fmtN(d.atmIV, 2)}%</div></div>
-      <div class="metric-cell"><div class="k">HV (30d)</div><div class="v">${fmtN(d.hv30, 2)}%</div></div>
-      <div class="metric-cell"><div class="k">IV vs HV</div><div class="v ${ivVsHv >= 0 ? 'bear' : 'bull'}">${fmtN(ivVsHv, 2)}% ${richCheap}</div></div>
-      <div class="metric-cell"><div class="k">Skew</div><div class="v">${fmtN(d.atmSkew, 2)}%</div></div>
-    </div>`;
-  return _aaCardWrap('📉', 'IV Rank Details', body, null, 'openIvSurfaceModal()', 'Full Surface →');
-}
-
-// ── 3. GEX table ──
+// ── 1. GEX table ──
 // Strikes ranked by |Net GEX| — the strongest dealer-hedging pressure
 // points, rather than the full strike-ordered ledger (that stays behind
 // "Full Table →", which opens the existing Greeks/GEX modal).
@@ -146,7 +87,7 @@ function _aaGexTableHtml(d) {
   return _aaCardWrap('\u03b3', 'GEX Table', rows, 'Strikes ranked by |Net GEX| magnitude.', 'openGreeksModal()', 'Full Table →', 'Top |GEX| Strikes');
 }
 
-// ── 4. OI Velocity ──
+// ── 2. OI Velocity ──
 // Same oiVelocity[window].rows source the sidebar's Vel Window tabs and
 // OI Flow modal already read (see chain-renderer.js's velBlock lookup),
 // ranked by fastest ΔOI in the currently-selected window instead of
@@ -171,7 +112,7 @@ function _aaOiVelocityHtml(d) {
   return _aaCardWrap('\u26a1', `OI Velocity (${_velWin}m)`, body, 'Strikes ranked by fastest ΔOI in the current window — change the window from the Range/Vel rail.');
 }
 
-// ── 5. Per-strike Greeks ──
+// ── 3. Per-strike Greeks ──
 // A narrow band around ATM (6 strikes) rather than the full chain — the
 // complete strike-by-strike Δ/Γ/Θ/Vega + Net GEX table (with tab
 // switching) stays behind "Full Table →", same modal as the GEX card
@@ -200,40 +141,7 @@ function _aaPerStrikeGreeksHtml(d) {
   return _aaCardWrap('\u0394', 'Per-Strike Greeks', rows, null, 'openGreeksModal()', 'Full Table →');
 }
 
-// ── 6. Scenario P&L ──
-// Net-new: no existing card models P&L directly. Kept deliberately
-// simple and transparent — a long ATM straddle's INTRINSIC value at
-// expiry across a handful of spot-move scenarios, vs the premium paid
-// today (d.callPremium + d.putPremium). This is expiry P&L, not a live
-// mark-to-market re-price (that would need a full Black-Scholes repricing
-// per scenario, which the Institutional F&O Simulator's GEX view already
-// approximates for gamma exposure — this card answers a different
-// question: "what does this position return if held to expiry").
-function _aaScenarioPnlHtml(d) {
-  const spot = d.spot || 0;
-  const atm = activeAtm(d);
-  const straddle = (d.callPremium || 0) + (d.putPremium || 0);
-  if (!spot || !straddle) return _aaCardWrap('\ud83c\udfaf', 'Scenario P&L', `<div class="dd-empty">No premium data yet.</div>`);
-
-  const moves = [-0.03, -0.02, -0.01, 0, 0.01, 0.02, 0.03];
-  const rows = moves.map(m => {
-    const scenSpot = spot * (1 + m);
-    const intrinsic = Math.max(scenSpot - atm, 0) + Math.max(atm - scenSpot, 0);
-    const pnl = intrinsic - straddle;
-    const isBase = m === 0;
-    return `<tr>
-      <td class="${isBase ? 'atm-sc' : 'sc'}">${m > 0 ? '+' : ''}${(m * 100).toFixed(0)}%</td>
-      <td style="font-family:var(--mono);">${fmtI(scenSpot)}</td>
-      <td style="font-family:var(--mono);color:${pnl >= 0 ? 'var(--green)' : 'var(--red)'};">${pnl >= 0 ? '+' : '\u2212'}\u20b9${fmtN(Math.abs(pnl), 2)}</td>
-    </tr>`;
-  }).join('');
-
-  return _aaCardWrap('\ud83c\udfaf', 'Scenario P&L',
-    `<table class="t"><thead><tr><th>Spot Move</th><th>Scenario Spot</th><th>Straddle P&amp;L</th></tr></thead><tbody>${rows}</tbody></table>`,
-    'Long ATM straddle payoff if held to expiry, per spot-move scenario — not a live mark-to-market re-price.');
-}
-
-// ── 8. Capital Confirmation ──
+// ── 4. Capital Confirmation ──
 // analytics/capital_futures_confirmation.py's compute_capital_confirmation()
 // output (spec item #3) — three-vote agreement check (capital flow /
 // market regime / price) with an elevated-volume upgrade from Weak to
@@ -269,7 +177,7 @@ function _aaCapitalConfirmationHtml(d) {
     'Agreement across capital flow, market regime, and price direction — elevated volume upgrades a 2/3 agreement to Confirmed.');
 }
 
-// ── 9. Futures-Options Divergence ──
+// ── 5. Futures-Options Divergence ──
 // analytics/capital_futures_confirmation.py's detect_futures_options_
 // divergence() output (spec item #4).
 function _aaFuturesOptionsDivergenceHtml(d) {
@@ -313,15 +221,12 @@ ChainView.prototype.buildAdvancedAnalyticsHtml = function(d) {
       <span class="chev">\u25b6</span>
     </summary>
     <div class="detail-body">
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 Smart Money \u00b7 IV Rank \u00b7 GEX \u00b7 OI Velocity \u00b7 Greeks \u00b7 Scenario P&amp;L \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 GEX \u00b7 OI Velocity \u00b7 Greeks \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div style="grid-column:1/-1;">${buildConvictionGaugeHtml(d)}</div>
-        ${_aaSmartMoneyRankingHtml(d)}
-        ${_aaIvRankHtml(d)}
         ${_aaGexTableHtml(d)}
         ${_aaOiVelocityHtml(d)}
         ${_aaPerStrikeGreeksHtml(d)}
-        ${_aaScenarioPnlHtml(d)}
         ${_aaCapitalConfirmationHtml(d)}
         ${_aaFuturesOptionsDivergenceHtml(d)}
       </div>

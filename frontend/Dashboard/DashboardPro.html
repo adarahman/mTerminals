@@ -665,6 +665,31 @@
      formatters.js), INST_THRESHOLDS (dashboard-thresholds.js above), and
      smartMoneyBadge (engines/smart-money.js) — all already loaded by this
      point. Must load before dashboard.js constructs the App. -->
+<!-- Volatility collapsible (IA redesign step 7, first Advanced Analytics
+     sub-card extracted out — see volatility-view.js): attaches
+     ChainView.prototype.buildVolatilityHtml, called from
+     chain-renderer.js's renderDashboard(). Same load-order requirements
+     as advanced-analytics-view.js above (ChainView + fmtN already
+     loaded); order relative to advanced-analytics-view.js itself doesn't
+     matter since both are called at render time, not load time. -->
+<script src="volatility-view.js"></script>
+<!-- Probability collapsible (IA redesign step 7, second Advanced
+     Analytics sub-card extracted out — see probability-view.js):
+     attaches ChainView.prototype.buildProbabilityHtml. Same load-order
+     requirements as advanced-analytics-view.js (needs ChainView,
+     fmtI/fmtK, getFilteredChain, INST_THRESHOLDS, smartMoneyBadge, all
+     already loaded by this point); order relative to the other two
+     files here doesn't matter since all three are called at render
+     time, not load time. -->
+<script src="probability-view.js"></script>
+<!-- Scenario Analysis collapsible (IA redesign step 7, third Advanced
+     Analytics sub-card extracted out — see scenario-analysis-view.js):
+     attaches ChainView.prototype.buildScenarioAnalysisHtml. Same
+     load-order requirements as advanced-analytics-view.js (needs
+     ChainView, fmtI/fmtN, activeAtm, all already loaded by this point);
+     order relative to the other files here doesn't matter since all are
+     called at render time, not load time. -->
+<script src="scenario-analysis-view.js"></script>
 <script src="advanced-analytics-view.js"></script>
 <script src="modal-manager.js"></script>
 <script src="fiidii-report.js"></script>
