@@ -83,6 +83,14 @@ class ExecView {
     </div>
       `;
     })()}
+    <!-- Trimmed Top Movers (top 2 drivers/draggers) — fills the space the
+         full Top Movers card left behind when it moved out of this slot
+         (see history above buildTopMoversInlineHtml). Keeps Card 1's
+         height reasonable next to Greeks/GEX and Chain Snapshot without
+         forcing align-items:stretch to pad it with dead space. Full
+         3-each ranking is still available via buildDriversDraggersCard()
+         wherever Top Movers eventually gets its standalone home. -->
+    ${app.exec.buildTopMoversInlineHtml(d)}
   </div>
 
   <!-- ── CARD 2: GREEKS / NET GEX ── -->
@@ -679,15 +687,20 @@ class ExecView {
   </div>`;
 }
 
-  buildDriversDraggersCard(d){
-  const contributors = d.contributors || [];
+  // ── Shared row/body builders for Drivers/Draggers ──
+  // Extracted so the full Top Movers card (buildDriversDraggersCard,
+  // Tier-3 destination once §2.3's decomposition lands) and the trimmed
+  // inline version living in Card 1 (buildTopMoversInlineHtml, below —
+  // IA redesign gap fix: Card 1 lost its old filler content when Top
+  // Movers moved out in step 1, leaving dead stretch-space next to its
+  // taller row-mates) agree on impact/pct parsing and row markup instead
+  // of maintaining it twice.
+  _ddImpactOf(c){ return c.pointImpact!=null ? c.pointImpact : (c.point_impact!=null ? c.point_impact : 0); }
+  _ddPctOf(c){ return c.pctChange!=null ? c.pctChange : (typeof c.pct_change==='string' ? parseFloat(c.pct_change) : (c.pct_change||0)); }
 
-  const impactOf = c => c.pointImpact!=null ? c.pointImpact : (c.point_impact!=null ? c.point_impact : 0);
-  const pctOf    = c => c.pctChange!=null ? c.pctChange : (typeof c.pct_change==='string' ? parseFloat(c.pct_change) : (c.pct_change||0));
-
-  const ddRow = (c, i, positive) => {
-    const pts = impactOf(c);
-    const pct = pctOf(c);
+  _ddRow(c, i, positive){
+    const pts = this._ddImpactOf(c);
+    const pct = this._ddPctOf(c);
     const clr = positive ? 'var(--green)' : 'var(--red)';
     return `<div class="dd-row">
       <span class="dd-rank">${i+1}</span>
@@ -695,21 +708,21 @@ class ExecView {
       <span class="dd-pct" style="color:${clr};" title="${pct>=0?'+':''}${fmtN(pct,2)}% move">${pct>=0?'+':''}${fmtN(pct,2)}%</span>
       <span class="dd-pts" style="color:${clr};" title="${pts>=0?'+':''}${fmtN(pts,2)} index points">${pts>=0?'+':''}${fmtN(pts,2)}</span>
     </div>`;
-  };
+  }
 
-  const drivers  = contributors.filter(c=>impactOf(c) > 0).sort((a,b)=>impactOf(b)-impactOf(a)).slice(0,3);
-  const draggers = contributors.filter(c=>impactOf(c) < 0).sort((a,b)=>impactOf(a)-impactOf(b)).slice(0,3);
+  _ddSplitHtml(d, n){
+  const contributors = d.contributors || [];
+  const drivers  = contributors.filter(c=>this._ddImpactOf(c) > 0).sort((a,b)=>this._ddImpactOf(b)-this._ddImpactOf(a)).slice(0,n);
+  const draggers = contributors.filter(c=>this._ddImpactOf(c) < 0).sort((a,b)=>this._ddImpactOf(a)-this._ddImpactOf(b)).slice(0,n);
 
   const driverBody  = contributors.length
-    ? (drivers.length  ? drivers.map((c,i)=>ddRow(c,i,true)).join('')   : `<div class="dd-empty">No positive contributors</div>`)
+    ? (drivers.length  ? drivers.map((c,i)=>this._ddRow(c,i,true)).join('')   : `<div class="dd-empty">No positive contributors</div>`)
     : `<div class="dd-empty">Awaiting live contributor feed…</div>`;
   const draggerBody = contributors.length
-    ? (draggers.length ? draggers.map((c,i)=>ddRow(c,i,false)).join('') : `<div class="dd-empty">No negative contributors</div>`)
+    ? (draggers.length ? draggers.map((c,i)=>this._ddRow(c,i,false)).join('') : `<div class="dd-empty">No negative contributors</div>`)
     : `<div class="dd-empty">Awaiting live contributor feed…</div>`;
 
   return `
-  <div class="exec-card c-movers">
-    <div class="exec-title">🚀📉 Top Movers</div>
     <div class="dd-split">
       <div class="dd-col">
         <div class="dd-subtitle c-driver"><span></span><span>Drivers ·</span><span>%</span><span>pts</span></div>
@@ -719,9 +732,30 @@ class ExecView {
         <div class="dd-subtitle c-dragger"><span></span><span>Draggers ·</span><span>%</span><span>pts</span></div>
         ${draggerBody}
       </div>
-    </div>
+    </div>`;
+  }
+
+  buildDriversDraggersCard(d){
+  return `
+  <div class="exec-card c-movers">
+    <div class="exec-title">🚀📉 Top Movers</div>
+    ${this._ddSplitHtml(d, 3)}
   </div>`;
 }
+
+  // ── Trimmed inline Top Movers, embedded in Card 1 (Market Health &
+  // Story) — top 2 drivers/draggers instead of 3, no card wrapper/title
+  // of its own (it's a sub-section, following the same "border-top
+  // divider" pattern the ±Expected Move / narrative blocks above it
+  // already use). Same underlying contributor data and ranking as the
+  // full card; this is a shorter view of it, not a re-derivation. -->
+  buildTopMoversInlineHtml(d){
+  return `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);margin-bottom:2px;">🚀📉 Top Movers</div>
+      ${this._ddSplitHtml(d, 2)}
+    </div>`;
+  }
 
   progress(name,val,clr,tip){
   clr = clr || (val>=65?'var(--green)':val<=35?'var(--red)':'var(--amber)');

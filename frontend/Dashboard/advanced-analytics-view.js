@@ -228,7 +228,11 @@ ChainView.prototype.buildAdvancedAnalyticsHtml = function(d) {
         ${_aaOiVelocityHtml(d)}
         ${_aaPerStrikeGreeksHtml(d)}
         ${_aaCapitalConfirmationHtml(d)}
-        ${_aaFuturesOptionsDivergenceHtml(d)}
+        <!-- 5 sub-cards in a 2-col grid leaves an odd count — the last one
+             would otherwise sit alone in its row with a dangling empty
+             cell beside it. Spans full width instead, same treatment as
+             Conviction Multiplier above. -->
+        <div style="grid-column:1/-1;">${_aaFuturesOptionsDivergenceHtml(d)}</div>
       </div>
     </div>
   </details>`;
