@@ -86,7 +86,7 @@ const pages = [
     html: "OptionChain/option-chain.html",
     out: "option-chain",
     css: ["styles/theme.css", "styles/components.css", "OptionChain/option-chain.css"],
-    js: [["engines/smart-money.js", "engines/market-structure.js", "OptionChain/option-chain.js"]],
+    js: [["engines/market-structure.js", "OptionChain/option-chain.js"]],
   },
   {
     html: "PriceChart/price-chart.html",

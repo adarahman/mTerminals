@@ -2,7 +2,7 @@
    OPTION CHAIN — "LEDGER" DESIGN SYSTEM
    A trading ledger, not a spreadsheet: the strike column reads as a
    bound spine down the center of the page, calls and puts fan out from
-   it like facing pages, and every derived number (skew, velocity) gets
+   it like facing pages, and derived positioning reads get
    a tiny inline chart instead of a bare figure so the read is felt,
    not just parsed.
    ════════════════════════════════════════════════════════════════════ */
@@ -161,14 +161,13 @@ body{
 .oc-empty-row td{padding:36px 18px!important;text-align:center!important;color:var(--oc-text-3)!important;font-family:var(--font-mono);font-size:12px;letter-spacing:.02em;}
 
 /* ── SUMMARY LEDGER (signature element #1) ──
-   Four cards read left-to-right as one sentence: how much OI sits where,
-   how much of it moved today, whether that movement is fresh (5/15/30m),
-   and whether volume backs it up. */
+   Three cards read left-to-right as one sentence: how much OI sits where,
+   how much it moved today, and whether volume backs that activity. */
 .oc-summary{
   display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;
 }
 @media (min-width:900px){
-  .oc-summary{grid-template-columns:repeat(4,1fr);}
+  .oc-summary{grid-template-columns:repeat(3,1fr);}
 }
 .oc-sum-card{
   background:var(--oc-panel);border:1px solid var(--oc-hairline);
@@ -202,7 +201,7 @@ body{
    chg-green/chg-red direction classes above always resolved to the same
    fixed color anyway, and that fixed color was CE=put-red / PE=call-green
    — the reverse of the CE/PE identity color used everywhere else on the
-   page (LTP, IV/Vol stack, OI Vel, Greeks, Volume ratio). oc-fixed-ce/pe
+   page (LTP, IV/Vol stack, Greeks, Volume ratio). oc-fixed-ce/pe
    give it the correct fixed identity color instead: CE always
    var(--call), PE always var(--put). */
 .oc-skew-fill-ce.oc-fixed-ce{background:linear-gradient(90deg,var(--call),transparent);}
@@ -231,25 +230,6 @@ body{
 .oc-sum-net b{font-weight:700;}
 .oc-sum-net.up b{color:var(--call);}
 .oc-sum-net.down b{color:var(--put);}
-
-/* dOI card — one column per window, PE above / CE below, bar length =
-   magnitude relative to the largest of the three windows so a trader can
-   see at a glance whether buildup is accelerating (bars growing 5→30) or
-   fading (bars shrinking). */
-.oc-doi-grid{display:flex;gap:10px;align-items:flex-end;height:auto;}
-.oc-doi-col{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;justify-content:flex-end;}
-.oc-doi-val{font-family:var(--font-mono);font-size:11.5px;font-weight:700;line-height:1.1;}
-.oc-doi-val.chg-red{color:var(--put);}
-.oc-doi-val.chg-green{color:var(--call);}
-.oc-doi-bars{display:flex;flex-direction:column;gap:2px;align-items:center;flex:1;justify-content:flex-end;height:40px;}
-.oc-doi-bar{width:16px;border-radius:2px 2px 0 0;min-height:2px;}
-.oc-doi-bar.chg-red{background:var(--put);}
-.oc-doi-bar.chg-green{background:var(--call);}
-.oc-doi-lbl{font-family:var(--font-mono);font-size:10.5px;color:var(--oc-text-3);margin-top:1px;}
-.oc-doi-net{font-family:var(--font-mono);font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;margin-top:2px;}
-.oc-doi-net.up{color:var(--call);background:var(--call-dim);}
-.oc-doi-net.down{color:var(--put);background:var(--put-dim);}
-.oc-doi-net.flat{color:var(--oc-text-3);background:var(--oc-row-alt);}
 
 /* Volume/OI ratio card — two compact rows, CE above PE, each a small
    filled track (ratio capped visually at 3x) plus the exact number. */
@@ -281,9 +261,9 @@ body{
    add up to ~100%, not the number of CSS rules below. */
 .c-iv{width:7%;} .c-vol{width:8%;} .c-prem{width:8%;} .c-ltp{width:11%;}
 .c-strike{width:12%;} .c-oi{width:10%;} .c-chg{width:11%;}
-.c-vel{width:9%;} .c-sig{width:9%;}
+.c-sig{width:12%;}
 .c-smart{width:4%;} .c-struct{width:5%;}
-/* iv7 + vol8 + ltp11*2 + strike12 + oi10 + chg11 + vel9 + sig9 + smart4 + struct5 = 97% */
+/* iv7 + vol8 + premium8 + ltp11*2 + strike12 + oi10 + chg11 + sig12 + smart4 + struct5 = 99% */
 
 /* head */
 thead th{
@@ -334,8 +314,14 @@ tbody tr:last-child td{border-bottom:none;}
    inner). Only the inner one touching the spine needs a divider
    border; alignment stays right (toward the spine) like every other
    left-hand column, no left/right text-align split needed anymore. */
-.oc-ltp-cell{text-align:right;cursor:pointer;}
+.oc-ltp-cell{text-align:right;}
 .oc-ltp-cell:hover{background:rgba(124,156,255,0.07);}
+.oc-cell-action{
+  appearance:none;border:0;background:transparent;color:inherit;font:inherit;
+  width:100%;padding:0;margin:0;cursor:pointer;text-align:inherit;border-radius:4px;
+}
+.oc-cell-action:focus-visible{outline:2px solid var(--oc-blue);outline-offset:2px;}
+.oc-strike-action{text-align:center;}
 .oc-ltp-main{font-weight:700;font-size:13.5px;display:block;}
 .oc-ltp-sub{font-size:10.5px;color:var(--oc-text-3);display:block;margin-top:1px;}
 .oc-ltp-sub.up{color:var(--call);} .oc-ltp-sub.down{color:var(--put);}
@@ -378,7 +364,7 @@ tr.oc-atm{background:linear-gradient(90deg,transparent,rgba(244,183,64,0.05) 45%
    "leans in" from both sides, the same fan-from-center language as the
    strike gauge above. */
 /* NOTE: display:flex must NOT go on the <td> itself (.oc-oi-cell /
-   .oc-chg-cell / .oc-vel-cell). A flexed <td> stops participating in the
+   .oc-chg-cell). A flexed <td> stops participating in the
    table's column layout like a normal table-cell, so it ignores the
    <col> width from the colgroup and can bleed/wrap into neighboring
    columns once the row gets tall (Greeks row, trade-modal changes,
@@ -425,19 +411,6 @@ tr.oc-atm{background:linear-gradient(90deg,transparent,rgba(244,183,64,0.05) 45%
 .oc-chg-val{min-width:56px;text-align:right;font-size:12px;font-weight:600;}
 .oc-chg-val.chg-red{color:var(--put);}
 .oc-chg-val.chg-green{color:var(--call);}
-
-/* OI Velocity — tri-bar sparkline (signature element #3): three bars per
-   side for the 5/15/30m windows, height = magnitude, color = direction.
-   Reads as a tiny bar chart rather than an arrow glyph. */
-.oc-vel-cell{vertical-align:middle;text-align:right;}
-.oc-vel-row{display:flex;align-items:center;gap:5px;justify-content:flex-end;}
-.oc-vel-row + .oc-vel-row{margin-top:5px;}
-.oc-vel-bars{display:flex;align-items:flex-end;gap:2px;height:16px;}
-.oc-vel-bars i{display:block;width:4px;border-radius:1px;background:var(--oc-text-3);min-height:2px;}
-.oc-vel-bars i.up{background:var(--call);}
-.oc-vel-bars i.down{background:var(--put);}
-.oc-vel-num{font-size:10.5px;color:var(--oc-text-3);min-width:38px;text-align:right;}
-.oc-vel-num.pe{color:var(--put);} .oc-vel-num.ce{color:var(--call);}
 
 /* Signal badges */
 .oc-sig-cell{text-align:left;}
@@ -501,7 +474,15 @@ tr.oc-atm{background:linear-gradient(90deg,transparent,rgba(244,183,64,0.05) 45%
 
 /* row selection state (click strike -> drawer) */
 tr.oc-row{cursor:pointer;}
+tr.oc-row:focus-visible{outline:2px solid var(--oc-blue);outline-offset:-2px;}
 tr.oc-row.oc-selected{outline:1px solid var(--oc-blue);outline-offset:-1px;}
+#ocExpiry.is-pending{border-color:var(--oc-blue);opacity:.75;cursor:progress;}
+.oc-drawer-action{
+  margin-top:14px;width:100%;border:1px solid var(--oc-blue);background:rgba(124,156,255,.08);
+  color:var(--oc-blue);border-radius:var(--oc-r-sm);padding:9px 12px;font:600 12px var(--font-sans);cursor:pointer;
+}
+.oc-drawer-action:hover{background:rgba(124,156,255,.15);}
+.oc-drawer-action:focus-visible{outline:2px solid var(--oc-blue);outline-offset:2px;}
 
 /* ── LEGEND ── */
 .oc-legend{

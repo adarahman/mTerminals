@@ -4,9 +4,9 @@
    Row shape consumed here is deliberately identical to what
    ChainDenseView.mapPayloadToRows() in chain-views.js already produces:
 
-     { strike, isAtm, pcr, pcrChg,
-       ce: { iv, ivChg, vol, ltp, chg, oi, oiChg, oiVel, velTrend, signal },
-       pe: { iv, ivChg, vol, ltp, chg, oi, oiChg, oiVel, velTrend, signal },
+     { strike, isAtm, footprintScore, pcr, pcrChg,
+       ce: { iv, ivChg, vol, ltp, chg, oi, oiChg, signal },
+       pe: { iv, ivChg, vol, ltp, chg, oi, oiChg, signal },
        totalCeOi, totalPeOi }
 
    That means this page can be wired to the live dashboard with almost no
@@ -49,11 +49,17 @@
     expiryDates: [],
     rows: [],
     range: 10,
-    velWin: 5,
     greeksOpen: false,
     selectedStrike: null,
+    drawerMode: null,
+    drawerSignature: null,
+    drawerInvoker: null,
+    tradeInvoker: null,
     focusStrike: null,
     pendingFocusStrike: null,
+    requestedExpiry: null,
+    needsInitialAtmCenter: false,
+    contextKey: "",
     // Real server-fed vol/OI ratio + max-pain strike, filled in by
     // applyLivePayload() once chain-sync.js starts forwarding them —
     // empty/null until the first live broadcast arrives, same as demo
@@ -70,6 +76,7 @@
   // variable), not window._ocRequestExpiry — nothing outside this IIFE
   // ever needs to read it.
   let _ocRequestExpiry = null;
+  let _ocRequestRange = null;
   // Same BroadcastChannel instance initLiveSync() opens, kept here (not on
   // window — same reasoning as _ocRequestExpiry above) so placeOrder() can
   // route an order request over it when this page has no parent window to
@@ -112,7 +119,7 @@
       pcrChg: (r.pcrChg >= 0 ? "+" : "") + r.pcrChg.toFixed(2),
       ce: {
         iv: r.ceIV, ivChg: r.ceIVchg, vol: r.ceVol, ltp: r.ceLTP, chg: r.ceChg, chgPct: r.ceChgPct,
-        oi: r.ceOI, oiChg: r.ceOIchg, velTrend: r.ceVel, signal: r.ceSig,
+        oi: r.ceOI, oiChg: r.ceOIchg, signal: r.ceSig,
         bid: r.ceBid, bidQty: r.ceBidQty, ask: r.ceAsk, askQty: r.ceAskQty,
         totalBidQty: r.ceTotBidQty, totalAskQty: r.ceTotAskQty,
         delta: r.ceDelta, gamma: r.ceGamma, theta: r.ceTheta, vega: r.ceVega,
@@ -124,7 +131,7 @@
       },
       pe: {
         iv: r.peIV, ivChg: r.peIVchg, vol: r.peVol, ltp: r.peLTP, chg: r.peChg, chgPct: r.peChgPct,
-        oi: r.peOI, oiChg: r.peOIchg, velTrend: r.peVel, signal: r.peSig,
+        oi: r.peOI, oiChg: r.peOIchg, signal: r.peSig,
         bid: r.peBid, bidQty: r.peBidQty, ask: r.peAsk, askQty: r.peAskQty,
         totalBidQty: r.peTotBidQty, totalAskQty: r.peTotAskQty,
         delta: r.peDelta, gamma: r.peGamma, theta: r.peTheta, vega: r.peVega,
@@ -292,17 +299,6 @@
     return "neutral";
 }
 
-  // tri-bar sparkline for OI velocity across 5/15/30m
-  function velBars(trend) {
-    if (!trend) return `<div class="oc-vel-bars"><i></i><i></i><i></i></div>`;
-    const max = Math.max(1, ...trend.map((v) => Math.abs(v || 0)));
-    return `<div class="oc-vel-bars">${trend.map((v) => {
-      const h = Math.max(2, Math.round((Math.abs(v || 0) / max) * 16));
-      const dir = v > 0 ? "up" : v < 0 ? "down" : "";
-      return `<i class="${dir}" style="height:${h}px;"></i>`;
-    }).join("")}</div>`;
-  }
-
   // ── OI BAR CHANGE INDICATOR ──
   // Single-bar OI visualization: the bar's total length always tracks
   // CURRENT OI only (never shifts because of a change), and the intraday
@@ -325,82 +321,36 @@
     return `<div class="oc-oi-bar-indicator ${type}" style="width:max(3px, ${pct}%);" title="${label}: ${sign(oiChg)}${fmt(oiChg)} (${pct}% of current OI)"></div>`;
   }
 
-  // ── SMART MONEY / MARKET STRUCTURE ──
-  // Uses the SHARED smartMoneyBadge() / marketStructureLabels()
-  // (engines/smart-money.js, engines/market-structure.js — both loaded
-  // above) instead of a local re-derivation, so this page's read can't
-  // drift from the main dashboard's Strike Detail table. volRatio prefers
-  // the real server-fed ratio forwarded by chain-sync.js
-  // (state.volOiRatios, same field the Strike Detail table reads) and
-  // only falls back to a local vol/oi approximation when that hasn't
-  // arrived yet for a given strike (see computeStrikeAnalytics() below).
-  // INST_THRESHOLDS stays a local copy (identical values to
-  // dashboard-thresholds.js) rather than a shared import, since this page
-  // loads independently of the main dashboard's script set.
-  const INST_THRESHOLDS = {
-    near: { oiMult: 1.75, volRatioMax: 40 },
-    far: { oiMult: 1.2, volRatioMax: 55 },
-  };
-
-  // Same label set as panels-views.js, abbreviated for this page's dense
-  // per-strike row (the full-text badge lives in the drawer/main table;
-  // here color + a 2-letter tag is enough, full text is in the tooltip).
-  const STRUCT_ABBR = {
-    "Max Pain": "MP",
-    "Major Resistance": "MR",
-    "Resistance Building": "RB",
-    "Fresh Writing": "FW",
-    "Weak Resistance": "WR",
-    "Major Support": "MS",
-    "Support Building": "SB",
-    "PE Writing": "PW",
-    "Weak Support": "WS",
-  };
-
-  // median() and instBandFor() now come from shared/market-structure.js
-  // (loaded above) instead of being redefined here.
-
-  // Strike step isn't sent explicitly to this page — infer it from the
-  // smallest positive gap between consecutive strikes, same fallback
-  // (50) as instBandFor() uses when step is missing.
-  function chainStep(rows) {
-    const strikes = rows.map((r) => r.strike).sort((a, b) => a - b);
-    for (let i = 1; i < strikes.length; i++) {
-      const d = strikes[i] - strikes[i - 1];
-      if (d > 0) return d;
+  // ── INSTITUTIONAL FOOTPRINT / MARKET STRUCTURE ──
+  // Market Structure still uses the shared marketStructureLabels() helper.
+  // Institutional significance is owned by backend footprintScore and is
+  // presented directly below — no local institutional threshold engine.
+  // D-05 presents footprintScore directly instead of re-running the old
+  // median-OI / Vol-OI institutional threshold engine in this UI.
+  function canonicalFootprintBadge(r) {
+    if (r.footprintScore == null || r.footprintScore === "") {
+      return { label: "—", color: "var(--text-3)", title: "Institutional footprint unavailable" };
     }
-    return 50;
+    const score = Number(r.footprintScore);
+    if (!Number.isFinite(score)) {
+      return { label: "—", color: "var(--text-3)", title: "Institutional footprint unavailable" };
+    }
+    const ceFlow = Math.abs(Number(r.ce && r.ce.capitalFlow) || 0);
+    const peFlow = Math.abs(Number(r.pe && r.pe.capitalFlow) || 0);
+    const dominantSide = ceFlow >= peFlow ? "CE" : "PE";
+    const color = score >= 70 ? "var(--put)" : score >= 40 ? "var(--spine)" : "var(--text-3)";
+    return {
+      label: `FP ${score.toFixed(0)}`,
+      color,
+      title: `Canonical footprint ${score.toFixed(1)}/100 · ${dominantSide}-led`,
+    };
   }
 
-  // Recomputed once per renderRows() pass over the FULL chain (state.rows,
-  // not just the currently visible ±range window) — every strike's
-  // Smart Money / Market Structure read is judged against its own band's
-  // median OI, same "own median/own pool" reasoning as the main
-  // dashboard's Strike Detail table, so paging the visible range can't
-  // shift what counts as "major" for a strike that stays on screen.
   function computeStrikeAnalytics(rows) {
     if (!rows.length) return { structure: {}, smartMoney: {} };
     const atmRow = rows.find((r) => r.isAtm);
     const atm = atmRow ? atmRow.strike : rows[0].strike;
-    const step = chainStep(rows);
 
-    const bandOf = {};
-    rows.forEach((r) => { bandOf[r.strike] = instBandFor(r.strike, atm, step); });
-    const nearRows = rows.filter((r) => bandOf[r.strike] === "near");
-    const farRows = rows.filter((r) => bandOf[r.strike] === "far");
-    const medianOiOf = (list) => median(list.map((r) => (r.ce.oi || 0) + (r.pe.oi || 0)));
-    const medianByBand = { near: medianOiOf(nearRows), far: medianOiOf(farRows) };
-
-    // Market Structure — now calls the SHARED marketStructureLabels()
-    // (engines/market-structure.js, already loaded on this page — see
-    // option-chain.html) instead of a hand-duplicated copy of the same
-    // resistance/support-ranking logic. That inline copy used to exist
-    // here purely because nobody wired the call through; the thresholds
-    // were already identical, so this removes drift risk with no
-    // behavior change for anyone who already agreed with this page's
-    // structure reads, and fixes the ones who didn't (e.g. the Max Pain
-    // strike is now labeled here too, which the old inline copy never
-    // did at all).
     const oiByStrike = {};
     rows.forEach((r) => {
       oiByStrike[r.strike] = {
@@ -409,43 +359,8 @@
       };
     });
     const structure = marketStructureLabels(rows, atm, oiByStrike, state.maxPain);
-
-    // Smart Money — 5-level badge (ACC/DIST/HEDGE institutional size +
-    // direction, ROLL high-turnover flat, else RETAIL), via the SHARED
-    // smartMoneyBadge() (engines/smart-money.js). volRatio prefers the
-    // real server-fed ratio (state.volOiRatios, forwarded by
-    // chain-sync.js — same field the main dashboard's Strike Detail
-    // Report reads) so this tab's ACC/RETAIL read matches the Strike
-    // Detail Report's for the same strike. Falls back to a local
-    // approximation from raw vol/oi only when server data isn't
-    // available yet for that strike (e.g. right after a fresh page load
-    // before the first live broadcast lands, or demo mode).
     const smartMoney = {};
-    rows.forEach((r) => {
-      const band = bandOf[r.strike];
-      const th = INST_THRESHOLDS[band];
-      const totalOI = (r.ce.oi || 0) + (r.pe.oi || 0);
-      const serverRatio = state.volOiRatios && state.volOiRatios[String(r.strike)];
-      let volRatio, hasRatioData;
-      if (serverRatio) {
-        volRatio = ((serverRatio.ce || 0) + (serverRatio.pe || 0)) / 2;
-        hasRatioData = totalOI > 0;
-      } else {
-        const ceRatio = r.ce.oi ? ((r.ce.vol || 0) / r.ce.oi) * 100 : 0;
-        const peRatio = r.pe.oi ? ((r.pe.vol || 0) / r.pe.oi) * 100 : 0;
-        volRatio = totalOI > 0 ? (ceRatio + peRatio) / 2 : 0;
-        hasRatioData = totalOI > 0;
-      }
-      const medianOI = medianByBand[band];
-      const isInst = totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax;
-      const oiDominant = (r.ce.oi || 0) >= (r.pe.oi || 0) ? "ce" : "pe";
-      const oiDomChg = oiDominant === "ce" ? (r.ce.oiChg || 0) : (r.pe.oiChg || 0);
-
-      smartMoney[r.strike] = smartMoneyBadge(
-        hasRatioData, isInst, oiDomChg, totalOI, volRatio, th
-      );
-    });
-
+    rows.forEach((r) => { smartMoney[r.strike] = canonicalFootprintBadge(r); });
     return { structure, smartMoney };
   }
 
@@ -456,7 +371,7 @@
     return `
         <span class="oc-smart-abbr"
               style="color:${sm.color};"
-              title="${sm.label}">
+              title="${sm.title || sm.label}">
             <span class="oc-smart-dot"
                   style="background:${sm.color};"></span>
             ${sm.label}
@@ -493,7 +408,7 @@
     const ceChgCls = ceOiCls(r.ce.oiChg);
     const peChgCls = peOiCls(r.pe.oiChg);
     const rowHtml = `
-    <tr class="oc-row${r.isAtm ? " oc-atm" : ""}${state.focusStrike === r.strike ? " oc-focus-target" : ""}" data-strike="${r.strike}">
+    <tr class="oc-row${r.isAtm ? " oc-atm" : ""}${state.focusStrike === r.strike ? " oc-focus-target" : ""}${state.selectedStrike === r.strike ? " oc-selected" : ""}" data-strike="${r.strike}" tabindex="0" aria-label="${state.symbol} ${r.strike} strike row; press Enter for summary">
       <td class="oc-iv-cell">
         <div class="oc-stack">
           <span class="pe">${fmtPct(r.pe.iv)}</span>
@@ -512,21 +427,27 @@
           <span class="ce">₹${fmt(r.ce.premiumLocked)}</span>
         </div>
       </td>
-      <td class="oc-ltp-cell" onclick="event.stopPropagation();window.ocOpenTradeModal(${r.strike},'CE',${r.ce.ltp != null ? r.ce.ltp : "null"})" title="Click to trade this strike">
-        <span class="oc-ltp-main oc-call-c">${fmtNum(r.ce.ltp)}</span>
-        <span class="oc-ltp-sub ${signClass(r.ce.chg)}">${ltpChgStr(r.ce.chg, r.ce.chgPct)}</span>
+      <td class="oc-ltp-cell" title="Open CE quick order">
+        <button class="oc-cell-action oc-ltp-action" data-oc-action="trade-ce" onclick="event.stopPropagation();window.ocOpenTradeModal(${r.strike},'CE',${r.ce.ltp != null ? r.ce.ltp : "null"})" aria-label="Trade ${state.symbol} ${r.strike} CE">
+          <span class="oc-ltp-main oc-call-c">${fmtNum(r.ce.ltp)}</span>
+          <span class="oc-ltp-sub ${signClass(r.ce.chg)}">${ltpChgStr(r.ce.chg, r.ce.chgPct)}</span>
+        </button>
       </td>
-      <td class="oc-ltp-cell oc-ltp-adjacent" onclick="event.stopPropagation();window.ocOpenTradeModal(${r.strike},'PE',${r.pe.ltp != null ? r.pe.ltp : "null"})" title="Click to trade this strike">
-        <span class="oc-ltp-main oc-put-c">${fmtNum(r.pe.ltp)}</span>
-        <span class="oc-ltp-sub ${signClass(r.pe.chg)}">${ltpChgStr(r.pe.chg, r.pe.chgPct)}</span>
+      <td class="oc-ltp-cell oc-ltp-adjacent" title="Open PE quick order">
+        <button class="oc-cell-action oc-ltp-action" data-oc-action="trade-pe" onclick="event.stopPropagation();window.ocOpenTradeModal(${r.strike},'PE',${r.pe.ltp != null ? r.pe.ltp : "null"})" aria-label="Trade ${state.symbol} ${r.strike} PE">
+          <span class="oc-ltp-main oc-put-c">${fmtNum(r.pe.ltp)}</span>
+          <span class="oc-ltp-sub ${signClass(r.pe.chg)}">${ltpChgStr(r.pe.chg, r.pe.chgPct)}</span>
+        </button>
       </td>
-      <td class="oc-strike-cell" onclick="event.stopPropagation();window.ocOpenDepth(${r.strike})" title="Click for Bid/Ask depth">
-        <span class="oc-strike-val">${r.strike}${ceVsPeDivergence(r.ce.chg, r.pe.chg) ? `<i class="oc-strike-div ${ceVsPeDivergence(r.ce.chg, r.pe.chg)}" title="${ceVsPeDivergence(r.ce.chg, r.pe.chg) === 'div-red' ? 'CE up / PE down' : 'CE down / PE up'}"></i>` : ""}</span>
-        <div class="oc-strike-gauge">
-          <div class="oc-strike-gauge-pe" style="width:${gaugePe}%;"></div>
-          <div class="oc-strike-gauge-ce" style="width:${gaugeCe}%;"></div>
-        </div>
-        <span class="oc-strike-pcr">PCR <b>${r.pcr}</b> <span class="${signClass(parseFloat(r.pcrChg))}">${r.pcrChg}</span></span>
+      <td class="oc-strike-cell" title="Open Bid/Ask depth">
+        <button class="oc-cell-action oc-strike-action" data-oc-action="depth" onclick="event.stopPropagation();window.ocOpenDepth(${r.strike})" aria-label="Open Bid Ask depth for strike ${r.strike}">
+          <span class="oc-strike-val">${r.strike}${ceVsPeDivergence(r.ce.chg, r.pe.chg) ? `<i class="oc-strike-div ${ceVsPeDivergence(r.ce.chg, r.pe.chg)}" title="${ceVsPeDivergence(r.ce.chg, r.pe.chg) === 'div-red' ? 'CE up / PE down' : 'CE down / PE up'}"></i>` : ""}</span>
+          <div class="oc-strike-gauge">
+            <div class="oc-strike-gauge-pe" style="width:${gaugePe}%;"></div>
+            <div class="oc-strike-gauge-ce" style="width:${gaugeCe}%;"></div>
+          </div>
+          <span class="oc-strike-pcr">PCR <b>${r.pcr}</b> <span class="${signClass(parseFloat(r.pcrChg))}">${r.pcrChg}</span></span>
+        </button>
       </td>
       <td class="oc-oi-cell">
         <div class="oc-oi-row"><span class="oc-oi-val ${peOiValCls}">${fmt(r.pe.oi)}</span>
@@ -539,10 +460,6 @@
           <div class="oc-chg-bar-track"><div class="oc-chg-bar-fill ${peChgCls}" style="width:${peChgPct}%;"></div></div></div>
         <div class="oc-chg-row"><span class="oc-chg-val ${ceChgCls}">${sign(r.ce.oiChg)}${fmt(r.ce.oiChg)}</span>
           <div class="oc-chg-bar-track"><div class="oc-chg-bar-fill ${ceChgCls}" style="width:${ceChgPct}%;"></div></div></div>
-      </td>
-      <td class="oc-vel-cell">
-        <div class="oc-vel-row"><span class="oc-vel-num pe">PE</span>${velBars(r.pe.velTrend)}</div>
-        <div class="oc-vel-row"><span class="oc-vel-num ce">CE</span>${velBars(r.ce.velTrend)}</div>
       </td>
       <td class="oc-sig-cell">${badge(compositeSignal(r.ce.signal, r.pe.signal))}</td>
       <td class="oc-smart-cell">${smartMoneyCellHtml(analytics, r.strike)}</td>
@@ -564,7 +481,7 @@
       <div class="oc-greek-item"><span>Vega</span> ${fmtNum(leg.vega, 2)}</div>`;
     return `
     <tr class="oc-greek-row" data-strike="${r.strike}">
-      <td colspan="12">
+      <td colspan="11">
         <div class="oc-greek-wrap">
           <div class="oc-greek-side pe"><b>PE</b>${g(r.pe)}</div>
           <div class="oc-greek-side ce"><b>CE</b>${g(r.ce)}</div>
@@ -625,9 +542,8 @@
       // dashboard's own ChainDenseView.renderExpiryOptions (chain-renderer.js).
       sel.value = state.expiry;
     }
+    renderExpiryPendingState();
   }
-
-  const VEL_WINDOWS = [5, 15, 30];
 
   function renderSummary() {
     const rows = visibleRows();
@@ -652,7 +568,6 @@
       $("ocChgTotalCe").textContent = "—";
       $("ocChgTotalPe").textContent = "—";
       $("ocChgPcrShift").textContent = "PCR Δ —";
-      $("ocDoiGrid").innerHTML = `<div style="grid-column:1/-1;color:var(--oc-text-3);font-family:var(--font-mono);font-size:10px;">—</div>`;
       $("ocVRatio").innerHTML = `<div style="color:var(--oc-text-3);font-family:var(--font-mono);font-size:10px;">—</div>`;
       $("ocNetOi").innerHTML = `Net (PE−CE) <b>—</b>`;
       $("ocNetChgOi").innerHTML = `Net (PE−CE) <b>—</b>`;
@@ -690,36 +605,6 @@
     const prevPcr = prevPe / (prevCe || 1);
     const pcrShift = pcr - prevPcr;
     $("ocChgPcrShift").textContent = `PCR Δ ${sign(pcrShift)}${pcrShift.toFixed(2)}`;
-
-    // ── dOI across 5 / 15 / 30m — net PE and CE change per window ──
-    // Each column now prints both leg values (PE above, CE below the
-    // bars — "double written" so the two numbers behind the bars are
-    // actually readable, not just implied by bar height) plus a NET
-    // pill (PE − CE) per window so the directional read doesn't require
-    // mentally subtracting two numbers yourself.
-    const winSums = VEL_WINDOWS.map((w, i) => {
-      const ceSum = rows.reduce((s, r) => s + ((r.ce.velTrend && r.ce.velTrend[i]) || 0), 0);
-      const peSum = rows.reduce((s, r) => s + ((r.pe.velTrend && r.pe.velTrend[i]) || 0), 0);
-      return { w, ceSum, peSum, net: peSum - ceSum };
-    });
-    const doiHtml = winSums.map(({ w, ceSum, peSum, net }) => {
-      const maxAbs = Math.max(1, Math.abs(ceSum), Math.abs(peSum));
-      const ceH = Math.max(2, Math.round((Math.abs(ceSum) / maxAbs) * 22));
-      const peH = Math.max(2, Math.round((Math.abs(peSum) / maxAbs) * 22));
-      const netCls = net > 0 ? "up" : net < 0 ? "down" : "flat";
-      return `
-        <div class="oc-doi-col">
-          <div class="oc-doi-val ${peOiCls(peSum)}">${sign(peSum)}${fmt(peSum)}</div>
-          <div class="oc-doi-bars">
-            <div class="oc-doi-bar ${peOiCls(peSum)}" style="height:${peH}px;opacity:${peSum < 0 ? .45 : 1};"></div>
-            <div class="oc-doi-bar ${ceOiCls(ceSum)}" style="height:${ceH}px;opacity:${ceSum < 0 ? .45 : 1};"></div>
-          </div>
-          <div class="oc-doi-val ${ceOiCls(ceSum)}">${sign(ceSum)}${fmt(ceSum)}</div>
-          <div class="oc-doi-lbl">${w}m</div>
-          <div class="oc-doi-net ${netCls}">net ${sign(net)}${fmt(net)}</div>
-        </div>`;
-    }).join("");
-    $("ocDoiGrid").innerHTML = doiHtml;
 
     // ── Volume / OI ratio — how much of today's activity vs resting OI ──
     const totalCeVol = rows.reduce((s, r) => s + (r.ce.vol || 0), 0);
@@ -787,7 +672,7 @@
             : state.feedState === "STALE"
               ? "Live Option Chain is stale — waiting for a fresh snapshot"
               : "No live Option Chain feed — open/refresh the Dashboard connection";
-      tbody.innerHTML = `<tr class="oc-empty-row" id="ocEmptyRow"><td colspan="12">${message}</td></tr>`;
+      tbody.innerHTML = `<tr class="oc-empty-row" id="ocEmptyRow"><td colspan="11">${message}</td></tr>`;
       return;
     }
     const emptyRow = $("ocEmptyRow");
@@ -812,10 +697,19 @@
         entry = { html: mainHtml, el: _parseTr(mainHtml), greekHtml: null, greekEl: null };
         _rowCache.set(key, entry);
       } else if (entry.html !== mainHtml) {
+        const active = document.activeElement;
+        const rowHadFocus = active === entry.el;
+        const actionKey = active && entry.el.contains(active) ? active.dataset.ocAction : null;
         const fresh = _parseTr(mainHtml);
         entry.el.replaceWith(fresh);
         entry.el = fresh;
         entry.html = mainHtml;
+        if (rowHadFocus || actionKey) {
+          requestAnimationFrame(() => {
+            const target = rowHadFocus ? fresh : fresh.querySelector(`[data-oc-action="${actionKey}"]`);
+            if (target) target.focus({preventScroll:true});
+          });
+        }
       }
 
       if (entry.greekHtml !== greekHtml) {
@@ -834,6 +728,8 @@
       }
       afterEl = entry.greekEl || entry.el;
     });
+
+    if ($("ocDrawer").classList.contains("open")) refreshOpenDrawer();
   }
 
   function _syncRangeButtons(){
@@ -856,8 +752,8 @@
       if(required > state.range){
         const allowed = [3,5,10,15,9999];
         state.range = allowed.find((v) => v >= required) || 9999;
-        state._userSetRange = true;
         _syncRangeButtons();
+        if (_ocRequestRange) _ocRequestRange(state.range);
         renderSummary();
       }
     }
@@ -876,24 +772,112 @@
     }, 2200);
   }
 
+  function centerAtmOnce() {
+    if (!state.needsInitialAtmCenter || state.pendingFocusStrike != null) return;
+    const atm = state.rows.find((r) => r.isAtm);
+    if (!atm) return;
+    state.needsInitialAtmCenter = false;
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`.oc-row[data-strike="${atm.strike}"]`);
+      if (row) row.scrollIntoView({behavior:'auto', block:'center'});
+    });
+  }
+
   function renderAll() {
     renderHeader();
     renderSummary();
     renderRows();
-    $("ocVelLabel").textContent = "5 · 15 · 30m";
   }
 
   // ── STRIKE DRAWER ──
   // mode "summary" (row click) shows the LTP/IV/OI/volume read for both
   // legs; mode "depth" (strike-cell click) shows Bid/Ask quotes and
   // total buy/sell depth instead. Same panel element, different content.
+  function captureRowInvoker(strike) {
+    const active = document.activeElement;
+    const row = document.querySelector(`.oc-row[data-strike="${strike}"]`);
+    const activeRow = active && active.closest ? active.closest(".oc-row") : null;
+    return {
+      el: active && active !== document.body ? active : row,
+      strike: activeRow ? Number(activeRow.dataset.strike) : Number(strike),
+      action: active && active.dataset ? active.dataset.ocAction || null : null,
+      rowFocus: !!row && active === row,
+    };
+  }
+
+  function restoreRowInvoker(ref) {
+    if (!ref) return;
+    if (ref.el && document.contains(ref.el)) { ref.el.focus({preventScroll:true}); return; }
+    const row = document.querySelector(`.oc-row[data-strike="${ref.strike}"]`);
+    if (!row) return;
+    const target = ref.action ? row.querySelector(`[data-oc-action="${ref.action}"]`) : row;
+    if (target) target.focus({preventScroll:true});
+  }
+
+  function drawerSignature(r, mode) {
+    if (!r) return "";
+    if (mode === "depth") {
+      return JSON.stringify([r.strike,r.ce.bid,r.ce.bidQty,r.ce.ask,r.ce.askQty,r.ce.totalBidQty,r.ce.totalAskQty,r.pe.bid,r.pe.bidQty,r.pe.ask,r.pe.askQty,r.pe.totalBidQty,r.pe.totalAskQty]);
+    }
+    return JSON.stringify([r.strike,r.pcr,r.pcrChg,r.ce.ltp,r.ce.iv,r.ce.oi,r.ce.oiChg,r.ce.vol,r.ce.premiumLocked,r.ce.capitalFlow,r.ce.signal,r.pe.ltp,r.pe.iv,r.pe.oi,r.pe.oiChg,r.pe.vol,r.pe.premiumLocked,r.pe.capitalFlow,r.pe.signal]);
+  }
+
   function openDrawer(strike, mode) {
     const r = state.rows.find((x) => x.strike === strike);
     if (!r) return;
+    state.drawerInvoker = captureRowInvoker(strike);
     state.selectedStrike = strike;
+    state.drawerMode = mode === "depth" ? "depth" : "summary";
+    state.drawerSignature = drawerSignature(r, state.drawerMode);
     document.querySelectorAll(".oc-row").forEach((tr) => tr.classList.toggle("oc-selected", +tr.dataset.strike === strike));
-    $("ocDrawerPanel").innerHTML = mode === "depth" ? buildDepthDrawerHtml(r) : buildSummaryDrawerHtml(r);
+    $("ocDrawerPanel").innerHTML = state.drawerMode === "depth" ? buildDepthDrawerHtml(r) : buildSummaryDrawerHtml(r);
     $("ocDrawer").classList.add("open");
+    requestAnimationFrame(() => $("ocDrawerPanel").querySelector('[data-oc-drawer-action="close"]')?.focus());
+  }
+
+  function refreshOpenDrawer() {
+    const strike = state.selectedStrike;
+    const r = state.rows.find((x) => x.strike === strike);
+    if (!r || !$("ocDrawer").classList.contains("open")) return;
+    const sig = drawerSignature(r, state.drawerMode);
+    if (sig === state.drawerSignature) return;
+    state.drawerSignature = sig;
+    const panel = $("ocDrawerPanel");
+    const active = document.activeElement;
+    const actionKey = active && panel.contains(active) ? active.dataset.ocDrawerAction : null;
+    panel.innerHTML = state.drawerMode === "depth" ? buildDepthDrawerHtml(r) : buildSummaryDrawerHtml(r);
+    if (actionKey) requestAnimationFrame(() => panel.querySelector(`[data-oc-drawer-action="${actionKey}"]`)?.focus({preventScroll:true}));
+  }
+
+  function closeDrawer() {
+    $("ocDrawer").classList.remove("open");
+    state.selectedStrike = null;
+    state.drawerMode = null;
+    state.drawerSignature = null;
+    document.querySelectorAll(".oc-row.oc-selected").forEach((tr) => tr.classList.remove("oc-selected"));
+    const invoker = state.drawerInvoker;
+    state.drawerInvoker = null;
+    requestAnimationFrame(() => restoreRowInvoker(invoker));
+  }
+
+  function openStrikeDetail(strike) {
+    const n = Number(strike);
+    if (!Number.isFinite(n)) return;
+    // The normal D-05 route is window.open() from Dashboard, so opener is
+    // the best path: open the Tier-3 report and bring Dashboard forward.
+    try {
+      if (window.opener && typeof window.opener.openStrikeDetailReportModal === "function") {
+        window.opener.openStrikeDetailReportModal(n);
+        window.opener.focus();
+        closeDrawer();
+        return;
+      }
+    } catch (_) {}
+    // Broadcast fallback for a manually opened same-origin D-05 tab.
+    if (_ocOrderChan) {
+      _ocOrderChan.postMessage({ type:"oc-open-strike-detail", strike:n });
+      closeDrawer();
+    }
   }
 
   function buildDepthDrawerHtml(r) {
@@ -913,11 +897,12 @@
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-family:var(--display);font-weight:700;font-size:17px;">${state.symbol} ${r.strike} <span style="color:var(--text-3);font-size:11px;font-weight:500;">Bid/Ask Depth</span>${r.isAtm ? ' <span style="color:var(--spine);font-size:11px;">ATM</span>' : ""}</div>
-        <button onclick="document.getElementById('ocDrawer').classList.remove('open')" style="background:none;border:none;color:var(--text-2);font-size:18px;cursor:pointer;">✕</button>
+        <button data-oc-drawer-action="close" onclick="window.ocCloseDrawer()" aria-label="Close strike detail" style="background:none;border:none;color:var(--text-2);font-size:18px;cursor:pointer;">✕</button>
       </div>
       ${hasDepth
         ? legDepth("CALL", r.ce, "--call") + legDepth("PUT", r.pe, "--put")
-        : `<div style="font-size:12px;color:var(--text-3);">No depth data in this feed yet.</div>`}`;
+        : `<div style="font-size:12px;color:var(--text-3);">No depth data in this feed yet.</div>`}
+      <button class="oc-drawer-action" data-oc-drawer-action="detail" onclick="window.ocOpenStrikeDetail(${r.strike})">Open Strike Detail ↗</button>`;
   }
 
   function buildSummaryDrawerHtml(r) {
@@ -925,7 +910,7 @@
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-family:var(--display);font-weight:700;font-size:17px;">${state.symbol} ${strike}${r.isAtm ? ' <span style="color:var(--spine);font-size:11px;">ATM</span>' : ""}</div>
-        <button onclick="document.getElementById('ocDrawer').classList.remove('open')" style="background:none;border:none;color:var(--text-2);font-size:18px;cursor:pointer;">✕</button>
+        <button data-oc-drawer-action="close" onclick="window.ocCloseDrawer()" aria-label="Close strike detail" style="background:none;border:none;color:var(--text-2);font-size:18px;cursor:pointer;">✕</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div>
@@ -954,7 +939,35 @@
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--hairline);font-family:var(--mono);font-size:12px;color:var(--text-2);">
         PCR <b style="color:var(--spine);">${r.pcr}</b> (${r.pcrChg}) — put OI share ${((r.pe.oi/(r.pe.oi+r.ce.oi||1))*100).toFixed(0)}% of this strike<br>
         Capital PCR <b style="color:var(--spine);">${((r.pe.premiumLocked||0)/((r.ce.premiumLocked||0)||1)).toFixed(2)}</b> — put premium share ${(((r.pe.premiumLocked||0)/((r.pe.premiumLocked||0)+(r.ce.premiumLocked||0)||1))*100).toFixed(0)}% of this strike's locked capital
-      </div>`;
+      </div>
+      <button class="oc-drawer-action" data-oc-drawer-action="detail" onclick="window.ocOpenStrikeDetail(${strike})">Open Strike Detail ↗</button>`;
+  }
+
+  function renderExpiryPendingState() {
+    const sel = $("ocExpiry");
+    if (!sel) return;
+    const pending = !!state.requestedExpiry;
+    sel.disabled = pending;
+    sel.setAttribute("aria-busy", pending ? "true" : "false");
+    sel.classList.toggle("is-pending", pending);
+    sel.title = pending ? `Loading ${state.requestedExpiry}…` : "";
+    if (pending && state.expiry) sel.value = state.expiry;
+  }
+
+  function clearExpiryRequest() {
+    state.requestedExpiry = null;
+    clearTimeout(state._expiryRequestTimer);
+    renderExpiryPendingState();
+  }
+
+  function trapFocus(container, e) {
+    if (e.key !== "Tab") return;
+    const focusable = Array.from(container.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+      .filter((el) => el.offsetParent !== null);
+    if (!focusable.length) { e.preventDefault(); container.focus(); return; }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 
   // ── EVENTS ──
@@ -968,31 +981,25 @@
     });
 
     $("ocExpiry").addEventListener("change", (e) => {
-      state.expiry = e.target.value;
-      if (_ocRequestExpiry) _ocRequestExpiry(state.expiry); // hook for live integration
-      renderAll();
+      const requested = e.target.value;
+      if (!requested || requested === state.expiry) return;
+      if (!_ocRequestExpiry) { e.target.value = state.expiry; return; }
+      state.requestedExpiry = requested;
+      renderExpiryPendingState();
+      _ocRequestExpiry(requested);
+      clearTimeout(state._expiryRequestTimer);
+      state._expiryRequestTimer = setTimeout(() => clearExpiryRequest(), 8000);
     });
 
     $("ocRangeGroup").addEventListener("click", (e) => {
       const btn = e.target.closest("button");
       if (!btn) return;
       state.range = +btn.dataset.val;
-      // Once the user picks a range here, this tab owns that choice —
-      // stop letting incoming live snapshots (which carry the dashboard
-      // sidebar's own, unrelated range) silently overwrite it.
-      state._userSetRange = true;
       $("ocRangeGroup").dataset.active = state.range;
       $("ocRangeGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
       renderSummary();
       renderRows();
-    });
-
-    $("ocVelGroup").addEventListener("click", (e) => {
-      const btn = e.target.closest("button");
-      if (!btn) return;
-      state.velWin = +btn.dataset.val;
-      $("ocVelGroup").dataset.active = state.velWin;
-      $("ocVelGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      if (_ocRequestRange) _ocRequestRange(state.range);
     });
 
     // Greeks toggle is the ONLY thing that flips state.greeksOpen, and
@@ -1009,9 +1016,17 @@
       const tr = e.target.closest(".oc-row");
       if (tr) openDrawer(+tr.dataset.strike, "summary");
     });
+    $("ocBody").addEventListener("keydown", (e) => {
+      if (e.target.closest("button")) return;
+      const tr = e.target.closest(".oc-row");
+      if (tr && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        openDrawer(+tr.dataset.strike, "summary");
+      }
+    });
 
     $("ocDrawer").addEventListener("click", (e) => {
-      if (e.target.id === "ocDrawer") $("ocDrawer").classList.remove("open");
+      if (e.target.id === "ocDrawer") closeDrawer();
     });
 
     $("ocTradeModal").addEventListener("click", (e) => {
@@ -1029,12 +1044,17 @@
       }
     });
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && $("ocTradeModal").classList.contains("open")) closeTradeModal();
+      if ($("ocTradeModal").classList.contains("open")) {
+        if (e.key === "Escape") { closeTradeModal(); return; }
+        trapFocus($("ocTradePanel"), e);
+      } else if ($("ocDrawer").classList.contains("open")) {
+        if (e.key === "Escape") { closeDrawer(); return; }
+        trapFocus($("ocDrawerPanel"), e);
+      }
     });
 
-    // set initial toggle button active states
+    // set initial toggle button active state
     $("ocRangeGroup").querySelector(`button[data-val="${state.range}"]`)?.classList.add("active");
-    $("ocVelGroup").querySelector(`button[data-val="${state.velWin}"]`)?.classList.add("active");
   }
 
   // ── BUY/SELL QUICK-ORDER MODAL (LTP click) ──
@@ -1057,11 +1077,16 @@
       </div>
       <div class="oc-trade-confirm" id="ocTradeConfirm"></div>`;
     state._tradeCtx = { strike, side, ltp: leg.ltp };
+    state.tradeInvoker = captureRowInvoker(strike);
     $("ocTradeModal").classList.add("open");
+    requestAnimationFrame(() => $("ocTradeQty")?.focus());
   }
 
   function closeTradeModal() {
     $("ocTradeModal").classList.remove("open");
+    const invoker = state.tradeInvoker;
+    state.tradeInvoker = null;
+    requestAnimationFrame(() => restoreRowInvoker(invoker));
   }
 
   function placeOrder(action) {
@@ -1172,40 +1197,51 @@
   window.ocCloseTradeModal = closeTradeModal;
   window.ocPlaceOrder = placeOrder;
   window.ocOpenDepth = (strike) => openDrawer(strike, "depth");
+  window.ocCloseDrawer = closeDrawer;
+  window.ocOpenStrikeDetail = openStrikeDetail;
 
   // ── LIVE DATA INTEGRATION ──
   function applyLivePayload(msg) {
     if (!msg || !Array.isArray(msg.rows)) return;
     state.lastLiveAt = Date.now();
     state.feedState = "LIVE";
+    const nextSymbol = msg.symbol || state.symbol;
+    const nextExpiry = msg.expiry || state.expiry;
+    const nextContextKey = `${nextSymbol}|${nextExpiry}`;
+    const contextChanged = nextContextKey !== state.contextKey;
+    if (contextChanged) {
+      state.needsInitialAtmCenter = true;
+      if ($("ocDrawer").classList.contains("open")) closeDrawer();
+      if ($("ocTradeModal").classList.contains("open")) closeTradeModal();
+    }
+    state.contextKey = nextContextKey;
     state.rows = msg.rows;
     if (msg.symbol) state.symbol = msg.symbol;
     if (msg.spot != null) state.spot = msg.spot;
     if (msg.spotChg != null) state.spotChg = msg.spotChg;
     if (msg.spotChgPct != null) state.spotChgPct = msg.spotChgPct;
-    if (msg.expiry) state.expiry = msg.expiry;
+    if (msg.expiry) {
+      state.expiry = msg.expiry;
+      if (state.requestedExpiry && msg.expiry === state.requestedExpiry) clearExpiryRequest();
+    }
     if (msg.expiryDates) state.expiryDates = msg.expiryDates;
-    // NEW: real server-fed vol/OI ratio + max-pain strike (see
-    // chain-sync.js's _broadcastToOptionChainTab) — used below in
-    // computeStrikeAnalytics() so this tab's Smart Money / Market
-    // Structure read matches the main dashboard's Strike Detail Report
-    // instead of approximating from raw per-row vol/oi.
+    // Max Pain feeds the shared Market Structure labels. volOiRatios is
+    // retained in state for the summary/detail surface, but institutional
+    // significance now comes from canonical per-row footprintScore.
     if (msg.volOiRatios) state.volOiRatios = msg.volOiRatios;
     if (msg.maxPain != null) state.maxPain = msg.maxPain;
     // Keep this tab's range in sync with the main dashboard's sidebar
     // toggle — chain-sync.js has always sent this field, but nothing
     // here ever read it, so the two views could silently show different
     // ATM ranges with no indication either was out of sync.
-    if (!state._userSetRange && msg.range != null && msg.range !== state.range) {
+    if (msg.range != null && msg.range !== state.range) {
       state.range = msg.range;
-      const activeBtn = $("ocRangeGroup").querySelector(`button[data-val="${msg.range}"]`);
-      if (activeBtn) {
-        $("ocRangeGroup").dataset.active = msg.range;
-        $("ocRangeGroup").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === activeBtn));
-      }
+      _syncRangeButtons();
     }
     renderAll();
+    renderExpiryPendingState();
     if(state.pendingFocusStrike != null) focusStrike(state.pendingFocusStrike);
+    else centerAtmOnce();
   }
 
   function initLiveSync() {
@@ -1237,6 +1273,9 @@
       _ocRequestExpiry = (expiry) => {
         chan.postMessage({ type: "oc-request-expiry", expiry });
       };
+      _ocRequestRange = (range) => {
+        chan.postMessage({ type: "oc-request-range", range });
+      };
       _ocOrderChan = chan;
     }
     // Fallback path: this page was opened via window.open() from the
@@ -1255,6 +1294,8 @@
       state.spotChgPct = 0.49;
       state.expiry = "24-JUL-2026";
       state.expiryDates = ["24-JUL-2026", "31-JUL-2026", "07-AUG-2026"];
+      state.contextKey = `${state.symbol}|${state.expiry}`;
+      state.needsInitialAtmCenter = true;
     }
     const hashMatch = location.hash.match(/(?:^#|&)strike=([^&]+)/);
     if(hashMatch){
@@ -1266,6 +1307,7 @@
     initLiveSync();
     startFeedMonitor();
     if(state.pendingFocusStrike != null) focusStrike(state.pendingFocusStrike);
+    else centerAtmOnce();
   }
 
   document.addEventListener("DOMContentLoaded", boot);

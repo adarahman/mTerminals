@@ -94,6 +94,10 @@ ChainDenseView.prototype.mapPayloadToRows = function(payload) {
 
       return {
         strike: row.strike, isAtm: !!row.atm || row.strike === atmStrike,
+        // Canonical institutional primitive from backend/oi/footprint_score.py.
+        // The standalone D-05 surface must present this value rather than
+        // re-running its own institutional threshold engine.
+        footprintScore: row.footprintScore,
         pcr: pcr != null ? pcr.toFixed(2) : "—",
         pcrChg: pcrChg != null ? sign(pcrChg.toFixed(2)) : "—",
         ce, pe, totalCeOi, totalPeOi,

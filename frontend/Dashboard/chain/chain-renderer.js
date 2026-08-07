@@ -775,7 +775,7 @@ ChainView.prototype.renderDashboard = function(d) {
              them directly into the modal's #sdt-rows/#sdt-stat-* elements;
              no inline element needed here to do so. -->
       </div>
-      ${buildOiFlowSummaryHtml(chain, atm, velByStrike)}
+      ${buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity)}
     </div>
 
     ${buildFiiDiiSummaryCard(d)}
@@ -1343,7 +1343,7 @@ ChainView.prototype._rerenderChainPanels = function() {
   // #oi-flow-summary-card wrapper — outerHTML (not innerHTML) so the
   // dataset-diff cache stays meaningful (it lives on the element itself,
   // which outerHTML replaces wholesale).
-  patchOuterHtmlIfChanged('oi-flow-summary-card', () => buildOiFlowSummaryHtml(chain, atm, velByStrike));
+  patchOuterHtmlIfChanged('oi-flow-summary-card', () => buildOiFlowSummaryHtml(chain, atm, velByStrike, _data.oiVelocity));
 
   // 4b. Greeks Alerts card (gamma flip / short-gamma regime / theta decay)
   // — now lives in the row2 Tier-2 row alongside Chain Summary and

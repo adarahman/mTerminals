@@ -38,13 +38,8 @@
         <button data-val="3">±3</button>
         <button data-val="5">±5</button>
         <button data-val="10">±10</button>
+        <button data-val="15">±15</button>
         <button data-val="9999">All</button>
-      </div>
-      <div class="oc-toggle-group" id="ocVelGroup" data-active="5">
-        <span class="oc-toggle-label">Velocity</span>
-        <button data-val="5">5m</button>
-        <button data-val="15">15m</button>
-        <button data-val="30">30m</button>
       </div>
       <button class="oc-greeks-btn" id="ocGreeksBtn">
         <span class="oc-greeks-icon">▸</span> Greeks
@@ -90,11 +85,6 @@
     </div>
 
     <div class="oc-sum-card">
-      <div class="oc-sum-title">dOI <span class="oc-sum-title-sub">5 · 15 · 30m</span> <span class="oc-sum-title-sub oc-range-badge">±10</span></div>
-      <div class="oc-doi-grid" id="ocDoiGrid"><!-- 3 window columns injected, each with PE/CE values + net --></div>
-    </div>
-
-    <div class="oc-sum-card">
       <div class="oc-sum-title">Volume <span class="oc-sum-title-sub">& Vol/OI</span> <span class="oc-sum-title-sub oc-range-badge">±10</span></div>
       <div class="oc-vratio-rows" id="ocVRatio"><!-- CE/PE volume + ratio rows injected --></div>
     </div>
@@ -107,7 +97,7 @@
       <table class="oc-table" id="ocTable">
         <colgroup>
           <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-ltp"><col class="c-ltp">
-          <col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-vel"><col class="c-sig">
+          <col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-sig">
           <col class="c-smart"><col class="c-struct">
         </colgroup>
         <thead>
@@ -120,10 +110,9 @@
             <th class="oc-strike-h">Strike <small>PCR skew</small></th>
             <th>Open Int <small>PE / CE</small></th>
             <th>Chg OI <small>PE / CE</small></th>
-            <th>OI Velocity <small id="ocVelLabel">5 · 15 · 30m</small></th>
             <th class="oc-sig-h">Signal <small>composite</small></th>
             <!-- <th class="oc-smart-h">SMART MONEY</th> -->
-            <th class="oc-smart-h">Smart Money <small>Institutional</small></th>
+            <th class="oc-smart-h">Footprint <small>Institutional · 0–100</small></th>
             <th class="oc-struct-h">Mkt Structure <small>Strike</small></th>
           </tr>
         </thead>
@@ -136,7 +125,6 @@
     <span><b>IV</b> implied vol vs prior snapshot</span>
     <span><b>Open Int bar</b> length = current OI · dashed = fresh buildup · hollow = unwind</span>
     <span><b>Skew bar</b> put OI share (left) vs call OI share (right) of that strike</span>
-    <span><b>OI Vel</b> three-bar trend across 5 / 15 / 30 min windows</span>
     <span><b>Signal</b> combined CE + PE buildup / unwind read</span>
     <span class="oc-legend-atm">◆ amber spine = ATM strike</span>
   </footer>
@@ -146,16 +134,15 @@
 <!-- Strike detail drawer — row click opens strike summary, strike-cell
      click opens Bid/Ask depth. Same drawer element, content swapped by
      openDrawer(strike, mode) in option-chain.js. -->
-<div class="oc-drawer" id="ocDrawer">
-  <div class="oc-drawer-panel" id="ocDrawerPanel"></div>
+<div class="oc-drawer" id="ocDrawer" role="dialog" aria-modal="true" aria-label="Strike detail">
+  <div class="oc-drawer-panel" id="ocDrawerPanel" tabindex="-1"></div>
 </div>
 
 <!-- Buy/Sell quick-order modal, opened by clicking a CE/PE LTP cell -->
-<div class="oc-trade-modal" id="ocTradeModal">
-  <div class="oc-trade-panel" id="ocTradePanel"></div>
+<div class="oc-trade-modal" id="ocTradeModal" role="dialog" aria-modal="true" aria-label="Quick order">
+  <div class="oc-trade-panel" id="ocTradePanel" tabindex="-1"></div>
 </div>
 
-<script src="../engines/smart-money.js"></script>
 <script src="../engines/market-structure.js"></script>
 
 <script src="option-chain.js"></script>

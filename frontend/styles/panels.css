@@ -899,13 +899,20 @@ details.card summary .card-head{margin:0;}
 .capital-flow-item{display:flex;align-items:center;justify-content:space-between;gap:7px;min-width:0;font-family:var(--font-mono);font-size:var(--fs-xs);}
 .capital-flow-label{color:var(--text-tertiary);font-family:var(--font-sans);font-weight:650;white-space:nowrap;}
 .capital-flow-net{justify-content:flex-end;}
+.oi-net-velocity-section{margin-top:9px;padding:9px 12px 0;border-top:1px solid var(--border);}
+.oi-net-velocity-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;}
+.oi-net-velocity-title{font-size:var(--fs-sm);font-weight:750;color:var(--text-primary);}
+.oi-net-velocity-note{font-size:var(--fs-2xs);color:var(--text-tertiary);white-space:nowrap;}
+.oi-net-velocity-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;}
+.oi-net-velocity-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-1);font-family:var(--font-mono);font-size:var(--fs-xs);}
+.oi-net-velocity-item span{color:var(--text-tertiary);font-family:var(--font-sans);font-weight:700;}
 .capital-wall-owner{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-2);}
 .capital-wall-owner>div{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:var(--fs-xs);color:var(--text-tertiary);}
 
 @media (max-width:640px){
-  .oi-snap-kpis,.capital-flow-strip,.capital-wall-owner{grid-template-columns:1fr;}
-  .capital-flow-heading{flex-wrap:wrap;}
-  .capital-flow-heading-note{margin-left:0;width:100%;}
+  .oi-snap-kpis,.capital-flow-strip,.oi-net-velocity-strip,.capital-wall-owner{grid-template-columns:1fr;}
+  .capital-flow-heading,.oi-net-velocity-heading{flex-wrap:wrap;}
+  .capital-flow-heading-note,.oi-net-velocity-note{margin-left:0;width:100%;}
 }
 
 /* ── LOADER ── */
@@ -1383,3 +1390,10 @@ button.oic-ledger-link:hover,button.oic-ledger-link:focus-visible{background:col
 .oic-ledger-empty{padding:9px;color:var(--text-tertiary);font-size:var(--fs-xs)}
 
 .verdict-data-quality{margin-top:4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;color:var(--warn);text-transform:uppercase;}
+
+/* PDS-02 D-05 -> PDS-03 deliberate strike drill-down focus. */
+.sdt-row.sdt-focus-target{
+  outline:2px solid var(--info);
+  outline-offset:-2px;
+  background:var(--info-dim);
+}

@@ -114,7 +114,7 @@ class OiFlowView {
   return { ceStrike, ceVal, peStrike, peVal, lbl, lblPe };
 }
 
-  buildOiFlowSummaryHtml(chain, atm, velByStrike){
+  buildOiFlowSummaryHtml(chain, atm, velByStrike, oiVelocity){
   if(!chain || !chain.length){
     return `
   <div class="oic-card" id="oi-flow-summary-card">
@@ -141,6 +141,32 @@ class OiFlowView {
     if(a>=1e3) return sign+'₹'+(a/1e3).toFixed(1)+'K';
     return sign+'₹'+Math.round(a);
   };
+
+  // Net OI Flow belongs to D-07. Preserve the original multi-window
+  // 5m/15m/30m read without duplicating it inside D-04 or the dedicated
+  // D-05 strike ledger. Net is PE velocity minus CE velocity across the
+  // same currently visible strike range used by this Dashboard card.
+  const visibleStrikes = new Set(chain.map(r => Number(r.strike)));
+  const netOiVelocityFor = (windowMin) => {
+    const block = (oiVelocity || []).find(b => Number(b.window) === windowMin);
+    if(!block || !Array.isArray(block.rows)) return null;
+    let ce = 0, pe = 0, hasValue = false;
+    block.rows.forEach((r) => {
+      if(!visibleStrikes.has(Number(r.strike))) return;
+      const ceV = Number(r.ceDOI);
+      const peV = Number(r.peDOI);
+      if(Number.isFinite(ceV)){ ce += ceV; hasValue = true; }
+      if(Number.isFinite(peV)){ pe += peV; hasValue = true; }
+    });
+    return hasValue ? pe - ce : null;
+  };
+  const netOiVel = [5,15,30].map(windowMin => ({
+    windowMin,
+    value: netOiVelocityFor(windowMin)
+  }));
+  const fmtNetOiVelocity = (v) => (v==null || !Number.isFinite(v))
+    ? '—'
+    : `${v>0?'+':''}${fmtK(v)}`;
 
   // Total PE/CE OI + PCR across the visible chain is intentionally NOT
   // recomputed here — it's the exact same aggregate the Option Chain
@@ -210,6 +236,19 @@ class OiFlowView {
           <span class="capital-flow-label">Net PE−CE</span>
           <strong style="color:${signColor(netCapitalFlow)};">${fmtCapital(netCapitalFlow)}</strong>
         </div>
+      </div>
+    </div>
+    <div class="oi-net-velocity-section" aria-label="Net OI Flow by velocity window">
+      <div class="oi-net-velocity-heading">
+        <span class="oi-net-velocity-title">Net OI Flow</span>
+        <span class="oi-net-velocity-note">PE−CE ΔOI velocity · visible range</span>
+      </div>
+      <div class="oi-net-velocity-strip">
+        ${netOiVel.map(({windowMin,value}) => `
+          <div class="oi-net-velocity-item">
+            <span>${windowMin}m</span>
+            <strong style="color:${value==null?'var(--text-tertiary)':signColor(value)};">${fmtNetOiVelocity(value)}</strong>
+          </div>`).join('')}
       </div>
     </div>
     <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading…</div>

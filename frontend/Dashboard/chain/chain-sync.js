@@ -12,7 +12,7 @@
   // option-chain.js listens on a BroadcastChannel('oc-live-sync') and
   // posts {type:'oc-request-snapshot'} on load,
   // {type:'oc-request-expiry', expiry} when its dropdown changes, and
-  // {type:'oc-request-range', range} when its own ±3/±5/±10/All buttons
+  // {type:'oc-request-range', range} when its own ±3/±5/±10/±15/All buttons
   // change — but nothing on this side ever opened that channel (the
   // constructor call was commented out), so every message went nowhere:
   // the tab stayed on 5 rows of demo data forever. With only 5 demo
@@ -45,6 +45,11 @@ ChainDenseView.prototype._initBroadcast = function() {
         // the single source of truth, instead of the tab keeping its own
         // disconnected copy.
         if (window.switchChainRange) window.switchChainRange(msg.range);
+      } else if (msg.type === "oc-open-strike-detail") {
+        // Explicit Tier-3 drill-down from the dedicated Option Chain.
+        // Keep normal row interaction inside D-05; only this deliberate
+        // action opens the Dashboard Strike Detail Report.
+        if (window.openStrikeDetailReportModal) window.openStrikeDetailReportModal(msg.strike);
       } else if (msg.type === "oc-place-order") {
         // Buy/Sell from the standalone tab's quick-order modal — see
         // option-chain.js's placeOrder(). That tab has no parent window to
