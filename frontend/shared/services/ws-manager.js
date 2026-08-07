@@ -42,6 +42,13 @@ class WSManager {
 
   connect(url) {
     if (url) this.url = url;
+    // An explicit connect (symbol/expiry switch or manual recovery) wins
+    // over any older delayed reconnect. Without clearing that timer here,
+    // it can fire later and replace the newly healthy socket a second time.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     // A symbol switch (switchActiveIndex -> connectWebSocket(newUrl)) calls
     // this while a connection is already open. Without closing it first, the
     // old socket just leaks: it stays connected (browser AND server-side
@@ -102,12 +109,18 @@ class WSManager {
   }
 
   disconnect() {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) { this.ws.onclose = null; try { this.ws.close(); } catch(e){} this.ws = null; }
   }
 
   reconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelayMs);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, this.reconnectDelayMs);
   }
 }

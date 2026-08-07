@@ -38,6 +38,7 @@ jobs:
           npm run test:price-chart
           npm run test:design-system
           npm run test:health-status
+          npm run test:feed-recovery
       - run: npm run build
 
   backend:

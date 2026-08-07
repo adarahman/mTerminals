@@ -13,6 +13,7 @@
     "test:price-chart": "node tools/test-price-chart-contracts.mjs",
     "test:design-system": "node tools/test-design-system-contracts.mjs",
     "test:health-status": "node tools/test-health-status-contracts.mjs",
+    "test:feed-recovery": "node tools/test-feed-recovery.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

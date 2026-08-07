@@ -86,6 +86,9 @@ class DataService {
       reason: '',
     };
     this._updateFeedStatusDom();
+    if (window.eventBus && prev.status !== 'LIVE') {
+      window.eventBus.emit('feed:status', AppState.feedState);
+    }
   }
 
   _updateDataQuality(state){
