@@ -24,23 +24,29 @@
       as a child tab via window.open() than a broadcast — see
       window.opener handling below, same message shape.
 
-   With neither connected, this file falls back to DEMO DATA so the page
-   is fully viewable/clickable on its own.
+   Demo rows are available only when this page is opened explicitly with
+   ?demo=1. In normal production mode, no live feed means CONNECTING /
+   DISCONNECTED with unavailable market values — fabricated rows are never
+   presented as a live market.
    ════════════════════════════════════════════════════════════════════ */
 
 (function () {
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  const DEMO_MODE = new URLSearchParams(window.location.search).get("demo") === "1";
+  const FEED_CONNECT_TIMEOUT_MS = 5000;
+  const FEED_STALE_MS = 10000;
+  const FEED_DISCONNECTED_MS = 30000;
 
   // ── STATE ──
   let state = {
     symbol: "NIFTY",
-    spot: 24062.40,
-    spotChg: 118.30,
-    spotChgPct: 0.49,
-    expiry: "24-JUL-2026",
-    expiryDates: ["24-JUL-2026", "31-JUL-2026", "07-AUG-2026"],
+    spot: null,
+    spotChg: null,
+    spotChgPct: null,
+    expiry: "",
+    expiryDates: [],
     rows: [],
     range: 10,
     velWin: 5,
@@ -54,6 +60,9 @@
     // mode's other fields.
     volOiRatios: {},
     maxPain: null,
+    feedState: DEMO_MODE ? "DEMO" : "CONNECTING",
+    bootAt: Date.now(),
+    lastLiveAt: null,
   };
   // Set by initLiveSync() when a BroadcastChannel to the dashboard tab is
   // open; used by the expiry dropdown's change handler to ask the
@@ -146,6 +155,43 @@
   };
   const sortExpiryDates = (dates) => (Array.isArray(dates) ? dates.slice().sort((a, b) => parseExpiryDate(a) - parseExpiryDate(b)) : dates);
 
+  // ── FEED STATE ──
+  function renderFeedState() {
+    const status = state.feedState || "DISCONNECTED";
+    const eyebrow = $("ocEyebrow");
+    const pill = $("ocFeedStatus");
+    if (eyebrow) eyebrow.dataset.feedState = status;
+    if (pill) {
+      pill.textContent = status;
+      pill.className = "oc-feed-status is-" + status.toLowerCase().replace(/\s+/g, "-");
+    }
+  }
+
+  function setFeedState(next) {
+    if (!next || state.feedState === next) return;
+    state.feedState = next;
+    renderFeedState();
+    if (!state.rows.length) renderRows();
+  }
+
+  function startFeedMonitor() {
+    renderFeedState();
+    if (DEMO_MODE) return;
+    const check = () => {
+      const now = Date.now();
+      if (state.lastLiveAt == null) {
+        setFeedState(now - state.bootAt >= FEED_CONNECT_TIMEOUT_MS ? "DISCONNECTED" : "CONNECTING");
+        return;
+      }
+      const age = now - state.lastLiveAt;
+      if (age >= FEED_DISCONNECTED_MS) setFeedState("DISCONNECTED");
+      else if (age >= FEED_STALE_MS) setFeedState("STALE");
+      else setFeedState("LIVE");
+    };
+    check();
+    state._feedTimer = setInterval(check, 1000);
+  }
+
   // ── FORMATTERS ──
   // Single source of truth for K/L/Cr formatting. Takes the RAW absolute
   // number (e.g. 613000 contracts, not "6.13"), same shape chain-views.js's
@@ -164,7 +210,8 @@
     if (a >= 1e3) return s + (a / 1e3).toFixed(1) + "K";
     return s + a.toFixed(0);
   };
-  const fmtNum = (v, d = 2) => (v == null ? "—" : v.toFixed(d));
+  const fmtNum = (v, d = 2) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(d));
+  const fmtPct = (v, d = 2) => (v == null || !Number.isFinite(Number(v)) ? "—" : `${Number(v).toFixed(d)}%`);
   // LTP change readout — %chg is optional data (not every feed/leg has a
   // prior-close reference to compute it from). Showing "12.4 ()" when
   // it's missing is worse than just showing "12.4"; only append the
@@ -449,8 +496,8 @@
     <tr class="oc-row${r.isAtm ? " oc-atm" : ""}${state.focusStrike === r.strike ? " oc-focus-target" : ""}" data-strike="${r.strike}">
       <td class="oc-iv-cell">
         <div class="oc-stack">
-          <span class="pe">${fmtNum(r.pe.iv)}%</span>
-          <span class="ce">${fmtNum(r.ce.iv)}%</span>
+          <span class="pe">${fmtPct(r.pe.iv)}</span>
+          <span class="ce">${fmtPct(r.ce.iv)}</span>
         </div>
       </td>
       <td class="oc-vol-cell">
@@ -535,16 +582,32 @@
 
   // ── HEADER / SKEW RENDER ──
   function renderHeader() {
-    $("ocSpot").textContent = state.spot.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    renderFeedState();
+    $("ocSpot").textContent = state.spot == null || !Number.isFinite(Number(state.spot))
+      ? "—"
+      : Number(state.spot).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const chgEl = $("ocSpotChg");
-    const up = state.spotChg >= 0;
-    chgEl.textContent = `${up ? "+" : ""}${state.spotChg.toFixed(2)} (${up ? "+" : ""}${state.spotChgPct.toFixed(2)}%)`;
-    chgEl.className = "oc-spot-chg" + (up ? "" : " down");
-    document.querySelector("#ocSymbol").childNodes[0].nodeValue = state.symbol + " ";
+    const haveChg = state.spotChg != null && state.spotChgPct != null
+      && Number.isFinite(Number(state.spotChg)) && Number.isFinite(Number(state.spotChgPct));
+    const up = haveChg && Number(state.spotChg) >= 0;
+    chgEl.textContent = haveChg
+      ? `${up ? "+" : ""}${Number(state.spotChg).toFixed(2)} (${Number(state.spotChgPct) >= 0 ? "+" : ""}${Number(state.spotChgPct).toFixed(2)}%)`
+      : "—";
+    chgEl.className = "oc-spot-chg" + (haveChg && !up ? " down" : "");
+    document.querySelector("#ocSymbol").childNodes[0].nodeValue = (state.symbol || "—") + " ";
 
     const sel = $("ocExpiry");
-    const sortedExpiryDates = sortExpiryDates(state.expiryDates);
+    const sortedExpiryDates = sortExpiryDates(state.expiryDates || []);
     const expiryKey = sortedExpiryDates.join("|");
+    if (!sortedExpiryDates.length) {
+      if (sel.dataset.key !== "__empty__") {
+        sel.innerHTML = `<option value="">Waiting for feed…</option>`;
+        sel.dataset.key = "__empty__";
+      }
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
     if (sel.dataset.key !== expiryKey) {
       sel.innerHTML = sortedExpiryDates.map((d) => `<option value="${d}"${d === state.expiry ? " selected" : ""}>${d}</option>`).join("");
       sel.dataset.key = expiryKey;
@@ -577,6 +640,24 @@
     // instead of hand-wiring four separate ids.
     const rangeLabel = state.range >= 9999 ? "All strikes" : `±${state.range}`;
     document.querySelectorAll(".oc-range-badge").forEach((el) => { el.textContent = rangeLabel; });
+
+    if (!rows.length) {
+      $("ocSkewCe").style.width = "0%";
+      $("ocSkewPe").style.width = "0%";
+      $("ocChgSkewCe").style.width = "0%";
+      $("ocChgSkewPe").style.width = "0%";
+      $("ocTotalCe").textContent = "—";
+      $("ocTotalPe").textContent = "—";
+      $("ocTotalPcr").textContent = "PCR —";
+      $("ocChgTotalCe").textContent = "—";
+      $("ocChgTotalPe").textContent = "—";
+      $("ocChgPcrShift").textContent = "PCR Δ —";
+      $("ocDoiGrid").innerHTML = `<div style="grid-column:1/-1;color:var(--oc-text-3);font-family:var(--font-mono);font-size:10px;">—</div>`;
+      $("ocVRatio").innerHTML = `<div style="color:var(--oc-text-3);font-family:var(--font-mono);font-size:10px;">—</div>`;
+      $("ocNetOi").innerHTML = `Net (PE−CE) <b>—</b>`;
+      $("ocNetChgOi").innerHTML = `Net (PE−CE) <b>—</b>`;
+      return;
+    }
 
     // ── OI summary ──
     const totalCe = rows.reduce((s, r) => s + r.ce.oi, 0);
@@ -690,6 +771,27 @@
     // can't shift just because the range toggle changed what's on screen.
     const analytics = computeStrikeAnalytics(state.rows);
     const wantKeys = new Set(rows.map((r) => String(r.strike)));
+
+    if (!rows.length) {
+      for (const [, entry] of _rowCache) {
+        entry.el.remove();
+        if (entry.greekEl) entry.greekEl.remove();
+      }
+      _rowCache.clear();
+      const message = state.feedState === "DEMO"
+        ? "Demo mode — no live market connection"
+        : state.feedState === "CONNECTING"
+          ? "Connecting to live Option Chain…"
+          : state.feedState === "LIVE"
+            ? "Live feed connected — no Option Chain rows for this context"
+            : state.feedState === "STALE"
+              ? "Live Option Chain is stale — waiting for a fresh snapshot"
+              : "No live Option Chain feed — open/refresh the Dashboard connection";
+      tbody.innerHTML = `<tr class="oc-empty-row" id="ocEmptyRow"><td colspan="12">${message}</td></tr>`;
+      return;
+    }
+    const emptyRow = $("ocEmptyRow");
+    if (emptyRow) emptyRow.remove();
 
     // Drop rows that scrolled out of the visible range (or window shrank).
     for (const [key, entry] of _rowCache) {
@@ -830,7 +932,7 @@
           <div style="color:var(--call);font-weight:700;font-size:12px;margin-bottom:8px;">CALL · ${SIGNAL_LABEL[r.ce.signal] || "—"}</div>
           <div style="font-family:var(--mono);font-size:12.5px;line-height:2;color:var(--text-2);">
             LTP <b style="color:var(--text);">${fmtNum(r.ce.ltp)}</b><br>
-            IV <b style="color:var(--text);">${fmtNum(r.ce.iv)}%</b><br>
+            IV <b style="color:var(--text);">${fmtPct(r.ce.iv)}</b><br>
             OI <b style="color:var(--text);">${fmt(r.ce.oi)}</b> &nbsp; Chg <b style="color:var(--text);">${sign(r.ce.oiChg)}${fmt(r.ce.oiChg)}</b><br>
             Volume <b style="color:var(--text);">${fmt(r.ce.vol)}</b><br>
             Premium Locked <b style="color:var(--text);">₹${fmt(r.ce.premiumLocked)}</b><br>
@@ -841,7 +943,7 @@
           <div style="color:var(--put);font-weight:700;font-size:12px;margin-bottom:8px;">PUT · ${SIGNAL_LABEL[r.pe.signal] || "—"}</div>
           <div style="font-family:var(--mono);font-size:12.5px;line-height:2;color:var(--text-2);">
             LTP <b style="color:var(--text);">${fmtNum(r.pe.ltp)}</b><br>
-            IV <b style="color:var(--text);">${fmtNum(r.pe.iv)}%</b><br>
+            IV <b style="color:var(--text);">${fmtPct(r.pe.iv)}</b><br>
             OI <b style="color:var(--text);">${fmt(r.pe.oi)}</b> &nbsp; Chg <b style="color:var(--text);">${sign(r.pe.oiChg)}${fmt(r.pe.oiChg)}</b><br>
             Volume <b style="color:var(--text);">${fmt(r.pe.vol)}</b><br>
             Premium Locked <b style="color:var(--text);">₹${fmt(r.pe.premiumLocked)}</b><br>
@@ -970,6 +1072,15 @@
     const el = $("ocTradeConfirm");
     state._tradeCtx = null;
 
+    if (DEMO_MODE || state.feedState !== "LIVE") {
+      if (el) {
+        el.textContent = DEMO_MODE ? "DEMO ONLY — order not sent" : `${state.feedState} market data — order not sent`;
+        el.classList.add("oc-trade-confirm-err", "show");
+      }
+      setTimeout(closeTradeModal, 1400);
+      return;
+    }
+
     // Path 1: embedded in the dashboard's iframe (see panels-views.js's
     // toggleFullChainFocus()) — direct call into the real paper-trading
     // engine. No fill/reject comes back through this call itself (the
@@ -1021,15 +1132,13 @@
       return;
     }
 
-    // Path 3: no live sync at all (BroadcastChannel unsupported, or this
-    // page loaded fully offline) — demo-mode fallback, same optimistic
-    // text as always, clearly labeled so it's never mistaken for a real fill.
+    // Path 3: no live order route at all. Never fabricate a trade or a
+    // fill in demo/offline mode.
     if (el) {
-      el.textContent = `${action === "BUY" ? "Bought" : "Sold"} ${qty} lot${qty > 1 ? "s" : ""} of ${state.symbol} ${ctx.strike} ${ctx.side} @ ${fmtNum(ctx.ltp)} (demo — not connected)`;
-      el.classList.remove("oc-trade-confirm-err");
-      el.classList.add("show");
+      el.textContent = DEMO_MODE ? "DEMO ONLY — order not sent" : "DISCONNECTED — order not sent";
+      el.classList.add("oc-trade-confirm-err", "show");
     }
-    setTimeout(closeTradeModal, 900);
+    setTimeout(closeTradeModal, 1400);
   }
 
   // Reply to a request THIS tab sent via the BroadcastChannel path above.
@@ -1041,8 +1150,15 @@
     state._pendingOrderReqId = null;
     const el = $("ocTradeConfirm");
     if (!el) return;
-    if (data.status === "FILLED") {
-      el.textContent = `Filled @ ${fmtNum(data.fill_price)}`;
+    if (data.status === "SENT" || data.status === "PENDING") {
+      el.textContent = "Order sent — awaiting confirmation";
+      el.classList.remove("oc-trade-confirm-err");
+    } else if (data.status === "CONFIRMATION_REQUIRED") {
+      el.textContent = "Confirmation required on Dashboard — not sent yet";
+      el.classList.remove("oc-trade-confirm-err");
+    } else if (data.status === "FILLED") {
+      // Reserved for a real broker/paper-engine confirmation event only.
+      el.textContent = data.fill_price != null ? `Filled @ ${fmtNum(data.fill_price)}` : "Filled";
       el.classList.remove("oc-trade-confirm-err");
     } else {
       el.textContent = `REJECTED: ${data.reason || "order not placed"}`;
@@ -1059,7 +1175,9 @@
 
   // ── LIVE DATA INTEGRATION ──
   function applyLivePayload(msg) {
-    if (!msg || !msg.rows) return;
+    if (!msg || !Array.isArray(msg.rows)) return;
+    state.lastLiveAt = Date.now();
+    state.feedState = "LIVE";
     state.rows = msg.rows;
     if (msg.symbol) state.symbol = msg.symbol;
     if (msg.spot != null) state.spot = msg.spot;
@@ -1130,7 +1248,14 @@
 
   // ── BOOT ──
   function boot() {
-    state.rows = buildDemoRows();
+    if (DEMO_MODE) {
+      state.rows = buildDemoRows();
+      state.spot = 24062.40;
+      state.spotChg = 118.30;
+      state.spotChgPct = 0.49;
+      state.expiry = "24-JUL-2026";
+      state.expiryDates = ["24-JUL-2026", "31-JUL-2026", "07-AUG-2026"];
+    }
     const hashMatch = location.hash.match(/(?:^#|&)strike=([^&]+)/);
     if(hashMatch){
       const target = Number(decodeURIComponent(hashMatch[1]));
@@ -1139,6 +1264,7 @@
     wireEvents();
     renderAll();
     initLiveSync();
+    startFeedMonitor();
     if(state.pendingFocusStrike != null) focusStrike(state.pendingFocusStrike);
   }
 

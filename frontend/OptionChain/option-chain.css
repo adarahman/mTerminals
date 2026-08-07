@@ -85,10 +85,23 @@ body{
   display:flex;align-items:center;gap: var(--space-2);margin-bottom: var(--space-1);
 }
 .oc-eyebrow::before{
-  content:'';width:6px;height:6px;border-radius:50%;background:var(--call);
-  box-shadow:0 0 8px var(--call);
-  animation:oc-pulse 1.8s ease-in-out infinite;
+  content:'';width:6px;height:6px;border-radius:50%;background:var(--oc-text-3);
+  box-shadow:none;
 }
+.oc-eyebrow[data-feed-state="LIVE"]::before{background:var(--pos);box-shadow:0 0 8px var(--pos);animation:oc-pulse 1.8s ease-in-out infinite;}
+.oc-eyebrow[data-feed-state="STALE"]::before{background:var(--warn);box-shadow:0 0 8px var(--warn);}
+.oc-eyebrow[data-feed-state="DISCONNECTED"]::before{background:var(--neg);box-shadow:0 0 8px var(--neg);}
+.oc-eyebrow[data-feed-state="DEMO"]::before{background:var(--warn);box-shadow:0 0 8px var(--warn);}
+.oc-eyebrow[data-feed-state="CONNECTING"]::before{background:var(--oc-blue);box-shadow:0 0 8px var(--oc-blue);}
+.oc-feed-status{
+  display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;
+  border:1px solid var(--oc-hairline);font-size:9px;font-weight:700;letter-spacing:.08em;
+  color:var(--oc-text-2);background:var(--oc-panel);
+}
+.oc-feed-status.is-live{color:var(--pos);border-color:var(--pos);}
+.oc-feed-status.is-stale,.oc-feed-status.is-demo{color:var(--warn);border-color:var(--warn);}
+.oc-feed-status.is-disconnected{color:var(--neg);border-color:var(--neg);}
+.oc-feed-status.is-connecting{color:var(--oc-blue);border-color:var(--oc-blue);}
 @keyframes oc-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 .oc-head h1{
   font-family:var(--font-display);font-weight:700;font-size:1.7rem;
@@ -144,6 +157,8 @@ body{
 .oc-greeks-btn.active{background:var(--oc-blue);color:#0A0C11;border-color:var(--oc-blue);}
 .oc-greeks-icon{display:inline-block;transition:transform .18s;font-size:10px;}
 .oc-greeks-btn.active .oc-greeks-icon{transform:rotate(90deg);}
+
+.oc-empty-row td{padding:36px 18px!important;text-align:center!important;color:var(--oc-text-3)!important;font-family:var(--font-mono);font-size:12px;letter-spacing:.02em;}
 
 /* ── SUMMARY LEDGER (signature element #1) ──
    Four cards read left-to-right as one sentence: how much OI sits where,

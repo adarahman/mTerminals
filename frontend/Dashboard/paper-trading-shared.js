@@ -419,6 +419,8 @@ function ptToast(message, kind){
 // on the portfolio panel) — it's genuinely cross-panel state, not
 // order-entry-specific.
 let _ptLiveMode = false;
+function ptIsLiveMode(){ return _ptLiveMode; }
+window.ptIsLiveMode = ptIsLiveMode;
 
 function ptToggleLiveMode(){
   if(!_ptLiveMode){

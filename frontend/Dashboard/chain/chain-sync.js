@@ -122,20 +122,13 @@ ChainDenseView.prototype._broadcastToOptionChainTab = function(payload) {
 // so this order shows up in the same Order/Trade Log as everything else.
 //
 // ptDispatchOrder() is fire-and-forget over the paper-trading WebSocket —
-// it does not return a real fill/reject, only whether the WS send
-// succeeded (the actual confirmed order arrives later via
-// AppState.wsState.orders, same as every other order path). So the reply
-// sent back here is the same kind of optimistic "sent" acknowledgement
-// the embedded-iframe path (Path 1, _ocPlaceOrder) already gives —
-// status:"FILLED" here means "order was sent", not "order was filled".
-// A true reject only happens if the WS itself isn't connected.
+// it does not return a real fill/reject, only whether the request was sent.
+// Therefore this bridge MUST NOT translate a successful send into FILLED.
+// FILLED is reserved for the actual backend-confirmed order lifecycle.
 //
-// If live trading mode is on, ptDispatchOrder() instead pops the
-// per-order Live confirmation modal on THIS (dashboard) tab and returns
-// true without sending anything yet — the actual send only happens if
-// someone clicks "Place Real Order" there. The standalone tab has no way
-// to see or answer that modal, so its order will read as "sent" here
-// while actually waiting on a confirmation click on the dashboard.
+// In live-trading mode ptDispatchOrder() opens the Dashboard's explicit
+// confirmation modal and does not send until that confirmation happens.
+// The standalone Option Chain is told CONFIRMATION_REQUIRED, not SENT.
 ChainDenseView.prototype._handleOcPlaceOrder = function(msg) {
     if (!this._ocChan) return;
     const o = msg.order || {};
@@ -148,12 +141,12 @@ ChainDenseView.prototype._handleOcPlaceOrder = function(msg) {
       qty_lots: o.qty,
       order_type: "MARKET",
     };
+    const liveNeedsConfirm = typeof ptIsLiveMode === "function" && ptIsLiveMode();
     const ok = ptDispatchOrder(payload, null);
     this._ocChan.postMessage({
       type: "oc-order-result",
       reqId: msg.reqId,
-      status: ok ? "FILLED" : "REJECTED",
-      fill_price: o.ltp,
+      status: ok ? (liveNeedsConfirm ? "CONFIRMATION_REQUIRED" : "SENT") : "REJECTED",
       reason: ok ? undefined : "WS not connected — order not sent",
     });
 };

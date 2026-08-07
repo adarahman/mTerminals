@@ -203,6 +203,22 @@ def _r(v, decimals=4):
     except Exception:
         return 0.0
 
+def _nullable_r(v, decimals=4):
+    """Round an optional numeric value without collapsing missing into zero."""
+    try:
+        if isinstance(v, (np.generic, pd.Series)):
+            v = v.item()
+        elif hasattr(v, 'iloc'):
+            v = v.iloc[0]
+        if v is None or pd.isna(v):
+            return None
+        f = float(v)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return round(f, decimals)
+    except Exception:
+        return None
+
 def _to_int(v):
     try:
         if isinstance(v, (np.generic, pd.Series)):
@@ -309,9 +325,8 @@ def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
     i.e. oi.capital_metrics.compute_capital_metrics()'s per-strike output.
     Adds the capital-weighted fields (premium locked, capital flow,
     premium turnover, delta/gamma exposure) alongside the existing OI/IV
-    fields. NaN values on illiquid strikes (see compute_capital_metrics'
-    NaN HANDLING docstring) round-trip through _r() to 0.0, same as every
-    other numeric field here.
+    fields. Optional IV/capital analytics use _nullable_r() so unavailable
+    data remains JSON null instead of being silently converted to zero.
     """
     capital_map = capital_map or {}
     rows = []
@@ -334,7 +349,7 @@ def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
             "ceOI":     _to_int(r.get("ce_oi",     0)),
             "ceChgOI":  _to_int(r.get("ce_oi_chg", 0)),
             "ceVol":    _to_int(r.get("ce_volume", 0)),
-            "ceIV":     _r(r.get("ce_iv",     0), 2),
+            "ceIV":     _nullable_r(r.get("ce_iv"), 2),
             "ceSignal": str(r.get("ce_signal", "")),
             "peLTP":    _r(r.get("pe_ltp",     0), 2),
             "peBid":    ba.get("peBid", 0.0),
@@ -347,27 +362,27 @@ def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
             "peOI":     _to_int(r.get("pe_oi",     0)),
             "peChgOI":  _to_int(r.get("pe_oi_chg", 0)),
             "peVol":    _to_int(r.get("pe_volume", 0)),
-            "peIV":     _r(r.get("pe_iv",     0), 2),
+            "peIV":     _nullable_r(r.get("pe_iv"), 2),
             "peSignal": str(r.get("pe_signal", "")),
             # ── capital-weighted fields (oi.capital_metrics) ────────────
             # Rupee premium locked = OI x LTP, day-session capital flow =
             # ChgOI x LTP (NOT intraday — see capital_metrics.py module
             # docstring), and delta/gamma exposure = OI x Greek x spot(^2).
-            "cePremiumLocked":  _r(cm.get("ce_premium_locked",   0), 2),
-            "pePremiumLocked":  _r(cm.get("pe_premium_locked",   0), 2),
-            "ceCapitalFlow":    _r(cm.get("ce_capital_flow",     0), 2),
-            "peCapitalFlow":    _r(cm.get("pe_capital_flow",     0), 2),
-            "cePremiumTurnover": _r(cm.get("ce_premium_turnover", 0), 2),
-            "pePremiumTurnover": _r(cm.get("pe_premium_turnover", 0), 2),
-            "ceDeltaExposure":  _r(cm.get("ce_delta_exposure",   0), 2),
-            "peDeltaExposure":  _r(cm.get("pe_delta_exposure",   0), 2),
-            "ceGammaExposure":  _r(cm.get("ce_gamma_exposure",   0), 2),
-            "peGammaExposure":  _r(cm.get("pe_gamma_exposure",   0), 2),
+            "cePremiumLocked":  _nullable_r(cm.get("ce_premium_locked"), 2),
+            "pePremiumLocked":  _nullable_r(cm.get("pe_premium_locked"), 2),
+            "ceCapitalFlow":    _nullable_r(cm.get("ce_capital_flow"), 2),
+            "peCapitalFlow":    _nullable_r(cm.get("pe_capital_flow"), 2),
+            "cePremiumTurnover": _nullable_r(cm.get("ce_premium_turnover"), 2),
+            "pePremiumTurnover": _nullable_r(cm.get("pe_premium_turnover"), 2),
+            "ceDeltaExposure":  _nullable_r(cm.get("ce_delta_exposure"), 2),
+            "peDeltaExposure":  _nullable_r(cm.get("pe_delta_exposure"), 2),
+            "ceGammaExposure":  _nullable_r(cm.get("ce_gamma_exposure"), 2),
+            "peGammaExposure":  _nullable_r(cm.get("pe_gamma_exposure"), 2),
             # oi.footprint_score.compute_footprint_score() — percentile-
             # ranked composite, "how loud is this strike right now vs the
             # rest of the currently-visible chain" (see that module's
             # docstring for why percentile rank rather than a fixed scale).
-            "footprintScore":   _r(cm.get("footprint_score", 0), 1),
+            "footprintScore":   _nullable_r(cm.get("footprint_score"), 1),
         })
     return rows
 
@@ -1077,16 +1092,16 @@ def export_dashboard_json(
         for r in greeks_table.to_dict("records"):
             rows.append({
                 "strike": _to_int(r.get("Strike", r.get("strike", 0))),
-                "iv":     _r(r.get("iv", 0), 2),
-                "cDelta": _r(r.get("cDelta", 0), 4),
-                "cGamma": _r(r.get("cGamma", 0), 4),
-                "cTheta": _r(r.get("cTheta", 0), 4),
-                "cVega":  _r(r.get("cVega",  0), 4),
-                "pDelta": _r(r.get("pDelta", 0), 4),
-                "pGamma": _r(r.get("pGamma", 0), 4),
-                "pTheta": _r(r.get("pTheta", 0), 4),
-                "pVega":  _r(r.get("pVega",  0), 4),
-                "netGEX": _r(r.get("netGEX", 0), 4),
+                "iv":     _nullable_r(r.get("iv"), 2),
+                "cDelta": _nullable_r(r.get("cDelta"), 4),
+                "cGamma": _nullable_r(r.get("cGamma"), 4),
+                "cTheta": _nullable_r(r.get("cTheta"), 4),
+                "cVega":  _nullable_r(r.get("cVega"), 4),
+                "pDelta": _nullable_r(r.get("pDelta"), 4),
+                "pGamma": _nullable_r(r.get("pGamma"), 4),
+                "pTheta": _nullable_r(r.get("pTheta"), 4),
+                "pVega":  _nullable_r(r.get("pVega"), 4),
+                "netGEX": _nullable_r(r.get("netGEX"), 4),
             })
         return rows
 
@@ -1123,13 +1138,13 @@ def export_dashboard_json(
                 win_block["rows"] = rows
 
     # ── 8. ATM CE/PE IV ───────────────────────────────────────────────
-    atm_ce_iv = _r(ctx_dict.get("atm_ce_iv", 0.0), 2)
-    atm_pe_iv = _r(ctx_dict.get("atm_pe_iv", 0.0), 2)
-    if atm_ce_iv == 0.0 or atm_pe_iv == 0.0:
+    atm_ce_iv = _nullable_r(ctx_dict.get("atm_ce_iv"), 2)
+    atm_pe_iv = _nullable_r(ctx_dict.get("atm_pe_iv"), 2)
+    if not atm_ce_iv or not atm_pe_iv:
         for row in chain_rows:
             if row["strike"] == atm_strike:
-                if atm_ce_iv == 0.0: atm_ce_iv = row["ceIV"]
-                if atm_pe_iv == 0.0: atm_pe_iv = row["peIV"]
+                if not atm_ce_iv: atm_ce_iv = row["ceIV"]
+                if not atm_pe_iv: atm_pe_iv = row["peIV"]
                 break
 
     # ── 9a. Build multi-expiry chains dict ────────────────────────────
@@ -1180,9 +1195,10 @@ def export_dashboard_json(
                     "expiry":      exp_str,
                     "dte":         _to_int(ex_dte),
                     "atm":         ex_atm,
-                    "atmCeIV":     atm_row["ceIV"]  if atm_row else 0,
-                    "atmPeIV":     atm_row["peIV"]  if atm_row else 0,
-                    "atmIV":       _r((atm_row["ceIV"] + atm_row["peIV"]) / 2, 2) if atm_row else 0,
+                    "atmCeIV":     atm_row["ceIV"]  if atm_row else None,
+                    "atmPeIV":     atm_row["peIV"]  if atm_row else None,
+                    "atmIV":       _nullable_r((atm_row["ceIV"] + atm_row["peIV"]) / 2, 2)
+                                   if atm_row and atm_row["ceIV"] is not None and atm_row["peIV"] is not None else None,
                     "straddle":    _r((atm_row["ceLTP"] + atm_row["peLTP"]), 2) if atm_row else 0,
                     "ceWall":      _to_int(ex_ctx.get("ce_wall",  0)),
                     "peWall":      _to_int(ex_ctx.get("pe_wall",  0)),

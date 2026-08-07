@@ -23,8 +23,8 @@
     <div class="oc-head-id">
       <button class="oc-back" id="ocBack" title="Back to dashboard">←</button>
       <div class="oc-head-text">
-        <div class="oc-eyebrow">Live Option Chain</div>
-        <h1 id="ocSymbol">NIFTY <span id="ocSpot">24,062.40</span> <span id="ocSpotChg" class="oc-spot-chg">+118.30 (0.49%)</span></h1>
+        <div class="oc-eyebrow" id="ocEyebrow" data-feed-state="CONNECTING">Option Chain <span id="ocFeedStatus" class="oc-feed-status is-connecting">CONNECTING</span></div>
+        <h1 id="ocSymbol">NIFTY <span id="ocSpot">—</span> <span id="ocSpotChg" class="oc-spot-chg">—</span></h1>
       </div>
     </div>
 
@@ -63,13 +63,13 @@
         <div class="oc-skew-fill oc-skew-fill-ce oc-fixed-ce" id="ocSkewCe"></div>
       </div>
       <div class="oc-sum-readout">
-        <span class="oc-sum-num oc-put-c" id="ocTotalPe">293.51L</span>
+        <span class="oc-sum-num oc-put-c" id="ocTotalPe">—</span>
         <span class="oc-sum-vs">PE</span>
-        <span class="oc-sum-pill" id="ocTotalPcr">PCR 1.08</span>
+        <span class="oc-sum-pill" id="ocTotalPcr">PCR —</span>
         <span class="oc-sum-vs">CE</span>
-        <span class="oc-sum-num oc-call-c" id="ocTotalCe">270.64L</span>
+        <span class="oc-sum-num oc-call-c" id="ocTotalCe">—</span>
       </div>
-      <div class="oc-sum-net" id="ocNetOi">Net (PE−CE) <b>+0L</b></div>
+      <div class="oc-sum-net" id="ocNetOi">Net (PE−CE) <b>—</b></div>
     </div>
 
     <div class="oc-sum-card">
@@ -80,13 +80,13 @@
         <div class="oc-skew-fill oc-skew-fill-ce chg-red" id="ocChgSkewCe"></div>
       </div>
       <div class="oc-sum-readout">
-        <span class="oc-sum-num chg-green" id="ocChgTotalPe">+57.43L</span>
+        <span class="oc-sum-num chg-green" id="ocChgTotalPe">—</span>
         <span class="oc-sum-vs">PE</span>
-        <span class="oc-sum-pill" id="ocChgPcrShift">PCR Δ +0.04</span>
+        <span class="oc-sum-pill" id="ocChgPcrShift">PCR Δ —</span>
         <span class="oc-sum-vs">CE</span>
-        <span class="oc-sum-num chg-red" id="ocChgTotalCe">+17.59L</span>
+        <span class="oc-sum-num chg-red" id="ocChgTotalCe">—</span>
       </div>
-      <div class="oc-sum-net" id="ocNetChgOi">Net (PE−CE) <b>+0L</b></div>
+      <div class="oc-sum-net" id="ocNetChgOi">Net (PE−CE) <b>—</b></div>
     </div>
 
     <div class="oc-sum-card">
