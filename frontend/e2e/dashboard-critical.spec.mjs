@@ -92,7 +92,7 @@ test('Option Chain hands Strike Detail back to the Dashboard', async ({ page }) 
   await firstRow.click();
   await optionChain.getByRole('button', { name: /Open Strike Detail/ }).click();
 
-  await expect(optionChain).toBeClosed();
+  await expect.poll(() => optionChain.isClosed()).toBe(true);
   await expect(page.locator('#strike-detail-report-modal')).toHaveClass(/open/);
   await expect(page.locator('#strike-detail-report-content .sdr-hero')).toBeVisible();
 });
