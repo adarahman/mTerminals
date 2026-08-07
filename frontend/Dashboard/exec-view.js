@@ -81,8 +81,7 @@ class ExecView {
 
   <!-- ── CARD 3: OPTION CHAIN SNAPSHOT ── -->
   <!-- Top Movers (Drivers/Draggers) moved out of this slot — pending its
-       own standalone section/customization elsewhere; buildDriversDraggersCard()
-       below is kept intact for that, just no longer called from here.
+       own standalone surface if it is reintroduced in a future PDS revision.
        app.chain is the live ChainView instance (see dashboard.js), so this
        reuses the exact same builder/markup as the row2 Snapshot card. -->
   ${app.chain.buildChainSummaryHtml(d)}
@@ -143,9 +142,10 @@ class ExecView {
   // the flagged strikes lean toward, and the single strongest signal.
   buildInstitutionalActivitySummaryCard(d){
   const chain = d.chain || [];
-  const greeksData = d.greeks || [];
+  const ranked = d.footprintRanked || [];
   const ratios = d.volOiRatios || {};
   const atm = d.atm || (d.ctx && d.ctx.atm) || 0;
+  const greeksData = d.greeks || [];
   const step = greeksData.length > 1 ? (greeksData[1].strike - greeksData[0].strike) : 50;
 
   if(!chain.length || !atm){
@@ -163,99 +163,67 @@ class ExecView {
   </div>`;
   }
 
-  // Median OI here is computed across the FULL chain, not the table's
-  // 10-nearest-strikes window, so the crux reflects the whole book.
-  const oiTotals = chain.map(r => (r.ceOI||0) + (r.peOI||0)).sort((a,b) => a-b);
-  const medianOI = oiTotals.length ? oiTotals[Math.floor(oiTotals.length/2)] : 0;
-
-  const flagged = [];
-  chain.forEach(r => {
-    const rawRatio = ratios[String(r.strike)];
-    if(!rawRatio) return; // missing data never counts as institutional
-    const totalOI = (r.ceOI||0) + (r.peOI||0);
+  // P2 ownership cleanup: significance comes from the canonical backend
+  // footprintRanked primitive. This card no longer re-applies independent
+  // median-OI / Vol-OI thresholds in the presentation layer. We only enrich
+  // canonical ranked strikes with current chain fields for the compact ledger.
+  const chainByStrike = new Map(chain.map(r => [Number(r.strike), r]));
+  const flagged = ranked.map(r => {
+    const strike = Number(r.strike);
+    const row = chainByStrike.get(strike) || {};
+    const rawRatio = ratios[String(strike)] || {};
+    const totalOI = (row.ceOI||0) + (row.peOI||0);
     const volRatio = totalOI > 0 ? ((rawRatio.ce||0) + (rawRatio.pe||0)) / 2 : 0;
-    const band = instBandFor(r.strike, atm, step);
-    const th = INST_THRESHOLDS[band];
-    if(!(totalOI > medianOI * th.oiMult && volRatio < th.volRatioMax)) return;
-    const oiDominant = (r.ceOI||0) >= (r.peOI||0) ? 'CE' : 'PE';
-    // Strength is scored relative to each band's own bar, so a far-band
-    // strike that just clears its (lower) bar doesn't automatically
-    // outrank a near-band strike clearing its (higher) bar decisively.
-    const strength = totalOI / (medianOI * th.oiMult);
-    const dominantDOI = oiDominant === 'CE' ? (r.ceChgOI||0) : (r.peChgOI||0);
-    flagged.push({ strike: r.strike, band, oiDominant, totalOI, dominantDOI, volRatio, strength });
-  });
+    const side = r.dominantSide || ((row.ceOI||0) >= (row.peOI||0) ? 'CE' : 'PE');
+    return {
+      strike,
+      band: instBandFor(strike, atm, step),
+      oiDominant: side,
+      totalOI,
+      dominantDOI: side === 'CE' ? (row.ceChgOI||0) : (row.peChgOI||0),
+      volRatio,
+      strength: Number(r.footprintScore)||0,
+    };
+  }).filter(r => Number.isFinite(r.strike));
 
   const nearCount = flagged.filter(f => f.band==='near').length;
   const farCount  = flagged.filter(f => f.band==='far').length;
   const ceCount   = flagged.filter(f => f.oiDominant==='CE').length;
   const peCount   = flagged.filter(f => f.oiDominant==='PE').length;
 
-  let biasLabel = 'Balanced', biasColor = 'var(--txt3)';
-  if(ceCount > peCount){ biasLabel = 'CE-heavy (bearish tilt)'; biasColor = 'var(--red)'; }
-  else if(peCount > ceCount){ biasLabel = 'PE-heavy (bullish tilt)'; biasColor = 'var(--green)'; }
+  let biasLabel = 'Balanced';
+  if(ceCount > peCount) biasLabel = 'CE-heavy (bearish tilt)';
+  else if(peCount > ceCount) biasLabel = 'PE-heavy (bullish tilt)';
 
   const top = flagged.slice().sort((a,b) => b.strength - a.strength)[0];
   const nearLedger = flagged.filter(f => f.band === 'near').sort((a,b) => b.strength - a.strength).slice(0,5);
-
-  // Bias badge reuses --pos/--neg (not a dedicated purple) since CE-heavy/
-  // PE-heavy here is a real bull/bear tilt read, same convention as the
-  // rest of the dashboard's bias colors — unlike the tile icons above,
-  // which are just accent chips with no directional meaning.
   const biasBadgeClass = ceCount > peCount ? 'b-red' : peCount > ceCount ? 'b-green' : 'b-blue';
   const signalClr = top && top.oiDominant==='CE' ? 'var(--neg)' : 'var(--pos)';
 
   return `
   <div class="oic-card" id="inst-activity-summary-card">
-    <!-- Whole header line is now the click target (no separate
-         .oic-action button) — same nav-card-header pattern as Option
-         Chain Snapshot / Greeks / FII/DII, adapted for a modal trigger
-         via panels.css's button.oic-head.nav-card-header. .oic-head
-         keeps flex-wrap as a safety net for narrow viewports. -->
     <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal()"
        aria-label="Open Institutional Activity Crux — view Strike Detail report" title="Open Strike Detail report">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>
-        <span class="oic-title nav-card-header-label">Institutional Activity Crux <span class="oic-sub">Near-ATM Ledger &bull; ±${INST_NEAR_BAND_STRIKES} strikes</span></span>
+        <span class="oic-title nav-card-header-label">Institutional Activity Crux <span class="oic-sub">Canonical Footprint • Near-ATM Ledger</span></span>
       </div>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
     </button>
     ${flagged.length===0 ? `
-    <div class="oic-empty">No strikes currently clear the institutional threshold.</div>
+    <div class="oic-empty">No canonical footprint strikes available.</div>
     ` : `
     <div class="oic-badges">
-      <span class="oic-badge b-blue">
-        <span class="lbl">NEAR</span>
-        <span class="val">${nearCount} flagged</span>
-      </span>
-      <span class="oic-badge b-amber">
-        <span class="lbl">FAR</span>
-        <span class="val">${farCount} flagged</span>
-      </span>
-      <span class="oic-badge ${biasBadgeClass}">
-        <span class="lbl">BIAS</span>
-        <span class="val" style="color:${biasColor};">${biasLabel}</span>
-      </span>
+      <span class="oic-badge b-blue"><span class="lbl">NEAR</span><span class="val">${nearCount} ranked</span></span>
+      <span class="oic-badge b-amber"><span class="lbl">FAR</span><span class="val">${farCount} ranked</span></span>
+      <span class="oic-badge ${biasBadgeClass}"><span class="lbl">BIAS</span><span class="val">${biasLabel}</span></span>
     </div>
-    <div class="oic-ledger" aria-label="Near-ATM institutional activity ledger">
-      <div class="oic-ledger-row oic-ledger-head"><span>Strike</span><span>Side</span><span>OI</span><span>ΔOI</span><span>Vol/OI</span></div>
-      ${nearLedger.length ? nearLedger.map(f => `
-        <button class="oic-ledger-row oic-ledger-link" onclick="event.stopPropagation();openOptionChainAtStrike(${f.strike})" aria-label="Open Option Chain at strike ${f.strike}">
-          <span>${fmtI(f.strike)}</span>
-          <span class="${f.oiDominant==='CE'?'bear':'bull'}">${f.oiDominant}</span>
-          <span>${fmtK(f.totalOI)}</span>
-          <span class="${f.dominantDOI>=0?'bull':'bear'}">${f.dominantDOI>=0?'+':''}${fmtK(f.dominantDOI)}</span>
-          <span>${fmtN(f.volRatio,1)}%</span>
-        </button>`).join('') : `<div class="oic-ledger-empty">No near-ATM institutional strikes currently flagged.</div>`}
-    </div>
-    ${top ? `
-    <div class="oic-signal">
-      <span class="oic-signal-icon">🎯</span>
-      <div class="oic-signal-body">
-        Strongest signal: <button class="strike-link" style="color:${signalClr};" onclick="event.stopPropagation();openOptionChainAtStrike(${top.strike})">${fmtI(top.strike)} ${top.oiDominant}</button>
-        <span class="oic-signal-meta">(${top.band} band · OI ${fmtK(top.totalOI)} · turnover ${fmtN(top.volRatio,1)}%)</span>
-      </div>
-    </div>` : ''}
+    ${top ? `<div class="oic-signal"><span class="lbl">Strongest</span><button class="strike-link ${top.oiDominant==='CE'?'ce':'pe'}" onclick="event.stopPropagation();openOptionChainAtStrike(${top.strike})">${fmtI(top.strike)} ${top.oiDominant}</button><span style="color:${signalClr};font-family:var(--mono);font-weight:700;">${fmtN(top.strength,0)}</span></div>` : ''}
+    ${nearLedger.length ? `
+    <div class="oic-ledger-wrap">
+      <div class="oic-ledger-head"><span>Strike</span><span>Side</span><span>OI</span><span>ΔOI</span><span>Vol/OI</span></div>
+      ${nearLedger.map(r => `<button type="button" class="oic-ledger-row" onclick="event.stopPropagation();openOptionChainAtStrike(${r.strike})" title="Open Option Chain at ${fmtI(r.strike)}"><span>${fmtI(r.strike)}</span><span class="${r.oiDominant==='CE'?'ce':'pe'}">${r.oiDominant}</span><span>${fmtK(r.totalOI)}</span><span style="color:${signColor(r.dominantDOI,'var(--txt3)')};">${fmtSigned(r.dominantDOI,0)}</span><span>${fmtN(r.volRatio,2)}</span></button>`).join('')}
+    </div>` : `<div class="oic-empty" style="margin-top:8px;">No ranked footprint strike is currently inside the near-ATM band.</div>`}
     `}
   </div>`;
 }
@@ -637,76 +605,6 @@ class ExecView {
     ${proDivergent ? `<div style="margin-top:${divergent?'4px':'8px'};${divergent?'':'padding-top:8px;border-top:1px solid var(--border);'}font-size:10px;color:var(--amber);">⚠ Pro desk positioning diverged from combined FII+DII flow day-over-day — prop writers moved opposite the institutional flow.</div>` : ''}
   </div>`;
 }
-
-  // ── Shared row/body builders for Drivers/Draggers ──
-  // Extracted so the full Top Movers card (buildDriversDraggersCard,
-  // Tier-3 destination once §2.3's decomposition lands) and the trimmed
-  // inline version living in Card 1 (buildTopMoversInlineHtml, below —
-  // IA redesign gap fix: Card 1 lost its old filler content when Top
-  // Movers moved out in step 1, leaving dead stretch-space next to its
-  // taller row-mates) agree on impact/pct parsing and row markup instead
-  // of maintaining it twice.
-  _ddImpactOf(c){ return c.pointImpact!=null ? c.pointImpact : (c.point_impact!=null ? c.point_impact : 0); }
-  _ddPctOf(c){ return c.pctChange!=null ? c.pctChange : (typeof c.pct_change==='string' ? parseFloat(c.pct_change) : (c.pct_change||0)); }
-
-  _ddRow(c, i, positive){
-    const pts = this._ddImpactOf(c);
-    const pct = this._ddPctOf(c);
-    const clr = positive ? 'var(--green)' : 'var(--red)';
-    return `<div class="dd-row">
-      <span class="dd-rank">${i+1}</span>
-      <span class="dd-sym">${c.symbol||'—'}</span>
-      <span class="dd-pct" style="color:${clr};" title="${pct>=0?'+':''}${fmtN(pct,2)}% move">${pct>=0?'+':''}${fmtN(pct,2)}%</span>
-      <span class="dd-pts" style="color:${clr};" title="${pts>=0?'+':''}${fmtN(pts,2)} index points">${pts>=0?'+':''}${fmtN(pts,2)}</span>
-    </div>`;
-  }
-
-  _ddSplitHtml(d, n){
-  const contributors = d.contributors || [];
-  const drivers  = contributors.filter(c=>this._ddImpactOf(c) > 0).sort((a,b)=>this._ddImpactOf(b)-this._ddImpactOf(a)).slice(0,n);
-  const draggers = contributors.filter(c=>this._ddImpactOf(c) < 0).sort((a,b)=>this._ddImpactOf(a)-this._ddImpactOf(b)).slice(0,n);
-
-  const driverBody  = contributors.length
-    ? (drivers.length  ? drivers.map((c,i)=>this._ddRow(c,i,true)).join('')   : `<div class="dd-empty">No positive contributors</div>`)
-    : `<div class="dd-empty">Awaiting live contributor feed…</div>`;
-  const draggerBody = contributors.length
-    ? (draggers.length ? draggers.map((c,i)=>this._ddRow(c,i,false)).join('') : `<div class="dd-empty">No negative contributors</div>`)
-    : `<div class="dd-empty">Awaiting live contributor feed…</div>`;
-
-  return `
-    <div class="dd-split">
-      <div class="dd-col">
-        <div class="dd-subtitle c-driver"><span></span><span>Drivers ·</span><span>%</span><span>pts</span></div>
-        ${driverBody}
-      </div>
-      <div class="dd-col">
-        <div class="dd-subtitle c-dragger"><span></span><span>Draggers ·</span><span>%</span><span>pts</span></div>
-        ${draggerBody}
-      </div>
-    </div>`;
-  }
-
-  buildDriversDraggersCard(d){
-  return `
-  <div class="exec-card c-movers">
-    <div class="exec-title">🚀📉 Top Movers</div>
-    ${this._ddSplitHtml(d, 3)}
-  </div>`;
-}
-
-  // ── Trimmed inline Top Movers, embedded in Card 1 (Market Health &
-  // Story) — top 2 drivers/draggers instead of 3, no card wrapper/title
-  // of its own (it's a sub-section, following the same "border-top
-  // divider" pattern the ±Expected Move / narrative blocks above it
-  // already use). Same underlying contributor data and ranking as the
-  // full card; this is a shorter view of it, not a re-derivation. -->
-  buildTopMoversInlineHtml(d){
-  return `
-    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
-      <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);margin-bottom:2px;">🚀📉 Top Movers</div>
-      ${this._ddSplitHtml(d, 2)}
-    </div>`;
-  }
 
   progress(name,val,clr,tip){
   clr = clr || (val>=65?'var(--green)':val<=35?'var(--red)':'var(--amber)');

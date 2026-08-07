@@ -924,6 +924,8 @@ details.card summary .card-head{margin:0;}
 .load-methods{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom: var(--space-4);}
 
 .load-btn{
+  font:inherit;
+  appearance:none;
   display:flex;flex-direction:column;align-items:center;gap: var(--space-3);
   padding:18px 12px;border:1px solid var(--border);
   border-radius:var(--radius);background:var(--bg-1);cursor:pointer;
@@ -931,6 +933,7 @@ details.card summary .card-head{margin:0;}
 }
 
 .load-btn:hover{border-color:var(--info);background:var(--bg-2);}
+.load-btn:focus-visible{outline:2px solid var(--info);outline-offset:2px;}
 
 .load-btn i{font-size:var(--fs-3xl);color:var(--text-primary);}
 
@@ -1366,7 +1369,10 @@ button.oic-head.nav-card-header{
 
 /* PDS-01 P1 — D-12 near-ATM institutional ledger */
 .oic-ledger{border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin:2px 0 12px;background:var(--bg-2)}
-.oic-ledger-row{display:grid;grid-template-columns:1fr .65fr 1fr 1fr .85fr;gap:8px;align-items:center;padding:7px 9px;font-family:var(--font-mono);font-size:var(--fs-xs);text-align:right}
+.oic-ledger-row{
+  appearance:none;
+  font:inherit;
+  color:inherit;display:grid;grid-template-columns:1fr .65fr 1fr 1fr .85fr;gap:8px;align-items:center;padding:7px 9px;font-family:var(--font-mono);font-size:var(--fs-xs);text-align:right}
 .oic-ledger-row>span:first-child{text-align:left}
 .oic-ledger-head{font-family:var(--font-sans);font-size:var(--fs-2xs);font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);border-bottom:1px solid var(--border)}
 button.oic-ledger-link{width:100%;border:0;border-bottom:1px solid var(--border-2);background:transparent;color:var(--text-primary);cursor:pointer}
@@ -1375,3 +1381,5 @@ button.oic-ledger-link:hover,button.oic-ledger-link:focus-visible{background:col
 .oic-ledger-row .bull{color:var(--pos)}
 .oic-ledger-row .bear{color:var(--neg)}
 .oic-ledger-empty{padding:9px;color:var(--text-tertiary);font-size:var(--fs-xs)}
+
+.verdict-data-quality{margin-top:4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;color:var(--warn);text-transform:uppercase;}

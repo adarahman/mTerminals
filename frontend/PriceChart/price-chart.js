@@ -217,16 +217,9 @@ class PriceChartEngine {
     }
     host.innerHTML = this._panelHtml();
     if(createdHost || !host.isConnected){
-      // #price-chart-mount (DashboardPro.html) is a dedicated, always-
-      // visible host that exists specifically so the mini chart doesn't
-      // depend on #dashboard's own display:none gating (#dashboard only
-      // becomes visible once a live WS payload triggers
-      // ChainView.renderDashboard() — during a non-trading session that
-      // may never happen). Falls back to #dashboard for pages that don't
-      // define #price-chart-mount at all (e.g. price-chart-standalone's
-      // price-chart.html, where #dashboard IS the dedicated host and is
-      // never hidden), then to document.body as a last resort.
-      const mountEl = $i('price-chart-mount') || $i('dashboard');
+      // PriceChartEngine now mounts only on its dedicated chart surface.
+      // PDS-01 D-19 deliberately removed the Dashboard mini-chart mount.
+      const mountEl = $i('dashboard');
       if(mountEl) mountEl.insertBefore(host, mountEl.firstChild);
       else document.body.insertBefore(host, document.body.firstChild);
     }

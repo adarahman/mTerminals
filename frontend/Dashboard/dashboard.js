@@ -115,7 +115,6 @@ window.buildOiFlowRows = (...args) => app.oiFlow.buildOiFlowRows(...args);
 window.buildOiFlowSummaryHtml = (...args) => app.oiFlow.buildOiFlowSummaryHtml(...args);
 window.switchOiFlowTab = (...args) => app.oiFlow.switchOiFlowTab(...args);
 window.renderExecutiveDashboard = (...args) => app.exec.renderExecutiveDashboard(...args);
-window.buildDriversDraggersCard = (...args) => app.exec.buildDriversDraggersCard(...args);
 window.buildFiiDiiCard = (...args) => app.exec.buildFiiDiiCard(...args);
 window.buildFiiDiiSummaryCard = (...args) => app.exec.buildFiiDiiSummaryCard(...args);
 window.progress = (...args) => app.exec.progress(...args);

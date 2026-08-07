@@ -395,9 +395,8 @@ class ModalManager {
 }
 
   // ── STRIKE DETAIL REPORT MODAL ──
-  // Replaces the old strike-detail-report.html standalone popup
-  // (window.open + postMessage — see strike-detail-report-panel.js's
-  // former openStrikeDetailReport()). simRenderTable() (simulator-view.js)
+  // Replaces the old strike-detail-report.html standalone popup /
+  // window.open + postMessage flow. simRenderTable() (simulator-view.js)
   // already writes directly into #sdt-stat-atm/#sdt-stat-spot/
   // #sdt-stat-totaloi/#sdt-stat-pcr/#sdt-rows on every tick whenever those
   // elements exist in the DOM — that direct-write path predates this move

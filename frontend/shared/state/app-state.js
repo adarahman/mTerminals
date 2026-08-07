@@ -41,6 +41,9 @@ const AppState = {
   // disconnected, so the UI needs to represent both facts at once.
   feedState: {
     status: 'CONNECTING',
+    quality: 'UNKNOWN',        // FULL | PARTIAL | UNKNOWN
+    missing: [],               // critical analytical inputs currently unavailable
+    marketSession: 'UNKNOWN',  // OPEN | MARKET_CLOSED | HOLIDAY | UNKNOWN
     lastMessageAt: null,
     lastStatusAt: Date.now(),
     reason: '',

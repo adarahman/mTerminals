@@ -109,11 +109,11 @@
         <span class="oc-modal-title">Δ Greeks &amp; Net GEX</span>
       </div>
       <div class="tab-group" id="grk-tabs">
-        <div class="tab-btn active-grk" onclick="switchGrkTab('delta',this)">Δ</div>
-        <div class="tab-btn" onclick="switchGrkTab('gamma',this)">Γ</div>
-        <div class="tab-btn" onclick="switchGrkTab('theta',this)">Θ</div>
-        <div class="tab-btn" onclick="switchGrkTab('vega',this)">Vega</div>
-        <div class="tab-btn" onclick="switchGrkTab('capital',this)">₹</div>
+        <button type="button" class="tab-btn active-grk" onclick="switchGrkTab('delta',this)">Δ</button>
+        <button type="button" class="tab-btn" onclick="switchGrkTab('gamma',this)">Γ</button>
+        <button type="button" class="tab-btn" onclick="switchGrkTab('theta',this)">Θ</button>
+        <button type="button" class="tab-btn" onclick="switchGrkTab('vega',this)">Vega</button>
+        <button type="button" class="tab-btn" onclick="switchGrkTab('capital',this)">₹</button>
       </div>
       <!-- Strike-level table, so it needs the same ATM range control the
            sidebar has — renderGreeksGex() already filters through
@@ -543,9 +543,9 @@
     <div class="ctrl-sidebar-group">
       <div class="ctrl-sidebar-group-label">Vel Window</div>
       <div class="tab-group" id="vel-tabs-side">
-        <div class="tab-btn active-vel" onclick="switchVelTab(5,this)">5m</div>
-        <div class="tab-btn" onclick="switchVelTab(15,this)">15m</div>
-        <div class="tab-btn" onclick="switchVelTab(30,this)">30m</div>
+        <button type="button" class="tab-btn active-vel" onclick="switchVelTab(5,this)">5m</button>
+        <button type="button" class="tab-btn" onclick="switchVelTab(15,this)">15m</button>
+        <button type="button" class="tab-btn" onclick="switchVelTab(30,this)">30m</button>
       </div>
     </div>
     <div class="ctrl-sidebar-divider"></div>
@@ -565,8 +565,8 @@
       Connecting to Python engine over WebSocket at <code style="font-size:11px;background:var(--bg2);padding:2px 8px;border-radius:4px;font-family:var(--mono);" id="ws-url-label">ws://localhost:8765</code>. Updates push automatically — no polling, no file.
     </div>
     <div class="load-methods" style="grid-template-columns:1fr 1fr;">
-      <div class="load-btn" onclick="(function(){const u=prompt('WebSocket URL', _wsUrl); if(u) connectWebSocket(u);})()"><span>🔌 Change URL</span><small>Point to a different engine</small></div>
-      <div class="load-btn" onclick="triggerPaste()"><span>📋 Paste JSON</span><small>Manual fallback snapshot</small></div>
+      <button type="button" class="load-btn" onclick="(function(){const u=prompt('WebSocket URL', _wsUrl); if(u) connectWebSocket(u);})()"><span>🔌 Change URL</span><small>Point to a different engine</small></button>
+      <button type="button" class="load-btn" onclick="triggerPaste()"><span>📋 Paste JSON</span><small>Manual fallback snapshot</small></button>
     </div>
     <input type="file" id="file-input" accept=".json" style="display:none;" onchange="handleFile(event)">
     <textarea id="paste-area" placeholder="Paste JSON here…"></textarea>
@@ -575,28 +575,13 @@
   </div>
 </div>
 <!-- ── OPTION CHAIN ──
-     The full dense CE/PE strike table (previously a static #sec-chain
-     block relocated into #dashboard by a #chain-anchor placeholder) has
-     been removed from this file entirely. In its place, ChainView now
-     builds a compact "Option Chain Snapshot" card inline as part of the
-     normal #dashboard template — see ChainView.buildChainSummaryHtml()
-     in chain-views.js — so there's nothing to anchor or relocate here
-     anymore; it's just another section in the template string like OI
+     D-04 is the compact Dashboard snapshot. The dense D-05 ledger lives
+     on the dedicated OptionChain surface and stays synchronized through
+     the shared Option Chain channel; there is no duplicate Dashboard table.
      Flow or IV Surface. The full strike-by-strike ledger (Greeks toggle,
      buy/sell click cells, Bid/Ask depth) lives at option-chain.html,
      one click away via the snapshot card's "Full Chain" button. -->
 
-+<!-- ── PRICE CHART MOUNT ──
-+     Dedicated, always-visible host for the mini price chart
-+     (price-chart.js: PriceChartEngine.ensureMounted()). Must live OUTSIDE
-+     #dashboard: #dashboard's entire innerHTML is replaced wholesale on
-+     every full rebuild (ChainView.renderDashboard()), and #dashboard
-+     itself stays display:none until the first live payload arrives.
-+     Without this element, ensureMounted() falls back to inserting the
-+     chart as #dashboard's first child — which then gets destroyed by the
-+     next full rebuild and re-created/re-inserted above the top bar the
-+     next time anything (resize, hover) calls render() again. -->
-<div id="price-chart-mount"></div>
 
 <!-- ── DASHBOARD ──
      Decision → Executive boxes → Option Chain Snapshot → OI Flow → IV
@@ -671,7 +656,6 @@
 <script src="../engines/market-structure.js"></script>
 
 <script src="dashboard-thresholds.js"></script>
-<script src="strike-detail-report-panel.js"></script>
 <script src="oi-flow-view.js"></script>
 <script src="exec-view.js"></script>
 <script src="strategy-view.js"></script>

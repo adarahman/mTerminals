@@ -240,6 +240,23 @@ _LAST_KNOWN_LEG_PRICES: dict[str, float] = {}
 # gap while the SmartAPI feed is (re)connecting).
 _LAST_PORTFOLIO_BROADCAST_TS = 0.0
 EOD_TRIGGER_TIME = dtime(15, 45)  # run shortly after NSE cash market close (15:30)
+
+MARKET_OPEN_TIME = dtime(9, 15)
+MARKET_CLOSE_TIME = dtime(15, 30)
+
+def _market_session_status(now: datetime) -> str:
+    """Best-effort NSE session label for the UI.
+
+    Uses the same yearly holiday calendar as is_trading_day(); ad-hoc exchange
+    closures still require that calendar/source to be updated.
+    """
+    if now.weekday() < 5 and not is_trading_day(now):
+        return "HOLIDAY"
+    if not is_trading_day(now):
+        return "MARKET_CLOSED"
+    if MARKET_OPEN_TIME <= now.time() <= MARKET_CLOSE_TIME:
+        return "OPEN"
+    return "MARKET_CLOSED"
 _EOD_DONE_DATE = None             # tracks which date's EOD job already ran
 _LAST_SESSION_DATE = None         # tracks which date's SmartAPI OI baseline is currently active
 
@@ -2433,6 +2450,9 @@ async def engine_loop():
         pipeline_elapsed = time.monotonic() - tick_start
 
         if payload is not None:
+            # Transport/session context is part of the canonical payload so the
+            # Dashboard can distinguish an exchange closure from a broken feed.
+            payload['marketSession'] = _market_session_status(now)
             LAST_PAYLOAD = payload
 
             # Strategy -> execution bridge: hand this tick's decision

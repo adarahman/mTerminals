@@ -57,7 +57,7 @@ const pages = [
         "Dashboard/chain/chain-renderer.js", "Dashboard/chain/chain-depth.js", "Dashboard/chain/chain-greeks.js",
         "Dashboard/chain/chain-sync.js",
         "engines/smart-money.js", "engines/market-structure.js",
-        "Dashboard/dashboard-thresholds.js", "Dashboard/strike-detail-report-panel.js",
+        "Dashboard/dashboard-thresholds.js",
         "Dashboard/oi-flow-view.js", "Dashboard/exec-view.js", "Dashboard/strategy-view.js",
         "Dashboard/simulator-view.js",
         "Dashboard/volatility-view.js",

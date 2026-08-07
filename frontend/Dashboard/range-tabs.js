@@ -29,7 +29,7 @@ function buildRangeTabsHtml(options, defaultValue) {
   defaultValue = defaultValue != null ? defaultValue : RANGE_TAB_DEFAULT;
   return options.map(function (opt) {
     const active = opt.value === defaultValue ? ' active-range' : '';
-    return '<div class="tab-btn' + active + '" onclick="switchChainRange(' + opt.value + ',this)">' + opt.label + '</div>';
+    return '<button type="button" class="tab-btn' + active + '" onclick="switchChainRange(' + opt.value + ',this)">' + opt.label + '</button>';
   }).join('');
 }
 

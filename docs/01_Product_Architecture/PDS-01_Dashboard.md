@@ -2,14 +2,14 @@
 
 | Field | Value |
 |---|---|
-| **Version** | 1.1 |
-| **Status** | Complete — Ready for implementation review |
+| **Version** | 1.3 |
+| **Status** | Implementation-aligned — final smoke verification |
 | **Product** | mTerminals |
 | **Surface** | `DashboardPro.html` |
 | **Owner** | Product Design |
 | **Depends on** | PDS-00 — Global Design System |
 | **Last Updated** | 2026-08-07 |
-| **Change from 1.1** | Aligns D-05 with the implemented dedicated Option Chain surface; revises drill-down, layout, navigation, and acceptance criteria |
+| **Change from 1.2** | Final P2 alignment: keyboard completeness, partial/session feed states, canonical D-12 footprint consumption, D-18 wording, and legacy cleanup |
 
 ---
 
@@ -192,7 +192,7 @@ Component IDs are durable identifiers.
 | D-15 | Scenario Analysis | Confirmation | 3 | How does the thesis behave under alternative states? |
 | D-16 | Advanced Analytics | Confirmation | 3 | What specialist evidence is available for deliberate inspection? |
 | D-17 | Strategy Simulator | Confirmation | 3 | How do active strategies behave under simulated conditions? |
-| D-18 | Paper Trading | Persistent | 1 pill / 2 panel | What is the paper account state? |
+| D-18 | Paper Trading | Persistent utility | 2 panel | What is the paper account state? |
 | D-19 | Price Chart | Persistent | — | Where can price action be inspected in its dedicated surface? |
 
 ---
@@ -270,7 +270,6 @@ No card is promoted because of signal strength.
 - DTE.
 - Data timestamp / `As of`.
 - Feed health.
-- D-18 paper-fund pill.
 
 ### Ownership
 D-00 owns **view context**, not analytical metrics.
@@ -587,13 +586,12 @@ Includes:
 
 ## D-18 — Paper Trading
 
-Persistent surface.
+Persistent utility surface.
 
-- Compact fund pill belongs in D-00.
-- Full paper-trading panel is not a dashboard zone card.
+- Full account/fund state lives in the Portfolio panel.
+- D-00 is not required to duplicate account funds; Status remains focused on market/feed context.
 - Paper account state SHALL not alter analytical metric ownership.
 
----
 
 ## D-19 — Price Chart
 
@@ -1073,7 +1071,7 @@ The architecture SHOULD make canonical metrics consumable independently of wheth
 
 # 23. Acceptance Criteria
 
-Dashboard v1.1 is accepted when all of the following are demonstrably true:
+Dashboard v1.3 is accepted when all of the following are demonstrably true:
 
 1. Status + Decision Engine alone provide an actionable first-glance answer.
 2. All Dashboard cards are reachable in prescribed zone order by scrolling; D-05 is reachable from D-04 and defined strike drill-downs as a dedicated Tier-3 surface.

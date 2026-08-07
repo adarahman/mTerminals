@@ -23,6 +23,9 @@
 .index-ticker::-webkit-scrollbar{display:none;}
 
 .idx-pill{
+  font:inherit;
+  color:inherit;
+  appearance:none;
   display:flex;align-items:center;gap: var(--space-3);
   /* #15171c was an unmigrated near-copy of --bg-1 (#16181D), off by
      ~1 hex unit per channel — repointed, same pattern as
@@ -39,6 +42,7 @@
 }
 
 .idx-pill:hover{transform:translateY(-1px);}
+.idx-pill:focus-visible{outline:2px solid var(--info);outline-offset:2px;}
 
 .idx-pill.active{border-color:var(--info);}
 
@@ -256,6 +260,8 @@
 .tab-group{display:flex;gap: var(--space-1);}
 
 .tab-btn{
+  font:inherit;
+  appearance:none;
   font-size:var(--fs-sm);font-weight:500;padding:4px 11px;
   border-radius:var(--radius-sm);
   border:1px solid var(--border);
@@ -264,6 +270,7 @@
 }
 
 .tab-btn:hover{border-color:var(--info);color:var(--info);}
+.tab-btn:focus-visible{outline:2px solid var(--info);outline-offset:2px;}
 
 .tab-btn.active-vel{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
 

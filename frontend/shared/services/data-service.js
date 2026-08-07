@@ -62,6 +62,9 @@ class DataService {
     const prev = AppState.feedState || {};
     AppState.feedState = {
       status: status,
+      quality: prev.quality || 'UNKNOWN',
+      missing: prev.missing || [],
+      marketSession: prev.marketSession || 'UNKNOWN',
       lastMessageAt: prev.lastMessageAt || null,
       lastStatusAt: Date.now(),
       reason: reason || '',
@@ -75,11 +78,32 @@ class DataService {
     const prev = AppState.feedState || {};
     AppState.feedState = {
       status: 'LIVE',
+      quality: prev.quality || 'UNKNOWN',
+      missing: prev.missing || [],
+      marketSession: prev.marketSession || 'UNKNOWN',
       lastMessageAt: now,
       lastStatusAt: prev.status === 'LIVE' ? (prev.lastStatusAt || now) : now,
       reason: '',
     };
     this._updateFeedStatusDom();
+  }
+
+  _updateDataQuality(state){
+    const prev = AppState.feedState || {};
+    const missing = [];
+    if (!state || !Array.isArray(state.chain) || !state.chain.length) missing.push('chain');
+    if (!state || !Array.isArray(state.greeks) || !state.greeks.length) missing.push('greeks');
+    if (!state || !state.decision) missing.push('decision');
+    AppState.feedState = {
+      ...prev,
+      quality: missing.length ? 'PARTIAL' : 'FULL',
+      missing,
+      marketSession: (state && state.marketSession) || prev.marketSession || 'UNKNOWN',
+    };
+    this._updateFeedStatusDom();
+    if (window.eventBus && (prev.quality !== AppState.feedState.quality || prev.marketSession !== AppState.feedState.marketSession)) {
+      window.eventBus.emit('feed:status', AppState.feedState);
+    }
   }
 
   _checkFeedFreshness(){
@@ -101,13 +125,25 @@ class DataService {
     if (!el) return;
     const fs = AppState.feedState || {status:'CONNECTING'};
     const status = fs.status || 'CONNECTING';
+    const session = fs.marketSession || 'UNKNOWN';
+    let visualStatus = status;
     let label = status;
-    if (status === 'STALE' && fs.lastMessageAt) {
+    if (session === 'HOLIDAY') {
+      visualStatus = 'HOLIDAY';
+      label = status === 'DISCONNECTED' ? 'HOLIDAY · OFFLINE' : 'HOLIDAY';
+    } else if (session === 'MARKET_CLOSED') {
+      visualStatus = 'MARKET_CLOSED';
+      label = status === 'DISCONNECTED' ? 'MARKET CLOSED · OFFLINE' : 'MARKET CLOSED';
+    } else if (status === 'LIVE' && fs.quality === 'PARTIAL') {
+      visualStatus = 'PARTIAL';
+      label = 'PARTIAL';
+    } else if (status === 'STALE' && fs.lastMessageAt) {
       label += ` ${Math.max(1, Math.floor((Date.now()-fs.lastMessageAt)/1000))}s`;
     }
     el.textContent = label;
-    el.dataset.status = status.toLowerCase();
-    el.title = fs.reason || (fs.lastMessageAt ? `Last feed message ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status);
+    el.dataset.status = visualStatus.toLowerCase().replace('_','-');
+    const missingTxt = fs.missing && fs.missing.length ? ` Missing: ${fs.missing.join(', ')}.` : '';
+    el.title = (fs.reason || (fs.lastMessageAt ? `Last feed message ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt;
   }
 
   connectWebSocket(url){
@@ -121,6 +157,7 @@ class DataService {
   updateDashboard(state){
   AppState.wsState = state;
   if(!AppState.wsState) return;
+  this._updateDataQuality(AppState.wsState);
 
   // OI dashboard iframe / popup — only push when the panel is actually
   // open. Previously every SmartAPI/REST tick structured-cloned the full

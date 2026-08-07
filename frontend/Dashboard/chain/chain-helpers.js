@@ -169,11 +169,11 @@ function renderIndexTicker(d) {
       const backendSymbol = idx.BackendSymbol || idx.Symbol;
       const displayName = idx.Symbol;
 
-      return `<div class="idx-pill" onclick="switchActiveIndex('${backendSymbol}')" title="Switch to ${displayName}">
+      return `<button type="button" class="idx-pill" onclick="switchActiveIndex('${backendSymbol}')" title="Switch to ${displayName}">
         <span class="idx-pill-sym">${displayName}</span>
         <span class="idx-pill-val">${fmtI(idx["Last Price"])}</span>
         <span class="idx-pill-chg ${up ? 'up' : 'down'}">${up ? '▲' : '▼'}${Math.abs(pChange).toFixed(2)}%</span>
-      </div>`;
+      </button>`;
     }).join('');
 
   return `<div class="index-ticker" id="index-ticker-bar">${vixPill}${pills}</div>`;

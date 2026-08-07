@@ -51,8 +51,20 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
 
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
-  const feedStatus = (feedState.status || 'CONNECTING').toLowerCase();
-  const feedLabel = feedState.status || 'CONNECTING';
+  const rawFeedStatus = feedState.status || 'CONNECTING';
+  const marketSession = feedState.marketSession || 'UNKNOWN';
+  let feedLabel = rawFeedStatus;
+  let feedStatus = rawFeedStatus.toLowerCase();
+  if (marketSession === 'HOLIDAY') {
+    feedLabel = rawFeedStatus === 'DISCONNECTED' ? 'HOLIDAY · OFFLINE' : 'HOLIDAY';
+    feedStatus = 'holiday';
+  } else if (marketSession === 'MARKET_CLOSED') {
+    feedLabel = rawFeedStatus === 'DISCONNECTED' ? 'MARKET CLOSED · OFFLINE' : 'MARKET CLOSED';
+    feedStatus = 'market-closed';
+  } else if (rawFeedStatus === 'LIVE' && feedState.quality === 'PARTIAL') {
+    feedLabel = 'PARTIAL';
+    feedStatus = 'partial';
+  }
   if (isBear === undefined) {
     isBear = isBearBias(d);
   }
@@ -276,6 +288,9 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const conf = dec.confidence || 0;
     const act  = dec.action || '—';
     const conflict = dec.conflictFlag || false;
+    const feedState = (window.AppState && AppState.feedState) || {};
+    const partialData = feedState.quality === 'PARTIAL';
+    const partialMissing = Array.isArray(feedState.missing) ? feedState.missing : [];
 
     const biasIsBull = bias === 'BULLISH';
     const biasIsBear = bias === 'BEARISH';
@@ -389,6 +404,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-conf-label">Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
         ${act && act !== '—' ? `<div class="verdict-conf-msg">${act}</div>` : ''}
+        ${partialData ? `<div class="verdict-data-quality" title="Missing: ${partialMissing.join(', ')}">PARTIAL DATA${partialMissing.length ? ' · '+partialMissing.join(', ') : ''}</div>` : ''}
       </div>
       ${risk.tradeGrade && risk.tradeGrade !== '—' ? `
       <div class="verdict-grade">
@@ -532,7 +548,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 
   // Compact "Option Chain Snapshot" card — sits between the Executive
   // boxes and OI Flow (see renderDashboard below). This was previously
-  // only a comment/placeholder (#chain-anchor expected a static #sec-chain
+  // only a comment/placeholder; the dense chain now lives on the dedicated D-05 surface
   // block to be moved into it, but that block was removed from
   // DashboardPro.html) — nothing was ever actually built here. The full
   // strike-by-strike ledger (Greeks toggle, buy/sell click cells, Bid/Ask
