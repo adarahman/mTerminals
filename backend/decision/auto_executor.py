@@ -46,6 +46,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
 from decision.types import T
@@ -64,6 +65,7 @@ AUTO_TRADE_QTY_LOTS = int(os.environ.get("AUTO_TRADE_QTY_LOTS", "1"))
 # and paper_trading.py's SQLite log are that), so an unbounded list isn't
 # needed and would just grow forever across a long-running process.
 AUTO_TRADE_HISTORY_MAX = int(os.environ.get("AUTO_TRADE_HISTORY_MAX", "200"))
+AUTO_DECISION_MAX_AGE_SECONDS = int(os.environ.get("AUTO_DECISION_MAX_AGE_SECONDS", "30"))
 
 # action_type -> (instrument_type, side). WAIT and every multi-leg
 # action_type are intentionally absent — see module docstring.
@@ -100,6 +102,8 @@ class AutoExecutor:
         cooldown_seconds: int = AUTO_TRADE_COOLDOWN_SECONDS,
         max_trades_per_symbol_per_day: int = AUTO_TRADE_MAX_PER_SYMBOL_PER_DAY,
         qty_lots: int = AUTO_TRADE_QTY_LOTS,
+        max_decision_age_seconds: int = AUTO_DECISION_MAX_AGE_SECONDS,
+        enforce_freshness: bool = True,
         now_fn: Callable[[], float] = time.time,
         today_fn: Callable[[], str] = lambda: time.strftime("%Y-%m-%d"),
     ):
@@ -110,6 +114,8 @@ class AutoExecutor:
         self.cooldown_seconds = cooldown_seconds
         self.max_trades_per_symbol_per_day = max_trades_per_symbol_per_day
         self.qty_lots = qty_lots
+        self.max_decision_age_seconds = max_decision_age_seconds
+        self.enforce_freshness = enforce_freshness
         # Pluggable clock, defaulting to the real wall clock — every live
         # call site (ws_server_live.py) never passes these, so production
         # behavior is unchanged. backtest/replay.py injects functions
@@ -192,6 +198,27 @@ class AutoExecutor:
         """The actual gating chain, split out of evaluate() so every exit
         path (including the master-switch short-circuit above) funnels
         through one place that records _last_decision — see evaluate()."""
+        if decision.get("degraded"):
+            missing = ", ".join(decision.get("missingInputs") or []) or "unspecified inputs"
+            return ExecutionDecision(False, f"degraded decision — missing: {missing}")
+
+        if decision.get("stale"):
+            return ExecutionDecision(False, "stale decision state")
+
+        if self.enforce_freshness:
+            timestamp = decision.get("decisionTimestamp")
+            if not timestamp:
+                return ExecutionDecision(False, "decision timestamp missing — freshness cannot be verified")
+            try:
+                decision_ts = datetime.fromisoformat(str(timestamp)).timestamp()
+            except (TypeError, ValueError):
+                return ExecutionDecision(False, "decision timestamp invalid — freshness cannot be verified")
+            age = self._now_fn() - decision_ts
+            if age < -5:
+                return ExecutionDecision(False, "decision timestamp is in the future")
+            if age > self.max_decision_age_seconds:
+                return ExecutionDecision(False, f"stale decision — age {age:.0f}s exceeds {self.max_decision_age_seconds}s")
+
         action_type = decision.get("actionType", "WAIT")
         if action_type not in _SINGLE_LEG_ACTIONS:
             return ExecutionDecision(False, f"action_type '{action_type}' not auto-executable (WAIT or multi-leg — v1 scope)")
@@ -244,6 +271,8 @@ class AutoExecutor:
             "cooldown_seconds": self.cooldown_seconds,
             "max_trades_per_symbol_per_day": self.max_trades_per_symbol_per_day,
             "qty_lots": self.qty_lots,
+            "max_decision_age_seconds": self.max_decision_age_seconds,
+            "enforce_freshness": self.enforce_freshness,
             "trades_today": self._trade_count_today.get(symbol, 0),
             "last_execution_ts": self._last_execution_ts.get(symbol),
             "last_decision_should_execute": last.should_execute if last else None,

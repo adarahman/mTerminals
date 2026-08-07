@@ -47,7 +47,9 @@ def compute_confidence(
         composite: float, conflict: bool,
         vix_tag: str, pos_count: int, neg_count: int,
         dte: int, pcr_score: float, oi_score: float,
-        sm_score: float = 0.0) -> int:
+        sm_score: float = 0.0,
+        evidence_coverage: float = 1.0,
+        critical_inputs_missing: bool = False) -> int:
     """
     Base from composite magnitude, then modulate by:
     - Signal confluence (how many sub-scores agree)
@@ -61,7 +63,7 @@ def compute_confidence(
 
     # Confluence bonus — each agreeing additional signal adds 5 pts (max +20)
     agree_count = pos_count if composite > 0 else neg_count
-    confluence_bonus = min(20, (agree_count - 1) * 5)
+    confluence_bonus = min(20, max(0, (agree_count - 1) * 5))
     base += confluence_bonus
 
     # VIX alignment: low VIX + bearish (sell premium edge) or high VIX + bullish
@@ -90,4 +92,12 @@ def compute_confidence(
     if conflict:
         base = min(base, 40)
 
-    return min(95, max(10, int(base)))
+    # Confidence means agreement supported by available evidence, not a
+    # probability of profit. Missing optional evidence scales the score;
+    # missing a required directional input additionally caps it.
+    coverage = max(0.0, min(1.0, float(evidence_coverage)))
+    base *= coverage
+    if critical_inputs_missing:
+        base = min(base, 35)
+
+    return min(95, max(0, int(base)))

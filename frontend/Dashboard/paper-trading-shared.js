@@ -358,6 +358,18 @@ function ptComputeFundSummary(wsState){
       fundSource: 'live-unavailable'
     };
   }
+  const backendFunds = wsState.portfolio.funds;
+  if(backendFunds){
+    return {
+      netPnl: Number(backendFunds.realized_pnl||0) + Number(backendFunds.unrealized_pnl||0),
+      capital: Number(backendFunds.equity ?? backendFunds.capital) || 0,
+      marginBlocked: Number(backendFunds.margin_blocked) || 0,
+      fund: Number(backendFunds.fund) || 0,
+      lowFund: !!backendFunds.low_fund,
+      isLive: false,
+      fundSource: 'paper-backend'
+    };
+  }
   return {
     netPnl, capital, marginBlocked, fund,
     lowFund: fund < PT_STARTING_CAPITAL * PT_LOW_FUND_PCT,
@@ -553,6 +565,9 @@ let _ptPending = []; // {id, symbol, side, qty_lots, order_type, limit_price, st
 // couple seconds' grace for clock skew between browser and server).
 function ptFindMatchingConfirmedOrder(pending, orders){
   return (orders || []).some(o=>{
+    if(pending.client_order_id && o.client_order_id){
+      return pending.client_order_id === o.client_order_id;
+    }
     const tsVal = o.fill_timestamp ?? o.timestamp;
     const tsMs = tsVal ? tsVal * 1000 : null;
     if(tsMs != null && tsMs < pending.ts - 2000) return false;
@@ -567,6 +582,12 @@ function ptFindMatchingConfirmedOrder(pending, orders){
 }
 
 function _ptSendOrderNow(payload, errEl, btn){
+  // Stable submission identity: if the WS frame is retried or replayed
+  // after reconnect, the paper engine returns the original durable order
+  // instead of creating another simulated fill.
+  if(!payload.live && !payload.client_order_id){
+    payload.client_order_id = 'paper_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  }
   const ok = sendWsMessage('place_order', payload);
   const priceBit = {
     'LIMIT': ptFmtN(payload.limit_price,2),
@@ -580,7 +601,7 @@ function _ptSendOrderNow(payload, errEl, btn){
     + ' — ' + payload.side + ' ' + payload.qty_lots + ' lot' + (payload.qty_lots===1?'':'s')
     + ' @ ' + priceBit;
   if(ok){
-    const pending = Object.assign({}, payload, {id:'pend_'+Date.now()+'_'+Math.random().toString(36).slice(2), status:'SENT', ts:Date.now()});
+    const pending = Object.assign({}, payload, {id:payload.client_order_id||('pend_'+Date.now()+'_'+Math.random().toString(36).slice(2)), status:'SUBMITTED', ts:Date.now()});
     _ptPending.unshift(pending);
     // BUGFIX: this used to unconditionally delete the pending row after
     // 10s ("by then the real order should have arrived and superseded

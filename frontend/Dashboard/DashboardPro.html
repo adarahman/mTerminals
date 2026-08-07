@@ -14,13 +14,11 @@
 <link rel="stylesheet" href="../styles/tables.css">
 <link rel="stylesheet" href="../styles/navigation.css">
 <link rel="stylesheet" href="../styles/panels.css">
-<link rel="stylesheet" href="../PriceChart/price-chart-components.css">
 <link rel="stylesheet" href="../styles/paper-trading.css">
 <link rel="stylesheet" href="../styles/algo-status.css">
 <link rel="stylesheet" href="../styles/backtest-view.css">
 <link rel="stylesheet" href="../styles/responsive.css">
 <link rel="stylesheet" href="../styles/fiidii-report.css">
-<link rel="stylesheet" href="../PriceChart/pc-order-panel.css">
 <style>
   /* Greeks/GEX modal body — the OI Flow modal's panel wraps a full
      iframe (.oc-modal-iframe fills the panel edge-to-edge by design), but
@@ -393,22 +391,7 @@
   </div>
 </div>
 
-<!-- ── STRIKE DETAIL REPORT MODAL ──
-     Replaces the old strike-detail-report.html standalone popup
-     (window.open + postMessage to a separate browser window/file).
-     simRenderTable() (simulator-view.js) already writes directly into
-     #sdt-stat-atm/#sdt-stat-spot/#sdt-stat-totaloi/#sdt-stat-pcr/
-     #sdt-rows on every tick whenever those elements exist in the DOM —
-     that direct-write path predates this move (it was a dormant
-     fallback for a possible future inline table) — so this modal is
-     current the instant it opens with zero new data-plumbing. All
-     .sdt-* classes below (statbar/table-wrap/head/row/oi-bar/...) are
-     the same ones already shared with the Institutional F&O Simulator's
-     inline strike rows (tables.css), so this needed no new CSS either.
-     No "live/stale" indicator here (the old popup had one, guarding
-     against the postMessage bridge going quiet) — moot now that this
-     renders in the same tick loop as everything else on the page,
-     same as the Vol/OI Velocity modal just above. -->
+<!-- ── PDS-03 SINGLE-STRIKE DETAIL REPORT MODAL ── -->
 <div id="strike-detail-report-modal" class="oc-modal" onclick="if(event.target===this) closeStrikeDetailReportModal()">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
@@ -417,46 +400,8 @@
         <span class="oc-modal-title">🏛️ Strike Detail Report</span>
       </div>
     </div>
-    <div class="chart-modal-body" style="padding:14px;overflow-y:auto;">
-      <div class="sdt-statbar">
-        <div class="sdt-stat">
-          <div class="sdt-stat-label">ATM Strike</div>
-          <div class="sdt-stat-value" id="sdt-stat-atm">&mdash;</div>
-        </div>
-        <div class="sdt-stat">
-          <div class="sdt-stat-label">Spot Price</div>
-          <div class="sdt-stat-value" id="sdt-stat-spot">&mdash;</div>
-        </div>
-        <div class="sdt-stat">
-          <div class="sdt-stat-label">Total OI (Near ATM)</div>
-          <div class="sdt-stat-value" id="sdt-stat-totaloi">&mdash;</div>
-        </div>
-        <div class="sdt-stat">
-          <div class="sdt-stat-label">PCR (Near ATM)</div>
-          <div class="sdt-stat-value" id="sdt-stat-pcr">&mdash;</div>
-        </div>
-      </div>
-      <div class="sdt-table-wrap">
-        <div class="sdt-head">
-          <span class="sdt-head-cell">Strike <span class="sdt-sort-arrows">&#8645;</span></span>
-          <span class="sdt-head-cell">Dist. from ATM <span class="sdt-sort-arrows">&#8645;</span></span>
-          <span class="sdt-head-cell sdt-oi-cell">
-            <span style="display:flex;align-items:center;gap:4px;">Open Interest <span class="sdt-sort-arrows">&#8645;</span></span>
-            <span class="sdt-oi-legend">
-              <span><span class="dot" style="background:var(--ce);"></span>Call OI</span>
-              <span><span class="dot" style="background:var(--pe);"></span>Put OI</span>
-            </span>
-          </span>
-          <span class="sdt-head-cell">&Delta;OI Today <span class="sdt-sort-arrows">&#8645;</span></span>
-          <span class="sdt-head-cell" style="justify-content:flex-end;">IV <span class="sdt-sort-arrows">&#8645;</span></span>
-          <span class="sdt-head-cell" style="justify-content:flex-end;">Delta <span class="sdt-sort-arrows">&#8645;</span></span>
-          <span class="sdt-head-cell">Smart Money <span class="sdt-sort-arrows">&#8645;</span></span>
-          <span class="sdt-head-cell">Market Structure <span class="sdt-sort-arrows">&#8645;</span></span>
-        </div>
-        <div id="sdt-rows">
-          <div style="padding:12px;color:var(--txt3);font-size:11px;">Waiting for the dashboard to send data&hellip;</div>
-        </div>
-      </div>
+    <div id="strike-detail-report-content" class="chart-modal-body sdr-report" style="padding:14px;overflow-y:auto;">
+      <div class="sdr-empty">Select a strike from the option chain to open its report.</div>
     </div>
   </div>
 </div>
@@ -606,11 +551,6 @@
 <script src="../shared/utils/event-bus.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="chart-legend.js"></script>
-<script src="../PriceChart/chart-data.js"></script>
-<script src="../PriceChart/chart-renderer.js"></script>
-<script src="../PriceChart/indicator-engine.js"></script>
-<script src="../PriceChart/history-loader.js"></script>
-<script src="../PriceChart/price-chart.js"></script>
 <script src="../shared/utils/formatters.js"></script>
 <script src="../shared/utils/dom-utils.js"></script>
 <script src="range-tabs.js"></script>
@@ -660,6 +600,7 @@
 <script src="exec-view.js"></script>
 <script src="strategy-view.js"></script>
 <script src="simulator-view.js"></script>
+<script src="strike-detail-report-view.js"></script>
 <!-- Advanced Analytics collapsible: attaches ChainView.prototype.
      buildAdvancedAnalyticsHtml, called from chain-renderer.js's
      renderDashboard(). Needs ChainView already declared (chain-view.js),

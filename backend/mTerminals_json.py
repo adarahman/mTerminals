@@ -370,6 +370,8 @@ def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
             # docstring), and delta/gamma exposure = OI x Greek x spot(^2).
             "cePremiumLocked":  _nullable_r(cm.get("ce_premium_locked"), 2),
             "pePremiumLocked":  _nullable_r(cm.get("pe_premium_locked"), 2),
+            "ceNotionalExposure": _nullable_r(cm.get("ce_notional_exposure"), 2),
+            "peNotionalExposure": _nullable_r(cm.get("pe_notional_exposure"), 2),
             "ceCapitalFlow":    _nullable_r(cm.get("ce_capital_flow"), 2),
             "peCapitalFlow":    _nullable_r(cm.get("pe_capital_flow"), 2),
             "cePremiumTurnover": _nullable_r(cm.get("ce_premium_turnover"), 2),
@@ -383,6 +385,17 @@ def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
             # rest of the currently-visible chain" (see that module's
             # docstring for why percentile rank rather than a fixed scale).
             "footprintScore":   _nullable_r(cm.get("footprint_score"), 1),
+            # Canonical component percentile ranks used to explain WHY the
+            # composite score is high. These are produced by footprint_score.py;
+            # the UI only ranks/presents them and never recomputes the score.
+            "footprintFactors": {
+                "capitalActivity": _nullable_r(cm.get("footprint_pct_capital_activity"), 1),
+                "oiChangeActivity": _nullable_r(cm.get("footprint_pct_oi_change_activity"), 1),
+                "turnoverActivity": _nullable_r(cm.get("footprint_pct_turnover_activity"), 1),
+                "gammaActivity": _nullable_r(cm.get("footprint_pct_gamma_activity"), 1),
+                "deltaActivity": _nullable_r(cm.get("footprint_pct_delta_activity"), 1),
+                "writingActivity": _nullable_r(cm.get("footprint_pct_writing_activity"), 1),
+            },
         })
     return rows
 
@@ -1363,8 +1376,16 @@ def export_dashboard_json(
         "capitalPCR":            _r(capital_summary.get("capital_pcr", 0.0), 2),
         "netPremiumLocked":      _r(capital_summary.get("net_premium_locked", 0.0), 2),
         "netCapitalFlow":        _r(capital_summary.get("net_capital_flow", 0.0), 2),
-        "netGammaExposureCapital": _r(capital_summary.get("net_gamma_exposure", 0.0), 2),
-        "netDeltaExposureCapital": _r(capital_summary.get("net_delta_exposure", 0.0), 2),
+        "netGammaExposureCapital": _nullable_r(capital_summary.get("net_gamma_exposure"), 2),
+        "netDeltaExposureCapital": _nullable_r(capital_summary.get("net_delta_exposure"), 2),
+        "totalNotionalExposureCapital": _r(
+            capital_summary.get("total_ce_notional_exposure", 0.0)
+            + capital_summary.get("total_pe_notional_exposure", 0.0), 2
+        ),
+        "totalPremiumTurnoverCapital": _r(
+            capital_summary.get("total_ce_premium_turnover", 0.0)
+            + capital_summary.get("total_pe_premium_turnover", 0.0), 2
+        ),
         "totalPremiumLockedCapital": _r(
             capital_summary.get("total_ce_premium_locked", 0.0)
             + capital_summary.get("total_pe_premium_locked", 0.0), 2
@@ -1502,6 +1523,9 @@ def export_dashboard_json(
     if engine_result is not None:
         try:
             ctx_for_decision = engine_result.to_ctx_dict() if hasattr(engine_result, "to_ctx_dict") else ctx_dict
+            ctx_for_decision = dict(ctx_for_decision or {})
+            ctx_for_decision["_decision_timestamp"] = last_updated
+            ctx_for_decision["_state_version"] = f"{payload.get('symbol', '')}:{payload.get('expiry', '')}:{last_updated}"
             payload["decision"] = DecisionEngine().evaluate(engine_result, ctx_for_decision).to_dict()
             # Persist this tick's decision so backtest/replay.py has
             # ground-truth history to replay auto_executor.py against.
@@ -1516,11 +1540,19 @@ def export_dashboard_json(
         except Exception as _de_err:
             logger.warning(f"[export_dashboard_json] DecisionEngine failed ({_de_err}) — decision block omitted")
             payload["decision"] = {
+                "decisionTimestamp": last_updated,
+                "stateVersion": f"{payload.get('symbol', '')}:{payload.get('expiry', '')}:{last_updated}",
+                "stale": False, "degraded": True, "evidenceCoverage": 0,
+                "missingInputs": ["decision_engine"], "contributors": [],
                 "bias": "NEUTRAL", "biasStrength": "WEAK", "confidence": 0,
                 "conflictFlag": False, "action": "Decision engine error",
                 "actionType": "WAIT", "suggestedStrike": None,
-                "suggestedStrategy": "", "activeSignals": [{"text": str(_de_err), "severity": "warn"}],
-                "verdicts": {}, "oiAnnotations": {}, "autoStrategy": {}, "_debug": {"error": str(_de_err)},
+                "suggestedStrategy": "", "executeRecommended": False,
+                "strategyCaution": "Decision engine unavailable",
+                "activeSignals": [{"text": str(_de_err), "severity": "warn"}],
+                "verdicts": {}, "oiAnnotations": {}, "autoStrategy": {},
+                "tradeGrade": "", "riskWarning": "Decision engine unavailable",
+                "importantLevels": {}, "_debug": {"error": str(_de_err)},
             }
 
 

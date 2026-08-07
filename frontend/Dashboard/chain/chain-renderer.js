@@ -514,7 +514,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // immediate `h+=` so the build order can move without moving this
   // whole template literal. See "ZONE: CONFIRMATION" below.
   let stratSimulatorHtml = '';
-  if(strats.length){
+  {
     // Build dropdown options
     if(_selStratIdx>=strats.length) _selStratIdx=0;
     const stratOpts = strats.map((s,i)=>`<option value="${i}"${i===_selStratIdx?' selected':''}>${s.name||('Strategy '+(i+1))}</option>`).join('');
@@ -561,8 +561,9 @@ ChainView.prototype.renderDashboard = function(d) {
         base: d.atmIV || simCtx.baseIv || 15, fmt: v => fmtN(v, 1) },
     ];
 
-  stratSimulatorHtml+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;">
+  stratSimulatorHtml+=`<div style="display:grid;grid-template-columns:${strats.length?'1fr 1fr':'1fr'};gap:16px;margin-bottom:18px;align-items:stretch;">
 
+    ${strats.length ? `
     <!-- LEFT: Strategy Payoff -->
     <div id="sec-strats" class="section-card sc-amber" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
 
@@ -606,7 +607,7 @@ ChainView.prototype.renderDashboard = function(d) {
       <div id="strat-legs-row" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center;"></div>
 
     
-    </div>
+    </div>` : ''}
 
     <!-- RIGHT: Institutional F&O Simulator — paired with Strategy Payoff in
          this 2-column row instead of rendering full-width below it, so the
@@ -617,7 +618,8 @@ ChainView.prototype.renderDashboard = function(d) {
     <div id="sec-simulator" class="sim-wrap sim-amber" style="min-width:0;min-height:0;display:flex;flex-direction:column;">
 
       <div class="sim-header">
-        <div class="sim-title">Institutional F&amp;O Simulator</div>
+        <div class="sim-title">Scenario — Institutional F&amp;O Simulator</div>
+        <button type="button" class="btn btn-sm" onclick="event.stopPropagation();resetScenario()" aria-label="Reset scenario inputs to current live references" title="Reset scenario inputs only; live data is not reloaded">Reset Scenario</button>
       </div>
       <div class="sim-body" style="padding:10px 14px;">
 
@@ -638,7 +640,7 @@ ChainView.prototype.renderDashboard = function(d) {
              of this same line (after the regime value), since it's the
              control that drives this readout. -->
         <div class="sim-regime-bar" id="sim-regime-bar">
-          <span class="sim-regime-label">Dealer Regime</span>
+          <span class="sim-regime-label">Scenario Dealer Regime</span>
           <div class="sim-regime-track" id="sim-regime-track"><div class="sim-regime-needle" id="sim-regime-needle" style="left:50%;"></div></div>
           <span class="sim-regime-val" id="sim-regime-val">Balanced</span>
           <select class="sim-dealer-sel" id="sim-dealer-sel" onchange="_simDealerOverride=this.value;simUpdate()" style="flex:none;flex-shrink:0;margin-left:8px;width:12ch;max-width:12ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
@@ -653,24 +655,24 @@ ChainView.prototype.renderDashboard = function(d) {
         <!-- Stats row -->
         <div class="sim-stats-row">
           <div class="sim-stat">
-            <div class="sim-stat-label">Net GEX ($B)</div>
+            <div class="sim-stat-label">Scenario Net GEX ($B)</div>
             <div class="sim-stat-val" id="sim-stat-gex" style="color:${totalGEX>=0?'var(--blue)':'var(--red)'};">${fmtN(totalGEX,2)}</div>
-            <div class="sim-stat-sub">${totalGEX>=0?'Long gamma (dampens)':'Short gamma (amplifies)'}</div>
+            <div class="sim-stat-sub">${totalGEX>=0?'Scenario: long gamma (dampens)':'Scenario: short gamma (amplifies)'}</div>
           </div>
           <div class="sim-stat">
-            <div class="sim-stat-label">Vanna Multiplier</div>
+            <div class="sim-stat-label">Scenario Vanna Multiplier</div>
             <div class="sim-stat-val" id="sim-stat-vanna" style="color:var(--amber);">${fmtN(vannaMultiplier,2)}</div>
             <div class="sim-stat-sub">IV-flow amplifier</div>
           </div>
           <div class="sim-stat">
-            <div class="sim-stat-label">Gamma Flip Strike</div>
+            <div class="sim-stat-label">Scenario-Adjusted Gamma Flip</div>
             <div class="sim-stat-val" id="sim-stat-flip" style="color:var(--red);">${flipStrike?fmtI(flipStrike):'--'}</div>
             <div class="sim-stat-sub">Short &rarr; Long GEX</div>
           </div>
         </div>
 
         <!-- Simulation Controls -->
-        <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Scenario Controls</div>
+        <div style="font-size:9px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Scenario Inputs · Live references remain unchanged</div>
         <div class="sim-controls" style="grid-template-columns:1fr;">
           ${simRangeControls.map(renderSimRangeRow).join('')}
         </div>
@@ -834,12 +836,12 @@ ChainView.prototype.renderDashboard = function(d) {
   // block previously rendered as a plain, always-open <div>, undermining
   // §3's "Confirmation collapses by default" for half the zone even though
   // Advanced Analytics itself already got this right. Guarded on
-  // stratSimulatorHtml being non-empty (it's '' when d.strategies is empty)
-  // so an empty collapsible card never renders when there's nothing to show.
+  // The simulator is independent of strategy availability; only the
+  // Strategy Payoff half is omitted when no strategy list exists.
   if (stratSimulatorHtml) {
     h += `<details class="card" id="strategy-simulator-card">
     <summary>
-      <div class="card-head"><span class="ic">🧪</span>Strategy Payoff &amp; Institutional F&amp;O Simulator<span class="fill"></span></div>
+      <div class="card-head"><span class="ic">🧪</span>${strats.length?'Strategy Payoff &amp; ':''}Institutional F&amp;O Simulator<span class="fill"></span></div>
       <span class="chev">▶</span>
     </summary>
     <div class="detail-body">
@@ -1002,7 +1004,10 @@ ChainView.prototype.renderDashboard = function(d) {
   bindCardClickGuard(document.getElementById('chain-summary-card'), 'chainSummary');
   bindCardClickGuard(document.getElementById('fiidii-summary-card'), 'fiiDiiSummary');
   bindCardClickGuard(document.getElementById('inst-activity-summary-card'), 'instActivity');
-  setTimeout(function(){simInit();},50);
+  setTimeout(function(){
+    simInit();
+    if(app.strikeDetail) app.strikeDetail.refresh();
+  },50);
   _afterRenderStratPayoff();
   
   
@@ -1446,6 +1451,9 @@ ChainView.prototype._rerenderChainPanels = function() {
   // showing whatever expiry was loaded first, and moving the Scenario
   // Control sliders had no visible effect until the next full page reload.
   if (document.getElementById('sim-gex-canvas')) simInit();
+  // Keep an open PDS-03 report current from the canonical payload tick,
+  // independently of whether the simulator panel exists or is active.
+  if (app.strikeDetail) app.strikeDetail.refresh();
 
   // ── 10. Executive dashboard (Market Health / Market Story / Top Movers) ────
   // Same gap as above — this block was only ever built once, during the

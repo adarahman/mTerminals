@@ -28,6 +28,60 @@ def test_market_buy_fills_immediately(engine):
     )
     assert order.status == "FILLED"
     assert order.fill_price == 120.5
+    assert order.price_source == "server_live_tick"
+    assert order.slippage_assumption == "none"
+    assert order.fill_delay_ms is not None
+
+
+def test_client_order_id_makes_submission_idempotent(engine):
+    kwargs = dict(
+        symbol="NIFTY", side="BUY", qty_lots=1, instrument_type="CE",
+        expiry="31-Jul-2026", strike=25000, order_type="MARKET",
+        current_ltp=100.0, enforce_risk_checks=False,
+        client_order_id="browser-submit-123",
+    )
+    first = engine.place_order(**kwargs)
+    second = engine.place_order(**kwargs)
+
+    assert second.id == first.id
+    assert len(engine.get_orders()) == 1
+    assert engine.get_positions()[0]["net_qty_lots"] == 1
+
+
+def test_rejected_retry_is_also_idempotent(engine):
+    first = engine.place_order(
+        "NIFTY", "BUY", qty_lots=1, instrument_type="CE",
+        expiry="31-Jul-2026", strike=25000, order_type="MARKET",
+        current_ltp=None, client_order_id="missing-price-123")
+    second = engine.place_order(
+        "NIFTY", "BUY", qty_lots=1, instrument_type="CE",
+        expiry="31-Jul-2026", strike=25000, order_type="MARKET",
+        current_ltp=None, client_order_id="missing-price-123")
+
+    assert first.status == "REJECTED"
+    assert second.id == first.id
+    assert len(engine.get_orders()) == 1
+
+
+def test_unsupported_order_type_is_explicitly_rejected(engine):
+    order = engine.place_order(
+        "NIFTY", "BUY", qty_lots=1, instrument_type="CE",
+        expiry="31-Jul-2026", strike=25000, order_type="SL-M",
+        current_ltp=100.0, client_order_id="unsupported-123")
+    assert order.status == "REJECTED"
+    assert "unsupported" in order.reject_reason.lower()
+
+
+def test_fund_summary_reconciles_equity_and_open_pnl(engine):
+    engine.place_order(
+        "NIFTY", "BUY", qty_lots=1, instrument_type="CE",
+        expiry="31-Jul-2026", strike=25000, order_type="MARKET",
+        current_ltp=100.0, enforce_risk_checks=False)
+    key = _instrument_key("NIFTY", "31-Jul-2026", 25000, "CE")
+    summary = engine.get_fund_summary(current_prices={key: 110.0})
+
+    assert summary["equity"] == pytest.approx(summary["capital"] + summary["realized_pnl"] + summary["unrealized_pnl"])
+    assert summary["fund"] == pytest.approx(summary["equity"] - summary["margin_blocked"])
 
 
 def test_limit_order_stays_pending_until_price_crosses(engine):

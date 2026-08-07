@@ -395,42 +395,23 @@ class ModalManager {
 }
 
   // ── STRIKE DETAIL REPORT MODAL ──
-  // Replaces the old strike-detail-report.html standalone popup /
-  // window.open + postMessage flow. simRenderTable() (simulator-view.js)
-  // already writes directly into #sdt-stat-atm/#sdt-stat-spot/
-  // #sdt-stat-totaloi/#sdt-stat-pcr/#sdt-rows on every tick whenever those
-  // elements exist in the DOM — that direct-write path predates this move
-  // (it was the dormant fallback for a possible future inline table), so
-  // moving the table's markup from strike-detail-report.html into this
-  // modal (DashboardPro.html) is all it takes for it to go live; no new
-  // data-plumbing needed. Same "already current the instant it opens"
-  // treatment as openSimGexModal/openVolOiVelocityModal above.
+  // A strike is mandatory: this report investigates one canonical live
+  // chain row, while the existing shell continues to own focus/Escape/back.
   openStrikeDetailReportModal(strike){
   var modal = document.getElementById('strike-detail-report-modal');
-  if(!modal) return;
+  var n = Number(strike);
+  if(!modal || !Number.isFinite(n)) return false;
+  if(!app.strikeDetail.render(n)) return false;
   this._openModal(modal, () => this.closeStrikeDetailReportModal());
   document.addEventListener('keydown', _strikeDetailReportEscHandler);
-  if(window.simUpdate) simUpdate();
-
-  // D-05 may deliberately open this Tier-3 report for one strike. The
-  // report remains the same canonical near/far ledger; we only focus the
-  // requested row after its normal render path has completed.
-  var n = Number(strike);
-  if(Number.isFinite(n)){
-    requestAnimationFrame(function(){
-      var row = document.querySelector('#sdt-rows .sdt-row[data-strike="' + n + '"]');
-      if(!row) return;
-      row.classList.add('sdt-focus-target');
-      row.scrollIntoView({behavior:'smooth', block:'center'});
-      setTimeout(function(){ row.classList.remove('sdt-focus-target'); }, 2200);
-    });
-  }
+  return true;
 }
 
   closeStrikeDetailReportModal(){
   var modal = document.getElementById('strike-detail-report-modal');
   if(!modal) return;
   this._closeModal(modal);
+  app.strikeDetail.clear();
   document.removeEventListener('keydown', _strikeDetailReportEscHandler);
 }
 

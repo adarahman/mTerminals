@@ -38,18 +38,14 @@ const pages = [
     out: "dashboard",
     css: [
       "styles/theme.css", "styles/backtest-view.css", "styles/components.css", "styles/animations.css", "styles/layout.css", "styles/tables.css",
-      "styles/navigation.css", "styles/panels.css", "PriceChart/price-chart-components.css",
+      "styles/navigation.css", "styles/panels.css",
       "styles/paper-trading.css", "styles/algo-status.css", "styles/responsive.css", "styles/fiidii-report.css",
-      "PriceChart/pc-order-panel.css",
     ],
     js: [
       ["shared/config.js", "shared/logger.js", "shared/state/app-state.js", "shared/utils/event-bus.js"],
       // -- external Chart.js CDN script stays here, unbundled --
       [
         "Dashboard/chart-legend.js",
-        "PriceChart/chart-data.js", "PriceChart/chart-renderer.js",
-        "PriceChart/indicator-engine.js", "PriceChart/history-loader.js",
-        "PriceChart/price-chart.js",
         "shared/utils/formatters.js", "shared/utils/dom-utils.js", "Dashboard/range-tabs.js",
         "Dashboard/chain/chain-helpers.js", "Dashboard/chain/metrics.js", "Dashboard/chain/chain-view.js", "Dashboard/chain/chain-template.js",
         "Dashboard/chain/chain-view-models.js",
@@ -60,6 +56,7 @@ const pages = [
         "Dashboard/dashboard-thresholds.js",
         "Dashboard/oi-flow-view.js", "Dashboard/exec-view.js", "Dashboard/strategy-view.js",
         "Dashboard/simulator-view.js",
+        "Dashboard/strike-detail-report-view.js",
         "Dashboard/volatility-view.js",
         "Dashboard/probability-view.js",
         "Dashboard/scenario-analysis-view.js",

@@ -24,6 +24,9 @@ function ptMountPortfolioPanel(){
   portfolioPanel.id = 'pt-portfolio-panel';
   portfolioPanel.innerHTML = `
     <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <span class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')">✕</span></h4>
+    <div class="pt-section" style="font-size:10px;line-height:1.45;color:var(--text-muted,#888);">
+      <strong style="color:var(--text-primary,#eee);">SIMULATION ONLY</strong> — fills are not exchange confirmations. MARKET fills use the backend's latest live tick; LIMIT fills use the live tick that crosses the limit. No added slippage or artificial delay; quantity is lots × resolved lot size.
+    </div>
     <div class="pt-section">
       <div class="pt-summary"><span>Realized</span><span id="pt-realized">—</span></div>
       <div class="pt-summary"><span>Unrealized</span><span id="pt-unrealized">—</span></div>
@@ -41,7 +44,7 @@ function ptMountPortfolioPanel(){
         <span title="Approximate — long options at premium paid, short/written options at PT_SHORT_MARGIN_PCT of notional (no real SPAN+exposure calc available client-side).">Margin used (approx.)</span><span id="pt-margin-used">—</span>
       </div>
       <div class="pt-summary" style="font-weight:800;border-top:1px solid var(--border,#333);padding-top:4px;margin-top:2px;">
-        <span title="₹1,00,000 starting paper capital ± net P&amp;L, minus margin currently used above.">Fund (available)</span><span id="pt-fund">—</span>
+        <span title="Backend paper equity (₹1,00,000 starting capital plus gross realized/unrealized P&amp;L) minus approximate open-position margin. Simulated charges are shown separately and are not deducted from this gross fund figure.">Fund (available, gross)</span><span id="pt-fund">—</span>
       </div>
       <div id="pt-fund-warn" style="display:none;font-size:10px;color:var(--neg,#e74c3c);margin-top:4px;">⚠ Fund running low — consider squaring off open positions.</div>
     </div>
@@ -274,9 +277,10 @@ function ptRenderOrdersTable(view, wsState){
     const isFilled = String(o.status||'').toUpperCase()==='FILLED';
     const isPending = String(o.status||'').toUpperCase()==='PENDING';
 
-    let statusTd = '<td>'+o.status+'</td>';
+    const displayStatus = isFilled ? 'SIM FILLED' : o.status;
+    let statusTd = '<td title="Paper lifecycle: Submitted → '+displayStatus+' → Position/Closed">'+displayStatus+'</td>';
     if(isRejected){
-      statusTd = '<td class="pt-neg pt-status-tap" data-reason="'+ptEscAttr(statusReason || 'No reason provided by engine')+'" title="Tap for reason">'+o.status+'</td>';
+      statusTd = '<td class="pt-neg pt-status-tap" data-reason="'+ptEscAttr(statusReason || 'No reason provided by engine')+'" title="Paper simulation rejected — tap for reason">SIM REJECTED</td>';
     } else if(isPending){
       const cancelBtn = '<span onclick="ptCancelOrder(\''+o.id+'\')" title="Cancel this pending order" '
         + 'style="cursor:pointer;margin-left:6px;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;'

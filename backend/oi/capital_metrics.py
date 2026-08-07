@@ -35,7 +35,7 @@ __all__ = ["compute_capital_metrics", "compute_chain_metrics", "capital_percenta
 _REQUIRED_COLS = {
     "strike", "ce_oi", "pe_oi", "ce_ltp", "pe_ltp",
     "ce_oi_chg", "pe_oi_chg", "ce_volume", "pe_volume",
-    "ce_delta", "pe_delta", "ce_gamma", "pe_gamma",
+    "ce_iv", "pe_iv", "ce_delta", "pe_delta", "ce_gamma", "pe_gamma",
 }
 
 # Every column compute_capital_metrics() adds — cast to float64 explicitly
@@ -155,12 +155,18 @@ def compute_capital_metrics(master: pd.DataFrame, spot: float, lot_size: int) ->
     # vectorized in oi_analysis.py — PE delta = exp_qt*(N(d1)-1), which is
     # < 0 for any normal input). Do not `abs()` or re-sign it here or in a
     # caller — that would silently break net_delta_exposure below.
-    out["ce_delta_exposure"] = out["ce_oi"] * out["ce_delta"] * spot
-    out["pe_delta_exposure"] = out["pe_oi"] * out["pe_delta"] * spot
+    # Greeks are only verified when the corresponding leg has positive IV
+    # and OI. build_master_table_nse uses numeric zero as its internal
+    # calculation sentinel; do not let that become a displayed claim of
+    # zero Stage-2 exposure. Nullable exposure is the product contract.
+    ce_greeks_valid = (out["ce_iv"] > 0) & (out["ce_oi"] > 0)
+    pe_greeks_valid = (out["pe_iv"] > 0) & (out["pe_oi"] > 0)
+    out["ce_delta_exposure"] = (out["ce_oi"] * out["ce_delta"] * spot).where(ce_greeks_valid)
+    out["pe_delta_exposure"] = (out["pe_oi"] * out["pe_delta"] * spot).where(pe_greeks_valid)
     out["net_delta_exposure"] = out["ce_delta_exposure"] + out["pe_delta_exposure"]
 
-    out["ce_gamma_exposure"] = out["ce_oi"] * out["ce_gamma"] * spot_sq
-    out["pe_gamma_exposure"] = out["pe_oi"] * out["pe_gamma"] * spot_sq
+    out["ce_gamma_exposure"] = (out["ce_oi"] * out["ce_gamma"] * spot_sq).where(ce_greeks_valid)
+    out["pe_gamma_exposure"] = (out["pe_oi"] * out["pe_gamma"] * spot_sq).where(pe_greeks_valid)
 
     out[_DERIVED_COLS] = out[_DERIVED_COLS].astype("float64")
 
@@ -174,10 +180,9 @@ def compute_chain_metrics(capital_df: pd.DataFrame) -> dict:
     400-strike table. Takes the OUTPUT of compute_capital_metrics(), not
     raw master.
 
-    All sums use skipna=True explicitly (pandas' default, but stated here
-    on purpose) — see compute_capital_metrics()'s NaN HANDLING note. A
-    strike with unknown Greeks/LTP contributes nothing to the total rather
-    than forcing the whole chain total to NaN or silently reading as 0.
+    Stage-1 sums use skipna=True. Stage-2 Greek exposure is stricter: if
+    any visible strike lacks verified Greeks, the chain exposure is None
+    rather than a misleading partial total or manufactured zero.
 
     Deliberately does NOT include a smart-money/institutional composite
     score here — those weights are uncalibrated (see the conversation this
@@ -191,8 +196,15 @@ def compute_chain_metrics(capital_df: pd.DataFrame) -> dict:
     total_pe_locked = float(capital_df["pe_premium_locked"].sum(skipna=True))
     total_ce_flow = float(capital_df["ce_capital_flow"].sum(skipna=True))
     total_pe_flow = float(capital_df["pe_capital_flow"].sum(skipna=True))
-    total_ce_gamma_exp = float(capital_df["ce_gamma_exposure"].sum(skipna=True))
-    total_pe_gamma_exp = float(capital_df["pe_gamma_exposure"].sum(skipna=True))
+    def complete_stage2_sum(column):
+        series = capital_df[column]
+        if series.empty or series.isna().any():
+            return None
+        return float(series.sum())
+
+    total_ce_gamma_exp = complete_stage2_sum("ce_gamma_exposure")
+    total_pe_gamma_exp = complete_stage2_sum("pe_gamma_exposure")
+    net_delta_exp = complete_stage2_sum("net_delta_exposure")
 
     # Capital-weighted "wall" — the strike holding the most premium, as
     # opposed to ce_wall/pe_wall elsewhere (engine.py), which is the
@@ -220,7 +232,9 @@ def compute_chain_metrics(capital_df: pd.DataFrame) -> dict:
         "total_pe_notional_exposure": float(capital_df["pe_notional_exposure"].sum(skipna=True)),
         "total_ce_notional_exposure_spot": float(capital_df["ce_notional_exposure_spot"].sum(skipna=True)),
         "total_pe_notional_exposure_spot": float(capital_df["pe_notional_exposure_spot"].sum(skipna=True)),
-        "net_delta_exposure": float(capital_df["net_delta_exposure"].sum(skipna=True)),
+        "total_ce_premium_turnover": float(capital_df["ce_premium_turnover"].sum(skipna=True)),
+        "total_pe_premium_turnover": float(capital_df["pe_premium_turnover"].sum(skipna=True)),
+        "net_delta_exposure": net_delta_exp,
         "total_ce_gamma_exposure": total_ce_gamma_exp,
         "total_pe_gamma_exposure": total_pe_gamma_exp,
         # Differencing convention (CE - PE), matching chain_metrics.py's
@@ -228,7 +242,10 @@ def compute_chain_metrics(capital_df: pd.DataFrame) -> dict:
         # magnitude on both legs, so "net" here means "which side's gamma
         # dominates", the same thing netGEX already answers via raw OI;
         # this is the capital-weighted analogue of that same question.
-        "net_gamma_exposure": total_ce_gamma_exp - total_pe_gamma_exp,
+        "net_gamma_exposure": (
+            total_ce_gamma_exp - total_pe_gamma_exp
+            if total_ce_gamma_exp is not None and total_pe_gamma_exp is not None else None
+        ),
         "ce_capital_wall_strike": ce_capital_wall_strike,
         "pe_capital_wall_strike": pe_capital_wall_strike,
         # Capital-weighted PCR — same PE/CE ratio idea as

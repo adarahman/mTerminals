@@ -151,7 +151,7 @@ class ExecView {
   if(!chain.length || !atm){
     return `
   <div class="oic-card" id="inst-activity-summary-card">
-    <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal()"
+    <button class="oic-head nav-card-header" disabled
        aria-label="Open Institutional Activity Crux — view Strike Detail report" title="Open Strike Detail report">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>
@@ -202,7 +202,7 @@ class ExecView {
 
   return `
   <div class="oic-card" id="inst-activity-summary-card">
-    <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal()"
+    <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal(${top ? top.strike : atm})"
        aria-label="Open Institutional Activity Crux — view Strike Detail report" title="Open Strike Detail report">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>

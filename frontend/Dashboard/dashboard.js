@@ -47,6 +47,7 @@ class App {
     this.exec = new ExecView();
     this.strategy = new StrategyView();
     this.simulator = new SimulatorView();
+    this.strikeDetail = new StrikeDetailReportView();
     this.modal = new ModalManager();
     this.chainDense = new ChainDenseView();      // slimmed: expiry options + BroadcastChannel sync to option-chain.html only
 
@@ -126,7 +127,8 @@ window.simInit = (...args) => app.simulator.simInit(...args);
 window.simUpdate = (...args) => app.simulator.simUpdate(...args);
 window.simRenderGEXChart = (...args) => app.simulator.simRenderGEXChart(...args);
 window.simRenderVolGrid = (...args) => app.simulator.simRenderVolGrid(...args);
-window.simRenderTable = (...args) => app.simulator.simRenderTable(...args);
+window.resetScenario = (...args) => app.simulator.resetScenario(...args);
+window.renderStrikeDetailReport = (...args) => app.strikeDetail.render(...args);
 window.openOIDashboardModal = (...args) => app.modal.openOIDashboardModal(...args);
 window.closeOIDashboardModal = (...args) => app.modal.closeOIDashboardModal(...args);
 window._oiEscHandler = (...args) => app.modal._oiEscHandler(...args);

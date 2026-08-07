@@ -69,6 +69,17 @@ class ActiveSignal:
 
 @dataclass
 class DecisionResult:
+    # The decision is a point-in-time interpretation of one exported market
+    # state.  These fields let consumers prove which state they are showing
+    # and fail closed when that evidence is incomplete or old.
+    decision_timestamp: str = ""
+    state_version:       str = ""
+    stale:               bool = False
+    degraded:            bool = False
+    evidence_coverage:   int = 0
+    missing_inputs:      List[str] = field(default_factory=list)
+    contributors:        List[dict] = field(default_factory=list)
+
     # ── Headline block ────────────────────────────────────────────────────────
     bias:           str = "NEUTRAL"   # BULLISH | BEARISH | NEUTRAL — direction always
                                        # from the weighted composite. See conflict_flag
@@ -99,6 +110,9 @@ class DecisionResult:
     active_signals:  List[ActiveSignal] = field(default_factory=list)
     verdicts:        dict = field(default_factory=dict)
     oi_annotations:  dict = field(default_factory=dict)
+    trade_grade:     str = ""
+    risk_warning:    str = ""
+    important_levels: dict = field(default_factory=dict)
 
     # ── Score debug (strip in prod if desired) ────────────────────────────────
     _debug: dict = field(default_factory=dict)
@@ -107,6 +121,13 @@ class DecisionResult:
         sigs = sorted(self.active_signals,
                       key=lambda s: (_SEVERITY_ORDER.get(s.severity, 9), s.priority))
         return {
+            "decisionTimestamp": self.decision_timestamp,
+            "stateVersion":      self.state_version,
+            "stale":             self.stale,
+            "degraded":          self.degraded,
+            "evidenceCoverage":  self.evidence_coverage,
+            "missingInputs":     self.missing_inputs,
+            "contributors":      self.contributors,
             "bias":              self.bias,
             "biasStrength":      self.bias_strength,
             "confidence":        self.confidence,
@@ -121,6 +142,9 @@ class DecisionResult:
                                   for s in sigs],
             "verdicts":          self.verdicts,
             "oiAnnotations":     self.oi_annotations,
+            "tradeGrade":        self.trade_grade,
+            "riskWarning":       self.risk_warning,
+            "importantLevels":   self.important_levels,
             "autoStrategy":      self.auto_strategy,
             "_debug":            self._debug,
         }

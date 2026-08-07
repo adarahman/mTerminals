@@ -1,6 +1,7 @@
 """Unit tests for decision/auto_executor.py's AutoExecutor.evaluate()."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -24,6 +25,9 @@ def _good_decision(**overrides):
         "confidence": 70,
         "suggestedStrike": 24000,
         "strategyCaution": "",
+        "decisionTimestamp": datetime.now(timezone.utc).isoformat(),
+        "degraded": False,
+        "stale": False,
     }
     d.update(overrides)
     return d
@@ -75,6 +79,36 @@ def test_conflict_flag_blocks():
     outcome = ex.evaluate(_good_decision(conflictFlag=True), "NIFTY")
     assert outcome.should_execute is False
     assert "conflict" in outcome.reason
+
+
+def test_degraded_decision_blocks_before_execution():
+    ex = _executor()
+    outcome = ex.evaluate(_good_decision(degraded=True, missingInputs=["pcr"]), "NIFTY")
+    assert outcome.should_execute is False
+    assert "degraded" in outcome.reason
+    assert "pcr" in outcome.reason
+
+
+def test_explicit_stale_decision_blocks():
+    ex = _executor()
+    outcome = ex.evaluate(_good_decision(stale=True), "NIFTY")
+    assert outcome.should_execute is False
+    assert "stale" in outcome.reason
+
+
+def test_aged_decision_blocks():
+    ex = _executor(max_decision_age_seconds=30)
+    old = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+    outcome = ex.evaluate(_good_decision(decisionTimestamp=old), "NIFTY")
+    assert outcome.should_execute is False
+    assert "age" in outcome.reason
+
+
+def test_missing_decision_timestamp_fails_closed():
+    ex = _executor()
+    outcome = ex.evaluate(_good_decision(decisionTimestamp=""), "NIFTY")
+    assert outcome.should_execute is False
+    assert "timestamp missing" in outcome.reason
 
 
 def test_execute_not_recommended_blocks():

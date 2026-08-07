@@ -619,8 +619,12 @@ async def ws_handler(request):
         # leaving the panel empty until the next place_order/tick.
         try:
             init_prices = _build_current_prices(LAST_PAYLOAD)
+            init_portfolio = PT_ENGINE.get_portfolio_summary(init_prices)
+            init_spot = init_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
+            init_portfolio["funds"] = PT_ENGINE.get_fund_summary(
+                spot_price=init_spot, current_prices=init_prices)
             await ws.send_str(orjson.dumps(
-                {"type": "portfolio", "payload": PT_ENGINE.get_portfolio_summary(init_prices)},
+                {"type": "portfolio", "payload": init_portfolio},
                 default=_json_default).decode())
             await ws.send_str(orjson.dumps(
                 {"type": "orders", "payload": PT_ENGINE.get_orders()},
@@ -734,7 +738,8 @@ async def _broadcast_portfolio(current_prices):
     # if the active symbol's spot is missing) so the frontend's Fund pill
     # stays synced with the backend's PT_STARTING_CAPITAL and SPAN estimation.
     spot = current_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
-    portfolio["funds"] = PT_ENGINE.get_fund_summary(spot_price=spot)
+    portfolio["funds"] = PT_ENGINE.get_fund_summary(
+        spot_price=spot, current_prices=current_prices)
 
     await broadcast({"type": "portfolio", "payload": portfolio})
     await broadcast({"type": "orders", "payload": orders})
@@ -779,6 +784,7 @@ async def _handle_place_order(payload):
     side = payload.get("side")
     order_type = payload.get("order_type") or "MARKET"
     limit_price = payload.get("limit_price")
+    client_order_id = payload.get("client_order_id")
 
     try:
         qty_lots = int(payload.get("qty_lots") or 0)
@@ -898,6 +904,7 @@ async def _handle_place_order(payload):
         instrument_type=instrument_type, expiry=expiry, strike=strike,
         order_type=order_type, limit_price=limit_price,
         current_ltp=current_ltp,
+        client_order_id=client_order_id,
     )
     print(f"[paper-trading] {order.status}: {symbol} {side} {qty_lots} lot(s) "
           f"{instrument_type} {expiry} {strike} "
@@ -906,7 +913,9 @@ async def _handle_place_order(payload):
           flush=True)
 
     await _broadcast_portfolio(current_prices)
-    return {"status": order.status, "reason": order.reject_reason}
+    return {"status": order.status, "reason": order.reject_reason,
+            "order_id": getattr(order, "id", None),
+            "client_order_id": getattr(order, "client_order_id", client_order_id)}
 
 
 async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_lots):

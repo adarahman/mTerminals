@@ -58,18 +58,12 @@ function ptMountOrderPanel(){
       </div>
       <div id="pt-lotsize-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">Lot size: — · Total qty: —</div>
       <div class="pt-row">
-        <div class="pt-toggle-group pt-toggle-group-6" id="pt-ordtype-toggle" role="group" aria-label="Order type">
+        <div class="pt-toggle-group" id="pt-ordtype-toggle" role="group" aria-label="Order type">
           <button type="button" class="pt-toggle-btn active" data-value="MARKET">MARKET</button>
           <button type="button" class="pt-toggle-btn" data-value="LIMIT">LIMIT</button>
-          <button type="button" class="pt-toggle-btn" data-value="SL">SL</button>
-          <button type="button" class="pt-toggle-btn" data-value="SL-M">SL-M</button>
-          <button type="button" class="pt-toggle-btn" data-value="TSL">TSL</button>
-          <button type="button" class="pt-toggle-btn" data-value="GTT">GTT</button>
         </div>
         <select id="pt-ordtype" style="display:none;">
           <option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option>
-          <option value="SL">SL</option><option value="SL-M">SL-M</option>
-          <option value="TSL">TSL</option><option value="GTT">GTT</option>
         </select>
       </div>
       <div class="pt-row" id="pt-limitprice-row">
@@ -92,17 +86,8 @@ function ptMountOrderPanel(){
       </div>
       <div id="pt-ltp-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">LTP: —</div>
       <div class="pt-row" id="pt-submit-row">
-        <button class="pt-submit" id="pt-add-basket-btn" style="flex:1;background:var(--bg-2,#1a1a1a);color:var(--text-primary,#eee);border:1px solid var(--border,#333);" title="Stage this leg into a basket instead of sending it now">+ Basket</button>
       </div>
       <div id="pt-err"></div>
-      <div id="pt-basket-wrap" style="display:none;margin-top:8px;">
-        <div style="font-size:11px;font-weight:800;opacity:.8;margin-bottom:4px;">Basket (<span id="pt-basket-count">0</span> legs)</div>
-        <div id="pt-basket-list"></div>
-        <div class="pt-row" style="margin-top:6px;">
-          <button class="pt-submit" id="pt-place-basket-btn" style="flex:2;">Place Basket</button>
-          <button class="pt-submit" id="pt-clear-basket-btn" style="flex:1;background:var(--bg-2,#1a1a1a);color:var(--neg,#e74c3c);border:1px solid var(--border,#333);">Clear</button>
-        </div>
-      </div>
     </div>
   `;
   document.body.appendChild(orderPanel);
@@ -160,9 +145,6 @@ function ptMountOrderPanel(){
   ptWireToggleGroup('pt-trigger-mode-toggle', 'pt-trigger-mode');
   $i('pt-trigger-mode').onchange = ptUpdateTriggerModeUi;
   $i('pt-trigger-price').addEventListener('input', ptUpdateTriggerPctHint);
-  $i('pt-add-basket-btn').onclick = ptAddToBasket;
-  $i('pt-place-basket-btn').onclick = ptPlaceBasket;
-  $i('pt-clear-basket-btn').onclick = ()=>{ _ptBasket = []; ptRenderBasket(); };
   $i('pt-instype').onchange = ptRefreshExpiryStrikeOptions;
   $i('pt-expiry').onchange  = ptRefreshStrikeOptions;
   $i('pt-strike').onchange  = ptUpdateLtpHint;
@@ -192,7 +174,6 @@ function ptMountOrderPanel(){
   ptRefreshLotSizes();
   ptUpdateLotSizeHint();
   ptUpdateOrdTypeFields();
-  ptRenderBasket();
 }
 
 function toggleOrderPanel(){
@@ -382,12 +363,7 @@ function ptResolveTriggerPrice(){
   return Math.round(ltp * (1 + val / 100) * 100) / 100;
 }
 
-// Shared by ptSubmitOrder (send immediately) and ptAddToBasket (stage a
-// leg without sending it yet) — reads the form once, validates it against
-// whatever the selected order type actually requires, and returns either
-// {order} or {error}. Keeping this in one place means SL/SL-M/TSL/GTT
-// validation rules only need to be right in one spot, not duplicated
-// between "place now" and "add to basket".
+// Reads and validates the single-leg MARKET/LIMIT order form.
 function ptGatherOrderFromForm(){
   const symbol = $i('pt-symbol').value;
   const instrument_type = $i('pt-instype').value;
@@ -411,19 +387,12 @@ function ptGatherOrderFromForm(){
   if(!qty_lots || qty_lots <= 0){
     return { error: 'Qty (lots) must be > 0' };
   }
-  if((order_type === 'LIMIT' || order_type === 'SL' || order_type === 'GTT')
+  if(order_type === 'LIMIT'
      && (limit_price === null || isNaN(limit_price))){
     return { error: `Limit price required for ${order_type} orders` };
   }
-  if((order_type === 'SL' || order_type === 'SL-M' || order_type === 'GTT')
-     && (trigger_price === null || isNaN(trigger_price))){
-    const pctModeStuck = $i('pt-trigger-mode').value === 'pct' && $i('pt-trigger-price').value !== '';
-    return { error: pctModeStuck
-      ? 'No live price yet to resolve the % trigger — wait for a tick or switch to ₹.'
-      : `Trigger price required for ${order_type} orders` };
-  }
-  if(order_type === 'TSL' && (trail_value === null || isNaN(trail_value) || trail_value <= 0)){
-    return { error: 'Trail value (points) required for TSL orders' };
+  if(order_type !== 'MARKET' && order_type !== 'LIMIT'){
+    return { error: `${order_type} is not supported by the paper simulator` };
   }
 
   // This is the actual fix for "price not picking, order being rejected":
@@ -444,20 +413,7 @@ function ptGatherOrderFromForm(){
   // option chain / futures / spot LTP server-side (per place_order()'s
   // current_ltp param), so the panel only sends order intent.
   //
-  // Field names below are what the backend needs to read for each type
-  // (send whichever of trigger_price/limit_price/trail_value/gtt_expiry_days
-  // apply — the rest come through as null and can be ignored server-side):
-  //   LIMIT : limit_price
-  //   SL    : trigger_price + limit_price  (rests as a LIMIT once triggered)
-  //   SL-M  : trigger_price only            (fills at MARKET once triggered)
-  //   TSL   : trail_value                   (points; recompute the live
-  //           trigger server-side as LTP moves in the position's favor —
-  //           frontend only ever sends the trail distance, never a fixed
-  //           trigger, since the whole point of TSL is the trigger moves)
-  //   GTT   : trigger_price + limit_price + gtt_expiry_days (days until
-  //           the GTT auto-cancels server-side if never triggered)
-  const order = { symbol, instrument_type, expiry, strike, side, qty_lots, order_type,
-                   limit_price, trigger_price, trail_value, gtt_expiry_days };
+  const order = { symbol, instrument_type, expiry, strike, side, qty_lots, order_type, limit_price };
   return { order };
 }
 
@@ -468,67 +424,6 @@ function ptSubmitOrder(){
   const { order, error } = ptGatherOrderFromForm();
   if(error){ errEl.textContent = error; return; }
   ptDispatchOrder(order, errEl, $i('pt-submit-btn'));
-}
-
-// ── Basket orders ─────────────────────────────────────────────────────
-// A basket is just several legs staged client-side, then sent together in
-// one 'place_basket_order' WS message as {legs:[...]} so the backend can
-// treat them as one atomic submission (e.g. an Iron Condor's 4 legs going
-// in together) instead of 4 separate 'place_order' round-trips.
-let _ptBasket = [];
-
-function ptAddToBasket(){
-  const errEl = $i('pt-err');
-  errEl.style.color = 'var(--neg,#e74c3c)';
-  errEl.textContent = '';
-  const { order, error } = ptGatherOrderFromForm();
-  if(error){ errEl.textContent = error; return; }
-  _ptBasket.push(order);
-  ptRenderBasket();
-  errEl.style.color = 'var(--pos,#2ecc71)';
-  errEl.textContent = 'Added to basket';
-  setTimeout(()=>{ if(errEl.textContent==='Added to basket') errEl.textContent=''; }, 1500);
-}
-
-function ptRenderBasket(){
-  const wrap = $i('pt-basket-wrap');
-  const list = $i('pt-basket-list');
-  const count = $i('pt-basket-count');
-  if(!wrap || !list || !count) return;
-  wrap.style.display = _ptBasket.length ? '' : 'none';
-  count.textContent = _ptBasket.length;
-  list.innerHTML = _ptBasket.map((o, i)=>{
-    const label = o.symbol + ' ' + (o.strike ? o.strike+' '+o.instrument_type : o.instrument_type);
-    const sideCls = o.side === 'BUY' ? 'pt-side-buy' : 'pt-side-sell';
-    return `<div class="pt-basket-leg">
-      <span><span class="pt-side-badge ${sideCls}">${o.side}</span> ${label} × ${o.qty_lots} (${o.order_type})</span>
-      <span class="pt-basket-leg-remove" data-idx="${i}">✕</span>
-    </div>`;
-  }).join('');
-  list.querySelectorAll('.pt-basket-leg-remove').forEach(el=>{
-    el.onclick = ()=>{ _ptBasket.splice(parseInt(el.dataset.idx, 10), 1); ptRenderBasket(); };
-  });
-}
-
-function ptPlaceBasket(){
-  const errEl = $i('pt-err');
-  errEl.style.color = 'var(--neg,#e74c3c)';
-  if(!_ptBasket.length){ errEl.textContent = 'Basket is empty'; return; }
-  const ok = sendWsMessage('place_basket_order', { legs: _ptBasket });
-  if(ok){
-    ptToast('Basket sent — ' + _ptBasket.length + ' leg' + (_ptBasket.length===1?'':'s'), 'ok');
-    errEl.style.color = 'var(--pos,#2ecc71)';
-    errEl.textContent = 'Basket sent';
-    setTimeout(()=>{ if(errEl.textContent==='Basket sent') errEl.textContent=''; }, 2000);
-    _ptBasket = [];
-    ptRenderBasket();
-    const panel = $i('pt-order-panel');
-    if(panel) panel.classList.add('open');
-    ptSyncToggleBtnActive('pt-order-panel', 'pt-order-toggle-btn');
-  } else {
-    ptToast('Basket failed to send (WS not connected)', 'err');
-    errEl.textContent = 'WS not connected — basket not sent';
-  }
 }
 
 // Opens a small BUY/SELL popover anchored to the LTP cell that was

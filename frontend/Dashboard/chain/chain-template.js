@@ -288,6 +288,10 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const conf = dec.confidence || 0;
     const act  = dec.action || '—';
     const conflict = dec.conflictFlag || false;
+    const contributors = Array.isArray(dec.contributors) ? dec.contributors : [];
+    const evidenceCoverage = Number.isFinite(Number(dec.evidenceCoverage)) ? Number(dec.evidenceCoverage) : 0;
+    const decisionDegraded = dec.degraded === true;
+    const decisionMissing = Array.isArray(dec.missingInputs) ? dec.missingInputs : [];
     const feedState = (window.AppState && AppState.feedState) || {};
     const partialData = feedState.quality === 'PARTIAL';
     const partialMissing = Array.isArray(feedState.missing) ? feedState.missing : [];
@@ -401,9 +405,11 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       </div>
       ${this._buildMiniChartHtml(d)}
       <div class="verdict-conf">
-        <div class="verdict-conf-label">Confidence</div>
+        <div class="verdict-conf-label">Evidence Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
+        <div class="verdict-conf-msg">Coverage ${evidenceCoverage}%</div>
         ${act && act !== '—' ? `<div class="verdict-conf-msg">${act}</div>` : ''}
+        ${decisionDegraded ? `<div class="verdict-data-quality" title="Missing: ${decisionMissing.join(', ')}">DEGRADED${decisionMissing.length ? ' · '+decisionMissing.join(', ') : ''}</div>` : ''}
         ${partialData ? `<div class="verdict-data-quality" title="Missing: ${partialMissing.join(', ')}">PARTIAL DATA${partialMissing.length ? ' · '+partialMissing.join(', ') : ''}</div>` : ''}
       </div>
       ${risk.tradeGrade && risk.tradeGrade !== '—' ? `
@@ -474,6 +480,23 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       <span class="chev">▶</span>
     </summary>
     <div class="detail-body">
+
+      <div class="dd-col" style="margin-bottom:10px;">
+        <div class="dd-col-title">Decision Evidence · ${evidenceCoverage}% coverage</div>
+        <div class="dd-sig-list">
+          ${contributors.length ? contributors.map(c => {
+            const available = c.available !== false;
+            const contribution = available && c.weightedContribution != null
+              ? `${Number(c.weightedContribution) >= 0 ? '+' : ''}${Number(c.weightedContribution).toFixed(3)}`
+              : 'unavailable';
+            return `<div class="dd-sig">
+              <span style="color:${available?'var(--text-primary)':'var(--neg)'};font-weight:700;min-width:170px;">${c.label || c.key || 'Signal'}</span>
+              <span style="color:var(--text-tertiary);">${available ? `${c.weight || 0}% weight · ${contribution}` : 'Missing — excluded from score'}</span>
+            </div>`;
+          }).join('') : '<div class="dd-empty">Contributor evidence unavailable.</div>'}
+          ${dec.decisionTimestamp ? `<div class="dd-sig"><span style="color:var(--text-tertiary);">State ${dec.stateVersion || '—'} · ${dec.decisionTimestamp}</span></div>` : ''}
+        </div>
+      </div>
 
       <!-- Active Signals (left) + S & R Levels (right), 2-column grid
            (.dd-grid, panels.css). Trap Warning used to be its own

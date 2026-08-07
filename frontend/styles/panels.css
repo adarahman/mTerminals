@@ -897,6 +897,14 @@ details.card summary .card-head{margin:0;}
 .capital-flow-heading-note{margin-left:auto;font-size:var(--fs-2xs);color:var(--text-tertiary);white-space:nowrap;}
 .capital-flow-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border);}
 .capital-flow-item{display:flex;align-items:center;justify-content:space-between;gap:7px;min-width:0;font-family:var(--font-mono);font-size:var(--fs-xs);}
+.capital-foundation-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border);}
+.capital-foundation-strip>div{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.capital-foundation-strip span,.capital-unit-note{font-size:var(--fs-2xs);color:var(--text-tertiary);}
+.capital-foundation-strip strong{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-primary);}
+.capital-foundation-strip small{font-size:9px;color:var(--text-tertiary);line-height:1.35;}
+.capital-flow-read,.capital-concentration-note{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:var(--fs-2xs);line-height:1.5;color:var(--text-secondary);}
+.capital-concentration-note{padding-top:0;border-top:0;color:var(--text-tertiary);}
+.capital-unit-note{margin-top:8px;line-height:1.45;}
 .capital-flow-label{color:var(--text-tertiary);font-family:var(--font-sans);font-weight:650;white-space:nowrap;}
 .capital-flow-net{justify-content:flex-end;}
 .oi-net-velocity-section{margin-top:9px;padding:9px 12px 0;border-top:1px solid var(--border);}
@@ -910,9 +918,17 @@ details.card summary .card-head{margin:0;}
 .capital-wall-owner>div{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:var(--fs-xs);color:var(--text-tertiary);}
 
 @media (max-width:640px){
-  .oi-snap-kpis,.capital-flow-strip,.oi-net-velocity-strip,.capital-wall-owner{grid-template-columns:1fr;}
+  .oi-snap-kpis,.capital-flow-strip,.capital-foundation-strip,.oi-net-velocity-strip,.capital-wall-owner{grid-template-columns:1fr;}
   .capital-flow-heading,.oi-net-velocity-heading{flex-wrap:wrap;}
   .capital-flow-heading-note,.oi-net-velocity-note{margin-left:0;width:100%;}
+}
+
+@media print{
+  #zone-capital-flow,.capital-flow-grid,.capital-flow-grid>.oic-merged-card,
+  #oi-flow-summary-card,.capital-flow-section,.oi-net-velocity-section{
+    break-inside:avoid-page;page-break-inside:avoid;
+  }
+  #zone-capital-flow{break-before:page;page-break-before:always;}
 }
 
 /* ── LOADER ── */

@@ -125,22 +125,47 @@ class OiFlowView {
   // Capital Flow belongs to D-07, not D-04. These values use the
   // backend-provided per-strike ceCapitalFlow/peCapitalFlow fields and
   // therefore remain flow (ChgOI × LTP), not premium locked (OI × LTP).
-  const totalCeFlow = chain.reduce((sum,r)=>sum+(r.ceCapitalFlow||0),0);
-  const totalPeFlow = chain.reduce((sum,r)=>sum+(r.peCapitalFlow||0),0);
-  const netCapitalFlow = totalPeFlow-totalCeFlow;
+  const nullableTotal = (field) => {
+    const values = chain.map((r) => r[field]).filter((v) => v != null && v !== '').map(Number).filter(Number.isFinite);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  };
+  const nullablePair = (ceField, peField) => {
+    const ce = nullableTotal(ceField), pe = nullableTotal(peField);
+    return ce == null && pe == null ? null : (ce || 0) + (pe || 0);
+  };
+  const totalCeFlow = nullableTotal('ceCapitalFlow');
+  const totalPeFlow = nullableTotal('peCapitalFlow');
+  const netCapitalFlow = totalCeFlow == null || totalPeFlow == null ? null : totalPeFlow-totalCeFlow;
+  const totalPremiumLocked = nullablePair('cePremiumLocked', 'pePremiumLocked');
+  const totalPremiumTurnover = nullablePair('cePremiumTurnover', 'pePremiumTurnover');
+  const totalNotionalExposure = nullablePair('ceNotionalExposure', 'peNotionalExposure');
+  const capitalByStrike = chain.map((r) => ({
+    strike:r.strike,
+    value:(Number(r.cePremiumLocked)||0)+(Number(r.pePremiumLocked)||0)
+  })).filter((r) => r.value > 0).sort((a,b) => b.value-a.value);
+  const topCapital = capitalByStrike[0] || null;
+  const topCapitalPct = topCapital && totalPremiumLocked > 0 ? topCapital.value / totalPremiumLocked * 100 : null;
   let topCeFlow = null, topPeFlow = null;
   chain.forEach((r) => {
-    if (!topCeFlow || Math.abs(r.ceCapitalFlow||0) > Math.abs(topCeFlow.value)) topCeFlow = {strike:r.strike, value:r.ceCapitalFlow||0};
-    if (!topPeFlow || Math.abs(r.peCapitalFlow||0) > Math.abs(topPeFlow.value)) topPeFlow = {strike:r.strike, value:r.peCapitalFlow||0};
+    const ceFlow = Number(r.ceCapitalFlow), peFlow = Number(r.peCapitalFlow);
+    if (r.ceCapitalFlow != null && Number.isFinite(ceFlow) && (!topCeFlow || Math.abs(ceFlow) > Math.abs(topCeFlow.value))) topCeFlow = {strike:r.strike, value:ceFlow};
+    if (r.peCapitalFlow != null && Number.isFinite(peFlow) && (!topPeFlow || Math.abs(peFlow) > Math.abs(topPeFlow.value))) topPeFlow = {strike:r.strike, value:peFlow};
   });
-  const fmtCapital = (v) => {
+  const fmtCapital = (v, signed=true) => {
     if(v==null || isNaN(v)) return '—';
-    const a=Math.abs(v), sign=v>0?'+':v<0?'-':'';
+    const a=Math.abs(v), sign=signed?(v>0?'+':v<0?'-':''):'';
+    if(a>=1e12) return sign+'₹'+(a/1e12).toFixed(2)+' lakh Cr';
     if(a>=1e7) return sign+'₹'+(a/1e7).toFixed(2)+'Cr';
     if(a>=1e5) return sign+'₹'+(a/1e5).toFixed(2)+'L';
     if(a>=1e3) return sign+'₹'+(a/1e3).toFixed(1)+'K';
     return sign+'₹'+Math.round(a);
   };
+  const capitalMetric = (label, value, qualifier) => `<div title="${value==null?'Unavailable':`Exact: ₹${Math.round(Math.abs(value)).toLocaleString('en-IN')}`}"><span>${label}</span><strong>${fmtCapital(value,false)}</strong>${qualifier?`<small>${qualifier}</small>`:''}</div>`;
+  const flowAction = (v) => v==null ? 'unavailable' : v>0 ? 'premium-weighted OI added' : v<0 ? 'premium-weighted OI unwound' : 'no net day-session change';
+  const netFlowRead = netCapitalFlow==null ? 'Net flow is unavailable.'
+    : netCapitalFlow>0 ? 'Put-side flow leads call-side flow; a bullish positioning tilt, not proof of fresh buying.'
+    : netCapitalFlow<0 ? 'Call-side flow leads put-side flow; a bearish positioning tilt, not proof of fresh writing.'
+    : 'Call- and put-side day-session flow are balanced.';
 
   // Net OI Flow belongs to D-07. Preserve the original multi-window
   // 5m/15m/30m read without duplicating it inside D-04 or the dedicated
@@ -237,6 +262,14 @@ class OiFlowView {
           <strong style="color:${signColor(netCapitalFlow)};">${fmtCapital(netCapitalFlow)}</strong>
         </div>
       </div>
+      <div class="capital-flow-read" role="note"><strong>Read:</strong> CE ${flowAction(totalCeFlow)}; PE ${flowAction(totalPeFlow)}. ${netFlowRead}</div>
+      <div class="capital-foundation-strip" aria-label="Stage 1 capital metrics">
+        ${capitalMetric('Premium locked',totalPremiumLocked,'positioned premium')}
+        ${capitalMetric('Premium turnover',totalPremiumTurnover,'session activity')}
+        ${capitalMetric('Gross strike notional',totalNotionalExposure,'exposure scale, not cash deployed')}
+      </div>
+      ${topCapital ? `<div class="capital-concentration-note"><strong>Concentration:</strong> <button class="strike-link" onclick="event.stopPropagation();openOptionChainAtStrike(${topCapital.strike})">${fmtI(topCapital.strike)}</button> holds ${fmtN(topCapitalPct,1)}% of visible premium locked.</div>` : ''}
+      <div class="capital-unit-note">Units: ₹ underlying quantity terms. OI is already lot-scaled; turnover alone converts raw volume contracts using lot size. Capital Flow is day-session ΔOI × LTP; 5m/15m/30m below is separate intraday velocity.</div>
     </div>
     <div class="oi-net-velocity-section" aria-label="Net OI Flow by velocity window">
       <div class="oi-net-velocity-heading">
@@ -255,4 +288,3 @@ class OiFlowView {
   </div>`;
 }
 }
-

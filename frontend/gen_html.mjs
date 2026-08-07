@@ -7,7 +7,7 @@ const outDir = path.join(root, "dist");
 const jobs = [
   {
     src: "Dashboard/DashboardPro.html", out: "Dashboard/DashboardPro.html",
-    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">[\s\S]*?<link rel="stylesheet" href="\.\.\/PriceChart\/pc-order-panel\.css">/,
+    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">[\s\S]*?<link rel="stylesheet" href="\.\.\/styles\/fiidii-report\.css">/,
     cssReplacement: `<link rel="stylesheet" href="dashboard.bundle.css">`,
     jsBlock: /<script src="\.\.\/shared\/config\.js"><\/script>[\s\S]*?<script src="backtest-view\.js"><\/script>/,
     jsReplacement:

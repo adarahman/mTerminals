@@ -129,6 +129,10 @@ class Order:
     fill_price: Optional[float] = None
     fill_timestamp: Optional[float] = None
     reject_reason: Optional[str] = None
+    client_order_id: Optional[str] = None
+    price_source: Optional[str] = None
+    fill_delay_ms: Optional[int] = None
+    slippage_assumption: Optional[str] = None
 
 
 @dataclass
@@ -190,6 +194,17 @@ class PaperTradingEngine:
                 realized_pnl REAL NOT NULL DEFAULT 0
             );
         """)
+        # Additive migrations for databases created before PDS-07 P0.
+        existing = {r[1] for r in self._conn.execute("PRAGMA table_info(orders)")}
+        for name, sql_type in (
+            ("client_order_id", "TEXT"), ("price_source", "TEXT"),
+            ("fill_delay_ms", "INTEGER"), ("slippage_assumption", "TEXT"),
+        ):
+            if name not in existing:
+                self._conn.execute(f"ALTER TABLE orders ADD COLUMN {name} {sql_type}")
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_client_order_id "
+            "ON orders(client_order_id) WHERE client_order_id IS NOT NULL")
         self._conn.commit()
 
     # ── Order placement ──────────────────────────────────────────────
@@ -201,7 +216,8 @@ class PaperTradingEngine:
                      current_ltp: float | None = None,
                      spot_price: float | None = None,
                      account_capital: float = PT_STARTING_CAPITAL,
-                     enforce_risk_checks: bool = True) -> Order:
+                     enforce_risk_checks: bool = True,
+                     client_order_id: str | None = None) -> Order:
         """spot_price and account_capital only matter when enforce_risk_checks
         is True. spot_price is the underlying's current price, used to size
         short-option margin the same way ptEstimateMarginBlocked() does in
@@ -215,18 +231,32 @@ class PaperTradingEngine:
         the same pre-fill position/margin state and both pass a check that,
         applied together, should have rejected the second one."""
         with self._write_lock:
+            # Browser reconnects/retries may deliver the same submission
+            # more than once. Return the original durable result instead of
+            # creating a second fill/position mutation.
+            if client_order_id:
+                prior = self._conn.execute(
+                    "SELECT * FROM orders WHERE client_order_id=?", (client_order_id,)
+                ).fetchone()
+                if prior:
+                    return Order(**dict(prior))
+            if order_type not in ("MARKET", "LIMIT"):
+                return self._reject(symbol, expiry, strike, instrument_type,
+                                    side, qty_lots, order_type, limit_price,
+                                    f"Unsupported paper order type: {order_type}",
+                                    client_order_id)
             if qty_lots <= 0:
                 return self._reject(symbol, expiry, strike, instrument_type,
                                      side, qty_lots, order_type, limit_price,
-                                     "qty_lots must be positive")
+                                     "qty_lots must be positive", client_order_id)
             if order_type == "MARKET" and current_ltp is None:
                 return self._reject(symbol, expiry, strike, instrument_type,
                                      side, qty_lots, order_type, limit_price,
-                                     "MARKET order requires current_ltp")
+                                     "MARKET order requires current_ltp", client_order_id)
             if order_type == "LIMIT" and limit_price is None:
                 return self._reject(symbol, expiry, strike, instrument_type,
                                      side, qty_lots, order_type, limit_price,
-                                     "LIMIT order requires limit_price")
+                                     "LIMIT order requires limit_price", client_order_id)
 
             ref_price = current_ltp if order_type == "MARKET" else limit_price
             lot_size = get_lot_size(symbol)
@@ -242,7 +272,7 @@ class PaperTradingEngine:
                             symbol, expiry, strike, instrument_type, side,
                             qty_lots, order_type, limit_price,
                             f"Price {limit_price:.2f} outside allowed band "
-                            f"(±{PRICE_BAND_PCT:.0%} of LTP {current_ltp:.2f})")
+                            f"(±{PRICE_BAND_PCT:.0%} of LTP {current_ltp:.2f})", client_order_id)
 
                 # 2) Max order value — premium turnover, same "turnover" concept
                 # ptCalcCharges() uses in paper-trading.js.
@@ -252,7 +282,7 @@ class PaperTradingEngine:
                         symbol, expiry, strike, instrument_type, side, qty_lots,
                         order_type, limit_price,
                         f"Order value \u20b9{order_notional:,.0f} exceeds max "
-                        f"per-order limit (\u20b9{MAX_NOTIONAL_PER_ORDER:,.0f})")
+                        f"per-order limit (\u20b9{MAX_NOTIONAL_PER_ORDER:,.0f})", client_order_id)
 
                 # 3) Margin/funds — only bites if this order OPENS or ADDS to a
                 # position. Closing/reducing an existing position releases
@@ -280,13 +310,16 @@ class PaperTradingEngine:
                             symbol, expiry, strike, instrument_type, side,
                             qty_lots, order_type, limit_price,
                             f"Insufficient margin — order needs \u20b9{order_margin:,.0f}, "
-                            f"only \u20b9{free:,.0f} free")
+                            f"only \u20b9{free:,.0f} free", client_order_id)
 
             order = Order(
                 id=str(uuid.uuid4()), timestamp=time.time(), symbol=symbol,
                 expiry=expiry, strike=strike, instrument_type=instrument_type,
                 side=side, qty_lots=qty_lots, order_type=order_type,
                 limit_price=limit_price, status="PENDING",
+                client_order_id=client_order_id,
+                price_source="server_live_tick" if order_type == "MARKET" else "user_limit",
+                slippage_assumption="none",
             )
 
             if order_type == "MARKET":
@@ -318,26 +351,35 @@ class PaperTradingEngine:
         return total
 
     def get_fund_summary(self, spot_price: float | None = None,
+                          current_prices: dict[str, float] | None = None,
                           account_capital: float = PT_STARTING_CAPITAL) -> dict:
         """Server-side equivalent of paper-trading.js's ptComputeFundSummary()
         for the paper-mode branch — lets a caller show the same fund/margin
         figures without duplicating the estimation logic client-side."""
         margin_blocked = self._estimate_margin_blocked(spot_price)
-        fund = account_capital - margin_blocked
+        portfolio = self.get_portfolio_summary(current_prices)
+        equity = account_capital + portfolio["total_pnl"]
+        fund = equity - margin_blocked
         return {
             "capital": account_capital,
+            "realized_pnl": portfolio["realized_pnl"],
+            "unrealized_pnl": portfolio["unrealized_pnl"],
+            "equity": round(equity, 2),
             "margin_blocked": round(margin_blocked, 2),
             "fund": round(fund, 2),
             "low_fund": fund < account_capital * 0.20,
         }
 
     def _reject(self, symbol, expiry, strike, instrument_type, side,
-                qty_lots, order_type, limit_price, reason) -> Order:
+                qty_lots, order_type, limit_price, reason,
+                client_order_id=None) -> Order:
         order = Order(
             id=str(uuid.uuid4()), timestamp=time.time(), symbol=symbol,
             expiry=expiry, strike=strike, instrument_type=instrument_type,
             side=side, qty_lots=qty_lots, order_type=order_type,
             limit_price=limit_price, status="REJECTED", reject_reason=reason,
+            client_order_id=client_order_id, price_source="unavailable",
+            slippage_assumption="none",
         )
         self._save_order(order)
         return order
@@ -377,6 +419,9 @@ class PaperTradingEngine:
         order.status = "FILLED"
         order.fill_price = fill_price
         order.fill_timestamp = time.time()
+        order.fill_delay_ms = max(0, round((order.fill_timestamp - order.timestamp) * 1000))
+        if order.order_type == "LIMIT":
+            order.price_source = "server_live_tick_at_limit_cross"
         self._save_order(order)
         self._apply_fill_to_position(order)
 
@@ -431,14 +476,18 @@ class PaperTradingEngine:
         self._conn.execute(
             "INSERT INTO orders (id, timestamp, symbol, expiry, strike, "
             "instrument_type, side, qty_lots, order_type, limit_price, "
-            "status, fill_price, fill_timestamp, reject_reason) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "status, fill_price, fill_timestamp, reject_reason, client_order_id, "
+            "price_source, fill_delay_ms, slippage_assumption) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
-            "fill_price=excluded.fill_price, fill_timestamp=excluded.fill_timestamp",
+            "fill_price=excluded.fill_price, fill_timestamp=excluded.fill_timestamp, "
+            "price_source=excluded.price_source, fill_delay_ms=excluded.fill_delay_ms, "
+            "slippage_assumption=excluded.slippage_assumption",
             (order.id, order.timestamp, order.symbol, order.expiry, order.strike,
              order.instrument_type, order.side, order.qty_lots, order.order_type,
              order.limit_price, order.status, order.fill_price,
-             order.fill_timestamp, order.reject_reason))
+             order.fill_timestamp, order.reject_reason, order.client_order_id,
+             order.price_source, order.fill_delay_ms, order.slippage_assumption))
         self._conn.commit()
 
     # ── Mark-to-market ────────────────────────────────────────────────

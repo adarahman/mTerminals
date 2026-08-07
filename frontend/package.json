@@ -4,7 +4,13 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs && node gen_html.mjs",
-    "test:option-chain": "node tools/test-option-chain-contracts.mjs"
+    "test:option-chain": "node tools/test-option-chain-contracts.mjs",
+    "test:strike-detail": "node tools/test-strike-detail-contracts.mjs",
+    "test:capital-flow": "node tools/test-capital-flow-contracts.mjs",
+    "test:decision": "node tools/test-decision-contracts.mjs",
+    "test:scenario": "node tools/test-scenario-contracts.mjs",
+    "test:paper-trading": "node tools/test-paper-trading-contracts.mjs",
+    "test:price-chart": "node tools/test-price-chart-contracts.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.2",

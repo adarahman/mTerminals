@@ -53,6 +53,8 @@ class DecisionEngine:
 
     def evaluate(self, er, ctx_dict: dict) -> DecisionResult:
         out = DecisionResult()
+        out.decision_timestamp = str(ctx_dict.get("_decision_timestamp", ""))
+        out.state_version = str(ctx_dict.get("_state_version", ""))
 
         # ── Unpack EngineResult (exact attribute names) ───────────────────────
         spot          = float(er.spot)
@@ -100,7 +102,44 @@ class DecisionEngine:
 
         # ── Conflict detection ────────────────────────────────────────────────
         # A conflict exists when directional sub-scores point opposite ways strongly
-        directional_scores = [pcr_score, bias_score, fut_score, mp_score, oi_score, sm_score]
+        weights = {
+            "pcr": 0.26, "engine_bias": 0.26, "futures": 0.18,
+            "max_pain": 0.12, "oi_velocity": 0.10, "smart_money": 0.08,
+        }
+        availability = {
+            "pcr": total_pcr > 0,
+            "engine_bias": bool(bias_str.strip()),
+            "futures": bool(fut_signal.strip()) and fut_signal.strip().lower() not in ("none", "unknown", "—"),
+            "max_pain": spot > 0 and max_pain > 0,
+            "oi_velocity": vel_df is not None and not getattr(vel_df, "empty", False),
+            "smart_money": smart_money_top is not None and not getattr(smart_money_top, "empty", False),
+        }
+        score_map = {
+            "pcr": pcr_score, "engine_bias": bias_score, "futures": fut_score,
+            "max_pain": mp_score, "oi_velocity": oi_score, "smart_money": sm_score,
+        }
+        labels = {
+            "pcr": "PCR positioning", "engine_bias": "Combined market bias",
+            "futures": "Futures positioning", "max_pain": "Max-pain gravity",
+            "oi_velocity": "OI velocity", "smart_money": "Volume / OI confirmation",
+        }
+        required = {"pcr", "engine_bias", "futures", "max_pain"}
+        out.missing_inputs = [key for key, available in availability.items() if not available]
+        critical_missing = any(key in required for key in out.missing_inputs)
+        out.degraded = critical_missing
+        out.evidence_coverage = round(sum(
+            weight for key, weight in weights.items() if availability[key]
+        ) * 100)
+        out.contributors = [{
+            "key": key,
+            "label": labels[key],
+            "available": availability[key],
+            "weight": round(weight * 100),
+            "score": round(score_map[key], 3) if availability[key] else None,
+            "weightedContribution": round(score_map[key] * weight, 3) if availability[key] else None,
+        } for key, weight in weights.items()]
+
+        directional_scores = [score_map[key] for key in weights if availability[key]]
         pos = sum(1 for s in directional_scores if s > 0.15)
         neg = sum(1 for s in directional_scores if s < -0.15)
         conflict = pos >= 2 and neg >= 2
@@ -115,12 +154,8 @@ class DecisionEngine:
         # OI velocity gains weight now that it's volume-confirmed (0.14).
         # Smart money is a small confirmation nudge (0.08).
         composite = (
-            pcr_score  * 0.26 +
-            bias_score * 0.26 +
-            fut_score  * 0.18 +
-            mp_score   * 0.12 +
-            oi_score   * 0.10 +
-            sm_score   * 0.08
+            sum(score_map[key] * weight for key, weight in weights.items()
+                if availability[key])
         )
         composite = max(-1.0, min(1.0, composite))
 
@@ -135,12 +170,16 @@ class DecisionEngine:
             "composite":  round(composite,  3),
             "conflict":   conflict,
             "vix_tag":    vix_tag,
+            "evidence_coverage": out.evidence_coverage,
+            "missing_inputs": out.missing_inputs,
         }
 
         # ── Top-line derivation ───────────────────────────────────────────────
         out.bias, out.bias_strength = derive_bias(composite, conflict)
         out.confidence = compute_confidence(
-            composite, conflict, vix_tag, pos, neg, dte, pcr_score, oi_score, sm_score)
+            composite, conflict, vix_tag, pos, neg, dte, pcr_score, oi_score, sm_score,
+            evidence_coverage=out.evidence_coverage / 100.0,
+            critical_inputs_missing=critical_missing)
         out.action, out.action_type, out.suggested_strike = derive_action(
             out.bias, out.bias_strength, atm, strike_step, vix_tag, iv_rank)
         # Optional: real OTM wing LTPs for Iron Condor / PANIC strangle pricing.
@@ -167,6 +206,8 @@ class DecisionEngine:
         if out.confidence < T.CONFIDENCE_EXECUTE_MIN:
             caution_reasons.append(
                 f"Confidence {out.confidence}% below {T.CONFIDENCE_EXECUTE_MIN}% execution threshold")
+        if out.degraded:
+            caution_reasons.append("Required decision evidence is missing")
         out.execute_recommended = not caution_reasons
         out.strategy_caution = " · ".join(caution_reasons)
 
@@ -174,5 +215,12 @@ class DecisionEngine:
         verdict_pcr(total_pcr, oi_chg_pcr, out)
         verdict_iv(base_iv, iv_rank, out)
         verdict_dte(dte, out)
+
+        out.trade_grade = str(getattr(er, "trade_grade", "") or "")
+        out.risk_warning = str(getattr(er, "trap_warn", "") or "")
+        out.important_levels = {
+            "atm": int(round(atm)), "maxPain": max_pain,
+            "ceWall": ce_wall, "peWall": pe_wall,
+        }
 
         return out

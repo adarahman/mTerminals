@@ -32,6 +32,34 @@ class SimulatorView {
   this.simState.step = this.simState.greeks.length > 1 ?
     (this.simState.greeks[1].strike - this.simState.greeks[0].strike) : 50;
   this.simState.volOiRatios = d.volOiRatios || {};
+  this._syncPristineControlsToLive();
+  this.simUpdate();
+}
+
+  // A live tick may move the reference spot/IV. Untouched controls follow
+  // that live reference; once the user changes a control its override is
+  // preserved until Reset Scenario. This keeps live data current without
+  // erasing explicit scenario inputs.
+  _syncPristineControlsToLive() {
+  var spotEl = document.getElementById('sim-spot-slider');
+  var ivEl = document.getElementById('sim-iv-slider');
+  var velEl = document.getElementById('sim-vel-slider');
+  if (spotEl && this.simSpotOverride == null) {
+    var spot = Math.min(parseFloat(spotEl.max), Math.max(parseFloat(spotEl.min), this.simState.spot));
+    spotEl.value = spot;
+  }
+  if (ivEl && this.simIvOverride == null) ivEl.value = this.simState.iv;
+  if (velEl && this.simVelOverride == null) velEl.value = this.simState.vel;
+}
+
+  resetScenario() {
+  this.simSpotOverride = null;
+  this.simIvOverride = null;
+  this.simVelOverride = null;
+  this.simDealerOverride = null;
+  var dealerEl = document.getElementById('sim-dealer-sel');
+  if (dealerEl) dealerEl.value = '0';
+  this._syncPristineControlsToLive();
   this.simUpdate();
 }
 
@@ -108,7 +136,7 @@ class SimulatorView {
     gexEl.textContent = fmtN(totalGEX, 2);
     gexEl.style.color = totalGEX >= 0 ? 'var(--blue)' : 'var(--red)';
     var sub = gexEl.nextElementSibling;
-    if (sub) sub.textContent = totalGEX >= 0 ? 'Long gamma (dampens)' : 'Short gamma (amplifies)';
+    if (sub) sub.textContent = totalGEX >= 0 ? 'Scenario: long gamma (dampens)' : 'Scenario: short gamma (amplifies)';
   }
   var vannaEl = document.getElementById('sim-stat-vanna');
   if (vannaEl) vannaEl.textContent = fmtN(vannaMultiplier, 2);
@@ -132,7 +160,7 @@ class SimulatorView {
 
   this.simRenderGEXChart(simGEX, simSpot, flipRow ? flipRow.strike : 0);
   this.simRenderVolGrid(simGEX, simVel);
-  this.simRenderTable(simGEX, simSpot, simIV);
+  // Strike Detail is live/canonical and intentionally receives no scenario values.
 }
 
   simRenderGEXChart(gexData, simSpot, flipStrike) {

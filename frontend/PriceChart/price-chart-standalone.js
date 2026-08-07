@@ -30,6 +30,19 @@
 
   let wsManager = null;
   let store = null;
+  let renderScheduled = false;
+
+  // Keep the socket callback limited to state ingestion. Chart drawing and
+  // indicator calculation are coalesced into the next animation frame, so
+  // a burst of ticks cannot make the live quote path wait for canvas work.
+  function scheduleChartRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      priceChart.render();
+    });
+  }
 
   function setConnLabel(live) {
     const dot = document.getElementById("pcsConnDot");
@@ -42,6 +55,7 @@
     const symEl = document.getElementById("pcsSymbol");
     const spotEl = document.getElementById("pcsSpot");
     const chgEl = document.getElementById("pcsChg");
+    const decEl = document.getElementById("pcsDecision");
     if (symEl && state.symbol) symEl.textContent = state.symbol;
     if (spotEl && state.spot != null) spotEl.textContent = fmtI(state.spot);
     if (chgEl && state.spotChange != null && state.spotChgPct != null) {
@@ -49,6 +63,19 @@
       chgEl.textContent = `${pos ? "▲" : "▼"} ${pos ? "+" : ""}${fmtI(state.spotChange)} (${pos ? "+" : ""}${state.spotChgPct.toFixed(2)}%)`;
       chgEl.classList.toggle("pc-pos", pos);
       chgEl.classList.toggle("pc-neg", !pos);
+    }
+    if (decEl) {
+      const dec = state.decision || {};
+      const bias = dec.bias || '—';
+      const confidence = Number(dec.confidence);
+      const degraded = dec.degraded === true;
+      decEl.textContent = degraded
+        ? `Decision: DEGRADED · ${bias}`
+        : `Decision: ${bias}${Number.isFinite(confidence) ? ` · ${confidence}% evidence` : ''}`;
+      decEl.className = 'pcs-decision ' + (
+        degraded ? 'pcs-decision-warn' : bias === 'BULLISH' ? 'pcs-decision-bull'
+          : bias === 'BEARISH' ? 'pcs-decision-bear' : 'pcs-decision-neutral');
+      decEl.title = dec.action || dec.strategyCaution || 'Current live Decision Engine context';
     }
   }
 
@@ -69,7 +96,7 @@
     // this call on state.spot meant render() (and everything inside it)
     // never ran again after boot()'s single data-less call, leaving the
     // chart permanently empty even once real historical bars existed.
-    priceChart.render();
+    scheduleChartRender();
     updateHeaderReadout(state);
     setConnLabel(true);
   }

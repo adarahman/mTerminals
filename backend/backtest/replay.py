@@ -316,6 +316,9 @@ async def run_backtest(
         cooldown_seconds=cooldown_seconds,
         max_trades_per_symbol_per_day=max_trades_per_symbol_per_day,
         qty_lots=qty_lots,
+        # Historical snapshots are intentionally old in wall-clock terms;
+        # replay already binds all other gates to the simulated tick clock.
+        enforce_freshness=False,
         now_fn=lambda: _clock["ts"].timestamp(),
         today_fn=lambda: _clock["ts"].strftime("%Y-%m-%d"),
     )
