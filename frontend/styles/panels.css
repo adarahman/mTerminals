@@ -1128,6 +1128,33 @@ details.card summary .card-head{margin:0;}
   flex-wrap:wrap;
 }
 
+/* Institutional Activity Crux's header as a nav-card-header, adapted for
+   a modal trigger (Strike Detail Report) rather than a page link — same
+   "whole header is the click target, no separate button" pattern as
+   Option Chain Snapshot, see components.css's NAVIGABLE CARD HEADERS
+   block for the full rationale. Needs its own bleed geometry rather than
+   inheriting .section-card's: .oic-card's padding is 18px 20px with
+   var(--radius-lg) corners (panels.css, .oic-card), not .section-card's
+   16px 18px / var(--radius-md) that the base pattern's numbers were
+   tuned for — using those verbatim here would leave a couple of px of
+   visible seam along the top/sides on hover instead of a flush bleed.
+   Also resets browser default <button> chrome, which .nav-card-header's
+   shared rules don't need to do for the <a>-based Option Chain Snapshot
+   usage. */
+button.oic-head.nav-card-header{
+  border:none;background-color:transparent;font:inherit;text-align:left;width:100%;
+  margin:-18px -20px var(--space-5) -20px;
+  padding:16px 20px 11px;
+  border-top-left-radius:var(--radius-lg);
+  border-top-right-radius:var(--radius-lg);
+}
+
+/* Amber glow on hover/focus, matching this card's own icon-amber icon
+   chip — same idea as .section-card's --section-accent (sc-blue/-green/
+   etc), just set directly since .oic-card doesn't carry that per-variant
+   accent system. */
+#inst-activity-summary-card{ --section-accent: var(--warn); }
+
 .oic-head-left{display:flex;align-items:center;gap: var(--space-4);min-width:0;}
 
 .oic-icon{
@@ -1166,18 +1193,12 @@ details.card summary .card-head{margin:0;}
 }
 .oic-action:hover{background:rgba(116,192,252,0.16);border-color:var(--info);}
 
-/* Strike Detail Report button, moved out of .oic-head — at typical card
-   widths the header's title + subtitle badge left no room for the
-   button, so flex-wrap dropped it onto its own centered second line.
-   A left-aligned footer, pinned to the bottom of the card via
-   margin-top:auto (.oic-card is flex-direction:column), reads as a
-   deliberate "more detail below" action instead of an overflow. */
-.oic-footer{
-  margin-top:auto;
-  padding-top:14px;
-  border-top:1px solid var(--border-2);
-}
-.oic-footer .oic-action{margin:0;}
+/* Strike Detail Report button lives inline in .oic-head now, right of
+   the title (see exec-view.js's buildInstitutionalActivitySummaryCard) —
+   matches Greeks/Net GEX's "Full Table →" and Option Chain Snapshot's
+   header-line action. The old bottom-pinned .oic-footer variant (kept
+   here as history: a left-aligned block, margin-top:auto, border-top)
+   is gone along with the last markup that used it.
 
 /* ── OI Flow Snapshot tiles (ATM read + Biggest Build) ── */
 
@@ -1248,8 +1269,13 @@ details.card summary .card-head{margin:0;}
   border-radius:var(--radius-md);
   border:1px solid var(--neg-dim);
   background:rgba(255,107,107,0.05);
-  margin-top:auto;
+  margin-top:14px;
 }
+/* Plain margin-top, not auto — this card no longer ends in a
+   margin-top:auto footer (see .oic-footer's removal above), so there's
+   no bottom-pinned sibling left to coordinate spacing with. A fixed
+   margin keeps this box sitting right after the badges regardless of
+   the card's height. */
 .oic-signal-icon{
   width:36px;height:36px;flex-shrink:0;border-radius:50%;
   display:flex;align-items:center;justify-content:center;

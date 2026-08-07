@@ -185,9 +185,9 @@ class ExecView {
         <span class="oic-icon icon-amber">🏛️</span>
         <span class="oic-title">Institutional Activity Crux</span>
       </div>
+      <button class="oic-action" onclick="openStrikeDetailReportModal()" title="Open Strike Detail report">📄 Strike Detail Report →</button>
     </div>
     <div class="oic-empty">Awaiting chain data…</div>
-    <div class="oic-footer"><button class="oic-action" onclick="openStrikeDetailReportModal()" title="Open Strike Detail report">📄 Strike Detail Report →</button></div>
   </div>`;
   }
 
@@ -238,6 +238,16 @@ class ExecView {
         <span class="oic-icon icon-amber">🏛️</span>
         <span class="oic-title">Institutional Activity Crux <span class="oic-sub">Near-ATM Ledger &bull; ±${INST_NEAR_BAND_STRIKES} strikes</span></span>
       </div>
+      <!-- Moved back onto the header line (was pulled out to a bottom
+           .oic-footer previously — see removed comment history — because
+           at that time this card still shared a narrow column with
+           another card and the button wrapped onto its own line). It no
+           longer shares a column with anything (Institutional zone,
+           full-width standalone card), so there's room for title +
+           subtitle + action on one row, matching the Greeks/Net GEX
+           "Full Table →" and Option Chain Snapshot header pattern.
+           .oic-head keeps flex-wrap as a safety net for narrow viewports. -->
+      <button class="oic-action" onclick="openStrikeDetailReportModal()" title="Open Strike Detail report">📄 Strike Detail Report →</button>
     </div>
     ${flagged.length===0 ? `
     <div class="oic-empty">No strikes currently clear the institutional threshold.</div>
@@ -265,7 +275,6 @@ class ExecView {
       </div>
     </div>` : ''}
     `}
-    <div class="oic-footer"><button class="oic-action" onclick="openStrikeDetailReportModal()" title="Open Strike Detail report">📄 Strike Detail Report →</button></div>
   </div>`;
 }
 
