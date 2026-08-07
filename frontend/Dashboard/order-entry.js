@@ -35,7 +35,7 @@ function ptMountOrderPanel(){
   const orderPanel = document.createElement('div');
   orderPanel.id = 'pt-order-panel';
   orderPanel.innerHTML = `
-    <h4><span id="pt-panel-title">Order GUI</span> <span id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Click to switch between Paper and Live trading">📝 PAPER</span> <span class="pt-close" onclick="ptClosePanel('pt-order-panel','pt-order-toggle-btn')">✕</span></h4>
+    <h4><span id="pt-panel-title">Order GUI</span> <button type="button" id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Switch between Paper and Live trading">📝 PAPER</button> <button type="button" class="pt-close" onclick="ptClosePanel('pt-order-panel','pt-order-toggle-btn')" aria-label="Close order panel">✕</button></h4>
     <div class="pt-section">
       <div class="pt-row">
         <select id="pt-symbol"></select>
@@ -438,7 +438,7 @@ function ptOpenQuickOrder(evt, strike, instrument_type, ltp){
   const symbol = AppState.wsState.symbol || '';
   const expiry = AppState.wsState._activeExpiry || _selectedExpiry || AppState.wsState.expiry || '';
   pop.innerHTML = `
-    <div class="pt-qp-hdr"><span>${symbol} ${fmtI(strike)} ${instrument_type}</span><span class="pt-qp-close" onclick="$i('pt-quick-popover').style.display='none'">✕</span></div>
+    <div class="pt-qp-hdr"><span>${symbol} ${fmtI(strike)} ${instrument_type}</span><button type="button" class="pt-qp-close" onclick="$i('pt-quick-popover').style.display='none'" aria-label="Close quick order">✕</button></div>
     <div class="pt-qp-ltp">LTP: ${ltp!=null ? ptFmtN(ltp,2) : '—'} &nbsp;|&nbsp; ${expiry||'—'}</div>
     <div class="pt-qp-row">
       <input id="pt-qp-qty" type="number" min="1" value="1" placeholder="Lots">

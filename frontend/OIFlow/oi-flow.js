@@ -837,8 +837,11 @@ function render() {
 // ─────────────────────────────────────────────────────────────
 // Top-level: Bar Chart / Butterfly / GEX
 function updateViewTabActiveState() {
-  document.querySelectorAll('#tabs .tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.view === currentView));
+  document.querySelectorAll('#tabs .tab').forEach(t => {
+    const active = t.dataset.view === currentView;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-pressed', String(active));
+  });
 }
 document.getElementById('tabs').addEventListener('click', e => {
   const tab = e.target.closest('.tab');
@@ -854,10 +857,16 @@ document.getElementById('tabs').addEventListener('click', e => {
 // 'chg' with that window. Clicking OI/Combined switches mode directly and
 // leaves chgWindow untouched (it's only read when mode === 'chg' again).
 function updateModeRowActiveStates() {
-  document.querySelectorAll('#modeTabs .mode-tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.mode === currentMode));
-  document.querySelectorAll('#modeTabs .win-tab').forEach(t =>
-    t.classList.toggle('active', currentMode === 'chg' && t.dataset.win === chgWindow));
+  document.querySelectorAll('#modeTabs .mode-tab').forEach(t => {
+    const active = t.dataset.mode === currentMode;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-pressed', String(active));
+  });
+  document.querySelectorAll('#modeTabs .win-tab').forEach(t => {
+    const active = currentMode === 'chg' && t.dataset.win === chgWindow;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-pressed', String(active));
+  });
   const winGroup = document.getElementById('winGroup');
   if (winGroup) winGroup.classList.toggle('show', currentMode === 'chg');
 }
@@ -881,8 +890,11 @@ document.getElementById('modeTabs').addEventListener('click', e => {
 });
 // ATM strike-range filter (±3/±5/±10/All)
 function updateRangeTabActiveState() {
-  document.querySelectorAll('#rangeGroup .rng-tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.range === String(rangeFilter)));
+  document.querySelectorAll('#rangeGroup .rng-tab').forEach(t => {
+    const active = t.dataset.range === String(rangeFilter);
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-pressed', String(active));
+  });
 }
 const _rangeGroupEl = document.getElementById('rangeGroup');
 if (_rangeGroupEl) {

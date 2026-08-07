@@ -374,16 +374,16 @@ function renderStrikeDetailTemplate(vm) {
 
 // ── One dense-chain table row (collapsed row + its hidden detail row) ──
 function renderChainRowTemplate(vm) {
-  let html = `<tr class="${vm.rowClass}"${vm.rowIdAttr} style="cursor:pointer;" onclick="toggleGreekRow(${vm.strike})" title="Click for full strike summary">`;
+  let html = `<tr class="${vm.rowClass}"${vm.rowIdAttr} style="cursor:pointer;" tabindex="0" aria-label="Strike ${vm.strike}; press Enter for full summary" onclick="toggleGreekRow(${vm.strike})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleGreekRow(${vm.strike})}" title="Click for full strike summary">`;
   html += `<td>${cell(vm.ce.ivText, vm.ce.ivDelta, "flat", vm.ce.ivDeltaClass)}</td>`;
   html += `<td>${cell(vm.ce.volText, vm.ce.volSub, "flat", "flat")}</td>`;
-  html += `<td class="pt-ltp-click" onclick="event.stopPropagation();ptOpenQuickOrder(event,${vm.strike},'CE',${vm.ce.ltpRaw != null ? vm.ce.ltpRaw : 'null'})" title="Click to trade this strike">${cell(vm.ce.ltpText, vm.ce.ltpDelta, vm.ce.ltpClass, vm.ce.ltpClass)}</td>`;
+  html += `<td class="pt-ltp-click" role="button" tabindex="0" aria-label="Trade ${vm.strike} CE" onclick="event.stopPropagation();ptOpenQuickOrder(event,${vm.strike},'CE',${vm.ce.ltpRaw != null ? vm.ce.ltpRaw : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();ptOpenQuickOrder(event,${vm.strike},'CE',${vm.ce.ltpRaw != null ? vm.ce.ltpRaw : 'null'})}" title="Click to trade this strike">${cell(vm.ce.ltpText, vm.ce.ltpDelta, vm.ce.ltpClass, vm.ce.ltpClass)}</td>`;
   html += `<td>${cell(vm.ce.velText, vm.ce.velSub, vm.ce.velClass, "flat")}</td>`;
   html += `<td class="oi-bar"><div class="fill ce" style="width:${vm.ce.oiFillPct}%"></div>${cell(vm.ce.oiText, vm.ce.oiDelta, "flat", vm.ce.oiDeltaClass)}</td>`;
-  html += `<td class="strike" title="Click to pin Bid/Ask Depth — summary also shown below" onclick="event.stopPropagation();selectDepthStrike(${vm.strike});toggleGreekRow(${vm.strike})">${cell(vm.strike, vm.pcrText, "", vm.pcrDeltaClass)}</td>`;
+  html += `<td class="strike" role="button" tabindex="0" aria-label="Pin strike ${vm.strike} depth and open summary" title="Click to pin Bid/Ask Depth — summary also shown below" onclick="event.stopPropagation();selectDepthStrike(${vm.strike});toggleGreekRow(${vm.strike})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();selectDepthStrike(${vm.strike});toggleGreekRow(${vm.strike})}">${cell(vm.strike, vm.pcrText, "", vm.pcrDeltaClass)}</td>`;
   html += `<td class="oi-bar"><div class="fill pe" style="width:${vm.pe.oiFillPct}%"></div>${cell(vm.pe.oiText, vm.pe.oiDelta, "flat", vm.pe.oiDeltaClass)}</td>`;
   html += `<td>${cell(vm.pe.velText, vm.pe.velSub, vm.pe.velClass, "flat")}</td>`;
-  html += `<td class="pt-ltp-click" onclick="event.stopPropagation();ptOpenQuickOrder(event,${vm.strike},'PE',${vm.pe.ltpRaw != null ? vm.pe.ltpRaw : 'null'})" title="Click to trade this strike">${cell(vm.pe.ltpText, vm.pe.ltpDelta, vm.pe.ltpClass, vm.pe.ltpClass)}</td>`;
+  html += `<td class="pt-ltp-click" role="button" tabindex="0" aria-label="Trade ${vm.strike} PE" onclick="event.stopPropagation();ptOpenQuickOrder(event,${vm.strike},'PE',${vm.pe.ltpRaw != null ? vm.pe.ltpRaw : 'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();ptOpenQuickOrder(event,${vm.strike},'PE',${vm.pe.ltpRaw != null ? vm.pe.ltpRaw : 'null'})}" title="Click to trade this strike">${cell(vm.pe.ltpText, vm.pe.ltpDelta, vm.pe.ltpClass, vm.pe.ltpClass)}</td>`;
   html += `<td>${cell(vm.pe.volText, vm.pe.volSub, "flat", "flat")}</td>`;
   html += `<td>${cell(vm.pe.ivText, vm.pe.ivDelta, "flat", vm.pe.ivDeltaClass)}</td>`;
   html += `<td class="sig-col"><span class="sig ${vm.signalCls}">${vm.signalLabel}</span></td>`;

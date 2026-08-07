@@ -273,9 +273,9 @@ class StrategyView {
     // the main panel's "Place Order" button already use, so confirmations/
     // toasts/pending rows/portfolio refresh all behave identically no
     // matter where the order originated.
-    const execAllBtn = `<span onclick="ptExecuteStrategy()" title="Place all legs of this strategy as paper orders"
+    const execAllBtn = `<button type="button" onclick="ptExecuteStrategy()" title="Place all legs of this strategy as paper orders"
       style="cursor:pointer;font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;
-      background:var(--accent,#3b82f6);color:#fff;margin-left:8px;">▶ Execute Strategy</span>`;
+      background:var(--accent,#3b82f6);color:#fff;margin-left:8px;border:0;">▶ Execute Strategy</button>`;
     const symbolForLegs = _data.symbol || '';
     const expiryForLegs = s.expiry || _data.expiry || '';
     // BUGFIX: this pill used to show the raw, unresolved expiryForLegs —
@@ -327,10 +327,10 @@ class StrategyView {
       const legExpTag = (l.expiry && l.expiry !== expiryForLegs)
         ? `<span style="color:var(--amber,#eda100);font-size:9px;" title="${l.expiry} → ${legExpiryReal}">(${ptFmtExpiry(l.expiry)})</span>`
         : '';
-      const execBtn = `<span onclick="ptExecuteLeg('${symbolForLegs}','${legExpiryReal}',${l.strike},'${legType}','${l.action}',${l.lots||1},${ltp})"
+      const execBtn = `<button type="button" onclick="ptExecuteLeg('${symbolForLegs}','${legExpiryReal}',${l.strike},'${legType}','${l.action}',${l.lots||1},${ltp})"
         title="Execute this leg as a paper order (expiry ${legExpiryReal||'—'})"
         style="cursor:pointer;font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px;
-        background:${ac};color:#0b0d12;margin-left:2px;">▶</span>`;
+        background:${ac};color:#0b0d12;margin-left:2px;border:0;" aria-label="Execute ${l.action} ${fmtI(l.strike)} ${legType} leg">▶</button>`;
       return `<span style="display:inline-flex;align-items:center;gap:4px;
         padding:5px 10px;border-radius:6px;border:1px solid ${border};
         background:${acBg};font-family:var(--mono);font-size:11px;font-weight:700;">
@@ -384,4 +384,3 @@ class StrategyView {
   }
 }
 }
-

@@ -105,3 +105,14 @@
 @media (min-width:901px){
   .oc-modal{padding-left:90px;}
 }
+
+/* PDS-00: honor the operating-system motion preference across every
+   Dashboard surface, including live-state pulses and width animations. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+    scroll-behavior:auto!important;
+  }
+}

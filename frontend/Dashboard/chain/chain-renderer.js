@@ -1172,16 +1172,16 @@ ChainView.prototype._rerenderChainPanels = function() {
       const cs=combinedSignal(r.ceSignal,r.peSignal);
       const annot=oiAnnot[String(sk)]||{};
       const rowTitle=annot.ce||annot.pe?`CE: ${annot.ce||'—'} | PE: ${annot.pe||'—'}`:'Click to show/hide Greeks';
-      rows+=`<tr${ia?' id="chain-row-atm"':''} style="cursor:pointer;" onclick="toggleGreekRow(${sk})" title="${rowTitle}">`;
+      rows+=`<tr${ia?' id="chain-row-atm"':''} style="cursor:pointer;" tabindex="0" aria-label="Strike ${sk}; press Enter for Greeks" onclick="toggleGreekRow(${sk})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleGreekRow(${sk})}" title="${rowTitle}">`;
       rows+=`<td class="${ac}" style="font-size:10px;color:var(--txt2);">${fmtK(r.ceVol)}</td>
         <td class="${ac}">${velMiniCell(ceVelDOI,velMax,ceOiChgClr(ceVelDOI))}</td>
-        <td class="${ac} pt-ltp-click" style="font-weight:600;font-family:var(--mono);" onclick="ptOpenQuickOrder(event,${sk},'CE',${r.ceLTP!=null?r.ceLTP:'null'})" title="Click to trade this strike">${fmtN(r.ceLTP,1)}</td>
+        <td class="${ac} pt-ltp-click" role="button" tabindex="0" aria-label="Trade ${sk} CE" style="font-weight:600;font-family:var(--mono);" onclick="event.stopPropagation();ptOpenQuickOrder(event,${sk},'CE',${r.ceLTP!=null?r.ceLTP:'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();ptOpenQuickOrder(event,${sk},'CE',${r.ceLTP!=null?r.ceLTP:'null'})}" title="Click to trade this strike">${fmtN(r.ceLTP,1)}</td>
         <td class="${ac}" style="color:${ceOiChgClr(r.ceDOI)};font-size:10px;">${(r.ceDOI||0)>=0?'+':''}${fmtK(r.ceDOI)}</td>
         <td class="${ac}" style="font-size:10px;color:var(--txt2);">${fmtK(r.ceOI)}</td>
         <td class="${acs}" style="white-space:nowrap;line-height:1.15;">${fmtI(r.strike)}${ia?' ★':''}</td>
         <td class="${ac}" style="font-size:10px;color:var(--txt2);">${fmtK(r.peOI)}</td>
         <td class="${ac}" style="color:${sClr(r.peDOI)};font-size:10px;">${(r.peDOI||0)>=0?'+':''}${fmtK(r.peDOI)}</td>
-        <td class="${ac} pt-ltp-click" style="font-weight:600;font-family:var(--mono);" onclick="ptOpenQuickOrder(event,${sk},'PE',${r.peLTP!=null?r.peLTP:'null'})" title="Click to trade this strike">${fmtN(r.peLTP,1)}</td>
+        <td class="${ac} pt-ltp-click" role="button" tabindex="0" aria-label="Trade ${sk} PE" style="font-weight:600;font-family:var(--mono);" onclick="event.stopPropagation();ptOpenQuickOrder(event,${sk},'PE',${r.peLTP!=null?r.peLTP:'null'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();ptOpenQuickOrder(event,${sk},'PE',${r.peLTP!=null?r.peLTP:'null'})}" title="Click to trade this strike">${fmtN(r.peLTP,1)}</td>
         <td class="${ac}">${velMiniCell(peVelDOI,velMax,sClr(peVelDOI))}</td>
         <td class="${ac}" style="font-size:10px;color:var(--txt2);">${fmtK(r.peVol)}</td>
         <td style="text-align:right;padding-right:10px;"><span class="sp ${cs.cls}">${cs.label}</span></td>

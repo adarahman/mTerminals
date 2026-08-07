@@ -895,8 +895,12 @@
     try {
       if (window.opener && typeof window.opener.openStrikeDetailReportModal === "function") {
         window.opener.openStrikeDetailReportModal(n);
-        window.opener.focus();
         closeDrawer();
+        // This page is opened by Dashboard with window.open(). Browsers may
+        // ignore opener.focus(), leaving the report hidden behind this child
+        // window. Closing the child after the handoff reliably reveals the
+        // already-open report on Dashboard.
+        window.close();
         return;
       }
     } catch (_) {}

@@ -23,7 +23,7 @@ function ptMountPortfolioPanel(){
   const portfolioPanel = document.createElement('div');
   portfolioPanel.id = 'pt-portfolio-panel';
   portfolioPanel.innerHTML = `
-    <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <span class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')">✕</span></h4>
+    <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <button type="button" class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')" aria-label="Close portfolio panel">✕</button></h4>
     <div class="pt-section" style="font-size:10px;line-height:1.45;color:var(--text-muted,#888);">
       <strong style="color:var(--text-primary,#eee);">SIMULATION ONLY</strong> — fills are not exchange confirmations. MARKET fills use the backend's latest live tick; LIMIT fills use the live tick that crosses the limit. No added slippage or artificial delay; quantity is lots × resolved lot size.
     </div>
@@ -232,11 +232,11 @@ function ptRenderPositionsTable(view){
       ? p.strike + ' ' + p.instrument_type : p.instrument_type;
     const hasExpiry = p.instrument_type === 'CE' || p.instrument_type === 'PE' || p.instrument_type === 'FUT';
     const expCell = hasExpiry ? ptFmtExpiry(p.expiry) : '—';
-    const exitBtn = '<span onclick="ptSquareOffPosition(\''+p.symbol+'\',\''+(p.expiry||'')+'\','
+    const exitBtn = '<button type="button" onclick="ptSquareOffPosition(\''+p.symbol+'\',\''+(p.expiry||'')+'\','
       + (p.strike==null?'null':p.strike) + ',\''+p.instrument_type+'\','+p.net_qty_lots+')" '
       + 'title="Exit this position (opposite-side MARKET order)" '
       + 'style="cursor:pointer;font-size:9px;font-weight:800;padding:1px 6px;border-radius:4px;'
-      + 'background:var(--neg,#e74c3c);color:#fff;">✕</span>';
+      + 'background:var(--neg,#e74c3c);color:#fff;border:0;" aria-label="Exit this position">✕</button>';
     return '<tr><td>'+p.symbol+'</td><td title="'+(p.expiry||'')+'">'+expCell+'</td><td>'+label+'</td><td>'+p.net_qty_lots+'</td>'
       + '<td>'+ptFmtN(p.avg_price)+'</td><td>'+ptFmtN(p.last_price)+(p._live?' <span title="live" style="color:var(--pos,#2ecc71);">●</span>':'')+'</td>'
       + '<td class="'+ptPnlClass(p.unrealized_pnl)+'">'+ptFmtN(p.unrealized_pnl)+'</td>'
@@ -282,9 +282,9 @@ function ptRenderOrdersTable(view, wsState){
     if(isRejected){
       statusTd = '<td class="pt-neg pt-status-tap" data-reason="'+ptEscAttr(statusReason || 'No reason provided by engine')+'" title="Paper simulation rejected — tap for reason">SIM REJECTED</td>';
     } else if(isPending){
-      const cancelBtn = '<span onclick="ptCancelOrder(\''+o.id+'\')" title="Cancel this pending order" '
+      const cancelBtn = '<button type="button" onclick="ptCancelOrder(\''+o.id+'\')" title="Cancel this pending order" '
         + 'style="cursor:pointer;margin-left:6px;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;'
-        + 'background:var(--neg,#e74c3c);color:#fff;">✕</span>';
+        + 'background:var(--neg,#e74c3c);color:#fff;border:0;" aria-label="Cancel this pending order">✕</button>';
       statusTd = '<td>'+o.status + cancelBtn + '</td>';
     }
 

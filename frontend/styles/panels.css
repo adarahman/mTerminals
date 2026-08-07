@@ -1391,18 +1391,24 @@ button.oic-head.nav-card-header{
 }
 
 /* PDS-01 P1 — D-12 near-ATM institutional ledger */
-.oic-ledger{border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin:2px 0 12px;background:var(--bg-2)}
+.oic-ledger,.oic-ledger-wrap{border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin:12px 0 0;background:var(--bg-2)}
 .oic-ledger-row{
   appearance:none;
   font:inherit;
-  color:inherit;display:grid;grid-template-columns:1fr .65fr 1fr 1fr .85fr;gap:8px;align-items:center;padding:7px 9px;font-family:var(--font-mono);font-size:var(--fs-xs);text-align:right}
+  width:100%;border:0;border-bottom:1px solid var(--border-2);background:transparent;color:var(--text-primary);cursor:pointer;
+  display:grid;grid-template-columns:1fr .65fr 1fr 1fr .85fr;gap:8px;align-items:center;padding:7px 9px;font-family:var(--font-mono);font-size:var(--fs-xs);text-align:right}
+.oic-ledger-row:last-child{border-bottom:0}
+.oic-ledger-row:hover,.oic-ledger-row:focus-visible{background:color-mix(in srgb,var(--info) 8%,transparent);outline:2px solid var(--info);outline-offset:-2px}
 .oic-ledger-row>span:first-child{text-align:left}
-.oic-ledger-head{font-family:var(--font-sans);font-size:var(--fs-2xs);font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);border-bottom:1px solid var(--border)}
+.oic-ledger-head{display:grid;grid-template-columns:1fr .65fr 1fr 1fr .85fr;gap:8px;padding:7px 9px;text-align:right;font-family:var(--font-sans);font-size:var(--fs-2xs);font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);border-bottom:1px solid var(--border)}
+.oic-ledger-head>span:first-child{text-align:left}
 button.oic-ledger-link{width:100%;border:0;border-bottom:1px solid var(--border-2);background:transparent;color:var(--text-primary);cursor:pointer}
 button.oic-ledger-link:last-of-type{border-bottom:0}
 button.oic-ledger-link:hover,button.oic-ledger-link:focus-visible{background:color-mix(in srgb,var(--info) 8%,transparent);outline:none}
 .oic-ledger-row .bull{color:var(--pos)}
 .oic-ledger-row .bear{color:var(--neg)}
+.oic-ledger-row .ce{color:var(--ce)}
+.oic-ledger-row .pe{color:var(--pe)}
 .oic-ledger-empty{padding:9px;color:var(--text-tertiary);font-size:var(--fs-xs)}
 
 .verdict-data-quality{margin-top:4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;color:var(--warn);text-transform:uppercase;}

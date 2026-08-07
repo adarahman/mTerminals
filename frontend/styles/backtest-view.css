@@ -22,8 +22,9 @@
    resolved four other base/lg ties (.oc-modal-back etc.): rounded up
    to --fs-lg, since this is an icon glyph (✕) that reads better sized
    with its container than snapped down to body-text size. */
-.bt-close{cursor:pointer; opacity:.6; font-size:var(--fs-lg);}
+.bt-close{cursor:pointer; opacity:.6; font-size:var(--fs-lg);background:none;border:0;color:inherit;padding:4px;}
 .bt-close:hover{opacity:1;}
+.bt-close:focus-visible{opacity:1;outline:2px solid var(--info);outline-offset:2px;}
 
 .bt-body{padding:var(--space-5);}
 

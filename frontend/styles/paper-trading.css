@@ -144,9 +144,12 @@
 
 .pt-ltp-click{cursor:pointer; padding:1px 4px; border-radius:3px; transition:background .1s;}
 .pt-ltp-click:hover{background:rgba(59,130,246,.28); outline:1px dashed rgba(59,130,246,.6);}
+.pt-ltp-click:focus-visible{background:rgba(59,130,246,.28);outline:2px solid var(--info);outline-offset:-2px;}
 #pt-quick-popover{position:fixed; z-index:var(--z-popover); width:190px; background:var(--bg-1); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:10px; font:var(--fs-sm)/1.4 inherit; box-shadow:var(--shadow-lg);}
 #pt-quick-popover .pt-qp-hdr{display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-2); font-weight:600;}
 #pt-quick-popover .pt-qp-close{cursor:pointer; opacity:.6;}
+#pt-quick-popover button.pt-qp-close,#pt-order-panel button.pt-close,#pt-portfolio-panel button.pt-close{background:none;border:0;color:inherit;padding:2px;}
+#pt-quick-popover button.pt-qp-close:focus-visible,#pt-order-panel button.pt-close:focus-visible,#pt-portfolio-panel button.pt-close:focus-visible,.pt-mode-toggle:focus-visible{outline:2px solid var(--info);outline-offset:2px;opacity:1;}
 #pt-quick-popover .pt-qp-ltp{font-size:var(--fs-xs); opacity:.75; margin-bottom:var(--space-2);}
 #pt-quick-popover .pt-qp-row{display:flex; gap:var(--space-2); margin-bottom:var(--space-2);}
 /* Shared field look moved to components.css — merged with .bt-field's

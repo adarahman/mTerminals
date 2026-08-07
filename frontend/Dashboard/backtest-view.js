@@ -35,7 +35,7 @@ function btMountModal(){
     <div class="bt-panel">
       <div class="bt-bar">
         <span class="bt-title">📈 Backtest — decision engine replay</span>
-        <span class="bt-close" onclick="toggleBacktestModal(false)" title="Close">✕</span>
+        <button type="button" class="bt-close" onclick="toggleBacktestModal(false)" aria-label="Close backtest">✕</button>
       </div>
       <div class="bt-body">
         <div class="bt-form" id="bt-form"></div>
@@ -248,9 +248,9 @@ function toggleBacktestModal(open){
   const opening = open !== undefined ? open : !el.classList.contains('open');
   if(opening){
     btRenderForm(); // refresh symbol default each time it's opened
-    el.classList.add('open');
+    app.modal._openModal(el, () => toggleBacktestModal(false));
   } else {
-    el.classList.remove('open');
+    app.modal._closeModal(el);
   }
 }
 window.toggleBacktestModal = toggleBacktestModal;
