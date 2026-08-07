@@ -12,6 +12,7 @@
     "test:paper-trading": "node tools/test-paper-trading-contracts.mjs",
     "test:price-chart": "node tools/test-price-chart-contracts.mjs",
     "test:design-system": "node tools/test-design-system-contracts.mjs",
+    "test:health-status": "node tools/test-health-status-contracts.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

@@ -134,6 +134,15 @@
 .feed-status-pill[data-status="recovering"],
 .feed-status-pill[data-status="connecting"]{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:var(--warn-dim);}
 .feed-status-pill[data-status="disconnected"]{color:var(--neg);border-color:color-mix(in srgb,var(--neg) 45%,var(--border));background:var(--neg-dim);}
+.feed-status-reason{
+  max-width:220px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--txt3);
+  font-size:10px;
+}
+.feed-status-reason[hidden]{display:none;}
 
 .dte-val{color:var(--warn);}
 

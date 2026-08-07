@@ -37,6 +37,7 @@ jobs:
           npm run test:paper-trading
           npm run test:price-chart
           npm run test:design-system
+          npm run test:health-status
       - run: npm run build
 
   backend:

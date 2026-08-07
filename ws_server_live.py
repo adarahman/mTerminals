@@ -205,7 +205,9 @@ _VIX_TOKEN = "99926017"            # exch_seg=NSE, verified against live ScripMa
 
 CONNECTED = set()
 LAST_PAYLOAD = None
+LAST_PAYLOAD_AT = None
 _LAST_SENT = None
+PROCESS_STARTED_AT = datetime.now().astimezone()
 _NODE_SESSION = None
 # Most recent real-account funds snapshot from _funds_poll_body() below —
 # handed to newly-connected clients immediately (see ws_handler) the same
@@ -1590,6 +1592,8 @@ async def _smartapi_sync_and_broadcast(message):
     still emit a few ticks for the old expiry before it's cut off. Spot
     (handled separately below) isn't tied to an expiry, so it's unaffected
     and still broadcasts every time."""
+    global LAST_PAYLOAD_AT
+    feed_update_applied = False
     try:
         payload = message.get("payload") if isinstance(message, dict) else None
         chain_delta = (payload or {}).get("chain") if isinstance(payload, dict) else None
@@ -1597,6 +1601,7 @@ async def _smartapi_sync_and_broadcast(message):
             changed_rows = chain_delta.get("changed") or []
             current_expiry = (LAST_PAYLOAD or {}).get("expiry")
             if changed_rows and _smartapi_feed_matches_displayed_expiry(current_expiry):
+                feed_update_applied = True
                 if isinstance(LAST_PAYLOAD, dict):
                     _apply_smartapi_rows_to_chain_list(LAST_PAYLOAD.get("chain"), changed_rows)
                 if isinstance(_LAST_SENT, dict):
@@ -1617,6 +1622,7 @@ async def _smartapi_sync_and_broadcast(message):
         # payload reflects the latest SmartAPI-streamed spot rather than
         # whatever run_pipeline_once() last polled.
         if isinstance(payload, dict) and "spot" in payload:
+            feed_update_applied = True
             for snapshot in (LAST_PAYLOAD, _LAST_SENT):
                 if isinstance(snapshot, dict):
                     snapshot["spot"] = payload["spot"]
@@ -1643,6 +1649,8 @@ async def _smartapi_sync_and_broadcast(message):
         # the tick to reach clients — never let a sync bug block broadcast.
         print(f"[smartapi] state sync failed (broadcasting anyway): {e}", flush=True)
 
+    if feed_update_applied and LAST_PAYLOAD is not None:
+        LAST_PAYLOAD_AT = datetime.now().astimezone()
     await broadcast(message)
 
     # Paper trading, fast path: previously portfolio/orders only went out
@@ -2415,7 +2423,7 @@ async def _post_to_node(payload: dict):
 
 
 async def engine_loop():
-    global LAST_PAYLOAD, _LAST_SENT, _EOD_DONE_DATE, _LAST_SESSION_DATE
+    global LAST_PAYLOAD, LAST_PAYLOAD_AT, _LAST_SENT, _EOD_DONE_DATE, _LAST_SESSION_DATE
     while True:
         tick_start = time.monotonic()
 
@@ -2463,6 +2471,7 @@ async def engine_loop():
             # Dashboard can distinguish an exchange closure from a broken feed.
             payload['marketSession'] = _market_session_status(now)
             LAST_PAYLOAD = payload
+            LAST_PAYLOAD_AT = datetime.now().astimezone()
 
             # Strategy -> execution bridge: hand this tick's decision
             # block to the auto-executor. No-op unless
@@ -2938,6 +2947,77 @@ async def lot_sizes_handler(request):
         )
 
 
+def _build_health_snapshot(now=None):
+    """Return the process, transport, and market-feed health contract.
+
+    A closed exchange is not itself a degraded service. During an open
+    session, however, a missing or old canonical payload makes the service
+    degraded even when the HTTP and WebSocket listeners are reachable.
+    """
+    now = now or datetime.now().astimezone()
+    if now.tzinfo is None:
+        now = now.astimezone()
+    session = _market_session_status(now)
+    payload_age = None
+    if LAST_PAYLOAD_AT is not None:
+        payload_age = max(0.0, (now - LAST_PAYLOAD_AT).total_seconds())
+
+    stale_after = max(12.0, float(POLL_SECONDS) * 2.5)
+    if (LAST_PAYLOAD is None or LAST_PAYLOAD_AT is None) and session == "OPEN":
+        feed_status = "STARTING"
+        feed_reason = "No canonical market snapshot has been produced yet"
+    elif LAST_PAYLOAD is None or LAST_PAYLOAD_AT is None:
+        feed_status = "IDLE"
+        feed_reason = f"Market session is {session.lower().replace('_', ' ')}; no live snapshot expected"
+    elif session == "OPEN" and payload_age > stale_after:
+        feed_status = "STALE"
+        feed_reason = f"Canonical market snapshot is {payload_age:.1f}s old"
+    elif session == "OPEN":
+        feed_status = "LIVE"
+        feed_reason = ""
+    else:
+        feed_status = "IDLE"
+        feed_reason = f"Market session is {session.lower().replace('_', ' ')}"
+
+    smartapi_connected = False
+    if USE_SMARTAPI and _smartapi_stream is not None:
+        connected_event = getattr(_smartapi_stream, "_connected", None)
+        smartapi_connected = bool(connected_event and connected_event.is_set())
+
+    degraded = feed_status in {"STARTING", "STALE"}
+    reasons = [feed_reason] if degraded and feed_reason else []
+    return {
+        "status": "degraded" if degraded else "ok",
+        "service": "mterminals",
+        "timestamp": now.isoformat(),
+        "uptimeSeconds": max(0.0, (now - PROCESS_STARTED_AT).total_seconds()),
+        "reasons": reasons,
+        "http": {"status": "ok"},
+        "websocket": {
+            "status": "ok",
+            "connectedClients": len(CONNECTED),
+        },
+        "marketFeed": {
+            "status": feed_status,
+            "reason": feed_reason,
+            "marketSession": session,
+            "symbol": SYMBOL,
+            "expiry": EXPIRY,
+            "lastPayloadAt": LAST_PAYLOAD_AT.isoformat() if LAST_PAYLOAD_AT else None,
+            "ageSeconds": round(payload_age, 3) if payload_age is not None else None,
+            "staleAfterSeconds": stale_after,
+            "smartapiEnabled": USE_SMARTAPI,
+            "smartapiConnected": smartapi_connected,
+        },
+    }
+
+
+async def health_handler(request):
+    """GET /health — dependency-free liveness and market freshness status."""
+    snapshot = _build_health_snapshot()
+    return web.json_response(snapshot, status=200 if snapshot["status"] == "ok" else 503)
+
+
 async def main():
     # Must run before any task that can hit a broker API timeout
     # (start_smartapi_feed(), engine_loop(), ...) gets a chance to log
@@ -2950,6 +3030,7 @@ async def main():
 
     app = web.Application(middlewares=[no_cache_middleware])
 
+    app.router.add_get('/health', health_handler)
     app.router.add_get('/ws', ws_handler)
     app.router.add_get('/bridge', bridge_ws_handler)
     app.router.add_get('/dashboard-relay', bridge_ws_handler)

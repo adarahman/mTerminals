@@ -53,6 +53,12 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
+  const feedReasonRaw = feedState.reason
+    || (feedState.quality === 'PARTIAL' && Array.isArray(feedState.missing) && feedState.missing.length
+      ? `Missing: ${feedState.missing.join(', ')}` : '');
+  const feedReason = String(feedReasonRaw).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  })[ch]);
   let feedLabel = rawFeedStatus;
   let feedStatus = rawFeedStatus.toLowerCase();
   if (marketSession === 'HOLIDAY') {
@@ -125,6 +131,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       <div class="expiry-pill feed-health-pill">
         <span class="expiry-pill-label">Feed</span>
         <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedState.reason || ''}">${feedLabel}</span>
+        <span class="feed-status-reason" id="feed-status-reason"${feedReason?'':' hidden'}>${feedReason}</span>
       </div>
       <div class="expiry-divider"></div>
       <!-- Expiry is its own dedicated pill, separate from DTE, and sits

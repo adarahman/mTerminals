@@ -122,7 +122,6 @@ class DataService {
 
   _updateFeedStatusDom(){
     const el = $i('feed-status-pill');
-    if (!el) return;
     const fs = AppState.feedState || {status:'CONNECTING'};
     const status = fs.status || 'CONNECTING';
     const session = fs.marketSession || 'UNKNOWN';
@@ -140,10 +139,18 @@ class DataService {
     } else if (status === 'STALE' && fs.lastMessageAt) {
       label += ` ${Math.max(1, Math.floor((Date.now()-fs.lastMessageAt)/1000))}s`;
     }
-    el.textContent = label;
-    el.dataset.status = visualStatus.toLowerCase().replace('_','-');
     const missingTxt = fs.missing && fs.missing.length ? ` Missing: ${fs.missing.join(', ')}.` : '';
-    el.title = (fs.reason || (fs.lastMessageAt ? `Last feed message ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt;
+    const reasonText = fs.reason || (fs.quality === 'PARTIAL' ? missingTxt.trim() : '');
+    if (el) {
+      el.textContent = label;
+      el.dataset.status = visualStatus.toLowerCase().replace('_','-');
+      el.title = (fs.reason || (fs.lastMessageAt ? `Last feed message ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt;
+    }
+    const reasonEl = $i('feed-status-reason');
+    if (reasonEl) {
+      reasonEl.textContent = reasonText;
+      reasonEl.hidden = !reasonText;
+    }
   }
 
   connectWebSocket(url){
