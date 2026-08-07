@@ -157,3 +157,28 @@ ChainDenseView.prototype._handleOcPlaceOrder = function(msg) {
       reason: ok ? undefined : "WS not connected — order not sent",
     });
 };
+
+// ── SEMANTIC NAVIGATION TO D-05 (dedicated Option Chain) ─────────────
+// Reuses one named tab/window instead of opening a duplicate chain on every
+// click. A #strike hash handles the first-load case; oc-focus-strike over the
+// existing BroadcastChannel handles an already-open tab without reloading it.
+function openOptionChainAtStrike(strike) {
+    const n = Number(strike);
+    const hasStrike = Number.isFinite(n);
+    const url = '../OptionChain/option-chain.html' + (hasStrike ? `#strike=${encodeURIComponent(n)}` : '');
+    const win = window.open(url, 'mterminals-option-chain');
+    if (win && typeof win.focus === 'function') { try { win.focus(); } catch(e){} }
+
+    if (hasStrike && typeof app !== 'undefined' && app.chainDense && app.chainDense._ocChan) {
+      const sendFocus = () => app.chainDense._ocChan.postMessage({ type:'oc-focus-strike', strike:n });
+      // Send immediately for an existing tab and once more after the new tab
+      // has had a chance to attach its BroadcastChannel listener.
+      sendFocus();
+      setTimeout(sendFocus, 300);
+    }
+    return false;
+}
+
+function openOptionChain() {
+    return openOptionChainAtStrike(null);
+}

@@ -22,6 +22,10 @@ const Config = {
     url: `ws://${location.host}/ws`,
     // Delay before price-chart-standalone.js retries a dropped connection.
     reconnectDelayMs: 3000,
+    // Dashboard feed-health threshold. The engine normally emits at least
+    // once per 5s poll ceiling; 12s allows one slow cycle without declaring
+    // stale while still surfacing a genuinely frozen feed promptly.
+    staleAfterMs: 12000,
     // ws_server_live.py's bridge_ws_handler — separate endpoint from /ws,
     // same origin/port. Used by fiidii-report.js's FiiDiiReportFeed
     // (connects only while the FII/DII modal is open).

@@ -36,6 +36,15 @@ const AppState = {
   lastGreeks: [],            // was window._lastGreeks (chain-renderer.js)
   ocChan: null,               // was window._ocChan, THIS page's side only (chain-sync.js)
   selectedDepthStrike: null, // was an accidental implicit global (chain-depth.js)
+  // Transport/freshness state is deliberately separate from wsState. A last
+  // valid market snapshot may remain on screen while the feed is stale or
+  // disconnected, so the UI needs to represent both facts at once.
+  feedState: {
+    status: 'CONNECTING',
+    lastMessageAt: null,
+    lastStatusAt: Date.now(),
+    reason: '',
+  },
 };
 
 window.AppState = AppState; // one deliberate, explicit global instead of four ad-hoc ones

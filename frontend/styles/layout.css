@@ -86,6 +86,8 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   align-items:stretch;
 }
 
+.capital-flow-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;}
+
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;}
 
 .three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:18px;align-items:start;}

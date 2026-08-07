@@ -29,16 +29,28 @@ class DataService {
     this.renderScheduled = false;
     this.store = new MarketStore();
     this.wsManager = new WSManager(Config.ws.url);
+    this.feedStatusTimer = null;
+    this._setFeedStatus('CONNECTING');
     this.wsManager.on('open', () => {
       err('');
-      const dot=$i('ws-status'); if(dot) dot.style.background='var(--green)';
+      const dot=$i('ws-status'); if(dot) dot.style.background='var(--warn)';
+      // Socket open is not the same thing as a coherent market snapshot.
+      // Stay RECOVERING until the first message actually arrives.
+      this._setFeedStatus('RECOVERING');
     });
     this.wsManager.on('close', () => {
       const dot=$i('ws-status'); if(dot) dot.style.background='var(--red)';
+      this._setFeedStatus('DISCONNECTED', 'WebSocket closed');
     });
     // Raw wire message -> MarketStore interprets it -> 'change' fires with
-    // the merged state, which is what actually drives a re-render.
-    this.wsManager.on('message', (raw) => this.store.ingest(raw));
+    // the merged state, which is what actually drives a re-render. Feed
+    // freshness is updated BEFORE ingest so the top bar built by the same
+    // tick already renders LIVE rather than one tick behind.
+    this.wsManager.on('message', (raw) => {
+      this._markFeedMessage();
+      this.store.ingest(raw);
+    });
+    this.feedStatusTimer = setInterval(() => this._checkFeedFreshness(), 1000);
     this.store.on('change', (state) => this.updateDashboard(state));
     // Tracks which symbol's DOM is currently built, so scheduleRender() can
     // force a full rebuild on a scrip switch instead of patching in place —
@@ -46,7 +58,60 @@ class DataService {
     this.lastRenderedSymbol = null;
   }
 
+  _setFeedStatus(status, reason){
+    const prev = AppState.feedState || {};
+    AppState.feedState = {
+      status: status,
+      lastMessageAt: prev.lastMessageAt || null,
+      lastStatusAt: Date.now(),
+      reason: reason || '',
+    };
+    this._updateFeedStatusDom();
+    if (window.eventBus) window.eventBus.emit('feed:status', AppState.feedState);
+  }
+
+  _markFeedMessage(){
+    const now = Date.now();
+    const prev = AppState.feedState || {};
+    AppState.feedState = {
+      status: 'LIVE',
+      lastMessageAt: now,
+      lastStatusAt: prev.status === 'LIVE' ? (prev.lastStatusAt || now) : now,
+      reason: '',
+    };
+    this._updateFeedStatusDom();
+  }
+
+  _checkFeedFreshness(){
+    const fs = AppState.feedState || {};
+    if (!fs.lastMessageAt) return;
+    if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING' || fs.status === 'RECOVERING') return;
+    const age = Date.now() - fs.lastMessageAt;
+    const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 12000;
+    if (age > staleAfter && fs.status !== 'STALE') {
+      this._setFeedStatus('STALE', `No feed message for ${Math.floor(age/1000)}s`);
+    } else if (fs.status === 'STALE') {
+      // Keep the age label moving without causing a Dashboard re-render.
+      this._updateFeedStatusDom();
+    }
+  }
+
+  _updateFeedStatusDom(){
+    const el = $i('feed-status-pill');
+    if (!el) return;
+    const fs = AppState.feedState || {status:'CONNECTING'};
+    const status = fs.status || 'CONNECTING';
+    let label = status;
+    if (status === 'STALE' && fs.lastMessageAt) {
+      label += ` ${Math.max(1, Math.floor((Date.now()-fs.lastMessageAt)/1000))}s`;
+    }
+    el.textContent = label;
+    el.dataset.status = status.toLowerCase();
+    el.title = fs.reason || (fs.lastMessageAt ? `Last feed message ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status);
+  }
+
   connectWebSocket(url){
+    this._setFeedStatus('CONNECTING');
     this.wsManager.connect(url);
   }
 

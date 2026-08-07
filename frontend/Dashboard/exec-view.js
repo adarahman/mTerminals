@@ -268,7 +268,7 @@ class ExecView {
     <div class="oic-signal">
       <span class="oic-signal-icon">🎯</span>
       <div class="oic-signal-body">
-        Strongest signal: <strong style="color:${signalClr};">${fmtI(top.strike)} ${top.oiDominant}</strong>
+        Strongest signal: <button class="strike-link" style="color:${signalClr};" onclick="event.stopPropagation();openOptionChainAtStrike(${top.strike})">${fmtI(top.strike)} ${top.oiDominant}</button>
         <span class="oic-signal-meta">(${top.band} band · OI ${fmtK(top.totalOI)} · turnover ${fmtN(top.volRatio,1)}%)</span>
       </div>
     </div>` : ''}
@@ -399,7 +399,9 @@ class ExecView {
   buildCapitalConcentrationCard(d){
   const cc = d.capitalConcentration || {};
   const top = cc.topStrikes || [];
-  if(!top.length){
+  const ceWall = d.capitalCeWallStrike;
+  const peWall = d.capitalPeWallStrike;
+  if(!top.length && !ceWall && !peWall){
     return `
   <div class="exec-card c-green">
     <div class="exec-title">🎯 Capital Concentration</div>
@@ -410,12 +412,16 @@ class ExecView {
   const pctColor = pct>=70 ? 'var(--red)' : pct>=45 ? 'var(--amber)' : 'var(--green)';
   const rows = top.map((s,i)=>`
     <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;${i<top.length-1?'border-bottom:1px solid var(--border);':''}">
-      <span style="font-family:var(--mono);font-weight:600;">${fmtI(s.strike)}</span>
+      <button class="strike-link" onclick="event.stopPropagation();openOptionChainAtStrike(${s.strike})">${fmtI(s.strike)}</button>
       <span style="font-family:var(--mono);color:var(--txt);">₹${fmtK(s.capitalLocked)}</span>
     </div>`).join('');
   return `
   <div class="exec-card c-green">
     <div class="exec-title">🎯 Capital Concentration</div>
+    <div class="capital-wall-owner" aria-label="Canonical capital walls">
+      ${ceWall ? `<div><span>₹ CE Wall</span><button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${ceWall})">${fmtI(ceWall)}</button></div>` : ''}
+      ${peWall ? `<div><span>₹ PE Wall</span><button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${peWall})">${fmtI(peWall)}</button></div>` : ''}
+    </div>
     <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px;">
       <span style="font-size:20px;font-weight:700;color:${pctColor};">${fmtN(pct,1)}%</span>
       <span style="font-size:10px;color:var(--txt3);">of chain capital in top ${top.length} strikes</span>

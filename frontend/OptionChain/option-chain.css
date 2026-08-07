@@ -588,3 +588,10 @@ tr.oc-greek-row td{
   .oc-eyebrow::before{animation:none;}
   .oc-drawer-panel{animation:none;}
 }
+/* Cross-report drill-down target: temporary semantic highlight from the Dashboard. */
+.oc-row.oc-focus-target > td{
+  box-shadow:inset 0 2px 0 var(--spine), inset 0 -2px 0 var(--spine);
+  background-color:color-mix(in srgb,var(--spine) 10%,transparent);
+}
+.oc-row.oc-focus-target > td:first-child{box-shadow:inset 2px 0 0 var(--spine), inset 0 2px 0 var(--spine), inset 0 -2px 0 var(--spine);}
+.oc-row.oc-focus-target > td:last-child{box-shadow:inset -2px 0 0 var(--spine), inset 0 2px 0 var(--spine), inset 0 -2px 0 var(--spine);}

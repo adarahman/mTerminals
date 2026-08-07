@@ -9,6 +9,19 @@
    immediately after its base rule). Split out of styles.css (Phase 7 CSS
    architecture reorg) — no selector, visual, or HTML changes. */
 
+
+/* PDS-01 Compact layout: below 1280px every multi-column Dashboard zone
+   becomes a single-column stack while preserving DOM/source order. */
+@media (max-width:1279px){
+  .exec-grid,
+  .capital-flow-grid,
+  .row2,
+  .row3,
+  .two-col,
+  .three-col{grid-template-columns:1fr;}
+  .exec-grid .exec-card.c-movers{grid-column:auto;}
+}
+
 /* was inline after: .db  —  @media (max-width:900px) */
 @media (max-width:900px){
   .db{padding-left: var(--space-6);} /* vertical rail collapses/overlays on narrow screens, see .sec-nav */
@@ -21,7 +34,7 @@
 
 /* was inline after: .exec-grid  —  @media (max-width:900px) */
 @media (max-width:900px){
-  .exec-grid{grid-template-columns:1fr 1fr;}
+  .exec-grid{grid-template-columns:1fr;}
   .exec-grid .exec-card.c-movers{grid-column:1 / -1;}
 }
 

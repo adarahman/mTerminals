@@ -46,6 +46,8 @@
     velWin: 5,
     greeksOpen: false,
     selectedStrike: null,
+    focusStrike: null,
+    pendingFocusStrike: null,
     // Real server-fed vol/OI ratio + max-pain strike, filled in by
     // applyLivePayload() once chain-sync.js starts forwarding them —
     // empty/null until the first live broadcast arrives, same as demo
@@ -444,7 +446,7 @@
     const ceChgCls = ceOiCls(r.ce.oiChg);
     const peChgCls = peOiCls(r.pe.oiChg);
     const rowHtml = `
-    <tr class="oc-row${r.isAtm ? " oc-atm" : ""}" data-strike="${r.strike}">
+    <tr class="oc-row${r.isAtm ? " oc-atm" : ""}${state.focusStrike === r.strike ? " oc-focus-target" : ""}" data-strike="${r.strike}">
       <td class="oc-iv-cell">
         <div class="oc-stack">
           <span class="pe">${fmtNum(r.pe.iv)}%</span>
@@ -730,6 +732,46 @@
       }
       afterEl = entry.greekEl || entry.el;
     });
+  }
+
+  function _syncRangeButtons(){
+    const grp = $("ocRangeGroup");
+    if(!grp) return;
+    grp.dataset.active = state.range;
+    grp.querySelectorAll("button").forEach((b) => b.classList.toggle("active", +b.dataset.val === state.range));
+  }
+
+  function focusStrike(strike){
+    const n = Number(strike);
+    if(!Number.isFinite(n)) return;
+    const idx = state.rows.findIndex((r) => +r.strike === n);
+    if(idx < 0){ state.pendingFocusStrike = n; return; }
+
+    state.pendingFocusStrike = null;
+    const atmIdx = state.rows.findIndex((r) => r.isAtm);
+    if(state.range < 9999 && atmIdx >= 0){
+      const required = Math.abs(idx-atmIdx);
+      if(required > state.range){
+        const allowed = [3,5,10,15,9999];
+        state.range = allowed.find((v) => v >= required) || 9999;
+        state._userSetRange = true;
+        _syncRangeButtons();
+        renderSummary();
+      }
+    }
+
+    state.focusStrike = n;
+    renderRows();
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`.oc-row[data-strike="${n}"]`);
+      if(row) row.scrollIntoView({behavior:'smooth', block:'center'});
+    });
+    clearTimeout(state._focusTimer);
+    state._focusTimer = setTimeout(() => {
+      state.focusStrike = null;
+      const row = document.querySelector(`.oc-row[data-strike="${n}"]`);
+      if(row) row.classList.remove('oc-focus-target');
+    }, 2200);
   }
 
   function renderAll() {
@@ -1045,6 +1087,7 @@
       }
     }
     renderAll();
+    if(state.pendingFocusStrike != null) focusStrike(state.pendingFocusStrike);
   }
 
   function initLiveSync() {
@@ -1058,6 +1101,7 @@
         // handleOrderResult() instead of applyLivePayload(), which would
         // otherwise just silently drop it (no `rows` field).
         if (data && data.type === "oc-order-result") { handleOrderResult(data); return; }
+        if (data && data.type === "oc-focus-strike") { focusStrike(data.strike); return; }
         applyLivePayload(data);
       });
       // ask the dashboard tab (if any) to replay its last snapshot immediately
@@ -1087,9 +1131,15 @@
   // ── BOOT ──
   function boot() {
     state.rows = buildDemoRows();
+    const hashMatch = location.hash.match(/(?:^#|&)strike=([^&]+)/);
+    if(hashMatch){
+      const target = Number(decodeURIComponent(hashMatch[1]));
+      if(Number.isFinite(target)) state.pendingFocusStrike = target;
+    }
     wireEvents();
     renderAll();
     initLiveSync();
+    if(state.pendingFocusStrike != null) focusStrike(state.pendingFocusStrike);
   }
 
   document.addEventListener("DOMContentLoaded", boot);

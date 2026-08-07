@@ -119,6 +119,18 @@
   font-family:var(--font-mono);white-space:nowrap;
 }
 
+
+.feed-status-pill{
+  font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:800;
+  letter-spacing:.04em;white-space:nowrap;padding:2px 7px;border-radius:999px;
+  border:1px solid var(--border);color:var(--text-secondary);background:var(--bg-1);
+}
+.feed-status-pill[data-status="live"]{color:var(--pos);border-color:color-mix(in srgb,var(--pos) 45%,var(--border));background:var(--pos-dim);}
+.feed-status-pill[data-status="stale"],
+.feed-status-pill[data-status="recovering"],
+.feed-status-pill[data-status="connecting"]{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:var(--warn-dim);}
+.feed-status-pill[data-status="disconnected"]{color:var(--neg);border-color:color-mix(in srgb,var(--neg) 45%,var(--border));background:var(--neg-dim);}
+
 .dte-val{color:var(--warn);}
 
 /* Expiry dropdown, relocated from the old horizontal .sec-nav into the

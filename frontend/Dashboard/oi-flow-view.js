@@ -122,6 +122,26 @@ class OiFlowView {
   </div>`;
   }
 
+  // Capital Flow belongs to D-07, not D-04. These values use the
+  // backend-provided per-strike ceCapitalFlow/peCapitalFlow fields and
+  // therefore remain flow (ChgOI × LTP), not premium locked (OI × LTP).
+  const totalCeFlow = chain.reduce((sum,r)=>sum+(r.ceCapitalFlow||0),0);
+  const totalPeFlow = chain.reduce((sum,r)=>sum+(r.peCapitalFlow||0),0);
+  const netCapitalFlow = totalPeFlow-totalCeFlow;
+  let topCeFlow = null, topPeFlow = null;
+  chain.forEach((r) => {
+    if (!topCeFlow || Math.abs(r.ceCapitalFlow||0) > Math.abs(topCeFlow.value)) topCeFlow = {strike:r.strike, value:r.ceCapitalFlow||0};
+    if (!topPeFlow || Math.abs(r.peCapitalFlow||0) > Math.abs(topPeFlow.value)) topPeFlow = {strike:r.strike, value:r.peCapitalFlow||0};
+  });
+  const fmtCapital = (v) => {
+    if(v==null || isNaN(v)) return '—';
+    const a=Math.abs(v), sign=v>0?'+':v<0?'-':'';
+    if(a>=1e7) return sign+'₹'+(a/1e7).toFixed(2)+'Cr';
+    if(a>=1e5) return sign+'₹'+(a/1e5).toFixed(2)+'L';
+    if(a>=1e3) return sign+'₹'+(a/1e3).toFixed(1)+'K';
+    return sign+'₹'+Math.round(a);
+  };
+
   // Total PE/CE OI + PCR across the visible chain is intentionally NOT
   // recomputed here — it's the exact same aggregate the Option Chain
   // Snapshot card's "OI SUMMARY" block already shows (same getFilteredChain()
@@ -169,6 +189,29 @@ class OiFlowView {
   // Detection)" so the tile's icon+label were pure duplication anyway.
   return `
   <div class="oic-card" id="oi-flow-summary-card">
+    <div class="capital-flow-section" aria-label="Capital Flow">
+      <div class="capital-flow-heading">
+        <span class="capital-flow-heading-icon" aria-hidden="true">₹</span>
+        <span class="capital-flow-heading-title">Capital Flow</span>
+        <span class="capital-flow-heading-note">Day-session ΔOI × LTP · visible range</span>
+      </div>
+      <div class="capital-flow-strip" aria-label="Capital flow summary">
+        <div class="capital-flow-item">
+          <span class="capital-flow-label">CE Flow</span>
+          ${topCeFlow ? `<button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${topCeFlow.strike})">${fmtI(topCeFlow.strike)}</button>` : ''}
+          <strong style="color:var(--ce);">${fmtCapital(totalCeFlow)}</strong>
+        </div>
+        <div class="capital-flow-item">
+          <span class="capital-flow-label">PE Flow</span>
+          ${topPeFlow ? `<button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${topPeFlow.strike})">${fmtI(topPeFlow.strike)}</button>` : ''}
+          <strong style="color:var(--pe);">${fmtCapital(totalPeFlow)}</strong>
+        </div>
+        <div class="capital-flow-item capital-flow-net">
+          <span class="capital-flow-label">Net PE−CE</span>
+          <strong style="color:${signColor(netCapitalFlow)};">${fmtCapital(netCapitalFlow)}</strong>
+        </div>
+      </div>
+    </div>
     <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading…</div>
   </div>`;
 }

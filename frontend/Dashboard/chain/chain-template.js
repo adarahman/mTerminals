@@ -50,6 +50,9 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
 };
 
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
+  const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
+  const feedStatus = (feedState.status || 'CONNECTING').toLowerCase();
+  const feedLabel = feedState.status || 'CONNECTING';
   if (isBear === undefined) {
     isBear = isBearBias(d);
   }
@@ -107,6 +110,11 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       ${renderIndexTicker(d)}
     </div>
     <div class="expiry-strip">
+      <div class="expiry-pill feed-health-pill">
+        <span class="expiry-pill-label">Feed</span>
+        <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedState.reason || ''}">${feedLabel}</span>
+      </div>
+      <div class="expiry-divider"></div>
       <!-- Expiry is its own dedicated pill, separate from DTE, and sits
            leftmost in the strip. The same persistent <select> node from
            #expiry-select-holder is re-parented into #expiry-slot on every
@@ -410,12 +418,12 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           ${wallBuild.ceStrike!==null ? `
           <div class="oic-build-row">
             <span>CE Wall</span>
-            <span><span class="val ce">${fmtI(wallBuild.ceStrike)}</span><span class="delta up">▲${fmtK(wallBuild.ceVal)}</span></span>
+            <span><button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${wallBuild.ceStrike})">${fmtI(wallBuild.ceStrike)}</button><span class="delta up">▲${fmtK(wallBuild.ceVal)}</span></span>
           </div>` : ''}
           ${wallBuild.peStrike!==null ? `
           <div class="oic-build-row">
             <span>PE Wall</span>
-            <span><span class="val pe">${fmtI(wallBuild.peStrike)}</span><span class="delta up">▲${fmtK(wallBuild.peVal)}</span></span>
+            <span><button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${wallBuild.peStrike})">${fmtI(wallBuild.peStrike)}</button><span class="delta up">▲${fmtK(wallBuild.peVal)}</span></span>
           </div>` : ''}
           ${wallBuild.ceStrike===null && wallBuild.peStrike===null ? '<div class="oic-empty">—</div>' : ''}
         </div>
@@ -429,8 +437,8 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           const capCe = d.capitalCeWallStrike, capPe = d.capitalPeWallStrike;
           if (!capCe && !capPe) return '';
           return `<div class="oic-tile" style="padding:0;border:0;background:transparent;margin-top:2px;" title="Highest premium-locked strike — OI x LTP, can differ from the raw-OI wall above">
-            ${capCe ? `<div class="oic-build-row"><span>₹ CE Wall</span><span class="val ce">${fmtI(capCe)}</span></div>` : ''}
-            ${capPe ? `<div class="oic-build-row"><span>₹ PE Wall</span><span class="val pe">${fmtI(capPe)}</span></div>` : ''}
+            ${capCe ? `<div class="oic-build-row"><span>₹ CE Wall</span><button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${capCe})">${fmtI(capCe)}</button></div>` : ''}
+            ${capPe ? `<div class="oic-build-row"><span>₹ PE Wall</span><button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${capPe})">${fmtI(capPe)}</button></div>` : ''}
           </div>`;
         })()}
         ${(() => {
@@ -535,13 +543,12 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   if(!chain.length){
     return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <a class="section-header nav-card-header"
-       href="../OptionChain/option-chain.html" target="_blank" rel="opener"
+    <button class="section-header nav-card-header" onclick="openOptionChain()"
        aria-label="Open Option Chain Snapshot — view full option chain"
        title="Open full option chain">
       <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
-    </a>
+    </button>
     <div class="dd-empty">Awaiting chain data…</div>
   </div>`;
   }
@@ -578,20 +585,14 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
       <circle cx="${lx}" cy="${ly}" r="3.5" fill="${colorVar}"/>
     </svg>`;
   };
-  const clockIcon = `<svg class="oi-flow-clock" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`;
-
-  // ── OI summary ──
-  // computeRangeChainTotals (metrics.js, IA redesign step 6) — this is
-  // the Range PCR figure (PROJECT-ARCHITECTURE.md §13: frontend-only,
-  // distinct from full-chain PCR), same computation this file's Volume
-  // Analytics block below used to redo independently.
+  // ── Positioning summary ─────────────────────────────────────────
+  // D-04 owns aggregate positioning only. Intraday OI/capital FLOW has
+  // moved to D-07 so this card answers one question: where is positioning
+  // concentrated across the currently visible strike range?
   const {totalCe, totalPe, pcr} = computeRangeChainTotals(chain);
-  const oiTotal = totalCe+totalPe || 1;
 
-  // ── Chg OI summary (+ how much that shifted PCR) ──
   const totalCeChg = chain.reduce((s,r)=>s+(r.ceChgOI||0),0);
   const totalPeChg = chain.reduce((s,r)=>s+(r.peChgOI||0),0);
-  const chgTotal = Math.abs(totalCeChg)+Math.abs(totalPeChg) || 1;
   const prevCe = totalCe-totalCeChg, prevPe = totalPe-totalPeChg;
   const prevPcr = prevPe/(prevCe||1);
   const pcrShift = pcr-prevPcr;
@@ -599,49 +600,17 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const netOi = totalPe-totalCe;
   const netChgOi = totalPeChg-totalCeChg;
 
-  // ── Net OI over 15m / 30m windows — reuses the same d.oiVelocity source
-  // as buildDoiDetailHtml's dOI·5/15/30m card below, just surfaced here
-  // as a net-only figure instead of the full CE/PE bar breakdown ──
-  const netForWindow = (w) => {
-    const block = (d.oiVelocity||[]).find(b=>b.window===w);
-    const byStrike = {};
-    if(block&&block.rows) block.rows.forEach(vr=>{byStrike[vr.strike]=vr;});
-    const ceSum = chain.reduce((s,r)=>s+((byStrike[r.strike]||{}).ceDOI||0),0);
-    const peSum = chain.reduce((s,r)=>s+((byStrike[r.strike]||{}).peDOI||0),0);
-    return peSum-ceSum;
-  };
-  const net5 = netForWindow(5);
-  const net15 = netForWindow(15);
-  const net30 = netForWindow(30);
+  const totalCeVol = chain.reduce((sum,r)=>sum+(r.ceVol||0),0);
+  const totalPeVol = chain.reduce((sum,r)=>sum+(r.peVol||0),0);
+  const ceVolOi = totalCeVol/(totalCe||1);
+  const peVolOi = totalPeVol/(totalPe||1);
 
   const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
-  // IA redesign step 3 (dashboard-redesign-proposal.md §4): this card's
-  // PCR is independently recomputed from getFilteredChain(d) — the
-  // range-filtered chain, not the backend's full-chain vrd.pcr the
-  // Decision Engine strip shows. Same label on both used to imply they're
-  // the same number when they can legitimately disagree; "Range PCR (±N)"
-  // makes the scope explicit right on the card instead of only in code
-  // comments. rngTag mirrors rngLabel's ALL-STRIKES fallback so the badge
-  // and this footer label never show different range wording.
   const rngTag = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All':'±'+rng; })();
-
-  // ── Capital flow summary ─────────────────────────────────────────
-  // Chain-wide capital flow (ChgOI x LTP, day-session — see cell comment
-  // below) aggregated over the same range-filtered `chain` array as OI
-  // Summary/Chg OI Summary above. Previously this block also computed
-  // totalCePrem/totalPePrem (cumulative premium LOCKED, OI x LTP) and
-  // displayed those next to a Net Flow figure derived from the FLOW
-  // series instead — two unrelated quantities that never reconciled.
-  // Dropped here; premium-locked totals belong in a "how much capital
-  // is parked here" card, not a flow card, if/when that's wanted.
-  const totalCeFlow = chain.reduce((s,r)=>s+(r.ceCapitalFlow||0),0);
-  const totalPeFlow = chain.reduce((s,r)=>s+(r.peCapitalFlow||0),0);
-  const netFlow = totalPeFlow - totalCeFlow;
 
   return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <a class="section-header nav-card-header"
-       href="../OptionChain/option-chain.html" target="_blank" rel="opener"
+    <button class="section-header nav-card-header" onclick="openOptionChain()"
        aria-label="Open Option Chain Snapshot — view full option chain"
        title="Open full option chain">
       <span class="oi-snap-heading nav-card-header-label">
@@ -650,7 +619,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
       </span>
       <span class="oi-snap-badge">${rngLabel}</span>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
-    </a>
+    </button>
 
     <div class="oi-snap-grid">
 
@@ -698,78 +667,26 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
     </div>
 
-    <div class="oi-flow-card">
-      <div class="oi-flow-head">
-        <div class="oi-flow-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8c6eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-        </div>
-        <div class="oi-snap-title">OI Flow</div>
+    <div class="oi-snap-kpis" aria-label="Option chain positioning metrics">
+      <div class="oi-snap-kpi">
+        <span class="oi-snap-kpi-label">Max Pain</span>
+        <strong class="oi-snap-kpi-value">${d.maxPain!=null?fmtI(d.maxPain):'—'}</strong>
       </div>
-      <div class="oi-flow-body">
-        <div class="oi-flow-cols">
-          <div class="oi-flow-col">
-            <span class="oi-flow-win">5m</span>
-            ${clockIcon}
-            <span class="oi-flow-val" style="color:${signColor(net5)};">${signedFmt(net5)}</span>
-          </div>
-          <div class="oi-flow-col">
-            <span class="oi-flow-win">15m</span>
-            ${clockIcon}
-            <span class="oi-flow-val" style="color:${signColor(net15)};">${signedFmt(net15)}</span>
-          </div>
-          <div class="oi-flow-col">
-            <span class="oi-flow-win">30m</span>
-            ${clockIcon}
-            <span class="oi-flow-val" style="color:${signColor(net30)};">${signedFmt(net30)}</span>
-          </div>
-        </div>
-        <div class="oi-flow-divider"></div>
-        <button class="oi-flow-open-btn" onclick="openOIDashboardModal('butterfly')" title="Open full OI Flow view">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,17 9,11 13,15 21,5"/></svg>
-        </button>
+      <div class="oi-snap-kpi">
+        <span class="oi-snap-kpi-label">CE Vol/OI</span>
+        <strong class="oi-snap-kpi-value ce">${fmtN(ceVolOi,2)}x</strong>
       </div>
-    </div>
-
-    <!-- Capital Flow strip — premium-weighted counterpart to the raw-OI
-         "OI Flow" strip above; same oi-flow-card/-col markup reused so no
-         new CSS is needed. All three cells now read off the SAME series
-         (ceCapitalFlow/peCapitalFlow — day-session ChgOI x LTP) so Net
-         Flow reconciles with what's shown beside it (PE - CE). Previously
-         CE ₹/PE ₹ showed cePremiumLocked/pePremiumLocked (cumulative OI x
-         LTP, a different quantity entirely) while Net Flow was computed
-         from the flow series — the two numbers never matched. -->
-    <div class="oi-flow-card">
-      <div class="oi-flow-head">
-        <div class="oi-flow-icon">₹</div>
-        <div class="oi-snap-title">Capital Flow</div>
-      </div>
-      <div class="oi-flow-body">
-        <div class="oi-flow-cols">
-          <div class="oi-flow-col">
-            <span class="oi-flow-win">CE ₹</span>
-            <span class="oi-flow-val" style="color:var(--ce);">${signedFmt(totalCeFlow)}</span>
-          </div>
-          <div class="oi-flow-col">
-            <span class="oi-flow-win">PE ₹</span>
-            <span class="oi-flow-val" style="color:var(--pe);">${signedFmt(totalPeFlow)}</span>
-          </div>
-          <div class="oi-flow-col">
-            <span class="oi-flow-win">Net Flow</span>
-            <span class="oi-flow-val" style="color:${signColor(netFlow)};">${signedFmt(netFlow)}</span>
-          </div>
-        </div>
-        <div class="oi-flow-divider"></div>
+      <div class="oi-snap-kpi">
+        <span class="oi-snap-kpi-label">PE Vol/OI</span>
+        <strong class="oi-snap-kpi-value pe">${fmtN(peVolOi,2)}x</strong>
       </div>
     </div>
   </div>`;
 };
 
-  // dOI · 5/15/30m detail card removed — this function used to back the
-  // Tier-3 collapsible "dOI · 5/15/30m" card, which is now fully redundant
-  // with the "OI Flow" strip inside buildChainSummaryHtml above (same
-  // d.oiVelocity source, same net 5/15/30m figures, no longer needs its
-  // own collapsible). Mount point removed from chain-renderer.js's row3
-  // and its incremental-refresh block.
+  // dOI · 5/15/30m detail card remains removed. Intraday flow now belongs
+  // to D-07 (Vol/OI Velocity + OI Flow), not this D-04 positioning card.
+  // Its old mount point remains intentionally absent from row3.
 
   // ── Volume & Vol/OI DETAIL (Tier-3 collapsible) ──
   // Same treatment as buildDoiDetailHtml above: previously the 3rd

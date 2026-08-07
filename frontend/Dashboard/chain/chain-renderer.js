@@ -736,7 +736,7 @@ ChainView.prototype.renderDashboard = function(d) {
   h += `<div id="oi-flow-section">
 
   <div class="zone-divider zone-divider--primary">Capital Flow</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;">
+  <div class="capital-flow-grid">
 
     <div class="oic-merged-card">
       <div id="sdt-panel" class="oic-merged-vel">
