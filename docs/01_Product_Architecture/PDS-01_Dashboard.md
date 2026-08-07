@@ -9,7 +9,7 @@
 | **Owner** | Product Design |
 | **Depends on** | PDS-00 — Global Design System |
 | **Last Updated** | 2026-08-07 |
-| **Change from 1.0** | Adds metric ownership, dependency, rendering, state, error, accessibility, animation, performance, and implementation contracts |
+| **Change from 1.1** | Aligns D-05 with the implemented dedicated Option Chain surface; revises drill-down, layout, navigation, and acceptance criteria |
 
 ---
 
@@ -179,7 +179,7 @@ Component IDs are durable identifiers.
 | D-02 | Market Health & Story | Structure | 1–2 | What is the simplest coherent story of the current market? |
 | D-03 | Greeks / Net GEX Alerts | Structure | 1–2 + 3 | What gamma/Greeks conditions materially affect the trade? |
 | D-04 | Option Chain Snapshot | Structure | 1–2 | What does aggregate option positioning say? |
-| D-05 | Option Chain | Structure | 2 + 3 | What is happening strike by strike? |
+| D-05 | Option Chain | Dedicated Tier-3 surface | 3 | What is happening strike by strike? |
 | D-06 | Greeks by Moneyness | Structure | 2 | How do Greeks change across strikes? |
 | D-07 | Vol/OI Velocity + OI Flow | Capital Flow | 1–2 + 3 | Where is fresh derivatives activity accelerating? |
 | D-08 | FII/DII Summary | Capital Flow | 1–2 + 3 | What does institutional cash flow contribute? |
@@ -215,9 +215,6 @@ STRUCTURE & POSITIONING
 │ D-02 Story       │ D-03 GEX/Greeks │ D-04 Chain Snapshot    │
 └──────────────────┴──────────────────┴────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
-│ D-05 OPTION CHAIN — fixed viewport, internal scroll          │
-└──────────────────────────────────────────────────────────────┘
-┌──────────────────────────────────────────────────────────────┐
 │ D-06 GREEKS BY MONEYNESS                                     │
 └──────────────────────────────────────────────────────────────┘
 
@@ -244,14 +241,14 @@ CONFIRMATION — collapsed by default
 
 All multi-column grids collapse to one column while preserving source order:
 
-`D-02 → D-03 → D-04 → D-05 → D-06 → D-07 → D-08 → D-09 → D-10 → D-11 → D-12 → Confirmation`
+`D-02 → D-03 → D-04 → D-06 → D-07 → D-08 → D-09 → D-10 → D-11 → D-12 → Confirmation`
 
 No card is promoted because of signal strength.
 
 ## 6.3 Height rules
 
 - D-01 SHALL never share its row.
-- D-05 SHALL use a fixed chain viewport and independent vertical scrolling.
+- D-05 is not mounted in the Dashboard layout; it is opened deliberately as a dedicated Tier-3 surface.
 - Tier-3 additions SHALL NOT increase executive-card height.
 - Cards in the same executive grid row SHOULD maintain compatible visual height.
 - Confirmation expansion SHALL only increase the Confirmation zone's own height.
@@ -375,22 +372,45 @@ Full per-strike Delta/Gamma/Theta/Vega and GEX detail.
 
 **Question:** What is happening at each strike?
 
-### Tier 2
-Dense strike-by-strike table.
+### Surface model
+
+D-05 is a **dedicated Tier-3 Option Chain surface**, not an always-mounted Dashboard card.
+
+The Dashboard entry point is D-04 (Option Chain Snapshot). D-04's header opens D-05 while preserving the active trading context.
 
 ### Required behavior
-- ATM auto-centred on initial render.
-- Default viewport approximately ±5 strikes.
-- Independent scroll.
+
+- Receive current symbol from Dashboard/global state.
+- Receive current expiry from D-00/global state.
+- Receive current range where applicable.
+- Preserve live synchronization with the Dashboard.
+- ATM auto-centred on initial/context-changing render.
+- Independent scrolling within the Option Chain page/surface.
 - Scroll position survives live ticks.
-- Clicking a strike toggles inline Greek detail.
-- A cross-report strike drill-down scrolls to and highlights the strike.
-- Highlighting must be temporary/clearable and must not mutate analytics.
+- Clicking a strike toggles inline Greek detail where supported.
+- Cross-report drill-down may open/focus D-05 at a specific strike.
+- A targeted strike may be temporarily highlighted.
+- Highlighting must not mutate analytics.
 
 ### Ownership
-D-05 owns authoritative **per-strike display primitives**, including the per-strike institutional-score primitive where applicable. Whole-chain interpretations remain owned by their analytical cards.
 
----
+D-05 owns authoritative **per-strike display primitives**, including the per-strike institutional-score primitive where applicable.
+
+Whole-chain interpretations remain owned by their analytical Dashboard cards.
+
+### Rationale
+
+Keeping the dense chain as a dedicated surface avoids duplicating a large strike table inside the executive Dashboard while preserving a direct analytical path:
+
+```text
+Dashboard D-04 Snapshot
+        ↓ header / drill-down
+D-05 Dedicated Option Chain
+        ↓ strike selection
+Strike Detail / deeper analysis
+```
+
+This is consistent with the three-tier information model: executive summary on the Dashboard, dense exploration in Tier 3.
 
 ## D-06 — Greeks by Moneyness
 
@@ -788,7 +808,7 @@ Changing expiry SHALL update every expiry-dependent metric through shared state.
 Cards with Tier-3 detail use their header as the primary open affordance:
 
 - D-03
-- D-05
+- D-04 → opens D-05 dedicated Option Chain
 - D-07
 - D-08
 - D-12
@@ -807,14 +827,25 @@ Focus SHALL return to the invoking control/header after close.
 
 ## 13.4 Strike drill-down
 
-A surfaced strike/level from Decision or Capital Flow may:
+A surfaced strike/level from Decision, Capital Flow, Capital Concentration, or Institutional Activity may open/focus the dedicated D-05 Option Chain surface at that strike.
 
-1. scroll D-05 into view;
-2. position the target strike in its viewport;
-3. apply a temporary highlight;
-4. preserve the user's ability to continue chain inspection.
+The semantic action SHOULD be equivalent to:
 
-This is an in-page drill-down, not a modal.
+```text
+openOptionChainAtStrike(strike, context)
+```
+
+It SHALL:
+
+1. preserve symbol;
+2. preserve expiry;
+3. preserve range where applicable;
+4. open/focus D-05;
+5. scroll the target strike into view;
+6. apply a temporary highlight;
+7. preserve the user's ability to continue chain inspection.
+
+This is a cross-surface drill-down, not a duplicate Dashboard table.
 
 ## 13.5 Section jump
 
@@ -1045,7 +1076,7 @@ The architecture SHOULD make canonical metrics consumable independently of wheth
 Dashboard v1.1 is accepted when all of the following are demonstrably true:
 
 1. Status + Decision Engine alone provide an actionable first-glance answer.
-2. All D-00 through applicable D-17 content is reachable in prescribed order by scrolling.
+2. All Dashboard cards are reachable in prescribed zone order by scrolling; D-05 is reachable from D-04 and defined strike drill-downs as a dedicated Tier-3 surface.
 3. D-01 occupies a full-width dedicated row.
 4. D-02/D-03/D-04 are 3-up on desktop and ordered single-column in Compact.
 5. D-07/D-08 are 2-up on desktop.
@@ -1060,12 +1091,12 @@ Dashboard v1.1 is accepted when all of the following are demonstrably true:
 14. Scenario-adjusted metrics are explicitly qualified.
 15. A live tick does not trigger a full-page rerender.
 16. D-05 scroll position survives live ticks.
-17. D-05 ATM auto-centering does not repeatedly override manual scrolling.
+17. D-05 ATM auto-centering occurs only on initial/context-changing render and does not repeatedly override manual scrolling.
 18. A modal remains open during incoming ticks.
 19. `Esc` closes every Dashboard modal.
 20. Modal focus returns to its invoker.
-21. A strike drill-down scrolls to/highlights the correct D-05 strike.
-22. A clicked D-05 strike can expose its inline Greek detail without navigating away.
+21. A strike drill-down opens/focuses D-05 and scrolls to/highlights the correct strike.
+22. A clicked D-05 strike can expose its inline Greek detail within the dedicated Option Chain surface.
 23. Collapsed Confirmation receives fresh underlying state.
 24. A chart with unchanged relevant inputs does not visibly redraw.
 25. A missing value never appears as `NaN`, `undefined`, or fabricated zero.
@@ -1096,6 +1127,7 @@ Before release, engineering/QA SHOULD verify:
 - [ ] Correct card order.
 - [ ] Correct desktop grid.
 - [ ] Correct Compact stack.
+- [ ] D-05 is not duplicated inside Dashboard.
 
 ### Ownership
 - [ ] Shared metric consumers use canonical state.
@@ -1105,7 +1137,8 @@ Before release, engineering/QA SHOULD verify:
 ### Interaction
 - [ ] Modal close paths work.
 - [ ] Keyboard operation works.
-- [ ] Strike drill-down works.
+- [ ] D-04 header opens D-05 with current context.
+- [ ] Strike drill-down opens/focuses D-05 at the requested strike.
 - [ ] Scroll/expand state survives ticks.
 
 ### Feed states
@@ -1128,7 +1161,7 @@ Before release, engineering/QA SHOULD verify:
 The following are explicitly deferred and require a PDS revision:
 
 - Declarative/data-driven dashboard configuration.
-- Cross-report drill-down beyond defined strike highlighting/detail routes.
+- Cross-report drill-down beyond the defined D-05 strike-focus/detail routes.
 - Adaptive collapse defaults based on viewport.
 - Phone-specific layout.
 - Persisted collapse state across sessions.
@@ -1146,7 +1179,7 @@ The following are explicitly deferred and require a PDS revision:
 Any change that does one or more of the following requires a PDS version update:
 
 - adds/removes a card;
-- changes zone membership;
+- changes zone membership or dedicated-surface placement;
 - changes canonical metric ownership;
 - changes default collapse state;
 - changes cross-report navigation;
@@ -1174,7 +1207,7 @@ Pure implementation refactors that preserve all observable contracts do not requ
                            ▼
         ┌─────────────────────────────────────┐
         │ STRUCTURE & POSITIONING             │
-        │ D-02 │ D-03 │ D-04 → D-05 → D-06  │
+        │ D-02 │ D-03 │ D-04 → D-06          │
         └──────────────────┬──────────────────┘
                            ▼
         ┌─────────────────────────────────────┐
@@ -1193,6 +1226,9 @@ Pure implementation refactors that preserve all observable contracts do not requ
         └─────────────────────────────────────┘
 
 Canonical State → Derived Metrics → Decision → Targeted UI Patches
+
+Dedicated Tier-3 surface:
+D-04 → D-05 Option Chain → Strike Detail
 
 Persistent surfaces:
 D-18 Paper Trading     D-19 Price Chart
