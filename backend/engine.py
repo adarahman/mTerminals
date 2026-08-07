@@ -90,6 +90,8 @@ from oi.chain_metrics import (
 # flow, delta/gamma exposure) — computed once off `master` here so every
 # consumer reads the same numbers instead of re-deriving them.
 from oi.capital_metrics import compute_capital_metrics
+from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
+from analytics.market_regime import classify_market_regime
 
 # Strategy definitions, rule-based scoring, and scenario P&L — moved to
 # strategy/strategies.py (Step 4b). build_engine_result() calls these three
@@ -351,6 +353,14 @@ class EngineResult:
     # off `master`. capital_flow here is day-session (ce_oi_chg-based), not
     # intraday — see capital_metrics.py's module docstring for why.
     capital_metrics: "pd.DataFrame | None" = None
+    # Market Regime (Price vs Futures OI) — see analytics/market_regime.py.
+    # {regime, confidence, description, price_chg_pct, fut_oi_chg_pct}.
+    # Distinct from the older `fut_signal` above, which only reads futures
+    # basis sign and never looked at futures OI despite the name.
+    market_regime: dict = field(default_factory=dict)
+    fut_oi: float = 0.0
+    fut_oi_chg: float = 0.0
+    fut_oi_chg_pct: float = 0.0
 
     def to_ctx_dict(self) -> dict:
         """Adapter so existing render_*.py functions written for a plain
@@ -391,6 +401,10 @@ class EngineResult:
             "far_expiry":  self.far_expiry,
             "gex_summary": self.gex_summary,
             "capital_metrics": self.capital_metrics,
+            "market_regime": self.market_regime,
+            "fut_oi": self.fut_oi,
+            "fut_oi_chg": self.fut_oi_chg,
+            "fut_oi_chg_pct": self.fut_oi_chg_pct,
         }
 
 
@@ -500,6 +514,32 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     basis = futures_ltp - spot
     fut_signal = "Long Buildup" if basis > 0 else "Short Buildup"
 
+    # ── futures OI session tracking (Market Regime input) ─────────────────
+    # df_fut is None for the extra NEAR/MONTHLY expiry bundles built via
+    # _build_expiry_bundle() in option_chain_json.py (those only need the
+    # option chain, not a second futures fetch) — market_regime correctly
+    # comes back "Indeterminate"/0-confidence for those secondary bundles
+    # rather than reusing the primary tick's regime call.
+    _fut_contract = (
+        df_fut["Contract"].iloc[0]
+        if df_fut is not None and not df_fut.empty and "Contract" in df_fut.columns
+        else None
+    )
+    _fut_oi_raw = (
+        df_fut["OI"].iloc[0]
+        if df_fut is not None and not df_fut.empty and "OI" in df_fut.columns
+        else None
+    )
+    _fut_oi_tracker_result = _get_futures_oi_tracker().update(_fut_contract, _fut_oi_raw)
+    fut_oi = _fut_oi_tracker_result["fut_oi"]
+    fut_oi_chg = _fut_oi_tracker_result["fut_oi_chg"]
+    fut_oi_chg_pct = _fut_oi_tracker_result["fut_oi_chg_pct"]
+    # has_oi_data=False whenever this tick had no usable futures OI at all
+    # (df_fut missing/empty) — a genuinely-zero fut_oi_chg_pct from a real
+    # OI reading is a valid "flat" regime input and shouldn't be treated
+    # the same as "no data".
+    _has_fut_oi_data = _fut_contract is not None and _fut_oi_raw is not None
+
     # ── spot change / day move ──────────────────────────────────────────
     idx_row = (df_idx[df_idx["Symbol"] == symbol]
                if df_idx is not None and "Symbol" in df_idx.columns else pd.DataFrame())
@@ -514,6 +554,12 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
             day_chg_pct = (day_change / spot * 100.0) if spot else 0.0
     else:
         day_change, day_chg_pct = 0.0, 0.0
+
+    # ── Market Regime (Price vs Futures OI) ────────────────────────────────
+    market_regime = classify_market_regime(
+        price_chg_pct=day_chg_pct, fut_oi_chg_pct=fut_oi_chg_pct,
+        has_oi_data=_has_fut_oi_data,
+    )
 
     # ── VIX regime ───────────────────────────────────────────────────────
     # india_vix is always caller-supplied now (market_api.get_unified_market_data(),
@@ -648,4 +694,6 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
         oi_history_snapshot=df_full_history,
         gex_summary=gex_summary,
         capital_metrics=capital_metrics,
+        market_regime=market_regime,
+        fut_oi=fut_oi, fut_oi_chg=fut_oi_chg, fut_oi_chg_pct=fut_oi_chg_pct,
     )

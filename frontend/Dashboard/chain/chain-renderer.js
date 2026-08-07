@@ -666,12 +666,25 @@ ChainView.prototype.renderDashboard = function(d) {
   // panels.css so it seats flush under the velocity panel — none of that
   // touches buildOiFlowSummaryHtml() itself (still the same markup,
   // still the same outerHTML-patch target), only how it looks once
-  // nested here. Institutional Activity Crux is intentionally left
-  // outside this merge and keeps its own card in the second grid column
-  // — the ask was Vol/OI Velocity into OI Flow specifically, not a
-  // three-way merge.
+  // nested here.
+  //
+  // ── ZONE: CAPITAL FLOW (IA redesign, phase 1b) ──
+  // Second grid column used to hold Institutional Activity Crux; swapped
+  // with FII/DII Summary (previously in #sec-tier2 below) so this row is
+  // a coherent "where is money moving" zone — OI Flow + FII/DII — instead
+  // of pairing OI Flow with an institutional-positioning card. Purely a
+  // swap of which builder call sits in which existing 2-col slot (both
+  // rows already use the same 1fr/1fr grid shape), so no CSS changes
+  // needed. Institutional Activity Crux now sits in #sec-tier2 instead —
+  // see that block's comment for the reciprocal note. This pairing isn't
+  // its final home either (it belongs with Smart Money Ranking in a
+  // dedicated Institutional zone once that's extracted from Advanced
+  // Analytics — see the dashboard IA proposal, roadmap step 7) but it's
+  // no worse than the previous Greeks-by-Moneyness pairing and unblocks
+  // the Capital Flow fix now instead of waiting on that larger change.
   h += `<div id="oi-flow-section">
 
+  <div class="zone-divider" style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--txt3);text-transform:uppercase;margin:4px 0 10px;">Capital Flow</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:stretch;">
 
     <div class="oic-merged-card">
@@ -704,24 +717,21 @@ ChainView.prototype.renderDashboard = function(d) {
       ${buildOiFlowSummaryHtml(chain, atm, velByStrike)}
     </div>
 
-    ${app.exec.buildInstitutionalActivitySummaryCard(d)}
+    ${buildFiiDiiSummaryCard(d)}
   </div>
 
   </div>`;
 
-  // ── TIER 2: Greeks by Moneyness + FII-DII Sentiment ──
-  // FII/DII (moved here — see comment at its old location above) is kept
-  // outside the `if(strats.length)` block above so it still renders even
-  // on days with no strategies. Greeks by Moneyness now pairs with it in
-  // the same 2-column row instead of sharing a row with Strategy Payoff
-  // (which now pairs with the Institutional F&O Simulator instead — see
-  // that grid earlier in this function) — moving it here also means it's
-  // no longer gated behind `strats.length` the way it was as Strategy
-  // Payoff's neighbor, so it stays visible even on days with no
-  // strategies, same as FII/DII already does. row2's CSS (layout.css)
-  // still assumes 3 tracks (1.3fr 1fr 1fr), so the inline override below
-  // splits this row 1fr/1fr for these two cards instead of leaving a dead
-  // third column.
+  // ── TIER 2: Greeks by Moneyness + Institutional Activity Crux ──
+  // Institutional Activity Crux (moved here — see the reciprocal note at
+  // #oi-flow-section above) is kept outside the `if(strats.length)` block
+  // above so it still renders even on days with no strategies, same as
+  // it already did in its previous slot. Greeks by Moneyness stays here
+  // unchanged — it's no longer gated behind `strats.length` the way it
+  // was as Strategy Payoff's neighbor, so it stays visible even on days
+  // with no strategies. row2's CSS (layout.css) still assumes 3 tracks
+  // (1.3fr 1fr 1fr), so the inline override below splits this row
+  // 1fr/1fr for these two cards instead of leaving a dead third column.
   h += `<div id="sec-tier2" class="row2" style="grid-template-columns:1fr 1fr;align-items:stretch;">
     <div id="sec-greeks-moneyness" class="section-card sc-violet" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
       <div class="section-header"><span class="section-title"><span class="section-icon">Δ</span>Greeks by Moneyness</span></div>
@@ -743,7 +753,7 @@ ChainView.prototype.renderDashboard = function(d) {
         <canvas id="greeksChart" role="img" aria-label="Line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain.">Delta rises steadily from OTM to ITM. Gamma, theta decay, and vega all peak at the at-the-money strike and fall off toward both deep ITM and deep OTM.</canvas>
       </div>
     </div>
-    ${buildFiiDiiSummaryCard(d)}
+    ${app.exec.buildInstitutionalActivitySummaryCard(d)}
   </div>`;
 
 

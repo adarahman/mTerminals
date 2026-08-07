@@ -587,11 +587,13 @@
 <div id="dashboard" style="display: none;"></div>
 
 <!-- Greeks-by-Moneyness legend + canvas now render inside the dashboard
-     template, next to FII/DII in the tier-2 row (see renderDashboard's
-     #sec-tier2 grid) — it used to pair with Strategy Payoff, which now
-     pairs with the Institutional F&O Simulator instead. The canvas is
-     recreated on every innerHTML rebuild, so the Chart.js instance below
-     is created/re-bound lazily rather than once here. -->
+     template, next to Institutional Activity Crux in the tier-2 row (see
+     renderDashboard's #sec-tier2 grid) — it used to pair with Strategy
+     Payoff, then with FII/DII (IA redesign phase 1b moved FII/DII to
+     #oi-flow-section instead, to sit with OI Flow as a coherent Capital
+     Flow zone). The canvas is recreated on every innerHTML rebuild, so
+     the Chart.js instance below is created/re-bound lazily rather than
+     once here. -->
 <!-- Phase 5: EventBus. Zero-dependency, loads first so every module's
      `if (window.eventBus) window.eventBus.emit(...)` guard is always true
      regardless of load order after this point. -->

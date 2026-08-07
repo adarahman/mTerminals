@@ -15,6 +15,7 @@ from nse_eod_fetch import fetch_all_eod, is_trading_day
 from analytics.fii_dii_sentiment import get_report_for_trading_day
 from analytics.nse_fii_dii_flow_fetch import record_today_flow, get_flow_series
 from analytics.fii_dii_market_bias import get_market_bias_report
+from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
 
 import numpy as np
 import orjson
@@ -2403,6 +2404,12 @@ async def engine_loop():
             if _smartapi_aggregator is not None:
                 _smartapi_aggregator.reset_session()
                 print(f"[smartapi] Reset OI session baseline for new trading day {now.date()}", flush=True)
+            # Futures OI session baseline (Market Regime input) — same
+            # per-day reset as the option-chain aggregator above, see
+            # oi/futures_oi_tracker.py's class docstring for why this is a
+            # separate tracker rather than a field on _smartapi_aggregator.
+            _get_futures_oi_tracker().reset_session()
+            print(f"[futures_oi] Reset futures OI session baseline for new trading day {now.date()}", flush=True)
 
         if (
             is_trading_day(now)

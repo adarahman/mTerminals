@@ -363,6 +363,11 @@ def _build_chain_rows(master, atm_strike, bid_ask_map, capital_map=None):
             "peDeltaExposure":  _r(cm.get("pe_delta_exposure",   0), 2),
             "ceGammaExposure":  _r(cm.get("ce_gamma_exposure",   0), 2),
             "peGammaExposure":  _r(cm.get("pe_gamma_exposure",   0), 2),
+            # oi.footprint_score.compute_footprint_score() — percentile-
+            # ranked composite, "how loud is this strike right now vs the
+            # rest of the currently-visible chain" (see that module's
+            # docstring for why percentile rank rather than a fixed scale).
+            "footprintScore":   _r(cm.get("footprint_score", 0), 1),
         })
     return rows
 
@@ -800,6 +805,15 @@ try:
 except ImportError:
     get_market_bias_report = None
 
+from analytics.smart_money_summary import compute_smart_money_summary
+from analytics.capital_futures_confirmation import (
+    classify_capital_vs_futures, compute_capital_confirmation,
+    detect_futures_options_divergence,
+)
+from oi.footprint_score import (
+    compute_footprint_score, rank_footprint_strikes, compute_capital_concentration,
+)
+
 try:
     from brokers.market_data import market_data
 except ImportError:
@@ -918,7 +932,12 @@ def export_dashboard_json(
     bid_ask_map = _build_bid_ask_map(df_clean)
 
     # ── 4. Chain rows ─────────────────────────────────────────────────
-    capital_map = _build_capital_map(ctx_dict.get("capital_metrics"))
+    # footprint_score wrapping added here (not inside _build_capital_map
+    # itself) so _build_capital_map stays a pure "key this df by strike"
+    # helper — compute_footprint_score() is the thing that actually adds
+    # the column, same separation compute_capital_metrics()/
+    # compute_chain_metrics() already keep.
+    capital_map = _build_capital_map(compute_footprint_score(ctx_dict.get("capital_metrics")))
     chain_rows = _build_chain_rows(master, atm_strike, bid_ask_map, capital_map)
 
     # ── 5. Compute Volume Changes ──────────────────────────────────────
@@ -1133,7 +1152,7 @@ def export_dashboard_json(
                         ex_atm = _to_int(
                             valid_strikes.iloc[(valid_strikes - ex_spot).abs().argmin()]
                         )
-                ex_capital_map = _build_capital_map(ex_ctx.get("capital_metrics"))
+                ex_capital_map = _build_capital_map(compute_footprint_score(ex_ctx.get("capital_metrics")))
                 ex_rows = _build_chain_rows(ex_master, ex_atm, ex_ba, ex_capital_map)
                 # extra_chains entries don't run the volume-change snapshot
                 # pass (that's only computed for the primary chain) — keep
@@ -1220,6 +1239,60 @@ def export_dashboard_json(
         if capital_df_for_rollup is not None and not capital_df_for_rollup.empty
         else {}
     )
+
+    # ── 9d. Smart Money Summary (Executive Card) ────────────────────────
+    # Rollup of Market Regime + the capital_summary just computed above —
+    # see analytics/smart_money_summary.py for why footprintScore isn't
+    # included yet.
+    smart_money_summary = compute_smart_money_summary(
+        market_regime=ctx_dict.get("market_regime") or {},
+        capital_summary=capital_summary,
+        fut_oi_chg_pct=ctx_dict.get("fut_oi_chg_pct", 0.0),
+    )
+
+    # ── 9e. Capital vs Futures OI / Capital Confirmation / Futures-Options
+    # Divergence (Phase B) ───────────────────────────────────────────────
+    # All three reuse market_regime + capital_summary above and fut_oi_chg
+    # off ctx_dict — no new per-strike computation. volume_ratio is a
+    # lightweight total-volume/total-OI read straight off the same
+    # capital_df_for_rollup used for capital_summary, not a new fetch.
+    _regime_label = (ctx_dict.get("market_regime") or {}).get("regime", "Indeterminate")
+    capital_vs_futures = classify_capital_vs_futures(
+        net_capital_flow=capital_summary.get("net_capital_flow", 0.0),
+        fut_oi_chg=ctx_dict.get("fut_oi_chg", 0.0),
+    ) if capital_summary else {}
+
+    _volume_ratio = None
+    if capital_df_for_rollup is not None and not capital_df_for_rollup.empty:
+        _tot_vol = float(capital_df_for_rollup["ce_volume"].sum(skipna=True) +
+                          capital_df_for_rollup["pe_volume"].sum(skipna=True))
+        _tot_oi = float(capital_df_for_rollup["ce_oi"].sum(skipna=True) +
+                         capital_df_for_rollup["pe_oi"].sum(skipna=True))
+        _volume_ratio = (_tot_vol / _tot_oi) if _tot_oi > 0 else None
+
+    capital_confirmation = compute_capital_confirmation(
+        net_capital_flow=capital_summary.get("net_capital_flow", 0.0),
+        regime=_regime_label,
+        price_chg_pct=ctx_dict.get("market_regime", {}).get("price_chg_pct", 0.0),
+        volume_ratio=_volume_ratio,
+    ) if capital_summary else {}
+
+    futures_options_divergence = detect_futures_options_divergence(
+        regime=_regime_label,
+        net_capital_flow=capital_summary.get("net_capital_flow", 0.0),
+    ) if capital_summary else {}
+
+    # ── 9f. Institutional Footprint Score ranking + Capital Concentration
+    # (Phase C) ──────────────────────────────────────────────────────────
+    # Per-strike footprintScore itself is already attached to each chain
+    # row above (see the capital_map wrapping at "4. Chain rows"); this is
+    # just the top-N ranking + concentration % for the Executive card,
+    # reusing that same footprint-scored df rather than recomputing it a
+    # second time.
+    _footprint_df = compute_footprint_score(capital_df_for_rollup) if capital_df_for_rollup is not None else None
+    footprint_ranked = rank_footprint_strikes(_footprint_df, top_n=8) if _footprint_df is not None else []
+    capital_concentration = compute_capital_concentration(capital_df_for_rollup, top_n=5) \
+        if capital_df_for_rollup is not None else {}
 
     # ── 10. Full payload ──────────────────────────────────────────────
     payload = {
@@ -1334,6 +1407,20 @@ def export_dashboard_json(
         # here on the same once/day cadence so the main dashboard's FII/DII
         # summary card can show it without needing that relay connection.
         "fiiDiiBias": _get_cached_fii_dii_bias() or {},
+        # ── Market Regime (Price vs Futures OI) — Executive card ──────────
+        # Tick-fresh (not day-cached like fiiDiiBias above) — see
+        # analytics/market_regime.py. {} only if engine_result somehow ran
+        # without this field (defensive; market_regime always builds one).
+        "marketRegime": ctx_dict.get("market_regime") or {},
+        "futOi":        _r(ctx_dict.get("fut_oi", 0.0), 0),
+        "futOiChg":     _r(ctx_dict.get("fut_oi_chg", 0.0), 0),
+        "futOiChgPct":  _r(ctx_dict.get("fut_oi_chg_pct", 0.0), 2),
+        "smartMoneySummary": smart_money_summary,
+        "capitalVsFutures": capital_vs_futures,
+        "capitalConfirmation": capital_confirmation,
+        "futuresOptionsDivergence": futures_options_divergence,
+        "footprintRanked": footprint_ranked,
+        "capitalConcentration": capital_concentration,
         # ── Index ticker strip data (NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX) ──
         # Fetched from NSE allIndices endpoint + BSE getScripHeaderData when relevant
         "allIndices": all_indices or [],

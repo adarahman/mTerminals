@@ -1,10 +1,10 @@
 // ============================================================
 // advanced-analytics-view.js
 // "Advanced Analytics" — one collapsed-by-default <details class="card">
-// on the main dashboard, tucking seven deep-dive views behind a single
+// on the main dashboard, tucking nine deep-dive views behind a single
 // expand so the always-visible dashboard stays readable for new users:
-//   0. Conviction Multiplier  4. OI Velocity
-//   1. Smart Money ranking    5. Per-strike Greeks
+//   0. Conviction Multiplier  4. OI Velocity       8. Capital Confirmation
+//   1. Smart Money ranking    5. Per-strike Greeks 9. Futures-Options Divergence
 //   2. IV Rank details        6. Scenario P&L
 //   3. GEX table
 // Each sub-card is a compact, self-contained read built off data already
@@ -215,6 +215,73 @@ function _aaScenarioPnlHtml(d) {
     'Long ATM straddle payoff if held to expiry, per spot-move scenario — not a live mark-to-market re-price.');
 }
 
+// ── 8. Capital Confirmation ──
+// analytics/capital_futures_confirmation.py's compute_capital_confirmation()
+// output (spec item #3) — three-vote agreement check (capital flow /
+// market regime / price) with an elevated-volume upgrade from Weak to
+// Confirmed. See that module's docstring for the vote definitions.
+function _aaCapitalConfirmationHtml(d) {
+  const c = d.capitalConfirmation || {};
+  if (!c.confirmation) return _aaCardWrap('\u2696\ufe0f', 'Capital Confirmation', `<div class="dd-empty">No capital/regime data yet.</div>`);
+
+  const confColor = c.confirmation === 'Confirmed Bullish' ? 'var(--green)'
+    : c.confirmation === 'Confirmed Bearish' ? 'var(--red)'
+    : c.confirmation === 'Divergence' ? 'var(--amber)'
+    : 'var(--txt3)';
+
+  const voteChip = (label, vote) => {
+    const clr = vote > 0 ? 'var(--green)' : vote < 0 ? 'var(--red)' : 'var(--txt3)';
+    const txt = vote > 0 ? 'Bullish' : vote < 0 ? 'Bearish' : 'Neutral';
+    return `<div style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);">
+      <div style="font-size:9.5px;color:var(--txt3);">${label}</div>
+      <div style="font-size:11px;font-weight:700;color:${clr};">${txt}</div>
+    </div>`;
+  };
+
+  const body = `
+    <div style="font-size:14px;font-weight:700;color:${confColor};margin-bottom:8px;">${c.confirmation}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${voteChip('Capital Flow', c.capitalVote)}
+      ${voteChip('Regime', c.regimeVote)}
+      ${voteChip('Price', c.priceVote)}
+    </div>
+    ${c.volumeRatio != null ? `<div style="margin-top:8px;font-size:10.5px;color:var(--txt3);">Vol/OI ${fmtN(c.volumeRatio * 100, 1)}% — ${c.volumeElevated ? 'elevated turnover' : 'normal turnover'}</div>` : ''}`;
+
+  return _aaCardWrap('\u2696\ufe0f', 'Capital Confirmation', body,
+    'Agreement across capital flow, market regime, and price direction — elevated volume upgrades a 2/3 agreement to Confirmed.');
+}
+
+// ── 9. Futures-Options Divergence ──
+// analytics/capital_futures_confirmation.py's detect_futures_options_
+// divergence() output (spec item #4).
+function _aaFuturesOptionsDivergenceHtml(d) {
+  const fo = d.futuresOptionsDivergence || {};
+  if (!fo.status) return _aaCardWrap('\ud83d\udd00', 'Futures\u2013Options Divergence', `<div class="dd-empty">No regime/capital data yet.</div>`);
+
+  const statusColor = fo.status === 'Aligned' ? 'var(--green)'
+    : fo.status === 'Insufficient Data' ? 'var(--txt3)'
+    : 'var(--amber)';
+
+  const sideChip = (label, side) => {
+    const clr = side === 'Bullish' ? 'var(--green)' : side === 'Bearish' ? 'var(--red)' : 'var(--txt3)';
+    return `<div style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);">
+      <div style="font-size:9.5px;color:var(--txt3);">${label}</div>
+      <div style="font-size:11px;font-weight:700;color:${clr};">${side}</div>
+    </div>`;
+  };
+
+  const body = `
+    <div style="font-size:13px;font-weight:700;color:${statusColor};margin-bottom:8px;">${fo.status}</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      ${sideChip('Futures', fo.futuresSide)}
+      ${sideChip('Options', fo.optionsSide)}
+    </div>
+    <div class="story" style="color:var(--txt3);">${fo.description || ''}</div>`;
+
+  return _aaCardWrap('\ud83d\udd00', 'Futures\u2013Options Divergence', body,
+    'Flags when futures positioning and options capital flow point opposite ways \u2014 a possible trap or hedging, not fresh conviction.');
+}
+
 // ── top-level wrapper ──
 // Collapsed by default (no `open` attribute, matching every other Tier-3
 // <details class="card">), placed right after the Tier-3 row so it reads
@@ -228,7 +295,7 @@ ChainView.prototype.buildAdvancedAnalyticsHtml = function(d) {
       <span class="chev">\u25b6</span>
     </summary>
     <div class="detail-body">
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 Smart Money \u00b7 IV Rank \u00b7 GEX \u00b7 OI Velocity \u00b7 Greeks \u00b7 Scenario P&amp;L</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 Smart Money \u00b7 IV Rank \u00b7 GEX \u00b7 OI Velocity \u00b7 Greeks \u00b7 Scenario P&amp;L \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div style="grid-column:1/-1;">${buildConvictionGaugeHtml(d)}</div>
         ${_aaSmartMoneyRankingHtml(d)}
@@ -237,6 +304,8 @@ ChainView.prototype.buildAdvancedAnalyticsHtml = function(d) {
         ${_aaOiVelocityHtml(d)}
         ${_aaPerStrikeGreeksHtml(d)}
         ${_aaScenarioPnlHtml(d)}
+        ${_aaCapitalConfirmationHtml(d)}
+        ${_aaFuturesOptionsDivergenceHtml(d)}
       </div>
     </div>
   </details>`;

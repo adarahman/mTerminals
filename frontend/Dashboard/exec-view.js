@@ -106,6 +106,33 @@ class ExecView {
        reuses the exact same builder/markup as the row2 Snapshot card. -->
   ${app.chain.buildChainSummaryHtml(d)}
 
+  <!-- ── CARD 4: MARKET REGIME & SMART MONEY ── -->
+  <!-- New for the Institutional Positioning Analytics layer (spec item #1
+       Market Regime + #12 Smart Money Summary). One merged card, not two —
+       d.smartMoneySummary already embeds d.marketRegime's own regime/
+       confidence, so a separate Market Regime card would just repeat the
+       same badge a second time (same "one canonical home per metric"
+       reasoning as the Health+Story merge above). Wraps to its own row
+       under the fixed 3-col .exec-grid (layout.css) rather than forcing a
+       4-column layout onto the other three cards. -->
+  ${this.buildMarketRegimeCard(d)}
+
+  <!-- ── CARD 5: INSTITUTIONAL FOOTPRINT SCORE ── -->
+  <!-- Spec item #5. d.footprintRanked is oi.footprint_score.
+       rank_footprint_strikes()'s top-8 list, already sorted; per-strike
+       footprintScore also rides on every d.chain row (see
+       _build_chain_rows in mTerminals_json.py) for the Option Chain
+       column — not duplicated here, this card is just the Executive
+       "who's loudest right now" glance. -->
+  ${this.buildFootprintScoreCard(d)}
+
+  <!-- ── CARD 6: CAPITAL CONCENTRATION ── -->
+  <!-- Spec item #10. d.capitalConcentration is oi.footprint_score.
+       compute_capital_concentration()'s output — top-5 strikes by
+       total premium locked and what share of the visible chain's total
+       capital they hold. -->
+  ${this.buildCapitalConcentrationCard(d)}
+
 </div>
 
 <!-- FII/DII Sentiment used to render here, full-width below the exec
@@ -250,6 +277,133 @@ class ExecView {
   // DashboardPro.html and fiidii-report.js. Still uses the .fd-bias-*
   // classes (fiidii-report.css, loaded globally, not modal-scoped) rather
   // than duplicating that CSS here.
+  // ── MARKET REGIME & SMART MONEY (main dashboard card) ──
+  // d.marketRegime is analytics/market_regime.py's classify_market_regime()
+  // output, d.smartMoneySummary is analytics/smart_money_summary.py's
+  // compute_smart_money_summary() output — both computed fresh every tick
+  // in engine.py/mTerminals_json.py (NOT day-cached like fiiDiiBias above).
+  // regime === "Indeterminate" whenever there's no futures OI baseline yet
+  // (first tick of the session/contract) or the price/OI move is inside
+  // the flat-deadband — shown as a neutral "reading market…" state rather
+  // than a misleadingly confident badge.
+  buildMarketRegimeCard(d){
+  const mr = d.marketRegime || {};
+  const sm = d.smartMoneySummary || {};
+  const regime = mr.regime || 'Indeterminate';
+  const hasRegime = regime !== 'Indeterminate';
+
+  const regimeColor = {
+    'Long Build-up':  'var(--green)',
+    'Short Covering': 'var(--green)',
+    'Short Build-up': 'var(--red)',
+    'Long Unwinding': 'var(--red)',
+  }[regime] || 'var(--amber)';
+
+  const biasColor = sm.bias === 'Bullish' ? 'var(--green)'
+                   : sm.bias === 'Bearish' ? 'var(--red)'
+                   : 'var(--amber)';
+
+  const confirmTxt = sm.capitalConfirms === true  ? '✓ capital confirms'
+                    : sm.capitalConfirms === false ? '✗ capital diverges'
+                    : 'capital data pending';
+  const confirmColor = sm.capitalConfirms === true ? 'var(--green)'
+                      : sm.capitalConfirms === false ? 'var(--red)'
+                      : 'var(--txt3)';
+
+  return `
+  <div class="exec-card c-blue">
+    <div class="exec-title">🧭 Market Regime &amp; Smart Money</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="font-size:13px;font-weight:700;color:${regimeColor};">${regime}</span>
+      ${hasRegime ? `<span style="font-size:10px;color:var(--txt3);">(${mr.confidence||0}% confidence)</span>` : ''}
+    </div>
+    ${hasRegime ? this.progress('Regime Confidence', mr.confidence||0, regimeColor) : `
+    <div class="story" style="color:var(--txt3);">${mr.description || 'Reading market — waiting on futures OI baseline.'}</div>`}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div>
+        <div style="font-size:10px;color:var(--txt3);">Price Chg</div>
+        <div style="font-size:13px;font-weight:700;color:${signColor(mr.price_chg_pct,'var(--txt3)')};">${fmtSigned(mr.price_chg_pct,2)}%</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--txt3);">Futures OI Chg</div>
+        <div style="font-size:13px;font-weight:700;color:${signColor(mr.fut_oi_chg_pct,'var(--txt3)')};">${fmtSigned(mr.fut_oi_chg_pct,2)}%</div>
+      </div>
+    </div>
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:12px;font-weight:700;color:${biasColor};">${sm.bias || 'Neutral'}</span>
+        <span style="font-size:10px;color:${confirmColor};">${confirmTxt}</span>
+      </div>
+      <div class="story" style="margin-top:4px;">${sm.summary || ''}</div>
+    </div>
+  </div>`;
+}
+
+  // ── INSTITUTIONAL FOOTPRINT SCORE (main dashboard card) ──
+  // d.footprintRanked: oi.footprint_score.rank_footprint_strikes() top-8,
+  // already sorted descending. footprintScore is a percentile rank
+  // against the rest of TODAY'S visible chain (0-100), not an absolute
+  // scale — see that module's docstring for why. dominantSide flags
+  // which leg (CE/PE) is driving that strike's score.
+  buildFootprintScoreCard(d){
+  const ranked = d.footprintRanked || [];
+  if(!ranked.length){
+    return `
+  <div class="exec-card c-amber">
+    <div class="exec-title">👣 Institutional Footprint Score</div>
+    <div class="dd-empty">No footprint data yet.</div>
+  </div>`;
+  }
+  const rows = ranked.slice(0,6).map((r,i)=>{
+    const clr = r.footprintScore>=70 ? 'var(--red)' : r.footprintScore>=40 ? 'var(--amber)' : 'var(--txt3)';
+    return `
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;${i<Math.min(ranked.length,6)-1?'border-bottom:1px solid var(--border);':''}">
+      <span style="font-family:var(--mono);font-weight:600;flex:0 0 64px;">${fmtI(r.strike)}</span>
+      <span style="flex:0 0 28px;font-size:10px;color:var(--txt3);">${r.dominantSide}</span>
+      <div class="p-bar" style="flex:1;"><div class="p-fill" style="width:${r.footprintScore}%;background:${clr};"></div></div>
+      <strong style="font-size:11px;font-family:var(--mono);color:${clr};flex:0 0 34px;text-align:right;">${fmtN(r.footprintScore,0)}</strong>
+    </div>`;
+  }).join('');
+  return `
+  <div class="exec-card c-amber">
+    <div class="exec-title">👣 Institutional Footprint Score</div>
+    ${rows}
+  </div>`;
+}
+
+  // ── CAPITAL CONCENTRATION (main dashboard card) ──
+  // d.capitalConcentration: oi.footprint_score.compute_capital_
+  // concentration()'s output — top-5 strikes by total premium locked
+  // (CE+PE combined) and what % of the visible chain's whole capital
+  // they hold.
+  buildCapitalConcentrationCard(d){
+  const cc = d.capitalConcentration || {};
+  const top = cc.topStrikes || [];
+  if(!top.length){
+    return `
+  <div class="exec-card c-green">
+    <div class="exec-title">🎯 Capital Concentration</div>
+    <div class="dd-empty">No capital data yet.</div>
+  </div>`;
+  }
+  const pct = cc.concentrationPct || 0;
+  const pctColor = pct>=70 ? 'var(--red)' : pct>=45 ? 'var(--amber)' : 'var(--green)';
+  const rows = top.map((s,i)=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;${i<top.length-1?'border-bottom:1px solid var(--border);':''}">
+      <span style="font-family:var(--mono);font-weight:600;">${fmtI(s.strike)}</span>
+      <span style="font-family:var(--mono);color:var(--txt);">₹${fmtK(s.capitalLocked)}</span>
+    </div>`).join('');
+  return `
+  <div class="exec-card c-green">
+    <div class="exec-title">🎯 Capital Concentration</div>
+    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px;">
+      <span style="font-size:20px;font-weight:700;color:${pctColor};">${fmtN(pct,1)}%</span>
+      <span style="font-size:10px;color:var(--txt3);">of chain capital in top ${top.length} strikes</span>
+    </div>
+    ${rows}
+  </div>`;
+}
+
   buildFiiDiiBiasHtml(bias){
   if(!bias || !bias.asOf) return '';
   const l = (bias.overallLabel || '').toLowerCase();
