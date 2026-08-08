@@ -18,6 +18,7 @@
     "test:system-architecture": "node tools/test-system-architecture-contracts.mjs",
     "test:ui-system": "node tools/test-ui-system-contracts.mjs",
     "test:data-model": "node tools/test-data-model-contracts.mjs",
+    "test:engineering": "node tools/test-engineering-contracts.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

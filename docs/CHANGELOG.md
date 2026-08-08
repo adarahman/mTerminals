@@ -1,5 +1,14 @@
 # Architecture Changelog
 
+## Unreleased — engineering conformance
+
+- Completed all nine engineering standards against the shipped repository and
+  current v1.5.0 release line.
+- Added a focused Python correctness lint gate without forcing a broad legacy
+  formatting rewrite.
+- Added CI-enforced engineering contracts covering builds, tests, operations,
+  logging, ignored artifacts, supply-chain checks and version guidance.
+
 ## Unreleased — data-model conformance
 
 - Published a versioned, machine-readable payload contract for identity, units,

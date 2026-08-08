@@ -1,9 +1,9 @@
 # Versioning and Change Control
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -39,6 +39,10 @@ Current release line:
 - `v1.4.0` — operational readiness: deployment preflight, repeatable smoke
   checks and backup/restore incident procedures.
 - `v1.4.1` — bounded live OI-velocity history and stable pipeline cadence.
+- `v1.5.0` — published complete architecture package and release baseline.
+
+The changelog may contain later unreleased conformance work. Unreleased entries
+do not retroactively change a published tag's contents.
 
 Annotated release tags SHALL point to a commit that passed the repository's
 three CI jobs and the applicable manual smoke checklist. A tag SHALL not be

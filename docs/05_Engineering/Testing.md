@@ -1,9 +1,9 @@
 # Testing Strategy
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -52,14 +52,20 @@ Maintain representative snapshots for:
 No architecture-critical behavior is considered complete without regression coverage
 or a documented manual verification checklist.
 
-Current automated commands include:
+Current local release commands include:
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest
-cd ../frontend && npm run test:health-status
-npm run test:feed-recovery
+../.venv/bin/ruff check . --select E9,F63,F7,F82
+cd ../frontend && npm run test:engineering
+npm run build
 npm run test:e2e
 ```
 
 GitHub Actions is authoritative for Browser E2E when the local execution
 environment cannot bind the temporary static-server port.
+
+CI additionally executes every named frontend contract suite, dependency
+audits, the full backend suite and browser journeys. Tests requiring network,
+credentials or a live market SHALL be separated from deterministic release
+gates and documented as manual smoke checks.

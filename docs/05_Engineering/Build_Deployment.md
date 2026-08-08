@@ -1,9 +1,9 @@
 # Build and Deployment
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -126,7 +126,7 @@ recovery is required.
 Do not use `git reset --hard` as the normal rollback mechanism. If the
 worktree is not clean, preserve or commit the changes before switching.
 
-## v1.1.0 release checklist
+## Release checklist
 
 1. Worktree is clean and the candidate commit is pushed.
 2. Frontend contracts/build, backend pytest and Browser E2E are green in CI.
@@ -139,4 +139,5 @@ worktree is not clean, preserve or commit the changes before switching.
 7. OI Flow, Price Chart and Paper Trading smoke checks pass.
 8. Runtime state is backed up when operational policy requires it.
 9. `docs/CHANGELOG.md` describes the final candidate.
-10. Tag the verified commit as `v1.1.0` and push the tag.
+10. Create a new annotated semantic-version tag and push it; never move an
+    already-published tag.

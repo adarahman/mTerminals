@@ -1,9 +1,9 @@
 # Logging
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 

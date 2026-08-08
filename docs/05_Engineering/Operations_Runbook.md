@@ -1,5 +1,10 @@
 # Operations Runbook
 
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
+> **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
+
 ## Before starting production
 
 Run `.venv/bin/python backend/operational_readiness.py preflight` before every
@@ -50,3 +55,11 @@ backup artifacts.
    state corruption or loss.
 5. After recovery, verify feed freshness, reconnection, expiry switching,
    Strike Detail handoff and paper/live mode before closing the incident.
+
+## Escalation and evidence
+
+Record an incident owner, start/end time, affected release, user-visible impact,
+mitigation and follow-up. Preserve only bounded structured logs and health
+snapshots needed for diagnosis. Never attach `.env`, authorization headers,
+complete market payloads or account responses. Recovery is complete only after
+the health endpoint, Dashboard state and order-safety mode agree.

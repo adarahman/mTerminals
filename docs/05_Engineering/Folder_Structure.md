@@ -1,9 +1,9 @@
 # Folder Structure
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -51,3 +51,8 @@ frontend/
 - Domain calculations should migrate away from templates.
 - Bootstrap files coordinate; they do not become feature dumping grounds.
 - Styles are organized by tokens/base/layout/component/surface rather than repeated selectors.
+
+Generated `frontend/dist/`, caches, databases, logs, `.env`, model artifacts
+and runtime payloads are not editable source and remain ignored. Tests live
+beside their runtime (`backend/tests`, `frontend/tools`, `frontend/e2e`), while
+cross-cutting architecture documents remain under `docs/`.

@@ -1,9 +1,9 @@
 # Performance
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -38,3 +38,12 @@ Performance work SHOULD record:
 - chart redraw frequency.
 
 Optimize measured bottlenecks.
+
+## Current instrumentation and budgets
+
+`GET /metrics` owns process uptime, pipeline run/failure counts, latest
+pipeline duration, feed transitions and recovery counters. Frontend hot paths
+avoid unchanged writes and preserve interactive subtrees. Performance changes
+SHALL report before/after measurements; no universal millisecond budget is
+asserted until representative production traces exist. Live history SHALL be
+bounded; OI velocity retains its domain window rather than an unbounded file.
