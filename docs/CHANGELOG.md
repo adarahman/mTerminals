@@ -1,5 +1,14 @@
 # Architecture Changelog
 
+## Unreleased — data-model conformance
+
+- Published a versioned, machine-readable payload contract for identity, units,
+  nullability, provenance and freshness ownership.
+- Completed the feed, option, Greeks, capital, institutional, decision and
+  derived-metric model specifications against the shipped implementation.
+- Added CI enforcement for all seven data-model contracts and critical unit,
+  baseline, missing-value and decision-provenance invariants.
+
 ## Unreleased — UI system conformance
 
 - Replaced remaining loaded clickable text controls with labeled native buttons.

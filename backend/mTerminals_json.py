@@ -1325,6 +1325,38 @@ def export_dashboard_json(
 
     # ── 10. Full payload ──────────────────────────────────────────────
     payload = {
+        "dataContract": {
+            "schemaVersion": "1.0.0",
+            "rowIdentity": ["symbol", "expiry", "strike"],
+            "optionSideNamespaces": ["ce", "pe"],
+            "units": {
+                "oi": "lot_scaled_underlying_quantity",
+                "changeOi": "lot_scaled_underlying_quantity",
+                "volume": "contracts",
+                "price": "INR_per_underlying_unit",
+                "iv": "percent_points",
+                "delta": "underlying_units_per_price_unit",
+                "gamma": "delta_change_per_price_unit",
+                "theta": "INR_per_day_per_lot",
+                "vega": "INR_per_volatility_point_per_lot",
+                "capital": "INR",
+            },
+            "nullability": {
+                "missingMarketValue": None,
+                "unverifiedGreekExposure": None,
+                "zeroMeaning": "observed_or_computed_zero",
+            },
+            "provenance": {
+                "chain": "exchange_or_broker_market_feed",
+                "greeks": "canonical_analytics_engine",
+                "capital": "oi.capital_metrics",
+                "decision": "decision.DecisionEngine",
+            },
+            "freshness": {
+                "observedAtField": "lastUpdated",
+                "transportStateOwnedBy": "websocket_envelope",
+            },
+        },
         "symbol":        str(SYMBOL),
         "spot":          spot,
         "spotChange":    _r(ctx_dict.get("spot_change",  0), 2),

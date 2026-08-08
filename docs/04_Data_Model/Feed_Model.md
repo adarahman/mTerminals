@@ -1,30 +1,30 @@
 # Feed Model
 
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented and CI-enforced
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
-> **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
+## Envelope and state
 
+WebSocket full and delta envelopes carry `type`, `version`, and payload data.
+Full snapshots establish a baseline; deltas identify that same baseline. The
+canonical snapshot carries `symbol`, `expiry`, and `lastUpdated`. Status
+messages are transport controls, not market snapshots.
 
-## Canonical feed envelope
+Client states are connecting, live, partial, stale, disconnected and
+recovering. The shared market store owns state; individual screens consume it.
 
-A transport payload SHOULD identify:
-- type (`full`, `delta`, status);
-- timestamp;
-- symbol/context;
-- state/snapshot version where practical;
-- payload data.
+## Delta and freshness rules
 
-## Client states
+A client SHALL reject a delta whose version does not match its active full
+baseline and reconnect for recovery. Symbol or expiry changes invalidate the
+old baseline. Arrays replace by default; keyed chain merging is allowed only
+when full `symbol + expiry + strike` identity remains intact.
 
-connecting, live, partial, stale, disconnected, recovering.
+`lastUpdated` is the observation/export timestamp. Freshness tolerance is a
+domain setting. Consumers SHALL NOT infer freshness from an animated UI
+indicator. Missing snapshots expose degraded state and never invented values.
+Unknown envelope types and incompatible versions are ignored and recovered.
 
-## Delta rules
-
-A delta applies only to a compatible baseline. Keyed collections (option chain)
-merge by stable key such as strike/expiry.
-
-## Freshness
-
-Freshness tolerance is a product/domain setting, not inferred from UI animation.
+**Owner:** backend exporter and WebSocket transport. **Approved consumer:**
+shared market store, which fans canonical state out to screens.

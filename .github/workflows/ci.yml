@@ -43,6 +43,7 @@ jobs:
           npm run test:ci-supply-chain
           npm run test:system-architecture
           npm run test:ui-system
+          npm run test:data-model
       - run: npm run build
 
   backend:

@@ -17,6 +17,7 @@
     "test:ci-supply-chain": "node tools/test-ci-supply-chain.mjs",
     "test:system-architecture": "node tools/test-system-architecture-contracts.mjs",
     "test:ui-system": "node tools/test-ui-system-contracts.mjs",
+    "test:data-model": "node tools/test-data-model-contracts.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

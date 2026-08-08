@@ -1,23 +1,26 @@
 # Decision Model
 
+> **Product:** mTerminals
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented and CI-enforced
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
-> **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
+## Canonical object
 
+A decision exposes bias and strength, action/type, confidence, trade grade,
+evidence contributors, active signals, warnings, important levels, strategy,
+execution recommendation, timestamp, state version and degraded-input flags.
+Confidence is bounded evidence confidence, not a probability of profit.
 
-A decision object SHOULD expose:
-- bias/action;
-- confidence;
-- trade grade;
-- evidence contributors;
-- warnings;
-- important levels;
-- strategy recommendation;
-- timestamp/version;
-- degraded-input flags.
+## Provenance and safety
 
-Confidence is not a profit guarantee.
+`decisionTimestamp` and `stateVersion` bind the decision to one exported market
+state. `evidenceCoverage`, `contributors`, and `missingInputs` explain its data
+quality. Missing critical evidence forces `degraded=true`, disables execution,
+and produces a WAIT/caution outcome. UI visibility does not affect decision
+state and the frontend SHALL NOT recompute confidence.
 
-Decision state is derived from canonical analytics and is independent of UI visibility.
+Live decision output is derived only from canonical live analytics. Scenario
+adjustments remain isolated and cannot mutate the decision baseline.
+
+**Owner:** `decision.DecisionEngine`. **Approved consumers:** decision view,
+strategy presentation, guarded automation, snapshot replay and backtests.
