@@ -234,10 +234,7 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
       badgeEl.textContent = `${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}% (${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)})`;
     }
     const tickerEl = document.getElementById('index-ticker-bar');
-    if (tickerEl) {
-      const html = renderIndexTicker(d);
-      if (tickerEl.outerHTML !== html) tickerEl.outerHTML = html;
-    }
+    if (tickerEl && window.patchIndexTicker) patchIndexTicker(d);
     const dteEl = document.getElementById('dte-display');
     if (dteEl) dteEl.textContent = (d.dte||0) + 'd';
     const timeEl = document.getElementById('time-display');

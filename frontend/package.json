@@ -15,6 +15,7 @@
     "test:health-status": "node tools/test-health-status-contracts.mjs",
     "test:feed-recovery": "node tools/test-feed-recovery.mjs",
     "test:ci-supply-chain": "node tools/test-ci-supply-chain.mjs",
+    "test:system-architecture": "node tools/test-system-architecture-contracts.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

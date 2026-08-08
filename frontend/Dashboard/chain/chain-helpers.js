@@ -144,7 +144,7 @@ function renderIndexTicker(d) {
   const vixChgHtml = d.indiaVixChgPct !== undefined
     ? `<span class="idx-pill-chg ${vixUp ? 'up' : 'down'}">${vixUp ? '▲' : '▼'}${Math.abs(d.indiaVixChgPct).toFixed(2)}%</span>`
     : '';
-  const vixPill = `<div class="idx-pill idx-pill-vix" title="India VIX">
+  const vixPill = `<div class="idx-pill idx-pill-vix" data-index-symbol="VIX" title="India VIX">
     <span class="idx-pill-sym">VIX</span>
     <span class="idx-pill-val" style="color:${vixColor};">${fmtN(d.indiaVix, 1)}</span>
     ${vixChgHtml}
@@ -169,7 +169,7 @@ function renderIndexTicker(d) {
       const backendSymbol = idx.BackendSymbol || idx.Symbol;
       const displayName = idx.Symbol;
 
-      return `<button type="button" class="idx-pill" onclick="switchActiveIndex('${backendSymbol}')" title="Switch to ${displayName}">
+      return `<button type="button" class="idx-pill" data-index-symbol="${backendSymbol}" onclick="switchActiveIndex('${backendSymbol}')" title="Switch to ${displayName}">
         <span class="idx-pill-sym">${displayName}</span>
         <span class="idx-pill-val">${fmtI(idx["Last Price"])}</span>
         <span class="idx-pill-chg ${up ? 'up' : 'down'}">${up ? '▲' : '▼'}${Math.abs(pChange).toFixed(2)}%</span>
@@ -177,6 +177,56 @@ function renderIndexTicker(d) {
     }).join('');
 
   return `<div class="index-ticker" id="index-ticker-bar">${vixPill}${pills}</div>`;
+}
+
+// Patch the frequently-changing quote values without replacing ticker buttons.
+// A structural rebuild is reserved for an actual change to the available index
+// set; routine quote ticks retain the same DOM nodes and cannot cancel a click.
+function patchIndexTicker(d) {
+  const ticker = document.getElementById('index-ticker-bar');
+  if (!ticker) return;
+  const active = d.symbol || 'NIFTY';
+  const indices = (d.allIndices || []).filter((idx) => (idx.BackendSymbol || idx.Symbol) !== active);
+  const expected = ['VIX'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
+  const existing = Array.from(ticker.querySelectorAll('[data-index-symbol]'))
+    .map((el) => el.dataset.indexSymbol);
+
+  if (expected.join('|') !== existing.join('|')) {
+    const fresh = renderIndexTicker(d);
+    const start = fresh.indexOf('>') + 1;
+    ticker.innerHTML = fresh.slice(start, fresh.lastIndexOf('</div>'));
+    return;
+  }
+
+  const vix = ticker.querySelector('[data-index-symbol="VIX"]');
+  if (vix) {
+    const value = vix.querySelector('.idx-pill-val');
+    const change = vix.querySelector('.idx-pill-chg');
+    const pct = Number(d.indiaVixChgPct || 0);
+    const regime = String(d.vixRegime || '').toLowerCase();
+    if (value) {
+      value.textContent = fmtN(d.indiaVix, 1);
+      value.style.color = regime === 'high' ? '#FF6B6B' : regime === 'low' ? '#20C997' : '#FFD43B';
+    }
+    if (change && d.indiaVixChgPct !== undefined) {
+      change.className = 'idx-pill-chg ' + (pct >= 0 ? 'up' : 'down');
+      change.textContent = `${pct >= 0 ? '▲' : '▼'}${Math.abs(pct).toFixed(2)}%`;
+    }
+  }
+
+  indices.forEach((idx) => {
+    const symbol = idx.BackendSymbol || idx.Symbol;
+    const pill = ticker.querySelector(`[data-index-symbol="${symbol}"]`);
+    if (!pill) return;
+    const value = pill.querySelector('.idx-pill-val');
+    const change = pill.querySelector('.idx-pill-chg');
+    const pct = parseFloat(idx['% Change']) || 0;
+    if (value) value.textContent = fmtI(idx['Last Price']);
+    if (change) {
+      change.className = 'idx-pill-chg ' + (pct >= 0 ? 'up' : 'down');
+      change.textContent = `${pct >= 0 ? '▲' : '▼'}${Math.abs(pct).toFixed(2)}%`;
+    }
+  });
 }
 // ── EXPIRY SELECT RE-PARENTING ──
 // #expirySelect lives once in the static DOM (see #expiry-select-holder in
@@ -301,6 +351,7 @@ function onPriceSourcePicked(val){
 window.onPriceSourcePicked = onPriceSourcePicked;
 
 window.renderIndexTicker = renderIndexTicker;
+window.patchIndexTicker = patchIndexTicker;
 
 // deepMerge() and applyDelta() live in market-store.js, used only by
 // MarketStore.ingest(). See that file for both implementations.
