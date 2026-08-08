@@ -1,9 +1,9 @@
 # mTerminals Architecture — Master Index
 
 
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Product:** mTerminals
+> **Architecture baseline:** mTerminals v1.6.0
+> **Status:** Implementation-aligned and CI-enforced
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -45,6 +45,19 @@ versioning, build and deployment.
 The `06_Diagrams/` directory contains Mermaid diagrams that can render directly in
 GitHub and many Markdown editors.
 
+## Audits
+
+`07_Audits/` preserves the original 2026-08-07 PDS-01 audit and the current
+v1.2 closure audit. The historical file is explicitly superseded; the current
+audit is the release baseline.
+
+## Release and operations
+
+- `RELEASE_NOTES_v1.6.0.md` — release scope and verification baseline.
+- `CHANGELOG.md` — application/architecture change history.
+- `05_Engineering/Build_Deployment.md` — build, health and rollback procedure.
+- `05_Engineering/Operations_Runbook.md` — preflight, smoke, backup and incident response.
+
 ## Conflict precedence
 
 When documents conflict, precedence is:
@@ -60,4 +73,3 @@ When documents conflict, precedence is:
 - `Existing_Project_Docs/CHANGELOG.md` — original mTerminals project changelog.
 - `Existing_Project_Docs/PROJECT-ARCHITECTURE.md` — original mTerminals project architecture document.
 - `ARCHITECTURE_CHANGELOG.md` — changelog for this new professional architecture package.
-

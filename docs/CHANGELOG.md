@@ -1,6 +1,8 @@
 # Architecture Changelog
 
-## Unreleased — audit closure
+## 2026-08-08 — mTerminals v1.6.0 architecture conformance
+
+### Audit closure
 
 - Preserved the 2026-08-07 PDS-01 audit as an explicitly superseded historical
   record and published a current PDS-01 v1.3 compliance audit.
@@ -9,7 +11,7 @@
 - Added CI checks tying audit closure claims to implementation evidence and
   documented triggers for the two residual performance optimizations.
 
-## Unreleased — diagram conformance
+### Diagram conformance
 
 - Rebuilt all nine architecture diagrams against the implemented v1.5 system.
 - Added coherent baseline recovery, session overlays, execution gates, complete
@@ -17,7 +19,7 @@
 - Added CI checks for diagram presence, Mermaid fencing and critical
   architecture relationships.
 
-## Unreleased — engineering conformance
+### Engineering conformance
 
 - Completed all nine engineering standards against the shipped repository and
   current v1.5.0 release line.
@@ -26,7 +28,7 @@
 - Added CI-enforced engineering contracts covering builds, tests, operations,
   logging, ignored artifacts, supply-chain checks and version guidance.
 
-## Unreleased — data-model conformance
+### Data-model conformance
 
 - Published a versioned, machine-readable payload contract for identity, units,
   nullability, provenance and freshness ownership.
@@ -35,7 +37,7 @@
 - Added CI enforcement for all seven data-model contracts and critical unit,
   baseline, missing-value and decision-provenance invariants.
 
-## Unreleased — UI system conformance
+### UI system conformance
 
 - Replaced remaining loaded clickable text controls with labeled native buttons.
 - Added accessible questions, units and fallback descriptions to every shipped canvas.
@@ -43,7 +45,7 @@
   motion, modals, responsive behavior and documentation status.
 - Recorded implementation status across the complete UI-system package.
 
-## Unreleased — system architecture conformance
+### System architecture conformance
 
 - Added versioned full/delta baselines with automatic coherent recovery.
 - Converted semantic market/navigation/modal events to compact payloads.
@@ -51,7 +53,13 @@
 - Documented canonical unit boundaries and implementation status across the
   complete system-architecture package.
 
-## Unreleased — mTerminals v1.4.1 OI-history performance fix
+## 2026-08-08 — mTerminals v1.5.0 architecture release
+
+- Published the complete architecture package baseline and the corrected
+  Dashboard implementation audit.
+- Improved Strike Detail context and dedicated Option Chain handoff.
+
+## 2026-08-08 — mTerminals v1.4.1 OI-history performance fix
 
 - Bounded live OI-velocity history to 35 minutes, removed duplicate per-tick
   appends, and preserved the former multi-million-row file as a legacy archive.

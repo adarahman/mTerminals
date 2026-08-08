@@ -26,7 +26,7 @@ const checks = [
   ['runtime readiness provides preflight and smoke', readiness.includes('preflight') && readiness.includes('smoke_health')],
   ['structured logging redacts secrets', logging.includes('RedactSensitiveHeaders') && logging.includes('StructuredFormatter')],
   ['generated and sensitive artifacts stay untracked', ['dist','*.log','.env','runtime/**'].every((entry) => gitignore.includes(entry))],
-  ['version guidance includes the current v1.5.0 release', docs.some((doc) => doc.includes('v1.5.0'))],
+  ['version guidance includes the current v1.6.0 release', docs.some((doc) => doc.includes('v1.6.0'))],
 ];
 
 let failed = 0;

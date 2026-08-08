@@ -1,5 +1,14 @@
 # Architecture Changelog
 
+## 2026-08-08 — v1.6.0 implementation conformance
+
+- Closed the system architecture, UI system, data model, engineering, diagrams
+  and Dashboard audit packages against the shipped implementation.
+- Added CI-enforced contracts for every completed documentation package.
+- Published a machine-readable data boundary, coherent feed baseline recovery,
+  current architecture diagrams and a closed PDS-01 v1.2 audit.
+- Reconciled the repository README, master index, changelog and release notes.
+
 ## 2026-08-07 — Complete Architecture Package 1.0
 
 - Added master index and package guide.

@@ -7,8 +7,8 @@ backend for AngelOne (SmartAPI).
 
 ```bash
 pip install -e .
-# or, without an editable install:
-pip install -r requirements.txt
+# development/test dependencies:
+pip install -e ".[dev]"
 ```
 
 Requires Python ≥3.10.
@@ -56,8 +56,10 @@ pip install -e ".[dev]"
 pytest
 ```
 
-(See `tests/` — currently a starting skeleton, not full coverage. Expand
-alongside new changes rather than treating it as complete.)
+The suite currently contains 205 deterministic tests spanning decision, risk,
+capital, SmartAPI adapters, paper/live order guards, reconciliation, backtest,
+health, logging, readiness and architecture boundaries. GitHub CI is the
+authoritative release result.
 
 ## Notes
 

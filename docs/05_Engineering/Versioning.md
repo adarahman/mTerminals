@@ -40,6 +40,8 @@ Current release line:
   checks and backup/restore incident procedures.
 - `v1.4.1` — bounded live OI-velocity history and stable pipeline cadence.
 - `v1.5.0` — published complete architecture package and release baseline.
+- `v1.6.0` — implementation-conformance release across architecture, UI, data,
+  engineering, diagrams and audit evidence.
 
 The changelog may contain later unreleased conformance work. Unreleased entries
 do not retroactively change a published tag's contents.
