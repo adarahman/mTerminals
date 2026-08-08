@@ -19,7 +19,7 @@ dependencies = [
     "joblib>=1.3",
     "requests>=2.31",
     "urllib3>=2.0",
-    "aiohttp>=3.9",
+    "aiohttp>=3.14.3",
     "websocket-client>=1.7",
     "websockets>=12.0",
     "python-dotenv>=1.0",
@@ -36,6 +36,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.5",
+    "pip-audit>=2.9,<3",
 ]
 
 # Flat-layout, multiple top-level packages (decision/, oi/, risk/, brokers/,

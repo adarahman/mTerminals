@@ -14,12 +14,13 @@
     "test:design-system": "node tools/test-design-system-contracts.mjs",
     "test:health-status": "node tools/test-health-status-contracts.mjs",
     "test:feed-recovery": "node tools/test-feed-recovery.mjs",
+    "test:ci-supply-chain": "node tools/test-ci-supply-chain.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "esbuild": "^0.24.2",
-    "postcss": "^8.5.25"
+    "esbuild": "^0.28.1",
+    "postcss": "^8.5.26"
   }
 }

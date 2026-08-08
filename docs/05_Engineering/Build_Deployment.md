@@ -24,6 +24,12 @@ using esbuild/PostCSS dependencies.
 - Build input order for classic/global scripts SHALL remain explicit where order is required.
 - A production build SHOULD fail on missing declared source assets.
 - Bundle generation SHOULD preserve page-specific CSS/JS ownership.
+- External GitHub Actions SHALL be pinned to a reviewed full commit SHA with
+  the corresponding immutable release version retained as an inline comment.
+- CI SHALL fail on high/critical npm advisories and known vulnerable Python
+  packages. Lower-severity advisories SHALL be reviewed rather than hidden.
+- Dependabot update volume SHALL remain bounded so automated maintenance does
+  not crowd out product review.
 
 ## Backend packaging
 

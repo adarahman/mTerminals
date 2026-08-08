@@ -1,6 +1,15 @@
 # Architecture Changelog
 
-## Unreleased — mTerminals v1.2.0 observability
+## Unreleased — mTerminals v1.3.0 supply-chain hardening
+
+- Pinned official GitHub Actions to immutable release commit SHAs and upgraded
+  them to Node 24-compatible major releases.
+- Added blocking high-severity npm and Python vulnerability audit gates.
+- Raised vulnerable `aiohttp` and build-tool minimum versions.
+- Added bounded weekly Dependabot updates for Actions, npm and Python.
+- Added a contract test preventing floating Action tags or missing audit gates.
+
+## 2026-08-08 — mTerminals v1.2.0 observability
 
 - Added default JSON backend logs with an explicit operational field allowlist.
 - Expanded credential redaction across standard logging and SmartAPI/logzero

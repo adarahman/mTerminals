@@ -32,6 +32,10 @@ Current release line:
 - `v1.0.0` — PDS-00 through PDS-08 implementation baseline;
 - `v1.1.0` — production hardening: health visibility, feed-state reasons,
   deterministic reconnect/recovery tests and rollback readiness.
+- `v1.2.0` — observability: structured redacted logs and payload-free
+  operational metrics;
+- `v1.3.0` — supply-chain hardening: immutable CI action pins, vulnerability
+  gates and bounded automated dependency updates.
 
 Annotated release tags SHALL point to a commit that passed the repository's
 three CI jobs and the applicable manual smoke checklist. A tag SHALL not be
