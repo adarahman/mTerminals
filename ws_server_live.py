@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import threading
@@ -33,6 +34,8 @@ import market_api              # noqa: E402  (lightweight ticker-strip quotes; n
 sys.argv = _real_argv          # restore for our own argparse below
 
 from pipeline_config import RuntimeConfig  # noqa: E402
+
+logger = logging.getLogger("mterminals.server")
 
 from paper_trading import PaperTradingEngine, _instrument_key, LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from brokers.market_data import market_data
@@ -208,6 +211,7 @@ LAST_PAYLOAD = None
 LAST_PAYLOAD_AT = None
 _LAST_SENT = None
 PROCESS_STARTED_AT = datetime.now().astimezone()
+_LAST_HEALTH_LOG_STATE = None
 _NODE_SESSION = None
 # Most recent real-account funds snapshot from _funds_poll_body() below —
 # handed to newly-connected clients immediately (see ws_handler) the same
@@ -530,7 +534,17 @@ async def ws_handler(request):
     await ws.prepare(request)
     CONNECTED.add(ws)
     t0 = time.monotonic()
-    print(f"[ws] {datetime.now().isoformat(timespec='milliseconds')} New connection! Total: {len(CONNECTED)}", flush=True)
+    logger.info(
+        "dashboard websocket connected",
+        extra={
+            "event": "websocket.connected",
+            "subsystem": "websocket",
+            "status": "connected",
+            "connected_clients": len(CONNECTED),
+            "symbol": SYMBOL,
+            "expiry": EXPIRY,
+        },
+    )
 
     # dashboard.js's switchActiveIndex() reconnects with ?symbol=BANKNIFTY
     # (etc) on the WS URL when a ticker pill is clicked — see
@@ -677,8 +691,19 @@ async def ws_handler(request):
     finally:
         CONNECTED.discard(ws)
         alive_for = time.monotonic() - t0
-        print(f"[ws] {datetime.now().isoformat(timespec='milliseconds')} Client disconnected after {alive_for:.1f}s "
-              f"(close_code={ws.close_code}). Total: {len(CONNECTED)}", flush=True)
+        logger.info(
+            "dashboard websocket disconnected",
+            extra={
+                "event": "websocket.disconnected",
+                "subsystem": "websocket",
+                "status": "disconnected",
+                "connected_clients": len(CONNECTED),
+                "duration_seconds": round(alive_for, 3),
+                "reason": f"close_code={ws.close_code}",
+                "symbol": SYMBOL,
+                "expiry": EXPIRY,
+            },
+        )
     return ws
 
 
@@ -3012,9 +3037,35 @@ def _build_health_snapshot(now=None):
     }
 
 
+def _log_health_transition(snapshot):
+    """Log health changes once; repeated health polls remain quiet."""
+    global _LAST_HEALTH_LOG_STATE
+    feed = snapshot.get("marketFeed") or {}
+    reasons = tuple(snapshot.get("reasons") or ())
+    state = (snapshot.get("status"), feed.get("status"), reasons)
+    if state == _LAST_HEALTH_LOG_STATE:
+        return
+    _LAST_HEALTH_LOG_STATE = state
+    log = logger.warning if snapshot.get("status") == "degraded" else logger.info
+    log(
+        "service health transition",
+        extra={
+            "event": "health.transition",
+            "subsystem": "market_feed",
+            "status": snapshot.get("status"),
+            "reason": "; ".join(reasons) or feed.get("reason") or "",
+            "symbol": feed.get("symbol"),
+            "expiry": feed.get("expiry"),
+            "connected_clients": (snapshot.get("websocket") or {}).get("connectedClients"),
+            "age_seconds": feed.get("ageSeconds"),
+        },
+    )
+
+
 async def health_handler(request):
     """GET /health — dependency-free liveness and market freshness status."""
     snapshot = _build_health_snapshot()
+    _log_health_transition(snapshot)
     return web.json_response(snapshot, status=200 if snapshot["status"] == "ok" else 503)
 
 

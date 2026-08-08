@@ -29,6 +29,8 @@ different entry points both do it, e.g. one script importing another.
 import logging
 import os
 import re
+import json
+from datetime import datetime, timezone
 
 _DEFAULT_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _configured = False
@@ -38,6 +40,54 @@ _configured = False
 _SENSITIVE_HEADER_RE = re.compile(
     r"(['\"](?:Authorization|X-PrivateKey)['\"]\s*:\s*['\"])[^'\"]*(['\"])"
 )
+_AUTH_BEARER_RE = re.compile(
+    r"(?i)(\bauthorization\b\s*[:=]\s*)Bearer\s+[^\s,;&}\]]+"
+)
+
+_SENSITIVE_KEY = (
+    r"authorization|x-privatekey|x-private-key|api[_-]?key|apikey|"
+    r"token|jwt[_-]?token|feed[_-]?token|access[_-]?token|refresh[_-]?token|"
+    r"client[_-]?code|totp(?:[_-]?secret)?|password|passwd|pin|secret"
+)
+_SENSITIVE_QUOTED_RE = re.compile(
+    rf"(?i)(['\"]?(?:{_SENSITIVE_KEY})['\"]?\s*[:=]\s*['\"])[^'\"]*(['\"])"
+)
+_SENSITIVE_UNQUOTED_RE = re.compile(
+    rf"(?i)(\b(?:{_SENSITIVE_KEY})\b\s*[:=]\s*)(?!['\"]|\[REDACTED\])[^\s,;&}}\]]+"
+)
+
+
+def redact_sensitive_text(value) -> str:
+    """Redact credential-shaped key/value pairs in arbitrary log text."""
+    text = str(value)
+    text = _AUTH_BEARER_RE.sub(r"\1[REDACTED]", text)
+    text = _SENSITIVE_HEADER_RE.sub(r"\1[REDACTED]\2", text)
+    text = _SENSITIVE_QUOTED_RE.sub(r"\1[REDACTED]\2", text)
+    return _SENSITIVE_UNQUOTED_RE.sub(r"\1[REDACTED]", text)
+
+
+class StructuredFormatter(logging.Formatter):
+    """One-line JSON logs with a small, explicit operational field set."""
+
+    _SAFE_EXTRA_FIELDS = (
+        "event", "subsystem", "status", "reason", "symbol", "expiry",
+        "connected_clients", "age_seconds", "duration_seconds",
+    )
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": redact_sensitive_text(record.getMessage()),
+        }
+        for field in self._SAFE_EXTRA_FIELDS:
+            value = getattr(record, field, None)
+            if value is not None:
+                payload[field] = redact_sensitive_text(value) if isinstance(value, str) else value
+        if record.exc_info:
+            payload["exception"] = redact_sensitive_text(self.formatException(record.exc_info))
+        return json.dumps(payload, separators=(",", ":"), default=str)
 
 
 class RedactSensitiveHeaders(logging.Filter):
@@ -64,8 +114,9 @@ class RedactSensitiveHeaders(logging.Filter):
             msg = record.getMessage()
         except Exception:
             return True
-        if "Authorization" in msg or "X-PrivateKey" in msg:
-            record.msg = _SENSITIVE_HEADER_RE.sub(r"\1[REDACTED]\2", msg)
+        redacted = redact_sensitive_text(msg)
+        if redacted != msg:
+            record.msg = redacted
             record.args = ()
         return True
 
@@ -76,10 +127,16 @@ def _attach_credential_redaction() -> None:
     handler(s) attached directly (see RedactSensitiveHeaders' docstring
     for why). Safe to no-op if logzero isn't installed in this
     environment -- nothing here is required for the app to run."""
-    logging.getLogger().addFilter(RedactSensitiveHeaders())
+    root = logging.getLogger()
+    root_filter = RedactSensitiveHeaders()
+    root.addFilter(root_filter)
+    for handler in root.handlers:
+        handler.addFilter(RedactSensitiveHeaders())
     try:
         import logzero
         logzero.logger.addFilter(RedactSensitiveHeaders())
+        for handler in logzero.logger.handlers:
+            handler.addFilter(RedactSensitiveHeaders())
     except ImportError:
         pass
 
@@ -96,5 +153,15 @@ def configure_logging(level: str = None) -> None:
 
     resolved_level = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
     logging.basicConfig(level=resolved_level, format=_DEFAULT_FORMAT)
+    if os.getenv("LOG_FORMAT", "json").strip().lower() == "json":
+        formatter = StructuredFormatter()
+        for handler in logging.getLogger().handlers:
+            handler.setFormatter(formatter)
+        try:
+            import logzero
+            for handler in logzero.logger.handlers:
+                handler.setFormatter(formatter)
+        except ImportError:
+            pass
     _attach_credential_redaction()
     _configured = True

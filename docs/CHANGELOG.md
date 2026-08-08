@@ -1,6 +1,16 @@
 # Architecture Changelog
 
-## Unreleased — mTerminals v1.1.0 production hardening
+## Unreleased — mTerminals v1.2.0 observability
+
+- Added default JSON backend logs with an explicit operational field allowlist.
+- Expanded credential redaction across standard logging and SmartAPI/logzero
+  handlers.
+- Added structured WebSocket lifecycle and deduplicated health-transition
+  events without logging high-frequency market ticks.
+- Added deterministic tests for credential redaction, JSON formatting and
+  transition deduplication.
+
+## 2026-08-08 — mTerminals v1.1.0 production hardening
 
 - Added `GET /health` as the operational health contract for the HTTP
   service, connected Dashboard WebSocket clients, market session, canonical
