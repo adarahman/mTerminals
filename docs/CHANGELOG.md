@@ -1,5 +1,12 @@
 # Architecture Changelog
 
+## Unreleased — documentation manifest maintenance
+
+- Replaced the stale byte-size inventory with a package-level documentation
+  manifest aligned to the post-v1.6.0 repository.
+- Added CI enforcement for recursive file totals, package counts, required root
+  documents and transient metadata exclusion.
+
 ## 2026-08-08 — mTerminals v1.6.0 architecture conformance
 
 ### Audit closure

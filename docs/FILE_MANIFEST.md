@@ -1,62 +1,37 @@
-# File Manifest
+# Documentation File Manifest
 
-Total files: **59**
+> **Baseline:** post-v1.6.0 documentation maintenance
+> **Status:** CI-enforced
 
-- `00_MASTER_INDEX.md` — 2,250 bytes
-- `01_Product_Architecture/PDS-00_Global_Design_System.md` — 6,019 bytes
-- `01_Product_Architecture/PDS-01_Dashboard.md` — 41,288 bytes
-- `01_Product_Architecture/PDS-02_Option_Chain.md` — 3,802 bytes
-- `01_Product_Architecture/PDS-03_Strike_Detail_Report.md` — 1,887 bytes
-- `01_Product_Architecture/PDS-04_Capital_Flow.md` — 2,347 bytes
-- `01_Product_Architecture/PDS-05_Decision_Engine.md` — 2,571 bytes
-- `01_Product_Architecture/PDS-06_Scenario_Analysis.md` — 1,494 bytes
-- `01_Product_Architecture/PDS-07_Paper_Trading.md` — 1,742 bytes
-- `01_Product_Architecture/PDS-08_Price_Chart.md` — 1,302 bytes
-- `02_System_Architecture/Component_Architecture.md` — 1,568 bytes
-- `02_System_Architecture/Data_Flow.md` — 1,168 bytes
-- `02_System_Architecture/Dependency_Graph.md` — 1,212 bytes
-- `02_System_Architecture/Event_Architecture.md` — 1,220 bytes
-- `02_System_Architecture/Information_Architecture.md` — 1,397 bytes
-- `02_System_Architecture/Metric_Ownership.md` — 2,124 bytes
-- `02_System_Architecture/Navigation_Architecture.md` — 1,278 bytes
-- `02_System_Architecture/Rendering_Architecture.md` — 1,766 bytes
-- `02_System_Architecture/State_Management.md` — 1,605 bytes
-- `02_System_Architecture/System_Architecture.md` — 3,707 bytes
-- `03_UI_System/Accessibility.md` — 564 bytes
-- `03_UI_System/Animations.md` — 536 bytes
-- `03_UI_System/Cards.md` — 809 bytes
-- `03_UI_System/Charts.md` — 633 bytes
-- `03_UI_System/Colors.md` — 736 bytes
-- `03_UI_System/Layout.md` — 738 bytes
-- `03_UI_System/Modals.md` — 556 bytes
-- `03_UI_System/Responsive_Design.md` — 545 bytes
-- `03_UI_System/Tables.md` — 667 bytes
-- `03_UI_System/Typography.md` — 861 bytes
-- `04_Data_Model/Capital_Model.md` — 788 bytes
-- `04_Data_Model/Decision_Model.md` — 587 bytes
-- `04_Data_Model/Derived_Metrics.md` — 668 bytes
-- `04_Data_Model/Feed_Model.md` — 752 bytes
-- `04_Data_Model/Greeks_Model.md` — 642 bytes
-- `04_Data_Model/Institutional_Model.md` — 766 bytes
-- `04_Data_Model/Option_Data_Model.md` — 815 bytes
-- `05_Engineering/Build_Deployment.md` — 1,091 bytes
-- `05_Engineering/Coding_Standards.md` — 1,371 bytes
-- `05_Engineering/Error_Handling.md` — 899 bytes
-- `05_Engineering/Folder_Structure.md` — 1,515 bytes
-- `05_Engineering/Logging.md` — 732 bytes
-- `05_Engineering/Performance.md` — 1,061 bytes
-- `05_Engineering/Testing.md` — 1,154 bytes
-- `05_Engineering/Versioning.md` — 851 bytes
-- `06_Diagrams/Component_Tree.md` — 520 bytes
-- `06_Diagrams/Dashboard_Layout.md` — 514 bytes
-- `06_Diagrams/Event_Flow.md` — 543 bytes
-- `06_Diagrams/Metric_Dependency.md` — 537 bytes
-- `06_Diagrams/Navigation.md` — 466 bytes
-- `06_Diagrams/Rendering_Pipeline.md` — 471 bytes
-- `06_Diagrams/State_Diagram.md` — 463 bytes
-- `06_Diagrams/System_Overview.md` — 585 bytes
-- `06_Diagrams/User_Flow.md` — 548 bytes
-- `ARCHITECTURE_CHANGELOG.md` — 668 bytes
-- `Existing_Project_Docs/CHANGELOG.md` — 3,635 bytes
-- `Existing_Project_Docs/PROJECT-ARCHITECTURE.md` — 35,738 bytes
-- `README.md` — 2,448 bytes
+Total tracked documentation files: **64**.
+
+Transient `.DS_Store` files and generated build output are excluded. Byte sizes
+are deliberately not recorded because they turn ordinary edits into unrelated
+manifest churn; the durable contract is file presence and package ownership.
+
+| Package | Directory | Files | Authority |
+|---|---|---:|---|
+| Master index | `docs/` | 1 | navigation and precedence |
+| Product architecture | `01_Product_Architecture/` | 9 | PDS-00 through PDS-08 |
+| System architecture | `02_System_Architecture/` | 10 | boundaries, state, data flow and ownership |
+| UI system | `03_UI_System/` | 10 | visual, interaction and accessibility rules |
+| Data model | `04_Data_Model/` | 7 | feed, option, Greeks, capital and decision contracts |
+| Engineering | `05_Engineering/` | 9 | coding, testing, operations and release rules |
+| Diagrams | `06_Diagrams/` | 9 | implementation-aligned Mermaid views |
+| Audits | `07_Audits/` | 2 | historical and current PDS-01 audits |
+| Preserved project docs | `Existing_Project_Docs/` | 2 | original snapshot references |
+| Root documentation | `docs/` | 5 | README, changelogs, manifest and current release notes |
+
+## Root documentation files
+
+- `00_MASTER_INDEX.md`
+- `README.md`
+- `CHANGELOG.md`
+- `ARCHITECTURE_CHANGELOG.md`
+- `FILE_MANIFEST.md`
+- `RELEASE_NOTES_v1.6.0.md`
+
+The master index is counted separately from the five root-support files in the
+table. Package file names are enforced by their dedicated CI contract suites;
+this manifest gate verifies the recursive total, package counts and required
+root documents.

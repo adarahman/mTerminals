@@ -22,6 +22,7 @@
     "test:diagrams": "node tools/test-diagram-contracts.mjs",
     "test:audits": "node tools/test-audit-contracts.mjs",
     "test:release": "node tools/test-release-contracts.mjs",
+    "test:manifest": "node tools/test-documentation-manifest.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

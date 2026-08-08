@@ -18,14 +18,14 @@ const suites = [
   'option-chain','strike-detail','capital-flow','decision','scenario',
   'paper-trading','price-chart','design-system','health-status','feed-recovery',
   'ci-supply-chain','system-architecture','ui-system','data-model','engineering',
-  'diagrams','audits','release',
+  'diagrams','audits','release','manifest',
 ];
 const checks = [
   ['release marker is semantic v1.6.0', version === '1.6.0'],
   ['root README links every architecture package', ['01_Product_Architecture','02_System_Architecture','03_UI_System','04_Data_Model','05_Engineering','06_Diagrams','07_Audits'].every((x) => rootReadme.includes(x))],
   ['entry points agree on release version', [rootReadme, docsReadme, index, changelog, notes].every((doc) => doc.includes('1.6.0'))],
   ['release notes include verification and operations', notes.includes('Verification baseline') && notes.includes('Upgrade and operations') && notes.includes('205 backend tests')],
-  ['released changelog has no stale Unreleased sections', !changelog.includes('## Unreleased')],
+  ['released changelog retains v1.6.0 and one current development section', changelog.includes('mTerminals v1.6.0 architecture conformance') && (changelog.match(/^## Unreleased/gm) || []).length <= 1],
   ['backend README reflects the real suite', backendReadme.includes('205 deterministic tests') && !backendReadme.includes('starting skeleton')],
   ['all frontend contract suites are named in CI', suites.every((suite) => workflow.includes(`npm run test:${suite}`))],
   ['release script is registered', packageJson.scripts['test:release'] === 'node tools/test-release-contracts.mjs'],

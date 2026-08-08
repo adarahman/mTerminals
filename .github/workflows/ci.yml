@@ -48,6 +48,7 @@ jobs:
           npm run test:diagrams
           npm run test:audits
           npm run test:release
+          npm run test:manifest
       - run: npm run build
 
   backend:
