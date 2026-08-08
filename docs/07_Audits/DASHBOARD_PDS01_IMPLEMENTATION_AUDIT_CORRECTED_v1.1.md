@@ -1,5 +1,10 @@
 # mTerminals — PDS-01 Dashboard Implementation Audit
 
+> **Historical record — superseded by
+> `DASHBOARD_PDS01_IMPLEMENTATION_AUDIT_v1.2.md`.** Findings and grades below
+> describe the 2026-08-07 archive baseline and SHALL NOT be read as the current
+> repository status.
+
 | Field | Value |
 |---|---|
 | **Audit baseline** | `mterminals(6).zip` |

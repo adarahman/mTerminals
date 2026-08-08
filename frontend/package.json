@@ -20,6 +20,7 @@
     "test:data-model": "node tools/test-data-model-contracts.mjs",
     "test:engineering": "node tools/test-engineering-contracts.mjs",
     "test:diagrams": "node tools/test-diagram-contracts.mjs",
+    "test:audits": "node tools/test-audit-contracts.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

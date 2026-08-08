@@ -1,5 +1,14 @@
 # Architecture Changelog
 
+## Unreleased — audit closure
+
+- Preserved the 2026-08-07 PDS-01 audit as an explicitly superseded historical
+  record and published a current PDS-01 v1.3 compliance audit.
+- Traced and dispositioned all 22 historical P0/P1/P2 findings against current
+  source, leaving no open P0/P1 contract violation.
+- Added CI checks tying audit closure claims to implementation evidence and
+  documented triggers for the two residual performance optimizations.
+
 ## Unreleased — diagram conformance
 
 - Rebuilt all nine architecture diagrams against the implemented v1.5 system.

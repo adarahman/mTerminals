@@ -46,6 +46,7 @@ jobs:
           npm run test:data-model
           npm run test:engineering
           npm run test:diagrams
+          npm run test:audits
       - run: npm run build
 
   backend:
