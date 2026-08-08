@@ -1,5 +1,13 @@
 # Architecture Changelog
 
+## Unreleased — diagram conformance
+
+- Rebuilt all nine architecture diagrams against the implemented v1.5 system.
+- Added coherent baseline recovery, session overlays, execution gates, complete
+  D-00–D-19 layout, context restoration and live/scenario separation.
+- Added CI checks for diagram presence, Mermaid fencing and critical
+  architecture relationships.
+
 ## Unreleased — engineering conformance
 
 - Completed all nine engineering standards against the shipped repository and

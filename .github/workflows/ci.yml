@@ -45,6 +45,7 @@ jobs:
           npm run test:ui-system
           npm run test:data-model
           npm run test:engineering
+          npm run test:diagrams
       - run: npm run build
 
   backend:

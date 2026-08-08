@@ -1,22 +1,27 @@
 # Component Tree
 
-
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
-> **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
-
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented and CI-enforced
 
 ```mermaid
-graph TD
-  APP[Dashboard Bootstrap] --> PM[PanelManager]
-  APP --> WS[WSManager]
-  WS --> MS[MarketStore]
-  PM --> OP[OptionChainPanel]
-  PM --> DP[DecisionPanel]
-  PM --> OI[OI Panel]
-  PM --> PP[PaperTradingPanel]
-  MS --> OP
-  MS --> DP
-  MS --> OI
+flowchart TD
+  PAGE["DashboardPro page"] --> BOOT["Dashboard bootstrap"]
+  BOOT --> DS["DataService"]
+  BOOT --> PM["PanelManager"]
+  BOOT --> MM["ModalManager"]
+  DS --> WM["WSManager"]
+  DS --> MS["MarketStore"]
+  MS --> AS["AppState"]
+  AS --> RENDER["Chain renderer"]
+  PM --> RENDER
+  RENDER --> DEC["Decision and evidence views"]
+  RENDER --> FLOW["Capital / OI flow views"]
+  RENDER --> INST["Institutional views"]
+  RENDER --> CONF["Confirmation views"]
+  MM --> DRILL["OI, Greeks, FII/DII, strike and backtest dialogs"]
+  PAGE --> TRADE["Paper trading + order entry"]
+  PAGE --> ALGO["Automation status"]
 ```
+
+The tree shows runtime ownership, not DOM nesting. `EventBus` carries semantic
+notifications beside this tree; it does not replace `MarketStore`.

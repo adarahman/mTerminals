@@ -1,22 +1,26 @@
 # Event Flow
 
-
-> **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
-> **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
-
+> **Architecture baseline:** 2026-08-08 implementation
+> **Status:** Implemented and CI-enforced
 
 ```mermaid
 sequenceDiagram
-  participant U as User
-  participant A as AppState
-  participant E as EventBus
-  participant S as Data/Store
-  participant P as Panels
-  U->>A: change expiry
-  A->>E: expiry:change
-  E->>S: request/apply context
-  S->>P: canonical update
-  P->>P: targeted patch
+  actor User
+  participant UI as UI control
+  participant State as AppState
+  participant Bus as EventBus
+  participant Data as DataService / MarketStore
+  participant View as Panels
+  User->>UI: choose symbol or expiry
+  UI->>State: update selected context
+  UI->>Bus: symbol:change or expiry:change
+  UI->>Data: reconnect with requested context
+  Data-->>Data: require coherent full baseline
+  Data->>State: commit canonical snapshot
+  Data->>Bus: market:update metadata
+  Bus->>View: invalidate affected presentation
+  View-->>User: targeted patch with context preserved
 ```
+
+Navigation and modal events carry identifiers only. Market snapshots stay in
+the canonical store rather than event payloads.
