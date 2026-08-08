@@ -477,7 +477,7 @@ def get_strike_step(strikes, default=DEFAULT_STRIKE_STEP):
 # their own full pd.read_parquet(log_path) on EVERY poll tick (5s
 # cadence), and append_json_history() rewrote the ENTIRE file back to
 # disk every tick too — 2 full reads + 1 full write per tick, with cost
-# growing linearly as the 45-day retention window fills up. Over a
+# growing linearly as the former 45-day retention window filled up. Over a
 # trading session at 5s intervals across dozens of strikes this file
 # grows into the millions of rows, and parquet has no incremental-append
 # mode, so every write serializes the whole thing. Left alone, this was
@@ -491,7 +491,14 @@ def get_strike_step(strikes, default=DEFAULT_STRIKE_STEP):
 # used for oi_snapshots.json (see _OI_SNAPSHOTS_MEM in mTerminals_json.py).
 # A short-lived crash can lose at most _FLUSH_INTERVAL_SECONDS of history,
 # which is an acceptable trade for removing per-tick disk I/O entirely.
-JSON_HISTORY_LOG_PATH = os.path.join(CACHE_DIR, "oi_history_log.parquet")
+# The original 45-day file grew to millions of rows and made every live tick
+# progressively slower because pandas copied and filtered the full frame. Keep
+# that file untouched as a legacy archive; live velocity now owns a small,
+# purpose-specific rolling store.
+LEGACY_OI_HISTORY_LOG_PATH = os.path.join(CACHE_DIR, "oi_history_log.parquet")
+JSON_HISTORY_LOG_PATH = os.path.join(CACHE_DIR, "oi_velocity_history.parquet")
+
+_VELOCITY_RETENTION_MINUTES = 35
 
 _FLUSH_INTERVAL_SECONDS = 60  # write to disk at most once per minute
 
@@ -532,11 +539,16 @@ def read_last_json_snapshot(symbol, log_path=JSON_HISTORY_LOG_PATH):
     return prev_poll
 
 
-def append_json_history(history_df, log_path=JSON_HISTORY_LOG_PATH, max_age_days=45,
-                         flush_interval_seconds=_FLUSH_INTERVAL_SECONDS):
-    """Appends new rows to the in-memory history and periodically flushes
-    to disk (at most once every `flush_interval_seconds`), instead of
-    reading + rewriting the whole parquet file on every call."""
+def append_json_history(
+    history_df,
+    log_path=JSON_HISTORY_LOG_PATH,
+    max_age_minutes=_VELOCITY_RETENTION_MINUTES,
+    flush_interval_seconds=_FLUSH_INTERVAL_SECONDS,
+):
+    """Append to the bounded live-velocity window and periodically flush.
+
+    The separate legacy archive is deliberately neither loaded nor rewritten.
+    """
     if history_df is None or history_df.empty:
         return
 
@@ -544,7 +556,7 @@ def append_json_history(history_df, log_path=JSON_HISTORY_LOG_PATH, max_age_days
     existing = _HISTORY_MEM.df
     combined = pd.concat([existing, history_df], ignore_index=True) if not existing.empty else history_df
 
-    cutoff = pd.Timestamp.now() - pd.Timedelta(days=max_age_days)
+    cutoff = pd.Timestamp.now() - pd.Timedelta(minutes=max_age_minutes)
     combined = combined[combined["snapshot_time"] >= cutoff]
 
     _HISTORY_MEM.replace(combined)

@@ -1,6 +1,11 @@
 # Architecture Changelog
 
-## Unreleased — mTerminals v1.4.0 operational readiness
+## Unreleased — mTerminals v1.4.1 OI-history performance fix
+
+- Bounded live OI-velocity history to 35 minutes, removed duplicate per-tick
+  appends, and preserved the former multi-million-row file as a legacy archive.
+
+## 2026-08-08 — mTerminals v1.4.0 operational readiness
 
 - Added a fail-fast deployment preflight for required broker settings, runtime
   storage writability, HTTP port availability and live-trading visibility.

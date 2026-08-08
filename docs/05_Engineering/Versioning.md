@@ -38,6 +38,7 @@ Current release line:
   gates and bounded automated dependency updates.
 - `v1.4.0` — operational readiness: deployment preflight, repeatable smoke
   checks and backup/restore incident procedures.
+- `v1.4.1` — bounded live OI-velocity history and stable pipeline cadence.
 
 Annotated release tags SHALL point to a commit that passed the repository's
 three CI jobs and the applicable manual smoke checklist. A tag SHALL not be
