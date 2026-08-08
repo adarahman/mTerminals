@@ -75,6 +75,7 @@ From the repository root, verify the exact candidate before restart:
 ```bash
 git status --short
 git rev-parse --short HEAD
+.venv/bin/python backend/operational_readiness.py preflight
 
 cd backend
 ../.venv/bin/python -m pytest
@@ -88,6 +89,7 @@ npm run build
 After restarting `ws_server_live.py`, verify:
 
 ```bash
+.venv/bin/python backend/operational_readiness.py smoke
 curl -i http://127.0.0.1:5500/health
 curl -sS http://127.0.0.1:5500/metrics
 ```
@@ -103,6 +105,8 @@ Confirm the Dashboard feed badge agrees with `/health`, a forced WebSocket
 disconnect recovers without a page reload, expiry switching returns a current
 chain, Strike Detail returns to the Dashboard, and Paper Trading remains in
 paper mode unless live trading was explicitly enabled.
+
+See `Operations_Runbook.md` for backup, restore and incident response.
 
 ## Rollback
 

@@ -1,6 +1,13 @@
 # Architecture Changelog
 
-## Unreleased — mTerminals v1.3.0 supply-chain hardening
+## Unreleased — mTerminals v1.4.0 operational readiness
+
+- Added a fail-fast deployment preflight for required broker settings, runtime
+  storage writability, HTTP port availability and live-trading visibility.
+- Added a repeatable post-start health smoke command.
+- Added tested backup, checksum, restore and incident-response procedures.
+
+## 2026-08-08 — mTerminals v1.3.0 supply-chain hardening
 
 - Pinned official GitHub Actions to immutable release commit SHAs and upgraded
   them to Node 24-compatible major releases.
