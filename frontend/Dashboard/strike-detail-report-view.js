@@ -24,10 +24,12 @@ class StrikeDetailReportView {
     const moneyness = distancePct == null ? '—' : (Math.abs(distancePct) < 0.05 ? 'ATM' : `${Math.abs(distancePct).toFixed(1)}% ${distancePct > 0 ? 'above' : 'below'} spot`);
     const score = this._number(row.footprintScore);
     const fs = (window.AppState && AppState.feedState) || {};
-    const feedLabel = fs.marketSession && fs.marketSession !== 'UNKNOWN' ? fs.marketSession : (fs.status || '—');
+    const feedLabel = this._feedLabel(fs);
     const feedQualification = this._feedQualification(fs, greek);
     const stamp = d.lastUpdated ? new Date(d.lastUpdated) : (fs.lastMessageAt ? new Date(fs.lastMessageAt) : null);
-    const asOf = stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleTimeString('en-IN') : '—';
+    const asOf = stamp && !Number.isNaN(stamp.getTime())
+      ? stamp.toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'})
+      : '—';
     const ceIv = row.ceIV != null ? row.ceIV : (greek && greek.iv != null ? greek.iv * 100 : null);
     const peIv = row.peIV != null ? row.peIV : (greek && greek.iv != null ? greek.iv * 100 : null);
 
@@ -35,7 +37,7 @@ class StrikeDetailReportView {
       <header class="sdr-hero" aria-labelledby="sdr-report-title">
         <div><div class="sdr-kicker">${this._escape(d.symbol || '—')} · ${this._escape(d.expiry || '—')}</div>
           <h2 id="sdr-report-title">Strike ${this._fmt(n, 0)}</h2><div class="sdr-sub">${moneyness}${atm === n ? ' · ATM' : ''}</div></div>
-        <div class="sdr-live"><strong>${this._escape(feedLabel)}</strong><span>As of ${this._escape(asOf)}</span><span>Spot ${this._fmt(spot, 2)}</span></div>
+        <div class="sdr-live"><strong>${this._escape(feedLabel)}</strong><span>Timestamp ${this._escape(asOf)}</span><span>Spot ${this._fmt(spot, 2)}</span></div>
       </header>
       ${feedQualification ? `<div class="sdr-feed-note" role="status">${this._escape(feedQualification)}</div>` : ''}
       <section class="sdr-section"><h3>Strike Summary</h3><div class="sdr-grid sdr-grid-4">
@@ -118,6 +120,10 @@ class StrikeDetailReportView {
     if (!greek) notes.push('Greeks unavailable; core chain, capital and flow remain live');
     return notes.join(' · ');
   }
+  _feedLabel(fs) {
+    const raw = fs.marketSession && fs.marketSession !== 'UNKNOWN' ? fs.marketSession : fs.status;
+    return raw ? String(raw).replaceAll('_', ' ') : '—';
+  }
   _importanceNarrative(r, score) {
     const side = this._dominant(Math.abs(this._number(r.ceCapitalFlow) || 0), Math.abs(this._number(r.peCapitalFlow) || 0));
     const level = score == null ? 'unranked' : score >= 70 ? 'high-ranked' : score >= 40 ? 'mid-ranked' : 'lower-ranked';
@@ -126,9 +132,9 @@ class StrikeDetailReportView {
   }
   _factorList(factors) {
     const labels = {capitalActivity:'Capital flow',oiChangeActivity:'OI change',turnoverActivity:'Premium turnover',gammaActivity:'Gamma exposure',deltaActivity:'Delta exposure',writingActivity:'Option writing'};
-    const ranked = Object.entries(factors || {}).map(([key,value]) => ({key,value:this._number(value)})).filter((x) => x.value != null && labels[x.key]).sort((a,b) => b.value-a.value).slice(0,3);
+    const ranked = Object.entries(factors || {}).map(([key,value]) => ({key,value:this._number(value)})).filter((x) => x.value != null && labels[x.key]).sort((a,b) => b.value-a.value);
     if (!ranked.length) return '<p class="sdr-factor-empty">Contributing factor ranks are unavailable in this feed.</p>';
-    return `<ol class="sdr-factors" aria-label="Top footprint contributors">${ranked.map((x) => `<li><span>${labels[x.key]}</span><strong>${this._fmt(x.value,1)}th percentile</strong></li>`).join('')}</ol>`;
+    return `<ol class="sdr-factors" aria-label="Footprint score contributors">${ranked.map((x) => `<li><span>${labels[x.key]}</span><strong>${this._fmt(x.value,1)}th percentile</strong></li>`).join('')}</ol>`;
   }
   _dominant(ce, pe) {
     ce = this._number(ce); pe = this._number(pe);
