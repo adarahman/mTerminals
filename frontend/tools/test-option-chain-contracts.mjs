@@ -18,6 +18,7 @@ const checks = [
   ['quick-order close has accessible label', oc.includes('aria-label="Close quick order"')],
   ['IV legend describes current IV', html.includes('<b>IV</b> implied volatility') && !html.includes('implied vol vs prior snapshot')],
   ['PDS permits paired bilateral stacks', spec.includes('paired bilateral PE/CE stacks')],
+  ['strike drawer survives compatible context replay', oc.includes('Preserve an investigation drawer') && oc.includes('row.strike === state.selectedStrike')],
 ];
 
 let failed = 0;

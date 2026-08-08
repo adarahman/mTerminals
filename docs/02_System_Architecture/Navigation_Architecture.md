@@ -46,3 +46,10 @@ strike in D-05 without opening another hierarchy.
 
 Closing a modal or detail view SHALL return to the invoking context and restore
 focus when possible.
+
+## Implementation status
+
+Modal navigation records its invoking element, traps focus while open, restores
+focus on close, and emits semantic open/close events. Symbol, expiry, range and
+strike changes publish compact context events; Strike Detail requires a canonical
+selected strike.

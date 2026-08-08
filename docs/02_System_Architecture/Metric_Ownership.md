@@ -44,3 +44,9 @@ Other displays are read-only consumers.
 - Scenario metrics use qualified names.
 - Missing canonical value is `unavailable`, not locally approximated under the same label.
 - Any ownership change requires PDS/architecture revision.
+
+## Enforcement status
+
+Decision, capital-flow, scenario, strike-detail and price-chart contract suites
+verify canonical owners and reject presentation-layer approximations under the
+same metric names. Backend dependency tests protect domain ownership boundaries.

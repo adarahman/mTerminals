@@ -1240,11 +1240,19 @@
     const contextChanged = nextContextKey !== state.contextKey;
     if (contextChanged) {
       state.needsInitialAtmCenter = true;
-      if ($("ocDrawer").classList.contains("open")) closeDrawer();
       if ($("ocTradeModal").classList.contains("open")) closeTradeModal();
     }
     state.contextKey = nextContextKey;
     state.rows = msg.rows;
+    // Preserve an investigation drawer across a late/replayed context
+    // snapshot when the selected strike still exists. Closing it eagerly
+    // races the row click and makes its actions disappear before they can
+    // be used. A trade ticket remains context-sensitive and is still
+    // closed above; a drawer whose strike vanished is closed here.
+    if (contextChanged && $("ocDrawer").classList.contains("open")
+        && !state.rows.some((row) => row.strike === state.selectedStrike)) {
+      closeDrawer();
+    }
     if (msg.symbol) state.symbol = msg.symbol;
     if (msg.spot != null) state.spot = msg.spot;
     if (msg.spotChg != null) state.spotChg = msg.spotChg;

@@ -211,6 +211,8 @@ CONNECTED = set()
 LAST_PAYLOAD = None
 LAST_PAYLOAD_AT = None
 _LAST_SENT = None
+_BASELINE_SEQ = 0
+_BASELINE_ID = None
 PROCESS_STARTED_AT = datetime.now().astimezone()
 _LAST_HEALTH_LOG_STATE = None
 METRICS = OperationalMetrics(started_at=PROCESS_STARTED_AT)
@@ -602,7 +604,9 @@ async def ws_handler(request):
         # skipped on purpose — better to wait for the next tick's real data
         # on the new symbol than hand back a snapshot of the old one.)
         if LAST_PAYLOAD is not None:
-            msg_str = orjson.dumps({"type": "full", "payload": LAST_PAYLOAD}, default=_json_default).decode()
+            msg_str = orjson.dumps({
+                "type": "full", "payload": LAST_PAYLOAD, "version": _BASELINE_ID,
+            }, default=_json_default).decode()
             await ws.send_str(msg_str)
         if INDEX_QUOTES:
             msg_str = orjson.dumps({"type": "indexQuotes", "payload": INDEX_QUOTES}, default=_json_default).decode()
@@ -1077,6 +1081,17 @@ async def _broadcast_reconciliation_alert(result, source: str):
 
 
 async def broadcast(message):
+    global _BASELINE_SEQ, _BASELINE_ID
+    if isinstance(message, dict) and message.get("type") == "full":
+        _BASELINE_SEQ += 1
+        payload = message.get("payload") or {}
+        _BASELINE_ID = f"{payload.get('symbol', '')}:{payload.get('expiry', '')}:{_BASELINE_SEQ}"
+        message = {**message, "version": _BASELINE_ID}
+    elif isinstance(message, dict) and message.get("type") == "delta":
+        if _BASELINE_ID is None:
+            print("[ws] dropping delta without an established full-snapshot baseline", flush=True)
+            return
+        message = {**message, "baseVersion": _BASELINE_ID}
     if not CONNECTED:
         return
 

@@ -46,3 +46,13 @@ expiry selector
    → MarketStore canonical state
    → affected panels refresh
 ```
+
+## Implemented payload contracts
+
+- `market:update`: `{ messageType, version }`; consumers read `MarketStore`.
+- `decision:update`: `{ stateVersion }`; decision truth remains in market state.
+- `feed:status`: the small `AppState.feedState` lifecycle object.
+- `symbol:change`, `expiry:change`, `range:change`: changed identifier only.
+- `strike:select`: `{ strike, source }`.
+- `modal:open`, `modal:close`: `{ id }`.
+- `paper:portfolio-update`: `{ source }`; account truth remains in market state.

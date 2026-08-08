@@ -1,5 +1,13 @@
 # Architecture Changelog
 
+## Unreleased — system architecture conformance
+
+- Added versioned full/delta baselines with automatic coherent recovery.
+- Converted semantic market/navigation/modal events to compact payloads.
+- Added CI-enforced backend dependency direction and frontend architecture contracts.
+- Documented canonical unit boundaries and implementation status across the
+  complete system-architecture package.
+
 ## Unreleased — mTerminals v1.4.1 OI-history performance fix
 
 - Bounded live OI-velocity history to 35 minutes, removed duplicate per-tick

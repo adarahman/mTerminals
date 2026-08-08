@@ -62,3 +62,9 @@ without requiring a whole-page rerender.
 
 Pure builders/view-models are acceptable. DOM-writing functions SHALL be isolated
 so they can be profiled and progressively replaced with targeted patches.
+
+## Implementation status
+
+Implemented through `PanelManager`, lifecycle-isolated panel wrappers, dedicated
+chain helper/template/view-model/rendering modules, and a bootstrap-only
+`dashboard.js`. DOM mutation helpers are centralized and architecture-tested.

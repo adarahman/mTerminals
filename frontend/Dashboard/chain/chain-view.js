@@ -160,6 +160,7 @@ class ChainView {
   if (app.chainDense && app.chainDense.lastPayload) {
     app.chainDense._broadcastToOptionChainTab(app.chainDense.lastPayload);
   }
+  if (window.eventBus) window.eventBus.emit('range:change', { range });
 }
 
   switchVelTab(win, el) {

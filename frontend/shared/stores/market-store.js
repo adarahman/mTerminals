@@ -80,7 +80,8 @@ function applyDelta(target, diff, keyField='strike'){
 class MarketStore {
   constructor() {
     this.state = null;
-    this.listeners = { change: [] };
+    this.baselineVersion = null;
+    this.listeners = { change: [], baselineMismatch: [] };
   }
 
   on(event, fn) {
@@ -111,13 +112,20 @@ class MarketStore {
       const prevPortfolio = this.state && this.state.portfolio;
       const prevOrders = this.state && this.state.orders;
       this.state = msg.payload;
+      this.baselineVersion = msg.version || null;
       if(prevPortfolio !== undefined) this.state.portfolio = prevPortfolio;
       if(prevOrders !== undefined) this.state.orders = prevOrders;
     } else if (msg.type === 'delta') {
       // ws_server_live.py's compute_diff() output — must be patched with
       // applyDelta, not merged under a literal "delta" key like the generic
       // branch below would do.
-      if(!this.state) this.state = {};
+      if(!this.state || !msg.baseVersion || msg.baseVersion !== this.baselineVersion) {
+        this.emit('baselineMismatch', {
+          expected: this.baselineVersion,
+          received: msg.baseVersion || null,
+        });
+        return this.state;
+      }
       applyDelta(this.state, msg.payload);
     } else {
       if(!this.state) this.state = {};
@@ -128,7 +136,20 @@ class MarketStore {
     // bus as 'market:update' alongside the existing 'change' emit above —
     // DataService's store.on('change', ...) subscription (data-service.js)
     // is untouched, so this is additive only.
-    if (window.eventBus) window.eventBus.emit('market:update', this.state);
+    if (window.eventBus) {
+      window.eventBus.emit('market:update', {
+        messageType: msg && msg.type ? msg.type : 'full',
+        version: this.baselineVersion,
+      });
+      if (this.state && this.state.decision) {
+        window.eventBus.emit('decision:update', {
+          stateVersion: this.state.decision.stateVersion || null,
+        });
+      }
+      if (msg && (msg.type === 'portfolio' || msg.type === 'orders')) {
+        window.eventBus.emit('paper:portfolio-update', { source: msg.type });
+      }
+    }
     return this.state;
   }
 }

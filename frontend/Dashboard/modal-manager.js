@@ -73,6 +73,7 @@ class ModalManager {
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.classList.add('open');
+  if(window.eventBus) window.eventBus.emit('modal:open', { id: modal.id || null });
 
   const oldKeyHandler = this._modalKeyHandlers.get(modal);
   if(oldKeyHandler) modal.removeEventListener('keydown', oldKeyHandler);
@@ -124,6 +125,7 @@ class ModalManager {
   _closeModal(modal){
   if(!modal) return;
   modal.classList.remove('open');
+  if(window.eventBus) window.eventBus.emit('modal:close', { id: modal.id || null });
 
   const keyHandler = this._modalKeyHandlers.get(modal);
   if(keyHandler) modal.removeEventListener('keydown', keyHandler);
@@ -402,6 +404,7 @@ class ModalManager {
   var n = Number(strike);
   if(!modal || !Number.isFinite(n)) return false;
   if(!app.strikeDetail.render(n)) return false;
+  if(window.eventBus) window.eventBus.emit('strike:select', { strike: n, source: 'strike-detail' });
   this._openModal(modal, () => this.closeStrikeDetailReportModal());
   document.addEventListener('keydown', _strikeDetailReportEscHandler);
   return true;

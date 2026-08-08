@@ -47,3 +47,10 @@ Duplication is permitted only when:
 - the duplicate is a canonical read-only reference.
 
 Duplicate calculations under the same label are prohibited.
+
+## Implementation status
+
+The Dashboard remains the executive surface; Option Chain, Capital/OI Flow,
+Strike Detail, Scenario, Price Chart and Paper Trading retain distinct depth
+roles. Shared values are transported as canonical read-only data and protected
+by the product-surface contract suites.

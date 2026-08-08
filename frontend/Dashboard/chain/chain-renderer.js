@@ -1135,6 +1135,7 @@ ChainView.prototype.renderIvSurfaceModal = function() {
   const params = new URLSearchParams((_wsUrl || '').split('?')[1] || '');
   params.set('expiry', selectedExpiry);
   const newUrl = `${base}?${params.toString()}`;
+  if (window.eventBus) window.eventBus.emit('expiry:change', { expiry: selectedExpiry });
   connectWebSocket(newUrl);
 };
 

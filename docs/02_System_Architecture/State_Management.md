@@ -54,3 +54,10 @@ v1 product rules:
 
 `window.*` legacy shims MAY exist during migration but SHALL not become independent
 stores that drift from MarketStore/AppState.
+
+## Implementation status
+
+`MarketStore` owns merged full/delta market state and `AppState` owns view/feed
+context. Full snapshots establish a wire baseline. Deltas without a matching
+baseline are rejected, the feed returns to `RECOVERING`, and the transport
+requests a coherent snapshot before live rendering resumes.

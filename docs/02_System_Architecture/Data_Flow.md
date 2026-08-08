@@ -63,3 +63,17 @@ Data-flow boundaries SHALL document:
 - currency units;
 - percentages vs decimals;
 - timestamps/time zones.
+
+### Canonical boundary units
+
+| Boundary | Unit contract |
+|---|---|
+| Broker → normalized chain | OI and volume are raw contracts; strike/LTP are INR |
+| Chain → capital analytics | Raw contracts are multiplied by the instrument lot size exactly once |
+| Capital analytics → transport | Notional/premium values are INR; presentation may format lakh/crore |
+| Greeks → transport | Delta is decimal; IV is decimal unless the exported field explicitly uses `%` |
+| Transport timestamps | ISO-8601 with an offset; UI renders in the user locale |
+| Paper account → UI | Quantity is contracts/lots as explicitly named; P&L and funds are INR |
+
+These contracts are enforced by the capital-flow, decision, feed-recovery and
+system-architecture contract suites.

@@ -36,6 +36,10 @@ The project already uses `setHtmlIfChanged`, `sizeCanvasIfChanged` and a shared
 `patchOuterHtmlIfChanged` approach in the chain renderer. This reduces redundant
 writes but still builds full HTML strings for several cards on each tick.
 
+The live index ticker now retains stable keyed nodes and patches quote fields
+in place. It rebuilds only when the available index set changes. Remaining
+whole-card patches are diff-guarded and preserve documented interaction state.
+
 ## Target
 
 Move hot paths toward field-level or row-level patching where profiling justifies it.

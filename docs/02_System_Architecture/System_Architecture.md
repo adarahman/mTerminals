@@ -140,3 +140,15 @@ complexity/performance needs, not fashion.
 4. Transport messages are validated before becoming canonical state.
 5. A reconnect cannot silently mix incompatible snapshot/delta versions.
 6. A single failed analytical module degrades locally where possible.
+
+## 8. Implementation status (v1.5 line)
+
+- Layers A–G have explicit package/component owners.
+- Full snapshots establish a versioned client baseline; incompatible deltas
+  are rejected and trigger coherent recovery.
+- Semantic events carry identifiers/version metadata rather than duplicating
+  canonical market snapshots.
+- Panel failures are isolated by `PanelManager` lifecycle guards.
+- High-frequency top-bar/ticker updates patch stable DOM nodes in place;
+  structural rebuilds are reserved for structural changes.
+- CI enforces frontend architecture contracts and backend dependency direction.

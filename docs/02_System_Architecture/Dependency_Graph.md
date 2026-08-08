@@ -48,3 +48,10 @@ Flag any new dependency where:
 - risk is used as a calculator by UI;
 - a card imports another card only to read a value;
 - template code computes a business metric that already exists in backend/domain logic.
+
+## Enforcement status
+
+CI parses backend imports and rejects broker-to-decision/strategy/risk,
+storage-to-domain, and analytics/OI-to-paper/execution dependencies. Frontend
+contracts separately prevent canonical decision and capital metrics from being
+recomputed in presentation code.

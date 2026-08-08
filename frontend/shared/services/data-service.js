@@ -52,6 +52,10 @@ class DataService {
     });
     this.feedStatusTimer = setInterval(() => this._checkFeedFreshness(), 1000);
     this.store.on('change', (state) => this.updateDashboard(state));
+    this.store.on('baselineMismatch', () => {
+      this._setFeedStatus('RECOVERING', 'Refreshing incompatible market snapshot');
+      this.wsManager.connect(undefined, true);
+    });
     // Tracks which symbol's DOM is currently built, so scheduleRender() can
     // force a full rebuild on a scrip switch instead of patching in place —
     // see the notYetBuilt/symbolChanged check in scheduleRender().
