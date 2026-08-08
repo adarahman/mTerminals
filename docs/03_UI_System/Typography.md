@@ -24,3 +24,9 @@ Body, Caption, Table Numeric.
 ## Hierarchy
 
 The largest text on Dashboard SHOULD be decision/spot-level information, not section decoration.
+
+## Implementation status
+
+Font families and size roles are centralized in `theme.css`; live numeric fields
+use mono/tabular figures, shared formatters own precision and sign treatment, and
+decision/spot values retain the primary visual hierarchy.

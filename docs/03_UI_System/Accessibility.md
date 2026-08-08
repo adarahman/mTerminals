@@ -18,3 +18,10 @@ Minimum contract:
 - zoom does not destroy access to controls/data.
 
 Dense financial data is not exempt from accessibility.
+
+## Implementation status
+
+Loaded actions use native buttons or keyboard-equivalent roles, icon controls
+have accessible names, focus is visible, feed states include text, and shared
+modal behavior traps/restores focus. Browser tests cover modal focus and compact
+viewport access; CI rejects inaccessible live popover controls.

@@ -21,3 +21,9 @@
 
 Use shared formatters for K/L/Cr, percentages, prices and Greeks.
 Do not embed formatting formulas independently in every table.
+
+## Implementation status
+
+Option Chain and portfolio tables retain stable column/strike anchors, sticky
+headers, local overflow, accessible ATM/selection labels and preserved row/scroll
+state. Shared formatters and tabular numeric styles provide consistent values.

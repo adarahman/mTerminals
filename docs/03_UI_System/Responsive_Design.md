@@ -20,3 +20,10 @@
 - Tables manage local overflow.
 - Modal content fits viewport.
 - No card disappears solely because of Compact width.
+
+## Implementation status
+
+The `<1280px` compact breakpoint collapses grids without hiding cards or changing
+source order. Navigation remains reachable, tables scroll locally, and modal
+content is viewport bounded. Browser coverage verifies a 1024px viewport has no
+page-level horizontal overflow.

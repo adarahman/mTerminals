@@ -24,3 +24,9 @@ Colors communicate state:
 3. Background tints SHOULD be restrained.
 4. Heatmaps require a legend/scale and accessible numeric backup.
 5. Theme tokens live centrally; component CSS does not invent arbitrary semantic colors.
+
+## Implementation status
+
+Positive, negative, warning, informational, disabled and neutral semantics are
+owned by `styles/theme.css`. UI controls combine color with text, signs, icons or
+labels; focus styling consumes the informational theme token.

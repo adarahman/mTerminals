@@ -20,3 +20,9 @@ Avoid:
 - decorative continuous motion.
 
 Honor reduced-motion settings.
+
+## Implementation status
+
+Dashboard, Option Chain, and OI Flow honor `prefers-reduced-motion`. Live quote
+updates patch stable nodes, avoiding repeated subtree flashes and layout-shifting
+number animation.

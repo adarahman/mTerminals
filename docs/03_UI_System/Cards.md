@@ -26,3 +26,9 @@ Use a consistent navigation indicator/hover treatment.
 ## Live behavior
 
 Text/numbers patch in place. Card root replacement SHOULD be minimized in hot paths.
+
+## Implementation status
+
+Navigable cards use consistent header affordances. Hot top-bar and ticker values
+patch in place; remaining card-root updates are diff-guarded and preserve active
+details and click state.

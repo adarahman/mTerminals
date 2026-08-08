@@ -1,11 +1,18 @@
 import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
-const [oiHtml, oiJs, oiCss, backtest, responsive, priceCss] = await Promise.all([
+const [oiHtml, oiJs, oiCss, backtest, responsive, priceCss, algo, depth, components, dashboardHtml, priceJs, chainRenderer] = await Promise.all([
   read('OIFlow/oi-flow.html'), read('OIFlow/oi-flow.js'), read('OIFlow/oi-flow.css'),
   read('Dashboard/backtest-view.js'), read('styles/responsive.css'),
   read('PriceChart/price-chart-standalone.css'),
+  read('Dashboard/algo-status.js'), read('Dashboard/chain/chain-depth.js'), read('styles/components.css'),
+  read('Dashboard/DashboardPro.html'), read('PriceChart/price-chart.js'), read('Dashboard/chain/chain-renderer.js'),
 ]);
+
+const canvasSources = [oiHtml, dashboardHtml, priceJs, chainRenderer].join('\n')
+  .replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+const unlabeledCanvases = [...canvasSources.matchAll(/<canvas\b[^>]*>/g)]
+  .filter(([tag]) => !/role="img"/.test(tag) || !/aria-label="[^"]+"/.test(tag));
 
 const checks = [
   ['OI Flow controls use native buttons', !/<div class="(?:tab|rng-tab|win-tab|mode-tab)"/.test(oiHtml)],
@@ -16,6 +23,9 @@ const checks = [
   ['Backtest close is a named button', /<button[^>]+class="bt-close"[^>]+aria-label="Close backtest"/.test(backtest)],
   ['Dashboard honors reduced motion', /prefers-reduced-motion:reduce/.test(responsive)],
   ['Price Chart has compact layout', /@media \(max-width:1279px\)/.test(priceCss)],
+  ['Algo close is a labeled native button', /<button[^>]+class="algo-close"[^>]+aria-label="Close Algo Status panel"/.test(algo)],
+  ['Depth reset is keyboard operable', /<button[^>]+class="depth-reset"[^>]+aria-label="Reset Bid Ask depth to ATM"/.test(depth) && /\.depth-reset:focus-visible/.test(components)],
+  ['Every shipped canvas has an accessible question and units', unlabeledCanvases.length === 0],
 ];
 
 let failed = 0;

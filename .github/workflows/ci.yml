@@ -42,6 +42,7 @@ jobs:
           npm run test:feed-recovery
           npm run test:ci-supply-chain
           npm run test:system-architecture
+          npm run test:ui-system
       - run: npm run build
 
   backend:

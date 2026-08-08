@@ -28,3 +28,9 @@ Multi-column groups become single column in source order.
 
 A card's content growth SHALL not unexpectedly reflow unrelated zones when that
 content belongs in Tier 3.
+
+## Implementation status
+
+Desktop zone grids and full-width Decision Engine follow the documented source
+order. Compact rules collapse multi-column zones to one column, while dense
+tables and Tier-3 modal/detail content own their overflow.

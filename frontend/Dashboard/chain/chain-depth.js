@@ -303,7 +303,7 @@ RightPanelView.prototype.buildDepthBoxHtml =function(rows) {
 
     const isPinned = !!pinnedRow;
     const titleLabel = isPinned ? `Strike ${depthRow.strike}` : `ATM ${depthRow.strike}`;
-    const resetLink = isPinned ? ` <span style="color:var(--text-faint);font-weight:400;text-decoration:underline;cursor:pointer;" onclick="selectDepthStrike(${depthRow.strike})">(reset to ATM)</span>` : "";
+    const resetLink = isPinned ? ` <button type="button" class="depth-reset" onclick="selectDepthStrike(${depthRow.strike})" aria-label="Reset Bid Ask depth to ATM">reset to ATM</button>` : "";
 
     const hasDepth = depthRow.ce.bid != null || depthRow.ce.ask != null || depthRow.pe.bid != null || depthRow.pe.ask != null
       || depthRow.ce.totalBidQty != null || depthRow.ce.totalAskQty != null || depthRow.pe.totalBidQty != null || depthRow.pe.totalAskQty != null;

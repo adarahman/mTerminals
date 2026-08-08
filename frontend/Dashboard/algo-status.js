@@ -35,7 +35,7 @@ function algoMountPanel(){
   const panel = document.createElement('div');
   panel.id = 'algo-panel';
   panel.innerHTML = `
-    <h4><span>Algo Status</span> <span class="algo-close" onclick="$i('algo-panel').classList.remove('open')">✕</span></h4>
+    <h4><span>Algo Status</span> <button type="button" class="algo-close" onclick="$i('algo-panel').classList.remove('open')" aria-label="Close Algo Status panel">✕</button></h4>
     <div id="algo-panel-body">Waiting for first status update…</div>
   `;
   document.body.appendChild(panel);

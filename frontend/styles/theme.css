@@ -20,6 +20,7 @@
   --neg:      #FF6B6B;  --neg-dim:  rgba(255,107,107,0.14); --neg-strong: #FA5252;
   --warn:     #FFD43B;  --warn-dim: rgba(255,212,59,0.14);
   --info:     #74C0FC;  --info-dim: rgba(116,192,252,0.14); --info-strong: #339AF0;
+  --disabled: #5C6370;  --disabled-dim: rgba(92,99,112,0.14);
 
   /* Alternate accent palette used by option-chain.css's "ledger" design
      (call/put reads better than pos/neg in that context — kept as a

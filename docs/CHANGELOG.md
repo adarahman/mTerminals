@@ -1,5 +1,13 @@
 # Architecture Changelog
 
+## Unreleased — UI system conformance
+
+- Replaced remaining loaded clickable text controls with labeled native buttons.
+- Added accessible questions, units and fallback descriptions to every shipped canvas.
+- Added CI-enforced UI-system contracts for color, typography, layout, tables,
+  motion, modals, responsive behavior and documentation status.
+- Recorded implementation status across the complete UI-system package.
+
 ## Unreleased — system architecture conformance
 
 - Added versioned full/delta baselines with automatic coherent recovery.

@@ -597,7 +597,7 @@ ChainView.prototype.renderDashboard = function(d) {
            renderStratPayoff() pass as this one, so it's never stale. -->
       <div class="chart-expand-wrap" role="button" tabindex="0" aria-label="Expand Strategy Payoff chart" onclick="openStratPayoffModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStratPayoffModal();}" title="Click to expand" style="cursor:zoom-in;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 14px 10px;position:relative;">
         <span class="chart-expand-icon" title="Expand">⤢</span>
-        <canvas id="strat-payoff-canvas" style="width:100%;display:block;" height="280"></canvas>
+        <canvas id="strat-payoff-canvas" role="img" aria-label="Strategy profit and loss payoff in Indian rupees by underlying price" style="width:100%;display:block;" height="280">Strategy payoff values are available in the strategy summary.</canvas>
       </div>
 
       <!-- Leg pills -->
@@ -629,7 +629,7 @@ ChainView.prototype.renderDashboard = function(d) {
         <div class="sim-chart-area chart-expand-wrap" role="button" tabindex="0" aria-label="Expand simulated Net GEX chart" onclick="openSimGexModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSimGexModal();}" title="Click to expand" style="cursor:zoom-in;padding-bottom:12px;position:relative;" id="sim-chart-container">
           <span class="chart-expand-icon" title="Expand">⤢</span>
           <div class="sim-chart-label">Net GEX Profile ($B) &#8593; <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;font-size:10px;">(Scenario-Adjusted)</span></div>
-          <canvas id="sim-gex-canvas" height="180"></canvas>
+          <canvas id="sim-gex-canvas" role="img" aria-label="Scenario-adjusted net gamma exposure by strike" height="180">Scenario gamma values are available in the surrounding scenario analysis.</canvas>
           <div class="sim-annot" id="sim-annot"></div>
         </div>
 

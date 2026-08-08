@@ -292,8 +292,8 @@ class PriceChartEngine {
 
         <div class="pc-chart-wrap">
           <div class="pc-watermark" id="pc-watermark">—</div>
-          <canvas id="price-chart-canvas" style="width:100%;display:block;" height="800"></canvas>
-          <canvas id="price-chart-volume-canvas" style="width:100%;display:block;" height="120"></canvas>
+          <canvas id="price-chart-canvas" role="img" aria-label="Price history chart in Indian rupees over time" style="width:100%;display:block;" height="800">Price history is unavailable without canvas support.</canvas>
+          <canvas id="price-chart-volume-canvas" role="img" aria-label="Trading volume by time interval in contracts" style="width:100%;display:block;" height="120">Volume history is unavailable without canvas support.</canvas>
           ${this._orderPanelHtml()}
         </div>
 

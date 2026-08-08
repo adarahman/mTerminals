@@ -21,3 +21,9 @@ Charts SHOULD:
 - expose underlying numeric values through tooltip/table where necessary.
 
 Dashboard charts are explanatory, not decorative.
+
+## Implementation status
+
+Every shipped canvas has an accessible question and unit-bearing label plus
+fallback text. Numeric summaries/tables accompany analytical charts, canvas
+resizing is change-guarded, and reduced-motion rules apply to chart surfaces.
