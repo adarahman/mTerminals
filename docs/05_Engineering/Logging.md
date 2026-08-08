@@ -62,3 +62,16 @@ The server emits structured, low-frequency lifecycle events including:
 
 Repeated health polls in the same state do not create duplicate transition
 records. Per-tick market data is not written to operational logs.
+
+## Operational metrics
+
+`GET /metrics` returns a bounded JSON snapshot with process-local counters
+and gauges. Counters cover WebSocket connections, automatic reconnects,
+disconnects, pipeline runs/failures, health transitions, stale events and
+recoveries. Gauges cover connected clients, latest pipeline duration,
+last pipeline success/failure timestamps and process uptime.
+
+The endpoint intentionally has no market-data labels or payloads: no chain,
+symbol, order, position, account or credential data is exposed. Values reset
+when the backend process restarts; this endpoint is for lightweight local
+monitoring, not durable accounting or trading audit history.

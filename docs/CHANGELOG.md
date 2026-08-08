@@ -9,6 +9,8 @@
   events without logging high-frequency market ticks.
 - Added deterministic tests for credential redaction, JSON formatting and
   transition deduplication.
+- Added a payload-free `/metrics` endpoint for WebSocket, reconnect, pipeline,
+  stale-feed, recovery and process-uptime telemetry.
 
 ## 2026-08-08 — mTerminals v1.1.0 production hardening
 

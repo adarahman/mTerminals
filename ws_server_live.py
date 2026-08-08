@@ -34,6 +34,7 @@ import market_api              # noqa: E402  (lightweight ticker-strip quotes; n
 sys.argv = _real_argv          # restore for our own argparse below
 
 from pipeline_config import RuntimeConfig  # noqa: E402
+from operational_metrics import OperationalMetrics  # noqa: E402
 
 logger = logging.getLogger("mterminals.server")
 
@@ -212,6 +213,7 @@ LAST_PAYLOAD_AT = None
 _LAST_SENT = None
 PROCESS_STARTED_AT = datetime.now().astimezone()
 _LAST_HEALTH_LOG_STATE = None
+METRICS = OperationalMetrics(started_at=PROCESS_STARTED_AT)
 _NODE_SESSION = None
 # Most recent real-account funds snapshot from _funds_poll_body() below —
 # handed to newly-connected clients immediately (see ws_handler) the same
@@ -533,6 +535,8 @@ async def ws_handler(request):
     ws = web.WebSocketResponse(heartbeat=20)
     await ws.prepare(request)
     CONNECTED.add(ws)
+    reconnect_attempt = request.query.get("reconnect") == "1"
+    METRICS.websocket_connected(len(CONNECTED), reconnect=reconnect_attempt)
     t0 = time.monotonic()
     logger.info(
         "dashboard websocket connected",
@@ -690,6 +694,7 @@ async def ws_handler(request):
                 print(f"[ws] connection ended via {msg.type} close_code={ws.close_code}", flush=True)
     finally:
         CONNECTED.discard(ws)
+        METRICS.websocket_disconnected(len(CONNECTED))
         alive_for = time.monotonic() - t0
         logger.info(
             "dashboard websocket disconnected",
@@ -2490,6 +2495,7 @@ async def engine_loop():
         async with _PIPELINE_LOCK:
             payload = await asyncio.to_thread(run_pipeline_once)
         pipeline_elapsed = time.monotonic() - tick_start
+        METRICS.observe_pipeline(payload is not None, pipeline_elapsed)
 
         if payload is not None:
             # Transport/session context is part of the canonical payload so the
@@ -3046,6 +3052,7 @@ def _log_health_transition(snapshot):
     if state == _LAST_HEALTH_LOG_STATE:
         return
     _LAST_HEALTH_LOG_STATE = state
+    METRICS.observe_health_transition(feed.get("status"))
     log = logger.warning if snapshot.get("status") == "degraded" else logger.info
     log(
         "service health transition",
@@ -3069,6 +3076,11 @@ async def health_handler(request):
     return web.json_response(snapshot, status=200 if snapshot["status"] == "ok" else 503)
 
 
+async def metrics_handler(request):
+    """GET /metrics — payload-free operational counters and gauges."""
+    return web.json_response(METRICS.snapshot())
+
+
 async def main():
     # Must run before any task that can hit a broker API timeout
     # (start_smartapi_feed(), engine_loop(), ...) gets a chance to log
@@ -3082,6 +3094,7 @@ async def main():
     app = web.Application(middlewares=[no_cache_middleware])
 
     app.router.add_get('/health', health_handler)
+    app.router.add_get('/metrics', metrics_handler)
     app.router.add_get('/ws', ws_handler)
     app.router.add_get('/bridge', bridge_ws_handler)
     app.router.add_get('/dashboard-relay', bridge_ws_handler)

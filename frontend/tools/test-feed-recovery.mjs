@@ -49,6 +49,7 @@ function loadWsManager() {
   timers.delete(reconnectId); // real timers leave the pending queue before invoking
   reconnectFn();
   assert.equal(sockets.length, 2, 'reconnect timer must create a replacement socket');
+  assert.match(sockets[1].url, /[?&]reconnect=1$/, 'automatic reconnect must identify itself to metrics');
 
   sockets[1].onopen();
   sockets[1].onmessage({ data: JSON.stringify({ type: 'full', payload: {} }) });

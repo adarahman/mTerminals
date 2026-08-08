@@ -40,7 +40,7 @@ class WSManager {
     (this.listeners[event] || []).forEach(fn => fn(payload));
   }
 
-  connect(url) {
+  connect(url, reconnectAttempt = false) {
     if (url) this.url = url;
     // An explicit connect (symbol/expiry switch or manual recovery) wins
     // over any older delayed reconnect. Without clearing that timer here,
@@ -71,7 +71,10 @@ class WSManager {
       try { this.ws.close(); } catch(e){}
     }
     let socket;
-    try { socket = new WebSocket(this.url); }
+    const socketUrl = reconnectAttempt
+      ? `${this.url}${this.url.includes('?') ? '&' : '?'}reconnect=1`
+      : this.url;
+    try { socket = new WebSocket(socketUrl); }
     catch(e){
       err('WS init error: '+e.message);
       // The constructor throwing is a SYNCHRONOUS failure — no open/close/
@@ -120,7 +123,7 @@ class WSManager {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.connect(undefined, true);
     }, this.reconnectDelayMs);
   }
 }

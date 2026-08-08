@@ -83,6 +83,7 @@ After restarting `ws_server_live.py`, verify:
 
 ```bash
 curl -i http://127.0.0.1:5500/health
+curl -sS http://127.0.0.1:5500/metrics
 ```
 
 Then smoke the production pages:
