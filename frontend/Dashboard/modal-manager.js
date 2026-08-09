@@ -150,6 +150,26 @@ class ModalManager {
   if(modal) this._closeModal(modal);
 }
 
+  openPriceChartModal(){
+  var modal=document.getElementById('price-chart-modal');
+  if(!modal)return;
+  this._openModal(modal,()=>this.closePriceChartModal());
+  priceChart.ensureMounted();
+  priceChart.hydrateRange(priceChart.settings.range);
+  requestAnimationFrame(()=>priceChart.render(true));
+}
+
+  closePriceChartModal(){
+  var modal=document.getElementById('price-chart-modal');
+  if(modal)this._closeModal(modal);
+  // Rebuild the preview immediately so it adopts the chart window/range
+  // the user just selected, even when the market is closed and no new
+  // tick would otherwise trigger a dashboard refresh.
+  if(app.chain && typeof app.chain.patchTopBarAndDecision==='function' && typeof _data!=='undefined' && _data){
+    app.chain.patchTopBarAndDecision(_data);
+  }
+}
+
   // ── GREEKS / GEX MODAL ──
   // Unlike the OI Dashboard modal above, this isn't an iframe to a
   // separate document — the full Greeks/GEX table (renderGreeksGex() in

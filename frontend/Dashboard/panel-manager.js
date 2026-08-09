@@ -9,8 +9,7 @@
 //   Panel        — base class with init/refresh/resize/destroy lifecycle
 //                  hooks. Subclasses override whichever hooks apply and
 //                  call super.init()/super.destroy() to keep `mounted`
-//                  bookkeeping correct (dashboard-panels.js relies on
-//                  this for PriceChartPanel/OiDashboardPanel).
+//                  bookkeeping correct.
 //   PanelManager — flat registry keyed by each panel's `name`. Exposes
 //                  register/get plus initAll/resizeAll/destroyAll
 //                  "fan-out" calls so dashboard.js (and any other caller)
@@ -58,52 +57,6 @@ class Panel {
   // should call super.destroy() so `mounted` bookkeeping stays correct.
   destroy() {
     this.mounted = false;
-  }
-}
-
-// Base class for panels that broadcast their latest payload over a
-// BroadcastChannel so a standalone tab (price-chart.html) can request a
-// snapshot on open instead of sitting blank until the next live tick.
-// PriceChartPanel is the one surviving subclass — FiiDiiPanel used to
-// extend this for a 'fd-live-sync' channel meant for a standalone
-// FII-DII.html tab, but that tab never actually listened on it (it opened
-// its own direct WebSocket instead — see price-chart-standalone.js's
-// header comment for how price-chart.html later did the same). FII-DII.
-// html itself is now gone: its panels live in DashboardPro's own FII/DII
-// modal (fiidii-report.js), fed by their own dedicated connection instead
-// of this broadcast pattern.
-class LiveSyncPanel extends Panel {
-  constructor(name, channelName, requestType) {
-    super(name);
-    this._channelName = channelName;
-    this._requestType = requestType;
-    this._chan = null;
-    this._lastPayload = null;
-  }
-
-  init() {
-    super.init();
-    if (!('BroadcastChannel' in window)) return;
-    this._chan = new BroadcastChannel(this._channelName);
-    this._chan.addEventListener('message', (e) => {
-      const msg = e.data;
-      if (msg && msg.type === this._requestType && this._lastPayload) {
-        this._chan.postMessage(this._lastPayload);
-      }
-    });
-  }
-
-  // Subclasses call this from their own pushX() method with the exact
-  // payload shape their standalone tab expects (e.g. { spot, symbol, ... }
-  // for price chart, { fiiDiiSentiment, t } for FII/DII).
-  _broadcast(payload) {
-    this._lastPayload = payload;
-    if (this._chan) this._chan.postMessage(payload);
-  }
-
-  destroy() {
-    super.destroy();
-    if (this._chan) { this._chan.close(); this._chan = null; }
   }
 }
 

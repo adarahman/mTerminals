@@ -29,7 +29,7 @@ class ChartData {
     // tick and kept dragging the buffer's "last tick time" forward to
     // whatever moment the heartbeat arrived — which defeats anchoring the
     // chart's visible window on the last tick (see chart-data.js's
-    // getVisibleTicks / price-chart.js's render()): the window would keep
+    // getVisibleTicks / price-chart-engine.js's render()): the window would keep
     // sliding to "now" even though the price hasn't genuinely moved since
     // the market closed. A tick with an unchanged price AND vwap is a
     // heartbeat, not new information — skip it regardless of its

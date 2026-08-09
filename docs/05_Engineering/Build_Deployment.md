@@ -97,7 +97,6 @@ curl -sS http://127.0.0.1:5500/metrics
 Then smoke the production pages:
 
 - `/dist/Dashboard/DashboardPro.html`;
-- `/dist/PriceChart/price-chart.html`.
 
 Confirm the Dashboard feed badge agrees with `/health`, a forced WebSocket
 disconnect recovers without a page reload, expiry switching returns a current

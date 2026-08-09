@@ -738,6 +738,8 @@ details.card summary .card-head{margin:0;}
   border:none;
   background:#0b0e11;
 }
+.price-chart-modal-body{flex:1;min-height:0;overflow:auto;padding:12px 14px;}
+.price-chart-modal-body #price-chart-section,.price-chart-modal-body .pc-panel{height:100%;min-height:520px;}
 
 .oi-native-modal-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:14px;overflow:hidden;}
 .oi-native-tabs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}

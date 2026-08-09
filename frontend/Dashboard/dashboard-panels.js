@@ -22,48 +22,12 @@
 // Must load after panel-manager.js (extends Panel) and after chain-
 // view.js/chain-renderer.js/chain-depth.js/chain-greeks.js/panels-views.js
 // (calls into ChainView/ChainDenseView/OiFlowView/ModalManager instances)
-// and price-chart.js/the split paper-trading modules (calls into their globals). Must
+// and price-chart-engine.js/the split paper-trading modules (calls into their globals). Must
 // load before dashboard.js, whose App constructor instantiates these.
 // See DashboardPro.html script order.
 // ============================================================
 
-// ── 1. Price Chart ──
-// CORRECTION: the comment that used to be here claimed the full
-// PriceChartEngine (PriceChart/price-chart.js) no longer loads on this
-// page and that only a compact snapshot card remains. That's not what
-// actually ships: DashboardPro.html still loads the entire PriceChart/*.js
-// engine, and dashboard.js's DOMContentLoaded handler calls
-// priceChart.ensureMounted() + priceChart.hydrateRange(...) directly,
-// mounting the real chart (not a lightweight card) on this same page.
-// That mount + its historical-range fetch fire at the same moment as the
-// dashboard's own first-render burst (see data-service.js's
-// notYetBuilt/symbolChanged branch) — worth knowing if you're debugging
-// anything that looks tied to "when the chart loads" (e.g. the Decision
-// Detail freeze fixed in chain-renderer.js's refreshDecisionBoxGuarded()/
-// renderDashboard()), since it's two independent startup tasks landing in
-// the same window, not one causing the other.
-//
-// What this panel DOES still own: broadcasting every tick's spot/symbol
-// over BroadcastChannel('pc-live-sync') so a price-chart.html tab open
-// in another window stays live, and answering that tab's
-// 'pc-request-snapshot' request on open so it isn't blank until the next
-// tick. This channel is only for the separate Price Chart surface.
-class PriceChartPanel extends LiveSyncPanel {
-  constructor() {
-    super('priceChart', 'pc-live-sync', 'pc-request-snapshot');
-  }
-
-  // Called from DataService.updateDashboard() on every tick — replaces
-  // the old direct `priceChart.addTick(...)` call now that the chart
-  // engine doesn't live on this page. _broadcast() keeps the last tick
-  // around so a price-chart.html tab opened later gets an immediate
-  // reply instead of waiting for the next live tick.
-  pushTick(spot, symbol, spotChange, spotChgPct) {
-    this._broadcast({ spot, symbol, spotChange, spotChgPct, t: Date.now() });
-  }
-}
-
-// ── 2. Option Chain ──
+// ── 1. Option Chain ──
 // Wraps ChainView (app.chain) + ChainDenseView (app.chainDense) — the
 // dense in-page table's payload mapping/broadcast, the full-page
 // rebuild, the per-tick top-bar+decision patch, and the expiry-switch

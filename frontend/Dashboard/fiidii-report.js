@@ -258,7 +258,7 @@ function _fdModalIsOpen() {
 // nse_fii_dii_flow_fetch.py, market_api.py) on a 2s loop and sends a full
 // {quotes, skew, sectors, ratio, oi, flow} snapshot on connect, then live
 // pushes after. Reuses Config.ws (shared/config.js) for the same-origin
-// host/scheme handling price-chart-standalone.js/data-service.js already
+// host/scheme handling data-service.js already
 // rely on, rather than FII-DII.html's old hardcoded `:5500`.
 // ==========================================================================
 const FiiDiiReportFeed = (() => {

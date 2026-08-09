@@ -39,7 +39,8 @@ const pages = [
     css: [
       "styles/theme.css", "styles/backtest-view.css", "styles/components.css", "styles/animations.css", "styles/layout.css", "styles/tables.css",
       "styles/navigation.css", "styles/panels.css",
-      "styles/paper-trading.css", "styles/algo-status.css", "styles/responsive.css", "styles/fiidii-report.css",
+      "styles/paper-trading.css", "styles/algo-status.css", "styles/responsive.css",
+      "PriceChart/price-chart-components.css", "PriceChart/pc-order-panel.css", "styles/fiidii-report.css",
     ],
     js: [
       ["shared/config.js", "shared/logger.js", "shared/state/app-state.js", "shared/utils/event-bus.js"],
@@ -61,6 +62,9 @@ const pages = [
         "Dashboard/probability-view.js",
         "Dashboard/scenario-analysis-view.js",
         "Dashboard/advanced-analytics-view.js",
+        "PriceChart/chart-data.js", "PriceChart/chart-renderer.js",
+        "PriceChart/indicator-engine.js", "PriceChart/history-loader.js",
+        "PriceChart/price-chart-engine.js",
         "Dashboard/modal-manager.js",
         "Dashboard/fiidii-report.js",
         "shared/services/ws-manager.js", "shared/stores/market-store.js", "shared/services/data-service.js",
@@ -72,23 +76,6 @@ const pages = [
         "Dashboard/backtest-view.js",
       ],
     ],
-  },
-  {
-    html: "PriceChart/price-chart.html",
-    out: "price-chart",
-    css: [
-      "styles/theme.css",
-      "PriceChart/price-chart-components.css", "PriceChart/pc-order-panel.css",
-      "PriceChart/price-chart-standalone.css",
-    ],
-    js: [[
-      "shared/config.js", "shared/logger.js",
-      "shared/state/app-state.js", "shared/utils/event-bus.js", "shared/utils/dom-utils.js", "shared/utils/formatters.js",
-      "shared/services/ws-manager.js", "shared/stores/market-store.js",
-      "PriceChart/chart-data.js", "PriceChart/chart-renderer.js",
-      "PriceChart/indicator-engine.js", "PriceChart/history-loader.js",
-      "PriceChart/price-chart.js", "PriceChart/price-chart-standalone.js",
-    ]],
   },
 ];
 
@@ -125,6 +112,7 @@ async function main() {
   // distributions too; otherwise an incremental build leaves stale HTML.
   await rm(path.join(outDir, "OptionChain"), { recursive: true, force: true });
   await rm(path.join(outDir, "OIFlow"), { recursive: true, force: true });
+  await rm(path.join(outDir, "PriceChart"), { recursive: true, force: true });
   const report = [];
 
   for (const page of pages) {

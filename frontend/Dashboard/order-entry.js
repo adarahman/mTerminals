@@ -565,6 +565,37 @@ function ptQuickSubmit(side, strike, instrument_type, expiry){
 }
 window.ptQuickSubmit = ptQuickSubmit;
 
+// Price Chart's compact order strip resolves its visible CALL/PUT choice
+// to a concrete active-expiry CE/PE contract before handing it here. Route
+// that contract through the same validated paper/live dispatch path as the
+// main Order Entry and option-chain quick-order controls.
+window.pcPlaceOrder = function(payload){
+  const instrument_type = payload.instrument_type;
+  const limit_price = payload.orderType === 'MARKET' ? null : payload.price;
+  if(!payload.expiry || !Number.isFinite(Number(payload.strike)) || !['CE','PE'].includes(instrument_type)){
+    ptToast('No valid CALL/PUT contract is selected', 'err');
+    return;
+  }
+  if(payload.orderType === 'MARKET' && ptResolveLtp(payload.symbol, instrument_type, payload.expiry, Number(payload.strike)) == null){
+    ptToast('No live option price yet — order not sent', 'err');
+    return;
+  }
+  if(payload.orderType === 'LIMIT' && !Number.isFinite(Number(limit_price))){
+    ptToast('Enter a valid option limit price', 'err');
+    return;
+  }
+  ptDispatchOrder({
+    symbol: payload.symbol,
+    instrument_type,
+    expiry: payload.expiry,
+    strike: Number(payload.strike),
+    side: payload.side,
+    qty_lots: Number(payload.lots) || 1,
+    order_type: payload.orderType,
+    limit_price: payload.orderType === 'MARKET' ? null : Number(limit_price),
+  }, null);
+};
+
 // Calendar-spread legs are labeled "NEAR"/"FAR" (see the leg pill display
 // and the Order/Trade Log's Expiry column) rather than a real date — that's
 // fine for display, but it's exactly why "current LTP required, FAR and

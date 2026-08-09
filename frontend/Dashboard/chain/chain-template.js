@@ -177,10 +177,17 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   // way renderTopBarHtml resets _lastSpot, so BANKNIFTY ticks never
   // trail in after a switch away from NIFTY mid-buffer.
 ChainView.prototype._buildMiniChartHtml = function(d) {
-    const MINI_CHART_MAX_POINTS = 150;
-    if (!this._miniChartHistory || (d.symbol && d.symbol !== this._miniChartSymbol)) {
+    const MINI_CHART_DRAW_POINTS = 150;
+    const MINI_CHART_BUFFER_POINTS = 2500;
+    let chartPrefs = { range: '1m', windowKey: '1D' };
+    try {
+      chartPrefs = Object.assign(chartPrefs, JSON.parse(localStorage.getItem('priceChartSettings.v2') || '{}'));
+    } catch (_) { /* retain the first-use chart defaults */ }
+    const prefsSignature = `${chartPrefs.range}|${chartPrefs.windowKey || 'custom'}|${chartPrefs.type || 'line'}`;
+    if (!this._miniChartHistory || (d.symbol && d.symbol !== this._miniChartSymbol) || this._miniChartPrefsSignature !== prefsSignature) {
       this._miniChartHistory = [];
       this._miniChartSymbol = d.symbol;
+      this._miniChartPrefsSignature = prefsSignature;
       // New symbol means the old hydration (if any) belongs to a
       // different history entirely — clear the guard so the fetch below
       // runs again for the newly-active symbol instead of staying
@@ -192,8 +199,8 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       const hist = this._miniChartHistory;
       const last = hist[hist.length - 1];
       if (!last || last.p !== spotNum) {
-        hist.push({ p: spotNum });
-        if (hist.length > MINI_CHART_MAX_POINTS) hist.shift();
+        hist.push({ t: Date.now(), p: spotNum });
+        if (hist.length > MINI_CHART_BUFFER_POINTS) hist.shift();
       }
     }
 
@@ -203,7 +210,7 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     // a non-trading session (after close, weekend, holiday) no tick ever
     // changes, so a fresh load shows nothing but the flat dashed
     // placeholder forever, even though the backend's own /api/history
-    // (the same endpoint price-chart.js's history-loader.js already uses)
+    // (the same endpoint price-chart-engine.js's history-loader.js already uses)
     // has the last real session's candles sitting right there. Same
     // principle as that chart's render(): show the last real session's
     // shape frozen rather than an empty/placeholder trace. Guarded by
@@ -212,18 +219,22 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     if (this._miniChartHistory.length < 2 && !this._miniChartHydrating && this._miniChartHydratedSymbol !== d.symbol) {
       this._miniChartHydrating = true;
       const symForFetch = d.symbol || 'NIFTY';
-      fetch(`${Config.api.history}?symbol=${encodeURIComponent(symForFetch)}&range=5m`)
+      const prefsForFetch = prefsSignature;
+      fetch(`${Config.api.history}?symbol=${encodeURIComponent(symForFetch)}&range=${encodeURIComponent(chartPrefs.range)}`)
         .then(res => res.ok ? res.json() : [])
         .then(rows => {
           // Bail if the symbol moved on again while this was in flight, or
           // a live tick already beat the fetch back and started filling
           // the real buffer — don't clobber newer data with a stale fetch.
-          if (this._miniChartSymbol !== symForFetch || this._miniChartHistory.length >= 2) return;
+          if (this._miniChartSymbol !== symForFetch || this._miniChartPrefsSignature !== prefsForFetch || this._miniChartHistory.length >= 2) return;
           if (Array.isArray(rows) && rows.length) {
             const bars = rows
-              .map(r => ({ p: parseFloat(r.c) }))
-              .filter(r => Number.isFinite(r.p));
-            if (bars.length) this._miniChartHistory = bars.slice(-MINI_CHART_MAX_POINTS);
+              .map(r => ({
+                t: Number(r.t), o: parseFloat(r.o), h: parseFloat(r.h),
+                l: parseFloat(r.l), c: parseFloat(r.c), p: parseFloat(r.c)
+              }))
+              .filter(r => Number.isFinite(r.t) && Number.isFinite(r.p));
+            if (bars.length) this._miniChartHistory = bars.slice(-MINI_CHART_BUFFER_POINTS);
           }
         })
         .catch(() => { /* leave the placeholder up — nothing else to show */ })
@@ -240,7 +251,49 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
         });
     }
 
-    const pts = this._miniChartHistory;
+    let pts = this._miniChartHistory;
+    const windowMs = {
+      '5D': 5 * 86400000, '1M': 30 * 86400000, '3M': 90 * 86400000,
+      '6M': 182 * 86400000, '1Y': 365 * 86400000, '5Y': 5 * 365 * 86400000
+    }[chartPrefs.windowKey];
+    if (pts.length && windowMs) {
+      const end = pts[pts.length - 1].t;
+      pts = pts.filter(p => p.t >= end - windowMs);
+    } else if (pts.length && chartPrefs.windowKey === '1D') {
+      const istDay = t => new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(t));
+      const lastDay = istDay(pts[pts.length - 1].t);
+      pts = pts.filter(p => istDay(p.t) === lastDay);
+    }
+    // The dashboard preview is intentionally a close-up, not a miniature
+    // copy of the whole session. For intraday intervals show only the most
+    // recent 90 trading minutes so individual 1m/5m/15m candles remain
+    // readable in the compact card. The full modal still shows the complete
+    // selected window (for example the entire 1D session).
+    if (pts.length && ['1m', '5m', '15m'].includes(chartPrefs.range)) {
+      const previewEnd = pts[pts.length - 1].t;
+      pts = pts.filter(p => p.t >= previewEnd - 90 * 60 * 1000);
+    }
+    // Preserve the complete selected span while keeping the tiny SVG light.
+    // Candle mode aggregates each pixel group so its high/low is retained.
+    const drawLimit = chartPrefs.type === 'candle' ? 55 : MINI_CHART_DRAW_POINTS;
+    if (pts.length > drawLimit && chartPrefs.type === 'candle') {
+      const source = pts;
+      pts = Array.from({length: drawLimit}, (_, i) => {
+        const from = Math.floor(i * source.length / drawLimit);
+        const to = Math.max(from + 1, Math.floor((i + 1) * source.length / drawLimit));
+        const group = source.slice(from, to);
+        const value = (p, key) => Number.isFinite(p[key]) ? p[key] : p.p;
+        return {
+          t: group[group.length - 1].t,
+          o: value(group[0], 'o'), c: value(group[group.length - 1], 'c'),
+          h: Math.max(...group.map(p => value(p, 'h'))),
+          l: Math.min(...group.map(p => value(p, 'l')))
+        };
+      });
+    } else if (pts.length > drawLimit) {
+      const source = pts;
+      pts = Array.from({length: drawLimit}, (_, i) => source[Math.round(i * (source.length - 1) / (drawLimit - 1))]);
+    }
     const W = 280, H = 90, PAD = 6;
     let svgInner;
     if (pts.length < 2) {
@@ -248,6 +301,27 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       // line rather than an empty box, so the widget's footprint/click
       // target is identical from the very first render.
       svgInner = `<line x1="${PAD}" y1="${H/2}" x2="${W-PAD}" y2="${H/2}" stroke="var(--text-tertiary)" stroke-width="2.5" stroke-dasharray="4,4"/>`;
+    } else if (chartPrefs.type === 'candle') {
+      const value = (p, key) => Number.isFinite(p[key]) ? p[key] : p.p;
+      const lows = pts.map(p => value(p, 'l'));
+      const highs = pts.map(p => value(p, 'h'));
+      const min = Math.min(...lows), max = Math.max(...highs);
+      const span = Math.max(max - min, ((max + min) / 2) * 0.0015) || 1;
+      const yMin = (max + min) / 2 - span / 2;
+      const y = v => PAD + (H - PAD * 2) * (1 - (v - yMin) / span);
+      const stepX = (W - PAD * 2) / pts.length;
+      const bodyW = Math.max(1.5, Math.min(4, stepX * 0.65));
+      const safeColor = (v, fallback) => /^#[0-9a-f]{6}$/i.test(v || '') ? v : fallback;
+      const upColor = safeColor(chartPrefs.upColor, '#26A69A');
+      const downColor = safeColor(chartPrefs.downColor, '#EF5350');
+      svgInner = pts.map((p, i) => {
+        const o = value(p, 'o'), h = value(p, 'h'), l = value(p, 'l'), c = value(p, 'c');
+        const x = PAD + (i + 0.5) * stepX;
+        const color = c >= o ? upColor : downColor;
+        const bodyTop = Math.min(y(o), y(c));
+        const bodyH = Math.max(1, Math.abs(y(c) - y(o)));
+        return `<line x1="${x.toFixed(1)}" y1="${y(h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y(l).toFixed(1)}" stroke="${color}" stroke-width="1"/><rect x="${(x-bodyW/2).toFixed(1)}" y="${bodyTop.toFixed(1)}" width="${bodyW.toFixed(1)}" height="${bodyH.toFixed(1)}" fill="${color}"/>`;
+      }).join('');
     } else {
       const vals = pts.map(p => p.p);
       const min = Math.min(...vals), max = Math.max(...vals);
@@ -273,9 +347,9 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     }
 
     return `
-      <div id="verdict-mini-chart" class="verdict-mini-chart" role="button" tabindex="0" aria-label="Open price chart in a new tab" title="Open price chart"
-           onclick="window.open('../PriceChart/price-chart.html?symbol=${encodeURIComponent(d.symbol||'NIFTY')}','_blank')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.open('../PriceChart/price-chart.html?symbol=${encodeURIComponent(d.symbol||'NIFTY')}','_blank');}">
+      <div id="verdict-mini-chart" class="verdict-mini-chart" role="button" tabindex="0" aria-label="Open Price Chart" title="Open Price Chart"
+           onclick="openPriceChartModal()"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPriceChartModal();}">
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
       </div>`;
 };

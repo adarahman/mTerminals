@@ -18,6 +18,8 @@
 <link rel="stylesheet" href="../styles/algo-status.css">
 <link rel="stylesheet" href="../styles/backtest-view.css">
 <link rel="stylesheet" href="../styles/responsive.css">
+<link rel="stylesheet" href="../PriceChart/price-chart-components.css">
+<link rel="stylesheet" href="../PriceChart/pc-order-panel.css">
 <link rel="stylesheet" href="../styles/fiidii-report.css">
 <style>
   /* Greeks/GEX modal body — the OI Flow modal's panel wraps a full
@@ -68,6 +70,20 @@
 
 <!-- Canonical Option Chain is the compact red/green dashboard snapshot;
      strike actions stay in-page and open the Strike Detail report. -->
+
+<!-- Native Price Chart modal. The engine mounts into this host on demand,
+     sharing DashboardPro's state and live feed. -->
+<div id="price-chart-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button class="oc-modal-back" onclick="closePriceChartModal()" aria-label="Close Price Chart">←</button>
+        <span class="oc-modal-title">📈 Price Chart</span>
+      </div>
+    </div>
+    <div id="price-chart-modal-host" class="price-chart-modal-body"></div>
+  </div>
+</div>
 
 <!-- Native OI Flow chart: shares the dashboard's canonical chain state;
      no duplicate standalone HTML application or second data connection. -->
@@ -650,16 +666,20 @@
      called at render time, not load time. -->
 <script src="scenario-analysis-view.js"></script>
 <script src="advanced-analytics-view.js"></script>
+<script src="../PriceChart/chart-data.js"></script>
+<script src="../PriceChart/chart-renderer.js"></script>
+<script src="../PriceChart/indicator-engine.js"></script>
+<script src="../PriceChart/history-loader.js"></script>
+<script src="../PriceChart/price-chart-engine.js"></script>
 <script src="modal-manager.js"></script>
 <script src="fiidii-report.js"></script>
 <script src="../shared/services/ws-manager.js"></script>
 <script src="../shared/stores/market-store.js"></script>
 <script src="../shared/services/data-service.js"></script>
 <script src="ui-controls.js"></script>
-<!-- Phase 4 Panel Manager: panel-manager.js declares the Panel base class
-     and PanelManager registry; dashboard-panels.js's six Panel subclasses
-     extend it. Both must load before dashboard.js, whose App constructor
-     does `new PanelManager()` and `new PriceChartPanel()` / etc. -->
+<!-- Panel Manager: panel-manager.js declares the Panel base class and
+     registry; dashboard-panels.js supplies dashboard-native adapters.
+     Both must load before dashboard.js constructs the registry. -->
 <script src="panel-manager.js"></script>
 <script src="dashboard-panels.js"></script>
 <script src="dashboard.js"></script>

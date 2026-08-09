@@ -16,13 +16,6 @@ const jobs = [
     <script src="dashboard.bundle.2.js"></script>`,
     // remove the now-duplicated original CDN line (it's inside jsBlock originally between the two)
   },
-  {
-    src: "PriceChart/price-chart.html", out: "PriceChart/price-chart.html",
-    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">\s*<link rel="stylesheet" href="price-chart-components\.css">\s*<link rel="stylesheet" href="pc-order-panel\.css">\s*<link rel="stylesheet" href="price-chart-standalone\.css">/,
-    cssReplacement: `<link rel="stylesheet" href="price-chart.bundle.css">`,
-    jsBlock: /<script src="\.\.\/shared\/config\.js"><\/script>[\s\S]*?<script src="price-chart-standalone\.js"><\/script>/,
-    jsReplacement: `<script src="price-chart.bundle.1.js"></script>`,
-  },
 ];
 
 for (const job of jobs) {

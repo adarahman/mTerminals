@@ -1,22 +1,8 @@
 // ============================================================
-// price-chart.js
-// Extracted verbatim from dashboard.js (Task 1 modularization,
-// step 1 — see master optimization prompt). No logic changed.
-//
-// Depends on globals defined in dashboard.js: $i(), sizeCanvasIfChanged(),
-// fmtI(), sign(). Those are only called from inside methods that run after
-// full page load (render/ensureMounted/_panelHtml/_attachHandlers/
-// _refreshToolbarState), so load order relative to dashboard.js does not
-// matter for correctness — but per the migration plan this file is loaded
-// BEFORE dashboard.js in DashboardPro.html, right after chart-legend.js.
-//
-// `priceChart` is declared here with top-level `const` (not on `window`
-// alone) so dashboard.js's existing bare `priceChart.addTick(...)` /
-// `priceChart.render()` / `priceChart.ensureMounted()` / `priceChart.hydrate()`
-// calls keep working unchanged — classic <script> tags share one global
-// lexical scope, so a `const` declared in this file is visible to code in
-// any script tag that runs after it. `window.priceChart` is also set,
-// since a few call sites guard on `window.priceChart` before using it.
+// price-chart-engine.js
+// Standalone chart controller: coordinates data, history, indicators,
+// rendering, zoom, toolbar state and order-panel UI. It mounts on demand
+// inside DashboardPro's native Price Chart modal.
 // ============================================================
 
 // ══════════════════════════════════════════════════════
@@ -34,7 +20,24 @@
 // fetch_bse_index_quote() in market_api.py — so VWAP is simply absent
 // for those until that endpoint is extended.
 
-const PRICE_CHART_SETTINGS_KEY = 'priceChartSettings.v1';
+const PRICE_CHART_SETTINGS_KEY = 'priceChartSettings.v2';
+const INDIA_UTC_OFFSET_MS = 330 * 60 * 1000;
+
+function isIndianTradingTimestamp(epochMs){
+  const shifted = new Date(Number(epochMs) + INDIA_UTC_OFFSET_MS);
+  const day = shifted.getUTCDay();
+  const minute = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+  return day >= 1 && day <= 5 && minute >= 9 * 60 + 15 && minute <= 15 * 60 + 30;
+}
+
+function indianSessionBounds(epochMs){
+  const shifted = new Date(Number(epochMs) + INDIA_UTC_OFFSET_MS);
+  const midnightUtc = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
+  return {
+    start: midnightUtc + (9 * 60 + 15) * 60 * 1000 - INDIA_UTC_OFFSET_MS,
+    end: midnightUtc + (15 * 60 + 30) * 60 * 1000 - INDIA_UTC_OFFSET_MS,
+  };
+}
 
 // Fallback symbol used ONLY until AppState.wsState.symbol is populated by a
 // live WS message. Must be a single, consistent value used by BOTH
@@ -79,14 +82,17 @@ for (const cfg of Object.values(PRICE_CHART_RANGES)) {
 // candle size. 'ALL' reuses the zoom-reset (null/null = full default
 // window for the active interval) rather than a fixed span.
 const PRICE_CHART_WINDOWS = [
-  { key: '1D',  ms: 24 * 60 * 60 * 1000 },
-  { key: '5D',  ms: 5 * 24 * 60 * 60 * 1000 },
-  { key: '1M',  ms: 30 * 24 * 60 * 60 * 1000 },
-  { key: '3M',  ms: 90 * 24 * 60 * 60 * 1000 },
-  { key: '6M',  ms: 182 * 24 * 60 * 60 * 1000 },
-  { key: '1Y',  ms: 365 * 24 * 60 * 60 * 1000 },
-  { key: '5Y',  ms: 5 * 365 * 24 * 60 * 60 * 1000 },
-  { key: 'ALL', ms: Infinity },
+  // historyRange selects a backend resolution that can cover the window
+  // without collapsing it to one candle (e.g. `all` is daily data, so it
+  // is unsuitable for a 1D view).
+  { key: '1D',  ms: 24 * 60 * 60 * 1000, session: true, historyRange: '1m' },
+  { key: '5D',  ms: 5 * 24 * 60 * 60 * 1000,         historyRange: '15m' },
+  { key: '1M',  ms: 30 * 24 * 60 * 60 * 1000,        historyRange: '15m' },
+  { key: '3M',  ms: 90 * 24 * 60 * 60 * 1000,        historyRange: '1h' },
+  { key: '6M',  ms: 182 * 24 * 60 * 60 * 1000,       historyRange: '1d' },
+  { key: '1Y',  ms: 365 * 24 * 60 * 60 * 1000,       historyRange: '1d' },
+  { key: '5Y',  ms: 5 * 365 * 24 * 60 * 60 * 1000,   historyRange: 'all' },
+  { key: 'ALL', ms: Infinity,                          historyRange: 'all' },
 ];
 
 class PriceChartEngine {
@@ -127,10 +133,8 @@ class PriceChartEngine {
   _loadSettings(){
     const defaults = {
       type: 'line',            // 'line' | 'candle'
-      range: '15m',             // key into PRICE_CHART_RANGES — 15m's 30-day
-                                 // backend lookback comfortably survives any
-                                 // weekend/holiday gap, unlike '5m' (7 days)
-                                 // or '1m' (was 1 day; see history_handler)
+      range: '1m',             // one-minute candles for the default 1D session
+      windowKey: '1D',         // last named window shortcut
       ohlcField: 'c',          // 'o'|'h'|'l'|'c' — which OHLC field line mode plots
       smaPeriods: [20],        // moving-average periods, in candles/points
       emaPeriods: [],
@@ -141,7 +145,6 @@ class PriceChartEngine {
       upColor: '#26A69A',      // TradingView-style teal/coral candle palette
       downColor: '#EF5350',
       vwapColor: '#FF8C42',
-      showVolume: true,        // volume sub-panel under the price panel
     };
     try{
       const raw = localStorage.getItem(PRICE_CHART_SETTINGS_KEY);
@@ -179,7 +182,8 @@ class PriceChartEngine {
   _lastDataAnchor(){
     const symbol = (AppState.wsState && AppState.wsState.symbol) || PRICE_CHART_DEFAULT_SYMBOL;
     const lastTick = this.chartData.getLastTick();
-    const bars = this.chartData.getHistoryBars(this.settings.range, symbol);
+    const bars = this.chartData.getHistoryBars(this._windowHistoryRange || this.settings.range, symbol)
+      || this.chartData.getHistoryBars(this.settings.range, symbol);
     const lastTickT = lastTick ? lastTick.t : null;
     const lastBarT = (bars && bars.length) ? bars[bars.length - 1].t : null;
     return Math.max(lastTickT || 0, lastBarT || 0) || Date.now();
@@ -192,14 +196,6 @@ class PriceChartEngine {
 
   _aggregateCandles(ticks, bucketMs){
     return this.chartData.aggregateCandles(ticks, bucketMs);
-  }
-
-  _sma(values, period){
-    return this.indicatorEngine.sma(values, period);
-  }
-
-  _ema(values, period){
-    return this.indicatorEngine.ema(values, period);
   }
 
   // ── DOM ──────────────────────────────────────────────
@@ -217,13 +213,12 @@ class PriceChartEngine {
     }
     host.innerHTML = this._panelHtml();
     if(createdHost || !host.isConnected){
-      // PriceChartEngine now mounts only on its dedicated chart surface.
-      // PDS-01 D-19 deliberately removed the Dashboard mini-chart mount.
-      const mountEl = $i('dashboard');
-      if(mountEl) mountEl.insertBefore(host, mountEl.firstChild);
-      else document.body.insertBefore(host, document.body.firstChild);
+      const mountEl = $i('price-chart-modal-host');
+      if(!mountEl) return;
+      mountEl.replaceChildren(host);
     }
     this._attachHandlers();
+    this._refreshToolbarState();
     if(!this._resizeAttached){
       window.addEventListener('resize', this._resizeBound);
       this._resizeAttached = true;
@@ -271,9 +266,6 @@ class PriceChartEngine {
             <input type="checkbox" id="pc-vwap-toggle" ${s.showVwap?'checked':''}/> VWAP
           </label>
           <label class="pc-field">
-            <input type="checkbox" id="pc-volume-toggle" ${s.showVolume?'checked':''}/> Volume
-          </label>
-          <label class="pc-field">
             <input type="checkbox" id="pc-grid-toggle" ${s.showGrid?'checked':''}/> Grid
           </label>
           <label class="pc-field">
@@ -293,7 +285,6 @@ class PriceChartEngine {
         <div class="pc-chart-wrap">
           <div class="pc-watermark" id="pc-watermark">—</div>
           <canvas id="price-chart-canvas" role="img" aria-label="Price history chart in Indian rupees over time" style="width:100%;display:block;" height="800">Price history is unavailable without canvas support.</canvas>
-          <canvas id="price-chart-volume-canvas" role="img" aria-label="Trading volume by time interval in contracts" style="width:100%;display:block;" height="120">Volume history is unavailable without canvas support.</canvas>
           ${this._orderPanelHtml()}
         </div>
 
@@ -351,14 +342,20 @@ class PriceChartEngine {
     if(!panel) return;
     const rangeSelect = $i('pc-range-select');
     if(rangeSelect){
-      rangeSelect.onchange = () => { this.settings.range = rangeSelect.value; this._zoomStart = this._zoomEnd = null; this._saveSettings(); this.hydrateRange(rangeSelect.value); this.render(true); };
+      rangeSelect.onchange = () => {
+        this.settings.range = rangeSelect.value;
+        this._windowHistoryRange = rangeSelect.value;
+        this._saveSettings();
+        this.hydrateRange(rangeSelect.value);
+        this.render(true);
+      };
     }
     const fieldSelect = $i('pc-field-select');
     if(fieldSelect){
       fieldSelect.onchange = () => { this.settings.ohlcField = fieldSelect.value; this._saveSettings(); this.render(); };
     }
     panel.querySelectorAll('.pc-type-btn').forEach(b=>{
-      b.onclick = () => { this.settings.type = b.dataset.type; this._zoomStart = this._zoomEnd = null; this._saveSettings(); this._refreshToolbarState(); this.render(true); };
+      b.onclick = () => { this.settings.type = b.dataset.type; this._saveSettings(); this._refreshToolbarState(); this.render(true); };
     });
     const smaToggle = $i('pc-sma-toggle'), smaPeriod = $i('pc-sma-period');
     const emaToggle = $i('pc-ema-toggle'), emaPeriod = $i('pc-ema-period');
@@ -372,8 +369,6 @@ class PriceChartEngine {
     if(vwapToggle) vwapToggle.onchange = () => { this.settings.showVwap = vwapToggle.checked; this._saveSettings(); this.render(); };
     if(gridToggle) gridToggle.onchange = () => { this.settings.showGrid = gridToggle.checked; this._saveSettings(); this.render(); };
     if(lineColor) lineColor.onchange = () => { this.settings.lineColor = lineColor.value; this._saveSettings(); this.render(); };
-    const volumeToggle = $i('pc-volume-toggle');
-    if(volumeToggle) volumeToggle.onchange = () => { this.settings.showVolume = volumeToggle.checked; this._saveSettings(); this.render(); };
 
     // Collapsed-by-default settings row (SMA/EMA/VWAP/grid/color) — the
     // gear icon toggles it, keeping the main toolbar as uncluttered as a
@@ -400,8 +395,18 @@ class PriceChartEngine {
           b.classList.add('pc-active');
           const w = PRICE_CHART_WINDOWS.find(x => x.key === b.dataset.win);
           if(!w) return;
+          // Window and candle interval are independent controls. A 1D
+          // window may therefore legitimately contain 1m, 5m or 15m bars.
+          this._windowHistoryRange = this.settings.range;
+          this.settings.windowKey = w.key;
+          this._saveSettings();
           if(w.ms === Infinity){
             this._zoomStart = null; this._zoomEnd = null;
+          } else if(w.session){
+            const now = this._lastDataAnchor();
+            const session = indianSessionBounds(now);
+            this._zoomStart = session.start;
+            this._zoomEnd = Math.min(now, session.end);
           } else {
             const now = this._lastDataAnchor();
             this._zoomStart = now - w.ms;
@@ -410,9 +415,7 @@ class PriceChartEngine {
           // Wide windows need real history beyond the tick buffer — make
           // sure the 'all' bar set has been fetched so zooming out actually
           // has data to show instead of empty space.
-          if(w.ms === Infinity || w.ms > (PRICE_CHART_RANGES[this.settings.range]||{}).ms){
-            this.hydrateRange('all');
-          }
+          this.hydrateRange(this.settings.range);
           this.render();
         };
       });
@@ -421,8 +424,11 @@ class PriceChartEngine {
     const resetZoomBtn = $i('pc-reset-zoom');
     if(resetZoomBtn){
       resetZoomBtn.onclick = () => {
+        this.settings.windowKey = null;
+        this._windowHistoryRange = null;
         this._zoomStart = null; this._zoomEnd = null;
         if(winBar) winBar.querySelectorAll('.pc-win-btn').forEach(x => x.classList.remove('pc-active'));
+        this._saveSettings();
         this.render();
       };
     }
@@ -554,8 +560,15 @@ class PriceChartEngine {
         optSeg.querySelectorAll('button').forEach(x => x.classList.remove('pc-active'));
         b.classList.add('pc-active');
         this._orderState.opt = b.dataset.opt;
+        delete $i('pc-order-price').dataset.touched;
+        this._syncOrderPanel(this._lastOrderTick);
       };
     });
+
+    $i('pc-order-strike').onchange = () => {
+      delete $i('pc-order-price').dataset.touched;
+      this._syncOrderPanel(this._lastOrderTick);
+    };
 
     const priceInput = $i('pc-order-price');
     const orderType = $i('pc-order-type');
@@ -568,10 +581,20 @@ class PriceChartEngine {
     };
 
     $i('pc-order-submit').onclick = () => {
+      const contract = this._resolveOrderContract(this._lastOrderTick);
+      if(!contract){
+        Logger.warn('priceChart', 'No live option contract is available for the selected leg');
+        return;
+      }
       const payload = {
         side: this._orderState.side,
         optType: this._orderState.opt,
         strikeOffset: parseInt($i('pc-order-strike').value, 10),
+        symbol: contract.symbol,
+        instrument_type: contract.instrumentType,
+        expiry: contract.expiry,
+        strike: contract.strike,
+        ltp: contract.ltp,
         lots: parseInt($i('pc-order-lots').value, 10) || 1,
         orderType: orderType.value,
         price: orderType.value === 'MARKET' ? null : parseFloat(priceInput.value) || null,
@@ -605,25 +628,64 @@ class PriceChartEngine {
   // track the live feed instead of sitting stale at whatever they were on
   // mount.
   _syncOrderPanel(lastTick){
+    if(lastTick) this._lastOrderTick = lastTick;
     const nameEl = $i('pc-order-symbol');
     const chgEl = $i('pc-order-chg');
     const priceInput = $i('pc-order-price');
     if(!nameEl || !lastTick) return;
-    nameEl.textContent = fmtI(lastTick.p);
-    if(chgEl && lastTick.chg != null){
-      chgEl.textContent = `${sign(lastTick.chg)}${fmtI(Math.abs(lastTick.chg))}`;
-      chgEl.classList.toggle('pc-neg', lastTick.chg < 0);
-      chgEl.classList.toggle('pc-pos', lastTick.chg >= 0);
+    const contract = this._resolveOrderContract(lastTick);
+    nameEl.textContent = contract
+      ? `${fmtI(contract.strike)} ${contract.instrumentType} · ${contract.expiry}`
+      : 'Option data unavailable';
+    const change = contract ? contract.change : null;
+    if(chgEl){
+      chgEl.textContent = Number.isFinite(change) ? `${sign(change)}${fmtI(Math.abs(change))}` : '';
+      chgEl.classList.toggle('pc-neg', Number.isFinite(change) && change < 0);
+      chgEl.classList.toggle('pc-pos', Number.isFinite(change) && change >= 0);
     }
     // Only auto-fill the price while the user hasn't started editing it,
     // so a live tick doesn't yank the field out from under someone mid-type.
     if(priceInput && !priceInput.dataset.touched){
-      priceInput.value = fmtI(lastTick.p);
+      priceInput.value = contract && Number.isFinite(contract.ltp) ? fmtI(contract.ltp) : '';
       if(!priceInput._pcTouchWired){
         priceInput._pcTouchWired = true;
-        priceInput.addEventListener('input', () => { priceInput.dataset.touched = '1'; }, { once: true });
+        priceInput.addEventListener('input', () => { priceInput.dataset.touched = '1'; });
       }
     }
+    this._refreshOrderSubmit();
+  }
+
+  _resolveOrderContract(lastTick){
+    const ws = window.AppState && AppState.wsState;
+    if(!ws || !this._orderState) return null;
+    const expiry = ws._activeExpiry || ws._primaryExpiry || ws.expiry || '';
+    const rows = (ws.chains && ws.chains[expiry]) || (expiry === ws.expiry ? ws.chain : null) || [];
+    const valid = rows
+      .filter(r => Number.isFinite(Number(r.strike)))
+      .slice()
+      .sort((a,b) => Number(a.strike) - Number(b.strike));
+    if(!valid.length) return null;
+    const spot = Number(lastTick && lastTick.p) || Number(ws.spot);
+    let atmIndex = 0;
+    valid.forEach((r,i) => {
+      if(Math.abs(Number(r.strike)-spot) < Math.abs(Number(valid[atmIndex].strike)-spot)) atmIndex=i;
+    });
+    const offset = parseInt(($i('pc-order-strike') || {}).value,10) || 0;
+    // CALL ITM lies below ATM; PUT ITM lies above ATM, so the same visible
+    // ITM/OTM choice must move in opposite strike directions for CE vs PE.
+    const rowIndex = atmIndex + (this._orderState.opt === 'CALL' ? offset : -offset);
+    const row = valid[Math.max(0, Math.min(valid.length-1, rowIndex))];
+    const isCall = this._orderState.opt === 'CALL';
+    const ltp = Number(isCall ? row.ceLTP : row.peLTP);
+    const change = Number(isCall ? row.ceChg : row.peChg);
+    return {
+      symbol: ws.symbol || PRICE_CHART_DEFAULT_SYMBOL,
+      expiry,
+      strike: Number(row.strike),
+      instrumentType: isCall ? 'CE' : 'PE',
+      ltp: Number.isFinite(ltp) ? ltp : null,
+      change: Number.isFinite(change) ? change : null,
+    };
   }
 
   // Maps real timestamps to a "virtual" compressed timeline: any gap
@@ -643,6 +705,7 @@ class PriceChartEngine {
     const panel = document.getElementById('price-chart-section');
     if(!panel) return;
     panel.querySelectorAll('.pc-type-btn').forEach(b=>b.classList.toggle('pc-active', b.dataset.type===this.settings.type));
+    panel.querySelectorAll('.pc-win-btn').forEach(b=>b.classList.toggle('pc-active', b.dataset.win===this.settings.windowKey));
   }
 
   // Populates the #pc-ohlc-readout strip (O/H/L/C + change) from a given
@@ -705,10 +768,15 @@ class PriceChartEngine {
       this._renderCache.tmap = null; // Invalidate cache on symbol change
       this.chartData.clearForSymbolChange(symText); // Free memory for old symbol
       this.hydrateRange(this.settings.range);
+      if(this._windowHistoryRange) this.hydrateRange(this._windowHistoryRange);
     }
 
     const lastTick = this.chartData.getLastTick();
-    const bars0 = this.chartData.getHistoryBars(this.settings.range, symText);
+    const rawBars = this.chartData.getHistoryBars(this._windowHistoryRange || this.settings.range, symText)
+      || this.chartData.getHistoryBars(this.settings.range, symText);
+    const historyRange = this._windowHistoryRange || this.settings.range;
+    const bars0 = rawBars && historyRange !== '1d' && historyRange !== 'all'
+      ? rawBars.filter(b=>isIndianTradingTimestamp(b.t)) : rawBars;
 
     // TradingView-style: a closed/non-trading market is never blank — it
     // keeps showing the last session's real candles, just without live
@@ -726,9 +794,9 @@ class PriceChartEngine {
     if(watermarkEl) watermarkEl.textContent = symText || '—';
     if(symEl) symEl.textContent = symText || '—';
 
-    const visible = this._visibleTicks();
+    const visible = this._visibleTicks().filter(t=>isIndianTradingTimestamp(t.t));
     if(!visible.length && !(bars0 && bars0.length)){
-      const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(800, canvas.parentElement.clientHeight);
+      const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(320, canvas.parentElement.clientHeight);
       const ctx = sizeCanvasIfChanged(canvas, W0, H0);
       ctx.clearRect(0,0,W0,H0);
       this._renderOhlcReadout(null, null);
@@ -749,7 +817,7 @@ class PriceChartEngine {
       vwap: this.settings.vwapColor,
     };
 
-    const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(800, canvas.parentElement.clientHeight);
+    const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(320, canvas.parentElement.clientHeight);
     const ctx = sizeCanvasIfChanged(canvas, W0, H0);
     const W = W0, H = H0;
     const PAD = { l: 54, r: 12, t: 12, b: 22 };
@@ -780,22 +848,27 @@ class PriceChartEngine {
     const dataMinT = (bars && bars.length) ? bars[0].t : (visible.length ? visible[0].t : _now - 60000);
     const dataMaxT = lastDataT;
 
-    // One-time default view: land on "5D" (anchored on the last real data
-    // point, not Date.now() — see _lastDataAnchor()'s comment) instead of
-    // each range's own default window, which for 15m is only ~6.25hr (one
-    // session) and can look sparse/blank-ish on first paint. Only fires
-    // once and only if the person hasn't already zoomed/panned or clicked
-    // a window button themselves.
+    // Restore the last named window; first-time users start at 1D + 1m.
     if(!this._defaultWindowApplied && this._zoomStart == null && this._zoomEnd == null){
       this._defaultWindowApplied = true;
-      const fiveDayWin = PRICE_CHART_WINDOWS.find(w => w.key === '5D');
-      if(fiveDayWin){
-        this._zoomStart = dataMaxT - fiveDayWin.ms;
-        this._zoomEnd = dataMaxT;
+      const savedWin = PRICE_CHART_WINDOWS.find(w => w.key === this.settings.windowKey);
+      if(savedWin){
+        this._windowHistoryRange=this.settings.range;
+        if(savedWin.ms===Infinity){
+          this._zoomStart=null;
+          this._zoomEnd=null;
+        }else if(savedWin.session){
+          const session=indianSessionBounds(dataMaxT);
+          this._zoomStart=session.start;
+          this._zoomEnd=Math.min(dataMaxT,session.end);
+        }else{
+          this._zoomStart=dataMaxT-savedWin.ms;
+          this._zoomEnd=dataMaxT;
+        }
         const winBar = document.getElementById('pc-win-bar');
         if(winBar){
           winBar.querySelectorAll('.pc-win-btn').forEach(x => x.classList.remove('pc-active'));
-          const btn = winBar.querySelector('[data-win="5D"]');
+          const btn = winBar.querySelector(`[data-win="${savedWin.key}"]`);
           if(btn) btn.classList.add('pc-active');
         }
       }

@@ -60,7 +60,6 @@ class App {
     // know which of app.chain/app.chainDense/app.oiFlow/app.modal/... to
     // reach for.
     this.panelManager = new PanelManager();
-    this.panelManager.register(new PriceChartPanel());
     this.panelManager.register(new OptionChainPanel());
     this.panelManager.register(new PaperTradingPanel());
     this.panelManager.register(new DecisionBoxPanel());
@@ -133,6 +132,8 @@ window.resetScenario = (...args) => app.simulator.resetScenario(...args);
 window.renderStrikeDetailReport = (...args) => app.strikeDetail.render(...args);
 window.openOIDashboardModal = (...args) => app.modal.openOIDashboardModal(...args);
 window.closeOIDashboardModal = (...args) => app.modal.closeOIDashboardModal(...args);
+window.openPriceChartModal = (...args) => app.modal.openPriceChartModal(...args);
+window.closePriceChartModal = (...args) => app.modal.closePriceChartModal(...args);
 window.openGreeksModal = (...args) => app.modal.openGreeksModal(...args);
 window.closeGreeksModal = (...args) => app.modal.closeGreeksModal(...args);
 window._greeksEscHandler = (...args) => app.modal._greeksEscHandler(...args);
@@ -281,9 +282,7 @@ Object.defineProperty(window, '_simState', {
 
 window.addEventListener('load', updateStickyOffsets);
 window.addEventListener('resize', updateStickyOffsets);
-// Panel-level resize hooks (Phase 4) — most of the six panels no-op this
-// (including PriceChartPanel now that its chart engine lives on
-// price-chart.html instead of this page). Kept as a separate listener
+// Panel-level resize hooks. Kept as a separate listener
 // rather than folded into updateStickyOffsets above so a panel's resize
 // concern stays owned by its panel, not by UiControls.
 window.addEventListener('resize', () => panelManager.resizeAll());
@@ -310,6 +309,10 @@ document.addEventListener('DOMContentLoaded', function(){
   if(oiModal) oiModal.addEventListener('click', function(e){
     if(e.target === oiModal) closeOIDashboardModal();
   });
+  var priceModal=document.getElementById('price-chart-modal');
+  if(priceModal) priceModal.addEventListener('click',function(e){
+    if(e.target===priceModal) closePriceChartModal();
+  });
   var greeksModal = document.getElementById('greeks-dashboard-modal');
   if(greeksModal){
     greeksModal.addEventListener('click', function(e){
@@ -322,21 +325,6 @@ document.addEventListener('DOMContentLoaded', function(){
 window.addEventListener('DOMContentLoaded', function(){
   const lbl = $i('ws-url-label');
   if(lbl) lbl.textContent = _wsUrl;
-  // Mount + hydrate the mini price chart right away, same as
-  // price-chart-standalone.js's boot() does for the popout tab. This must
-  // not wait on connectWebSocket()/panelManager.initAll() below: those
-  // only populate #dashboard once the backend actually pushes a payload,
-  // which during a non-trading session (after close, weekend, holiday)
-  // may never happen at all. The chart itself has its own
-  // /api/history-backed hydrateRange() and correctly renders the last
-  // real session frozen when there's no live tick (see render() in
-  // price-chart.js) — it just needs to actually be told to mount and
-  // fetch, independent of whether the rest of the dashboard ever gets
-  // live data this session. addTick() calls still arrive the normal way,
-  // via DataService.updateDashboard() on each WS message once/if one
-  // lands.
-  // priceChart.ensureMounted();
-  // priceChart.hydrateRange(priceChart.settings.range);
   panelManager.initAll();
   connectWebSocket();
 });

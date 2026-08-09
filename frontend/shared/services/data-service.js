@@ -217,39 +217,17 @@ class DataService {
   }
   this._updateDataQuality(AppState.wsState);
 
+  // Keep the native Price Chart buffer current even while its modal is
+  // closed, so opening it never starts from an empty live series.
+  if(window.priceChart && AppState.wsState.spot != null){
+    window.priceChart.addTick(AppState.wsState.spot, Date.now(), null);
+  }
+
   // applyExpirySelection() call removed (dead code — see chain-helpers.js):
   // expiry switching is handled by ChainView.onExpiryChange reconnecting
   // the WebSocket with ?expiry=..., not by splicing an alternate expiry's
   // chain into this tick's payload. This call was always a no-op since
   // app.chain.selectedExpiry (_selectedExpiry) is never written anywhere.
-
-  // Feed the live price chart from this same tick's spot value. The
-  // chart engine itself (price-chart.js) no longer loads on this page —
-  // it lives on the standalone price-chart.html tab now — so this just
-  // broadcasts the tick over BroadcastChannel('pc-live-sync') via
-  // PriceChartPanel; that tab's own price-chart-standalone.js calls
-  // priceChart.addTick() on the receiving end using the same client-side
-  // timestamp approach as before (no timestamp field exists on the
-  // payload today — fine for a live scrolling chart, just not a true
-  // exchange-timestamped tape).
-  //
-  // VWAP intentionally NOT sent for the index spot chart: NIFTY/etc. are
-  // computed composite index levels, not traded instruments — they have
-  // no volume or traded value of their own. allIndices' Value/Volume
-  // fields are the SUM across the index's individual constituent stocks
-  // (Reliance, HDFC Bank, ...), so Value/Volume is really "average traded
-  // price across those constituent shares" — a real number, just not the
-  // index's VWAP, and not comparable to the index level at all (hence it
-  // showing ~900 next to a ~24,000 spot). If a real index-level VWAP is
-  // wanted later, it needs to come from NIFTY FUTURES turnover/volume
-  // (see fetch_nifty_futures in market_api.py) or SmartAPI's own volume
-  // field on the index token, not this basket aggregate.
-  if(AppState.wsState.spot != null) {
-    panelManager.get('priceChart').pushTick(
-      AppState.wsState.spot, AppState.wsState.symbol,
-      AppState.wsState.spotChange, AppState.wsState.spotChgPct
-    );
-  }
 
   // Keep canonical Option Chain rows ready for in-dashboard drill-downs.
   app.chainDense.refreshView(AppState.wsState);

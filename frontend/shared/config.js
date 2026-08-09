@@ -14,13 +14,16 @@
 //   setInterval(tick, Config.refresh.mockTickMs)
 // ============================================================
 
+const _fileHttpOrigin = location.protocol === 'file:' ? 'http://127.0.0.1:5500' : '';
+const _wsOrigin = location.protocol === 'file:'
+  ? 'ws://127.0.0.1:5500'
+  : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+
 const Config = {
   ws: {
-    // Same-origin WS endpoint. Centralized because data-service.js,
-    // price-chart-standalone.js, and oi-flow.js each independently built
-    // this string before.
-    url: `ws://${location.host}/ws`,
-    // Delay before price-chart-standalone.js retries a dropped connection.
+    // Same-origin WS endpoint shared by the dashboard and Price Chart page.
+    url: `${_wsOrigin}/ws`,
+    // Delay before a dropped dashboard connection is retried.
     reconnectDelayMs: 3000,
     // Dashboard feed-health threshold. The engine normally emits at least
     // once per 5s poll ceiling; 12s allows one slow cycle without declaring
@@ -29,14 +32,14 @@ const Config = {
     // ws_server_live.py's bridge_ws_handler — separate endpoint from /ws,
     // same origin/port. Used by fiidii-report.js's FiiDiiReportFeed
     // (connects only while the FII/DII modal is open).
-    relayUrl: `ws://${location.host}/dashboard-relay`,
+    relayUrl: `${_wsOrigin}/dashboard-relay`,
   },
 
   api: {
-    history: '/api/history',
-    symbols: '/api/symbols',
-    lotSizes: '/api/lot-sizes',
-    setIndex: '/api/set_index',
+    history: `${_fileHttpOrigin}/api/history`,
+    symbols: `${_fileHttpOrigin}/api/symbols`,
+    lotSizes: `${_fileHttpOrigin}/api/lot-sizes`,
+    setIndex: `${_fileHttpOrigin}/api/set_index`,
   },
 
   refresh: {

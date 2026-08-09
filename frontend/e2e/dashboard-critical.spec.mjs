@@ -39,6 +39,33 @@ test('native OI Flow chart opens and switches measure', async ({ page }) => {
   await expect(modal).not.toHaveClass(/open/);
 });
 
+test('Price Chart opens as a native dashboard modal', async ({ page }) => {
+  await openDashboard(page);
+  await page.getByRole('button', { name:'Open Price Chart' }).click();
+  const modal=page.locator('#price-chart-modal');
+  await expect(modal).toHaveClass(/open/);
+  await expect(page.locator('#price-chart-canvas')).toBeVisible();
+  const oneDay=page.locator('#pc-win-bar').getByRole('button',{name:'1D',exact:true});
+  await expect(oneDay).toHaveClass(/pc-active/);
+  expect(await page.locator('#pc-range-select').evaluate(select=>select.value)).toBe('1m');
+  await oneDay.click();
+  await expect(oneDay).toHaveClass(/pc-active/);
+  await page.locator('#pc-range-select').selectOption('5m');
+  await expect(oneDay).toHaveClass(/pc-active/);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('priceChartSettings.v2')).windowKey)).toBe('1D');
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('priceChartSettings.v2')).range)).toBe('5m');
+  const windowState=await page.evaluate(()=>({
+    range:window.priceChart._windowHistoryRange,
+    span:window.priceChart._zoomEnd-window.priceChart._zoomStart,
+  }));
+  expect(windowState.range).toBe('5m');
+  expect(windowState.span).toBeGreaterThan(0);
+  expect(windowState.span).toBeLessThanOrEqual(6.25*60*60*1000);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('priceChartSettings.v2')).windowKey)).toBe('1D');
+  await page.getByRole('button', { name:'Close Price Chart' }).click();
+  await expect(modal).not.toHaveClass(/open/);
+});
+
 test('Backtest modal uses the shared accessible modal contract', async ({ page }) => {
   await openDashboard(page);
   await page.locator('#rail-tools-toggle').click();

@@ -92,7 +92,7 @@ event-bus.js                    ← Phase 5, loads first so every eventBus guard
 Chart.js (CDN)
 chart-legend.js
 PriceChart/*.js                 (chart-data, chart-renderer, indicator-engine,
-                                  history-loader, price-chart)
+                                  history-loader, price-chart-engine)
 formatters.js
 dom-utils.js                    ← $i, err, setHtmlIfChanged, sizeCanvasIfChanged
 range-tabs.js
@@ -215,7 +215,10 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 ### 🔹 Price Chart
 | File | Role |
 |---|---|
-| `dashboard-panels.js` | `PriceChartPanel` — only owns BroadcastChannel (`pc-live-sync`) sync to the standalone `price-chart.html` tab; the full chart engine no longer lives on this page |
+| `price-chart-engine.js` | Coordinates chart data, history, indicators, rendering, zoom and order-panel UI |
+| `DashboardPro.html` / `modal-manager.js` | Native Price Chart modal, opened from the Decision Engine mini chart |
+| `chart-data.js` / `chart-renderer.js` | Tick/history storage and canvas drawing responsibilities |
+| `indicator-engine.js` / `history-loader.js` | SMA/EMA calculations and backend OHLCV hydration |
 | `chart-legend.js` | Greeks-by-Moneyness legend chart (Chart.js) — separate from the price chart, rendered inline in the dashboard template |
 
 ---
@@ -228,7 +231,7 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 | `event-bus.js` | `EventBus` — pub/sub (`market:update`, `symbol:change`, `expiry:change`, `chain:update`, `chart:refresh`). Introduced but not yet subscribed-to anywhere (additive only, no call sites migrated yet) |
 | `market-store.js` | `MarketStore` — single owner of live state (`_wsState`); `ingest()` handles `full`/`delta`/generic WS message shapes; `applyDelta()` patches keyed arrays (e.g. option chain by strike) in place; `deepMerge()` for generic merges |
 | `panel-manager.js` | `Panel` base class (init/refresh/resize/destroy lifecycle) + `PanelManager` registry (`register`, `get`, `initAll`, `refreshAll`, `resizeAll`, `destroyAll`) |
-| `dashboard-panels.js` | The 6 concrete `Panel` subclasses: `PriceChartPanel`, `OptionChainPanel`, `OiDashboardPanel`, `PaperTradingPanel`, `DecisionBoxPanel`, `MarketBreadthPanel` (stub — no data source yet) |
+| `dashboard-panels.js` | Dashboard-native panel adapters: `OptionChainPanel`, `PaperTradingPanel`, `DecisionBoxPanel`, `MarketBreadthPanel` |
 | `range-tabs.js` | Single source of truth for the ±3/±5/±10/±15/All range tab-group markup, injected into every `[data-range-tabs]` placeholder (sidebar, Greeks modal, IV modal) |
 | `chain-helpers.js` | Shared pure functions: `activeAtm`, `applyExpirySelection`, `getFilteredChain`, `findGammaFlipStrike`, `chainCombinedSignal`, `velMiniCell`, `oiFlowLabel`, expiry-select re-parenting, mojibake repair |
 
@@ -247,7 +250,7 @@ Exist elsewhere in the project — not part of the files uploaded/reviewed so fa
 - `order-entry.js` / `portfolio-tracker.js` — order and portfolio surfaces
 - `OptionChain/chain-depth.js`, `OptionChain/chain-utils.js`, `OptionChain/chain-templates.js`
 - `Dashboard/chain/*` — canonical Option Chain snapshot and strike drill-down
-- `price-chart.html` + `PriceChart/*.js` — standalone price chart tab
+- `DashboardPro.html` + `PriceChart/*.js` — native modal price chart
 
 ---
 

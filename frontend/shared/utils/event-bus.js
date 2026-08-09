@@ -31,10 +31,10 @@
 //                     GEX/etc.) finished a re-render
 //                     (chain-views.js, ChainView._rerenderChainPanels())
 //   chart:refresh  — the live price chart finished a redraw
-//                     (price-chart.js, PriceChartEngine.render())
+//                     (price-chart-engine.js, PriceChartEngine.render())
 //
 // Must load BEFORE ws-manager.js/market-store.js/chain-helpers.js/
-// chain-views.js/price-chart.js — all of them do a top-level
+// chain-views.js/price-chart-engine.js — all of them do a top-level
 // `if (window.eventBus) window.eventBar.emit(...)` guard, but the guard
 // only protects against EventBus not existing yet; loading it first
 // keeps that guard always true. See DashboardPro.html script order.

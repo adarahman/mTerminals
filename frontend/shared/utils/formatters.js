@@ -7,7 +7,7 @@
 // _wsState or any other dashboard state — just number/string -> string.
 // Heavily used by chain-views.js and panels-views.js (fmtN/fmtI/fmtK
 // especially), which is why this loads before them in DashboardPro.html,
-// right after chart-legend.js and price-chart.js.
+// right after chart-legend.js and price-chart-engine.js.
 //
 // Phase 1 bootstrap cleanup note: this file's <script> tag was missing
 // from DashboardPro.html up to now — dashboard.js still carried its own
