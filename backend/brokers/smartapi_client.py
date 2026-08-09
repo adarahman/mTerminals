@@ -1204,18 +1204,21 @@ def get_atm_chain_with_greeks(underlying, expiry_ddmmmyyyy, strikes_around_atm=1
 # ── 6. Live order placement (real money — see caller-side safeguards in
 #      ws_server_live.py: LIVE_TRADING_ENABLED, kill-switch file, lot caps
 #      before assuming this is safe to call directly) ────────────────────
-def _find_order_by_tag(tag: str):
+def _find_order_by_tag(tag: str, *, suppress_errors: bool = True):
     """Look up a live order by its ordertag in the current order book.
     Used by place_order() to detect an order that actually landed
     server-side despite the placeOrder call itself raising/timing out or
     coming back with a (possibly stale) rejection — see place_order()'s
-    docstring. Returns the order id if found, else None. Swallows its own
-    errors (order-book lookup failing shouldn't crash the idempotency
-    check itself — the caller falls back to its normal error path)."""
+    docstring. Returns the order id if found, else None. Recovery checks
+    suppress lookup errors, while the pre-submission check requests strict
+    behavior so an unavailable order book blocks a potentially duplicate
+    real order."""
     try:
         orders = get_order_book()
     except Exception:
-        return None
+        if suppress_errors:
+            return None
+        raise
     for o in orders:
         if str(o.get("ordertag", "")) == tag:
             return o.get("orderid")
@@ -1253,6 +1256,24 @@ def place_order(
     _session.call() may already perform internally.
     """
     tag = order_tag or uuid.uuid4().hex[:20]  # AngelOne ordertag cap ~20 chars
+
+    # A caller-supplied tag represents a retryable durable identity. Check
+    # AngelOne before submission so a process crash after broker acceptance
+    # but before the local ledger commit cannot create a second real order.
+    # Fail closed when the order book cannot be verified.
+    if order_tag:
+        try:
+            existing = _find_order_by_tag(tag, suppress_errors=False)
+        except Exception as e:
+            raise BrokerError(
+                f"cannot verify order tag {tag} before placement: {e}"
+            ) from e
+        if existing:
+            logger.warning(
+                "[smartapi_client] order tag %s already exists (id=%s) — "
+                "returning it without another submission.", tag, existing,
+            )
+            return existing
 
     order_params = {
         "variety": variety,

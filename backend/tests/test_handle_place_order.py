@@ -45,6 +45,18 @@ class _StubFilledOrder:
     reject_reason = None
 
 
+class _MemoryLiveOrderStore:
+    def __init__(self):
+        self.orders = {}
+
+    def get(self, client_order_id):
+        return self.orders.get(client_order_id)
+
+    def record(self, client_order_id, broker_order_id):
+        self.orders.setdefault(client_order_id, str(broker_order_id))
+        return self.orders[client_order_id]
+
+
 def _order_payload(**overrides):
     payload = {
         "symbol": "NIFTY",
@@ -83,6 +95,7 @@ def live_env(ws_server_live, monkeypatch, tmp_path):
     monkeypatch.setattr(m, "LIVE_MAX_ORDERS_PER_MINUTE", 5)
     monkeypatch.setattr(m, "_live_order_timestamps", [])
     monkeypatch.setattr(m, "_LIVE_ORDER_RESULTS", {})
+    monkeypatch.setattr(m, "_LIVE_ORDER_STORE", _MemoryLiveOrderStore())
     monkeypatch.setattr(m, "_ACCOUNT_GUARD", _FakeGuard())
     monkeypatch.setattr(m, "smartapi_get_positions", lambda: [])
     # PT_LOT_SIZES (lot_sizes.LOT_SIZES) is a dict subclass that only

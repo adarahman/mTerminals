@@ -173,3 +173,40 @@ def test_call_token_error_code_triggers_relogin_and_retries(session, errorcode):
     assert result == {"status": True, "data": "ok"}
     assert session.login_calls["n"] == 2
     assert session.mock_api.someMethod.call_count == 2
+
+
+def test_place_order_reuses_existing_caller_tag_without_submission(smartapi_modules, monkeypatch):
+    smartapi_client, _ = smartapi_modules
+    monkeypatch.setattr(smartapi_client, "_find_order_by_tag", lambda tag, **kwargs: "ORDER123")
+    submit_calls = []
+    monkeypatch.setattr(
+        smartapi_client._session, "call",
+        lambda *args, **kwargs: submit_calls.append((args, kwargs)),
+    )
+
+    result = smartapi_client.place_order(
+        "NIFTY", "123", "NFO", "BUY", 65, order_tag="liveorder00000001",
+    )
+
+    assert result == "ORDER123"
+    assert submit_calls == []
+
+
+def test_place_order_fails_closed_when_tag_preflight_is_unavailable(smartapi_modules, monkeypatch):
+    smartapi_client, _ = smartapi_modules
+
+    def unavailable(tag, **kwargs):
+        raise RuntimeError("order book unavailable")
+
+    monkeypatch.setattr(smartapi_client, "_find_order_by_tag", unavailable)
+    submit_calls = []
+    monkeypatch.setattr(
+        smartapi_client._session, "call",
+        lambda *args, **kwargs: submit_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(smartapi_client.BrokerError, match="cannot verify order tag"):
+        smartapi_client.place_order(
+            "NIFTY", "123", "NFO", "BUY", 65, order_tag="liveorder00000001",
+        )
+    assert submit_calls == []

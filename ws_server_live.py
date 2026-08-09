@@ -58,6 +58,7 @@ from risk.account_guard import (
     LiveAccountRiskGuard, pnl_from_positions, open_lots_from_positions,
 )
 from risk.position_reconciler import PositionReconciler
+from risk.live_order_store import LiveOrderStore
 from decision.auto_executor import AutoExecutor
 from backtest.replay import run_backtest
 
@@ -295,6 +296,7 @@ _live_order_timestamps = []  # sliding window for the per-minute cap, main-threa
 _LIVE_ORDER_SUBMIT_LOCK = threading.Lock()
 _LIVE_ORDER_RESULTS = {}
 _LIVE_ORDER_RESULTS_MAX = 500
+_LIVE_ORDER_STORE = LiveOrderStore(max_entries=_LIVE_ORDER_RESULTS_MAX)
 
 if LIVE_TRADING_ENABLED:
     print(
@@ -408,7 +410,13 @@ def _check_live_rate_limit():
 def _completed_live_order(client_order_id):
     """Returns a previously completed live submission, if any."""
     with _LIVE_ORDER_SUBMIT_LOCK:
-        return _LIVE_ORDER_RESULTS.get(client_order_id)
+        cached = _LIVE_ORDER_RESULTS.get(client_order_id)
+        if cached is not None:
+            return cached
+        persisted = _LIVE_ORDER_STORE.get(client_order_id)
+        if persisted is not None:
+            _LIVE_ORDER_RESULTS[client_order_id] = persisted
+        return persisted
 
 
 def _submit_live_order_idempotent(client_order_id, *args, **kwargs):
@@ -424,6 +432,7 @@ def _submit_live_order_idempotent(client_order_id, *args, **kwargs):
         order_id = smartapi_place_order(
             *args, **kwargs, order_tag=client_order_id,
         )
+        order_id = _LIVE_ORDER_STORE.record(client_order_id, order_id)
         _LIVE_ORDER_RESULTS[client_order_id] = order_id
         while len(_LIVE_ORDER_RESULTS) > _LIVE_ORDER_RESULTS_MAX:
             _LIVE_ORDER_RESULTS.pop(next(iter(_LIVE_ORDER_RESULTS)))
