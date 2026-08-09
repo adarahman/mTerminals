@@ -33,8 +33,6 @@ frontend/
 ├─ Dashboard/
 │  ├─ chain/
 │  └─ components/
-├─ OptionChain/
-├─ OIFlow/
 ├─ PriceChart/
 ├─ engines/
 ├─ shared/

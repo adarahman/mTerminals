@@ -7,7 +7,7 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const view = read('Dashboard/strike-detail-report-view.js');
 const modal = read('Dashboard/modal-manager.js');
 const simulator = read('Dashboard/simulator-view.js');
-const sync = read('Dashboard/chain/chain-sync.js');
+const sync = read('Dashboard/chain/chain-controls.js');
 const backend = read('../backend/mTerminals_json.py');
 const build = read('build.mjs');
 
@@ -20,7 +20,11 @@ const checks = [
   ['feed state and timestamp are explicit', view.includes('Timestamp ${this._escape(asOf)}') && view.includes("replaceAll('_', ' ')")],
   ['5/15/30 velocity context is rendered', ['5m OI velocity','15m OI velocity','30m OI velocity'].every((label) => view.includes(label))],
   ['partial feed is qualified', view.includes("fs.quality === 'PARTIAL'") && view.includes('sdr-feed-note')],
-  ['simulator does not render Strike Detail', !simulator.includes('this.simRenderTable(simGEX')],
+  ['single-strike and multi-strike reports stay separate',
+    modal.includes("getElementById('single-strike-detail-modal')")
+      && modal.includes("getElementById('strike-detail-report-modal')")
+      && simulator.includes('this.simRenderTable(simGEX')
+      && !view.includes('simState')],
   ['option-chain strike action opens the in-page report', sync.includes('openStrikeDetailReportModal(n)')],
   ['production bundle includes report view', build.includes('Dashboard/strike-detail-report-view.js')],
 ];

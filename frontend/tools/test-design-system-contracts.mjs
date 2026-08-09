@@ -5,7 +5,7 @@ const [backtest, responsive, priceCss, algo, depth, components, dashboardHtml, p
   read('Dashboard/backtest-view.js'), read('styles/responsive.css'),
   read('styles/responsive.css'),
   read('Dashboard/algo-status.js'), read('Dashboard/chain/chain-depth.js'), read('styles/components.css'),
-  read('Dashboard/DashboardPro.html'), read('PriceChart/price-chart-engine.js'), read('Dashboard/chain/chain-renderer.js'),
+  read('Dashboard/DashboardPro.html'), read('PriceChart/price-chart-engine.js'), read('Dashboard/chain/chain-dashboard-renderer.js'),
 ]);
 
 const canvasSources = [dashboardHtml, priceJs, chainRenderer].join('\n')

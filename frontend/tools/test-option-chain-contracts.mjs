@@ -4,7 +4,7 @@ import process from 'node:process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
-const sync = read('Dashboard/chain/chain-sync.js');
+const sync = read('Dashboard/chain/chain-controls.js');
 const template = read('Dashboard/chain/chain-template.js');
 const styles = read('styles/panels.css');
 const build = read('build.mjs');

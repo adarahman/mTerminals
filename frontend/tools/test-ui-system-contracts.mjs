@@ -20,7 +20,7 @@ const formatterContext = {};
 vm.runInNewContext(formatters, formatterContext);
 const chartSources = [
   read('Dashboard/DashboardPro.html'),
-  read('PriceChart/price-chart-engine.js'), read('Dashboard/chain/chain-renderer.js'),
+  read('PriceChart/price-chart-engine.js'), read('Dashboard/chain/chain-dashboard-renderer.js'),
 ].join('\n').replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 const docsDir = path.join(root, '../docs/03_UI_System');
 const docs = fs.readdirSync(docsDir).filter((name) => name.endsWith('.md'))

@@ -852,6 +852,7 @@ details.card summary .card-head{margin:0;}
 .oc-ledger-table td.footprint,.oc-ledger-table td.structure{text-align:center}.oc-ledger-table td.footprint strong{color:var(--info)}.oc-ledger-table td.structure{color:var(--warn);font-size:10px;font-weight:700}
 .oc-ledger-greeks[hidden]{display:none}.oc-ledger-greeks td{padding:8px 16px!important;background:#0a0c11;text-align:center!important}.oc-ledger-greeks td>div{display:inline-block;margin:0 18px;color:var(--text-secondary);font-size:11px}.oc-ledger-greeks b.ce{color:var(--pos)}.oc-ledger-greeks b.pe{color:var(--neg)}
 
+
 .oi-snap-card{
   border-radius:var(--radius);border:1px solid;
   padding: var(--space-4);display:flex;flex-direction:column;gap:10px;min-width:0;

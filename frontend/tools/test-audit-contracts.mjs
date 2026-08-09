@@ -8,12 +8,16 @@ const historical = read('docs/07_Audits/DASHBOARD_PDS01_IMPLEMENTATION_AUDIT_COR
 const current = read('docs/07_Audits/DASHBOARD_PDS01_IMPLEMENTATION_AUDIT_v1.2.md');
 const pds = read('docs/01_Product_Architecture/PDS-01_Dashboard.md');
 const template = read('frontend/Dashboard/chain/chain-template.js');
-const sync = read('frontend/Dashboard/chain/chain-sync.js');
+const sync = read('frontend/Dashboard/chain/chain-controls.js');
 const modal = read('frontend/Dashboard/modal-manager.js');
 const execView = read('frontend/Dashboard/exec-view.js');
 const chart = read('frontend/Dashboard/chart-legend.js');
 const responsive = read('frontend/styles/responsive.css');
-const renderer = read('frontend/Dashboard/chain/chain-renderer.js');
+const renderer = [
+  read('frontend/Dashboard/chain/chain-dense-renderer.js'),
+  read('frontend/Dashboard/chain/chain-dashboard-renderer.js'),
+  read('frontend/Dashboard/chain/chain-analytics-renderer.js'),
+].join('\n');
 const domUtils = read('frontend/shared/utils/dom-utils.js');
 
 const checks = [

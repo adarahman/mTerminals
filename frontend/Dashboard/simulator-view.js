@@ -177,7 +177,9 @@ class SimulatorView {
 
   this.simRenderGEXChart(simGEX, simSpot, flipRow ? flipRow.strike : 0);
   this.simRenderVolGrid(simGEX, simVel);
-  // Strike Detail is live/canonical and intentionally receives no scenario values.
+  // The multi-strike report is live/canonical. Greeks enrich its IV/Delta
+  // columns, but chain rows remain the authoritative strike/OI universe.
+  this.simRenderTable(simGEX, simSpot, simIV);
 }
 
   simRenderGEXChart(gexData, simSpot, flipStrike) {
@@ -507,7 +509,7 @@ simRenderVolGrid(gexData, simVel) {
 }
 
   simRenderTable(gexData, simSpot, simIV) {
-  // #sdt-rows lives inside the Strike Detail Report modal
+  // #sdt-rows lives inside the multi-strike Strike Detail Report modal
   // (strike-detail-report-modal in DashboardPro.html) — not always in the
   // DOM if that modal markup is ever absent, hence the null-guard on `el`
   // below. This function always computes the rows/stats regardless, so
@@ -517,6 +519,20 @@ simRenderVolGrid(gexData, simVel) {
   var atm = this.simState.atm;
   var step = this.simState.step || 50;
   var ratios = this.simState.volOiRatios || {};
+  // Do not let missing/partial Greeks erase valid option-chain strikes.
+  // Build the report universe from the canonical chain and merge whatever
+  // Greek enrichment exists for each strike.
+  var greekByStrike = {};
+  (gexData || []).forEach(function(g) { greekByStrike[Number(g.strike)] = g; });
+  var chainRows = ((_data && _data.chain) || []);
+  if (chainRows.length) {
+    gexData = chainRows.map(function(r) {
+      var g = greekByStrike[Number(r.strike)] || {};
+      var rowIv = r.ceIV != null && r.peIV != null ? (Number(r.ceIV) + Number(r.peIV)) / 2
+        : r.ceIV != null ? Number(r.ceIV) : r.peIV != null ? Number(r.peIV) : simIV;
+      return Object.assign({ strike:Number(r.strike), iv:rowIv, cDelta:null, pDelta:null }, g);
+    }).filter(function(g) { return Number.isFinite(g.strike); });
+  }
   // Real per-strike open interest lives on the chain rows (ceOI/peOI), not
   // on volOiRatios (which only carries ce_vol/pe_vol — traded volume — plus
   // the vol/OI ratio itself). The table was previously showing

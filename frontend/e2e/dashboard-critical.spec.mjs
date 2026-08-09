@@ -62,8 +62,29 @@ test('Price Chart opens as a native dashboard modal', async ({ page }) => {
   expect(windowState.span).toBeGreaterThan(0);
   expect(windowState.span).toBeLessThanOrEqual(6.25*60*60*1000);
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('priceChartSettings.v2')).windowKey)).toBe('1D');
-  await page.getByRole('button', { name:'Close Price Chart' }).click();
+  await page.keyboard.press('Escape');
   await expect(modal).not.toHaveClass(/open/);
+});
+
+test('Escape closes dashboard flyouts one at a time', async ({ page }) => {
+  await openDashboard(page);
+  const toolsMenu = page.locator('#rail-tools-menu');
+  if(!(await toolsMenu.evaluate(el => el.open))) await page.locator('#rail-tools-toggle').click();
+  await page.locator('#pt-order-toggle-btn').click();
+  await expect(page.locator('#pt-order-panel')).toHaveClass(/open/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#pt-order-panel')).not.toHaveClass(/open/);
+  await expect(page.locator('#pt-order-toggle-btn')).not.toHaveClass(/active/);
+
+  await page.locator('#algo-toggle-btn').click();
+  await expect(page.locator('#algo-panel')).toHaveClass(/open/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#algo-panel')).not.toHaveClass(/open/);
+
+  await page.locator('#ctrl-sidebar-toggle-btn').click();
+  await expect(page.locator('#ctrl-sidebar')).toHaveClass(/open/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#ctrl-sidebar')).not.toHaveClass(/open/);
 });
 
 test('Backtest modal uses the shared accessible modal contract', async ({ page }) => {
@@ -105,8 +126,20 @@ test('Option Chain strike opens dashboard-native Strike Detail', async ({ page }
   }, { row: chainRow });
 
   await page.evaluate((selectedStrike) => window.openOptionChainAtStrike(selectedStrike), strike);
-  await expect(page.locator('#strike-detail-report-modal')).toHaveClass(/open/);
+  await expect(page.locator('#single-strike-detail-modal')).toHaveClass(/open/);
   await expect(page.locator('#strike-detail-report-content .sdr-hero')).toBeVisible();
+});
+
+test('Institutional Activity Crux opens the full multi-strike report', async ({ page }) => {
+  await openDashboard(page);
+  await page.getByRole('button', { name:'Open full multi-strike Institutional Activity report' }).click();
+  const modal = page.locator('#strike-detail-report-modal');
+  await expect(modal).toHaveClass(/open/);
+  await expect(modal).toContainText('Total OI (Near ATM)');
+  await expect(modal).toContainText('Smart Money');
+  await expect(modal).toContainText('Market Structure');
+  await expect(modal.locator('.sdt-row').first()).toBeVisible();
+  await expect(page.locator('#single-strike-detail-modal')).not.toHaveClass(/open/);
 });
 
 test('Option Chain Snapshot header opens and closes the native chain table', async ({ page }) => {
@@ -126,7 +159,7 @@ test('Option Chain Snapshot header opens and closes the native chain table', asy
   await table.locator('.oc-ledger-row td.ltp.ce button').first().click();
   await expect(page.locator('#pt-quick-popover')).toBeVisible();
   await page.locator('#pt-quick-popover .pt-qp-close').click();
-  await header.click();
+  await page.keyboard.press('Escape');
   await expect(table).toBeHidden();
 });
 

@@ -96,17 +96,18 @@ PriceChart/*.js                 (chart-data, chart-renderer, indicator-engine,
 formatters.js
 dom-utils.js                    ← $i, err, setHtmlIfChanged, sizeCanvasIfChanged
 range-tabs.js
-chain-helpers.js                ← shared chain/expiry/index pure functions
+chain-helpers.js                ← shared option-chain calculations/formatting
+market-context.js               ← index ticker, symbol/source and expiry state
 chain-view.js                   ← MUST load first of the chain-*.js split files
                                    (declares ChainDenseView / RightPanelView / ChainView)
 chain-template.js               ← pure HTML builders (attaches to ChainView.prototype)
-chain-renderer.js               ← DOM-writing render/patch methods
-OptionChain/chain-depth.js
+chain-dense-renderer.js         ← dense-table status/expiry/row rendering
+chain-dashboard-renderer.js     ← dashboard and Decision Engine render/patch paths
+chain-analytics-renderer.js     ← velocity, IV surface and secondary analytics
+chain-depth.js
 chain-greeks.js
-chain-sync.js                   ← in-dashboard strike/detail navigation
-OptionChain/chain-utils.js
+chain-controls.js               ← in-dashboard disclosure/strike navigation
 chain-view-models.js            ← Phase 3: pure business-logic (row/strike view models)
-OptionChain/chain-templates.js  ← Phase 3: pure HTML templates consuming those view models
 panels-views.js                 ← OiFlowView, ExecView, StrategyView, SimulatorView, ModalManager
 ws-manager.js
 market-store.js                 ← MarketStore: owns _wsState, ingest()/applyDelta()/deepMerge()
@@ -137,8 +138,8 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 | File | Role |
 |---|---|
 | `chain-template.js` | `ChainView.prototype.renderTopBarHtml()` — symbol picker, spot + flash-up/down, %/pt badge, chart icon, expiry/DTE/"As of" pills. Also `renderFundPillHtml()` (P&L/Fund pills), `renderSymbolOptions()` |
-| `chain-helpers.js` | `renderIndexTicker()` (NIFTY/BANKNIFTY/VIX pill strip); `getExpirySelectNode()` / `moveExpirySelectIntoTopBar()` — re-parents the persistent `#expirySelect` node |
-| `chain-renderer.js` | `ChainView.prototype.patchTopBarAndDecision()` — swaps `#sec-topbar` outerHTML on every live tick |
+| `market-context.js` | Index ticker, symbol/source switching, expiry selection and persistent-select re-parenting |
+| `chain-dashboard-renderer.js` | `ChainView.prototype.patchTopBarAndDecision()` — patches the top bar on live ticks |
 | `dashboard-panels.js` / `dashboard.js` | `OptionChainPanel.patch()` wraps it; exposed as `window.patchTopBarAndDecision` |
 | `DashboardPro.html` | Hosts the persistent `#expiry-select-holder` / `#expirySelect` node |
 
@@ -147,15 +148,15 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 |---|---|
 | `chain-template.js` | `ChainView.prototype.renderDecisionBoxHtml()` — Tier-1 `.verdict` card (bias/confidence/trade grade/PCR-VIX-MaxPain-Wall strip) + Tier-3 "Decision Detail" collapsible (trap warning, active signals, S&R levels, strategy name) |
 | `decision-card-preview.html` | **Static design mockup only** — not wired into the app, no live data. See §1 — safe to delete. |
-| `chain-renderer.js` | `patchTopBarAndDecision()` (per-tick) and `renderDashboard()` (full rebuild) both swap `#sec-decision` |
+| `chain-dashboard-renderer.js` | `patchTopBarAndDecision()` and `renderDashboard()` update `#sec-decision` |
 | `dashboard-panels.js` | `DecisionBoxPanel.refresh()` — standalone `PanelManager` refresh path |
 
 ### 🔹 Option Chain Snapshot (`#chain-summary-card`)
 | File | Role |
 |---|---|
 | `chain-template.js` | `ChainView.prototype.buildChainSummaryHtml()` — OI totals, PCR, ΔOI shift, Vol/OI card |
-| `chain-renderer.js` | Incremental-refresh path diffs/swaps `#chain-summary-card` via `dataset.lastHtml` cache |
-| `panels-views.js` | `toggleFullChainFocus()` — "Full Chain →" button; injects an inline iframe (`OptionChain/option-chain.html`) after the card instead of opening a new tab |
+| `chain-dashboard-renderer.js` | Incremental-refresh path diffs/swaps `#chain-summary-card` via `dataset.lastHtml` cache |
+| `chain-controls.js` | Expands the native chain ledger and opens dashboard-native strike detail |
 | `dom-utils.js` | `setHtmlIfChanged()` — shared diff-and-write helper used by this and most other cards |
 
 ### 🔹 Greeks / Net GEX (alerts card + full modal table)
@@ -169,13 +170,13 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 |---|---|
 | `chain-template.js` | `buildIvAlertsHtml()` (compact skew/rank alerts), `buildIvSurfaceHtml()` (full per-strike CE/PE IV bar table + Skew/Max/Min footer) |
 
-### 🔹 Option Chain full dense table (standalone tab)
+### 🔹 Option Chain dense table (dashboard-native)
 | File | Role |
 |---|---|
-| `chain-renderer.js` | `ChainDenseView.prototype.buildRowsHtml()`, `refreshView()`, `updateHeader()`, `renderExpiryOptions()` |
+| `chain-dense-renderer.js` | `ChainDenseView.prototype.buildRowsHtml()`, `refreshView()`, `updateHeader()`, `renderExpiryOptions()` |
 | `chain-view-models.js` | Pure business logic — `buildChainRowViewModel()`, `buildStrikeDetailViewModel()`, `buildOiCombinedBarViewModel()` (institutional OI bar + smart-money badge) |
-| `OptionChain/chain-templates.js` | Pure HTML rendering of those view models (not in original upload, referenced by header comments) |
-| `chain-sync.js` | `ChainDenseView.prototype._initBroadcast()` / `_broadcastToOptionChainTab()` — BroadcastChannel sync to standalone `option-chain.html` tab |
+| `chain-view-models.js` | Also contains pure HTML row/strike templates consuming those view models |
+| `chain-controls.js` | Native disclosure, Greeks-row toggle and strike-detail navigation |
 
 ### 🔹 OI Flow
 | File | Role |
@@ -233,7 +234,8 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 | `panel-manager.js` | `Panel` base class (init/refresh/resize/destroy lifecycle) + `PanelManager` registry (`register`, `get`, `initAll`, `refreshAll`, `resizeAll`, `destroyAll`) |
 | `dashboard-panels.js` | Dashboard-native panel adapters: `OptionChainPanel`, `PaperTradingPanel`, `DecisionBoxPanel`, `MarketBreadthPanel` |
 | `range-tabs.js` | Single source of truth for the ±3/±5/±10/±15/All range tab-group markup, injected into every `[data-range-tabs]` placeholder (sidebar, Greeks modal, IV modal) |
-| `chain-helpers.js` | Shared pure functions: `activeAtm`, `applyExpirySelection`, `getFilteredChain`, `findGammaFlipStrike`, `chainCombinedSignal`, `velMiniCell`, `oiFlowLabel`, expiry-select re-parenting, mojibake repair |
+| `chain-helpers.js` | Shared option-chain calculations, signals, velocity cells and payoff helpers |
+| `market-context.js` | Market/index ticker, symbol/source selection, expiry parsing and active-expiry projection |
 
 ---
 

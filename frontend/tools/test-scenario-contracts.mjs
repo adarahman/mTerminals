@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const simulator = fs.readFileSync(new URL('../Dashboard/simulator-view.js', import.meta.url), 'utf8');
-const renderer = fs.readFileSync(new URL('../Dashboard/chain/chain-renderer.js', import.meta.url), 'utf8');
+const renderer = fs.readFileSync(new URL('../Dashboard/chain/chain-dashboard-renderer.js', import.meta.url), 'utf8');
 const dashboard = fs.readFileSync(new URL('../Dashboard/dashboard.js', import.meta.url), 'utf8');
 const scenario = fs.readFileSync(new URL('../Dashboard/scenario-analysis-view.js', import.meta.url), 'utf8');
 const backtest = fs.readFileSync(new URL('../Dashboard/backtest-view.js', import.meta.url), 'utf8');

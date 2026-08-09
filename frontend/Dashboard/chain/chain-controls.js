@@ -1,4 +1,6 @@
-// Option-chain navigation stays inside the canonical dashboard. The old
+// Native option-chain disclosure and strike-navigation controls.
+
+// Option-chain controls and navigation stay inside the canonical dashboard. The old
 // BroadcastChannel bridge and standalone OptionChain application were
 // removed so there is one source of UI state, expiry, range, and orders.
 

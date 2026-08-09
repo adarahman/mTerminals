@@ -378,7 +378,7 @@
      whole row under it on the main dashboard every time someone opened
      or closed it. Opened by clicking the summary panel
      (openVolOiVelocityModal(), see the Vol/OI Velocity block in
-     chain-renderer.js's buildSimulatorHtml). #sdt-voi-grid is repainted
+     chain-dashboard-renderer.js's buildSimulatorHtml). #sdt-voi-grid is repainted
      by simRenderVolGrid() in the same tick pass as every other simulator
      panel regardless of whether this modal is open, so it's already
      current the instant it opens — it lives only here now, not
@@ -388,7 +388,7 @@
      not on the dashboard card — it used to sit on the always-visible
      card as a second, easy-to-miss control duplicating this modal's own
      job. It's plain static markup (this file isn't template-rendered
-     per tick like chain-renderer.js's cards are), but that's fine: this
+     per tick like chain-dashboard-renderer.js's cards are), but that's fine: this
      modal panel is a permanent DOM node toggled via the 'open' class
      (see ModalManager._openModal/closeVolOiVelocityModal), never
      recreated, so the slider's dragged position survives close/reopen
@@ -419,13 +419,46 @@
   </div>
 </div>
 
-<!-- ── PDS-03 SINGLE-STRIKE DETAIL REPORT MODAL ── -->
-<div id="strike-detail-report-modal" class="oc-modal" onclick="if(event.target===this) closeStrikeDetailReportModal()">
+<!-- ── INSTITUTIONAL MULTI-STRIKE DETAIL REPORT ── -->
+<div id="strike-detail-report-modal" class="oc-modal" onclick="if(event.target===this) closeInstitutionalStrikeReportModal()">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
       <div class="oc-modal-id">
-        <button id="strike-detail-report-modal-close" class="oc-modal-back" onclick="closeStrikeDetailReportModal()" title="Back to dashboard">←</button>
+        <button id="strike-detail-report-modal-close" class="oc-modal-back" onclick="closeInstitutionalStrikeReportModal()" title="Back to dashboard">←</button>
         <span class="oc-modal-title">🏛️ Strike Detail Report</span>
+      </div>
+    </div>
+    <div class="chart-modal-body" style="padding:14px;overflow:auto;">
+      <div class="sdt-statbar">
+        <div class="sdt-stat"><div class="sdt-stat-label">ATM Strike</div><div class="sdt-stat-value" id="sdt-stat-atm">&mdash;</div></div>
+        <div class="sdt-stat"><div class="sdt-stat-label">Spot Price</div><div class="sdt-stat-value" id="sdt-stat-spot">&mdash;</div></div>
+        <div class="sdt-stat"><div class="sdt-stat-label">Total OI (Near ATM)</div><div class="sdt-stat-value" id="sdt-stat-totaloi">&mdash;</div></div>
+        <div class="sdt-stat"><div class="sdt-stat-label">PCR (Near ATM)</div><div class="sdt-stat-value" id="sdt-stat-pcr">&mdash;</div></div>
+      </div>
+      <div class="sdt-table-wrap">
+        <div class="sdt-head">
+          <span class="sdt-head-cell">Strike <span class="sdt-sort-arrows">⇅</span></span>
+          <span class="sdt-head-cell">Dist. from ATM <span class="sdt-sort-arrows">⇅</span></span>
+          <span class="sdt-head-cell sdt-oi-cell"><span>Open Interest ⇅</span><span class="sdt-oi-legend"><span><span class="dot" style="background:var(--ce);"></span>Call OI</span><span><span class="dot" style="background:var(--pe);"></span>Put OI</span></span></span>
+          <span class="sdt-head-cell">ΔOI Today ⇅</span>
+          <span class="sdt-head-cell" style="justify-content:flex-end;">IV ⇅</span>
+          <span class="sdt-head-cell" style="justify-content:flex-end;">Delta ⇅</span>
+          <span class="sdt-head-cell">Smart Money ⇅</span>
+          <span class="sdt-head-cell">Market Structure ⇅</span>
+        </div>
+        <div id="sdt-rows"><div style="padding:12px;color:var(--txt3);font-size:11px;">Waiting for live strike data…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PDS-03 SINGLE-STRIKE INVESTIGATION MODAL ── -->
+<div id="single-strike-detail-modal" class="oc-modal" onclick="if(event.target===this) closeStrikeDetailReportModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button class="oc-modal-back" onclick="closeStrikeDetailReportModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🏛️ Single Strike Investigation</span>
       </div>
     </div>
     <div id="strike-detail-report-content" class="chart-modal-body sdr-report" style="padding:14px;overflow-y:auto;">
@@ -587,6 +620,7 @@
 <script src="../shared/utils/dom-utils.js"></script>
 <script src="range-tabs.js"></script>
 <script src="chain/chain-helpers.js"></script>
+<script src="chain/market-context.js"></script>
 <!-- metrics.js (IA redesign step 6) must load after chain-helpers.js
      (getFilteredChain/findGammaFlipStrike) and before every view file
      that consumes it — conviction-gauge.js is the earliest such
@@ -608,11 +642,11 @@
      builders, plus the HTML templates consuming them — merged from a
      formerly-separate chain-templates.js on 2026-07-29, see that file's
      header) that replaces the inline calculation+markup that used to
-     live in ChainDenseView.buildRowsHtml (chain-renderer.js) and
+     live in ChainDenseView.buildRowsHtml (chain-dense-renderer.js) and
      ChainDenseView.buildStrikeDetailHtml (chain-depth.js). It's a plain
      function file (no classes), so nothing here depends on
      chain-view.js's class declarations having run first — but it MUST
-     load before chain-renderer.js/chain-depth.js, whose methods call
+     load before chain-dense-renderer.js/chain-depth.js, whose methods call
      into it at render time. (Previously this loaded after both, which
      only worked by luck — plain function declarations are hoisted and
      nothing called them until actual render time, well after every
@@ -620,10 +654,12 @@
      that.) -->
 <script src="chain/chain-view-models.js"></script>
 <script src="conviction-gauge.js"></script>
-<script src="chain/chain-renderer.js"></script>
+<script src="chain/chain-dense-renderer.js"></script>
+<script src="chain/chain-dashboard-renderer.js"></script>
+<script src="chain/chain-analytics-renderer.js"></script>
 <script src="chain/chain-depth.js"></script>
 <script src="chain/chain-greeks.js"></script>
-<script src="chain/chain-sync.js"></script>
+<script src="chain/chain-controls.js"></script>
 <script src="../engines/smart-money.js"></script>
 <script src="../engines/market-structure.js"></script>
 
@@ -634,7 +670,7 @@
 <script src="simulator-view.js"></script>
 <script src="strike-detail-report-view.js"></script>
 <!-- Advanced Analytics collapsible: attaches ChainView.prototype.
-     buildAdvancedAnalyticsHtml, called from chain-renderer.js's
+     buildAdvancedAnalyticsHtml, called from chain-dashboard-renderer.js's
      renderDashboard(). Needs ChainView already declared (chain-view.js),
      plus fmtI/fmtN/fmtK, getFilteredChain, activeAtm (chain-helpers.js /
      formatters.js), INST_THRESHOLDS (dashboard-thresholds.js above), and
@@ -643,7 +679,7 @@
 <!-- Volatility collapsible (IA redesign step 7, first Advanced Analytics
      sub-card extracted out — see volatility-view.js): attaches
      ChainView.prototype.buildVolatilityHtml, called from
-     chain-renderer.js's renderDashboard(). Same load-order requirements
+     chain-dashboard-renderer.js's renderDashboard(). Same load-order requirements
      as advanced-analytics-view.js above (ChainView + fmtN already
      loaded); order relative to advanced-analytics-view.js itself doesn't
      matter since both are called at render time, not load time. -->

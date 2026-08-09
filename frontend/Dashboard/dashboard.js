@@ -20,7 +20,8 @@
 //                        flyout, section-jump nav)
 //   data-service.js    — DataService (WS/file/paste loading, auto-refresh,
 //                        MarketStore/WSManager wiring, render scheduling)
-//   chain-helpers.js   — shared chain/expiry/index pure functions
+//   chain-helpers.js   — shared option-chain calculations/formatting
+//   market-context.js  — index ticker, symbol/source and expiry state
 //                        (activeAtm, applyExpirySelection, getFilteredChain,
 //                        ceBias/peBias/combinedSignal/biasCls/pcrCls,
 //                        parseExpiryDate/sortExpiryDates, findGammaFlipStrike,
@@ -155,6 +156,8 @@ window._volOiVelocityEscHandler = (...args) => app.modal._volOiVelocityEscHandle
 window.openStrikeDetailReportModal = (...args) => app.modal.openStrikeDetailReportModal(...args);
 window.closeStrikeDetailReportModal = (...args) => app.modal.closeStrikeDetailReportModal(...args);
 window._strikeDetailReportEscHandler = (...args) => app.modal._strikeDetailReportEscHandler(...args);
+window.openInstitutionalStrikeReportModal = (...args) => app.modal.openInstitutionalStrikeReportModal(...args);
+window.closeInstitutionalStrikeReportModal = (...args) => app.modal.closeInstitutionalStrikeReportModal(...args);
 window.openGreeksChartModal = (...args) => app.modal.openGreeksChartModal(...args);
 window.closeGreeksChartModal = (...args) => app.modal.closeGreeksChartModal(...args);
 window._greeksChartEscHandler = (...args) => app.modal._greeksChartEscHandler(...args);
@@ -318,6 +321,54 @@ document.addEventListener('DOMContentLoaded', function(){
     greeksModal.addEventListener('click', function(e){
       if(e.target === greeksModal) closeGreeksModal();
     });
+  }
+});
+
+// Escape closes the topmost non-modal popup/panel. Full-screen modals own
+// Escape inside ModalManager and mark that event handled, preventing one
+// keypress from also closing a panel underneath the modal.
+document.addEventListener('keydown', function(e){
+  if(e.key !== 'Escape' || e.defaultPrevented) return;
+
+  const liveConfirm = document.getElementById('pt-live-confirm-overlay');
+  if(liveConfirm && liveConfirm.classList.contains('open')){
+    e.preventDefault();
+    document.getElementById('pt-live-confirm-no')?.click();
+    return;
+  }
+
+  const quickOrder = document.getElementById('pt-quick-popover');
+  if(quickOrder && quickOrder.style.display !== 'none'){
+    e.preventDefault();
+    quickOrder.style.display = 'none';
+    return;
+  }
+
+  const dismissers = [
+    ['algo-panel', () => document.getElementById('algo-panel')?.classList.remove('open')],
+    ['ctrl-sidebar', () => document.getElementById('ctrl-sidebar')?.classList.remove('open')],
+    ['pt-order-panel', () => ptClosePanel('pt-order-panel','pt-order-toggle-btn')],
+    ['pt-portfolio-panel', () => ptClosePanel('pt-portfolio-panel','pt-toggle-btn')],
+  ];
+  const active = dismissers.find(([id]) => document.getElementById(id)?.classList.contains('open'));
+  if(active){
+    e.preventDefault();
+    active[1]();
+    return;
+  }
+
+  // The Option Chain ledger is an inline report, not an .oc-modal. Escape
+  // should still return the user to its compact dashboard summary.
+  const chainCard = document.getElementById('chain-summary-card');
+  const chainTable = chainCard && chainCard.querySelector('.oc-native-chain');
+  if(chainTable && !chainTable.hidden){
+    e.preventDefault();
+    const header = chainCard.querySelector('.nav-card-header');
+    if(header && typeof toggleOptionChainSnapshot === 'function'){
+      toggleOptionChainSnapshot(header);
+    } else {
+      chainTable.hidden = true;
+    }
   }
 });
 

@@ -32,6 +32,7 @@ class StrikeDetailReportView {
       : '—';
     const ceIv = row.ceIV != null ? row.ceIV : (greek && greek.iv != null ? greek.iv * 100 : null);
     const peIv = row.peIV != null ? row.peIV : (greek && greek.iv != null ? greek.iv * 100 : null);
+    const context = this._institutionalContext(d, row, n, atm);
 
     root.innerHTML = `
       <header class="sdr-hero" aria-labelledby="sdr-report-title">
@@ -45,6 +46,16 @@ class StrikeDetailReportView {
         ${this._metric('Strike PCR', row.ceOI ? row.peOI / row.ceOI : null, 2)}
         ${this._metric('Importance', score == null ? null : score + ' / 100')}
       </div></section>
+      <section class="sdr-section"><h3>Smart Money &amp; Market Structure</h3><div class="sdr-grid sdr-grid-4">
+        ${this._metric('Strike classification', context.badge)}
+        ${this._metric('Dominant option leg', context.dominant)}
+        ${this._metric('Structure at strike', context.structure)}
+        ${this._metric('ATM distance band', context.band)}
+        ${this._metric('Market regime', context.regime)}
+        ${this._metric('Regime confidence', context.regimeConfidence, 0, '%')}
+        ${this._metric('Smart-money bias', context.smartMoneyBias)}
+        ${this._metric('Capital confirmation', context.capitalConfirmation)}
+      </div>${context.summary ? `<p class="sdr-why">${this._escape(context.summary)}</p>` : ''}</section>
       <section class="sdr-section"><h3>Positioning</h3><div class="sdr-legs">
         ${this._leg('CALL', row, 'ce', ceIv)}${this._leg('PUT', row, 'pe', peIv)}
       </div></section>
@@ -95,6 +106,45 @@ class StrikeDetailReportView {
       if (row) { out.ce[win] = row.ceDOI; out.pe[win] = row.peDOI; }
     });
     return out;
+  }
+  _institutionalContext(d, row, strike, atm) {
+    const chain = d.chain || [];
+    const sortedStrikes = chain.map(r => Number(r.strike)).filter(Number.isFinite).sort((a,b) => a-b);
+    const step = sortedStrikes.length > 1
+      ? Math.min(...sortedStrikes.slice(1).map((v,i) => v-sortedStrikes[i]).filter(v => v > 0))
+      : 50;
+    const band = typeof instBandFor === 'function' ? instBandFor(strike, atm, step) : 'near';
+    const totals = chain.map(r => (Number(r.ceOI)||0) + (Number(r.peOI)||0)).sort((a,b) => a-b);
+    const medianOi = totals[Math.floor(totals.length/2)] || 1;
+    const ratio = (d.volOiRatios || {})[String(strike)];
+    const hasRatio = !!ratio;
+    const volRatio = hasRatio ? ((Number(ratio.ce)||0) + (Number(ratio.pe)||0))/2 : 0;
+    const totalOi = (Number(row.ceOI)||0) + (Number(row.peOI)||0);
+    const thresholds = (typeof INST_THRESHOLDS !== 'undefined' && INST_THRESHOLDS[band]) || {oiMult:1.75,volRatioMax:40};
+    const institutional = hasRatio && totalOi > medianOi*thresholds.oiMult && volRatio < thresholds.volRatioMax;
+    const dominant = (Number(row.ceOI)||0) >= (Number(row.peOI)||0) ? 'CE' : 'PE';
+    const dominantChange = dominant === 'CE' ? (Number(row.ceChgOI)||0) : (Number(row.peChgOI)||0);
+    const badgeResult = typeof smartMoneyBadge === 'function'
+      ? smartMoneyBadge(hasRatio, institutional, dominantChange, totalOi, volRatio, thresholds)
+      : null;
+    const oiByStrike = {};
+    chain.forEach(r => { oiByStrike[r.strike] = {ce:Number(r.ceOI)||0,pe:Number(r.peOI)||0,ceChg:Number(r.ceChgOI)||0,peChg:Number(r.peChgOI)||0}; });
+    const structures = typeof marketStructureLabels === 'function'
+      ? marketStructureLabels(chain, atm, oiByStrike, Number(d.maxPain)) : {};
+    const structure = structures[strike];
+    const regime = d.marketRegime || {};
+    const smart = d.smartMoneySummary || {};
+    return {
+      badge: badgeResult ? `${badgeResult.dot} ${badgeResult.label}` : 'Unavailable',
+      dominant,
+      structure: structure ? structure.text : 'No major structure label',
+      band: String(band).toUpperCase(),
+      regime: regime.regime || 'Indeterminate',
+      regimeConfidence: this._number(regime.confidence),
+      smartMoneyBias: smart.bias || 'Neutral',
+      capitalConfirmation: smart.capitalConfirms === true ? 'Confirms' : smart.capitalConfirms === false ? 'Diverges' : 'Pending',
+      summary: smart.summary || regime.description || '',
+    };
   }
   _flowState(oiChg, priceChg) {
     const oi = this._number(oiChg), price = this._number(priceChg);

@@ -81,6 +81,12 @@ class ModalManager {
   ].join(',');
 
   const keyHandler = (e) => {
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      e.stopPropagation();
+      if(typeof closeFn === 'function') closeFn();
+      return;
+    }
     if(e.key !== 'Tab') return;
     const focusables = Array.from(modal.querySelectorAll(focusableSelector))
       .filter(el => !el.hidden && el.offsetParent !== null);
@@ -348,7 +354,7 @@ class ModalManager {
   // A strike is mandatory: this report investigates one canonical live
   // chain row, while the existing shell continues to own focus/Escape/back.
   openStrikeDetailReportModal(strike){
-  var modal = document.getElementById('strike-detail-report-modal');
+  var modal = document.getElementById('single-strike-detail-modal');
   var n = Number(strike);
   if(!modal || !Number.isFinite(n)) return false;
   if(!app.strikeDetail.render(n)) return false;
@@ -359,7 +365,7 @@ class ModalManager {
 }
 
   closeStrikeDetailReportModal(){
-  var modal = document.getElementById('strike-detail-report-modal');
+  var modal = document.getElementById('single-strike-detail-modal');
   if(!modal) return;
   this._closeModal(modal);
   app.strikeDetail.clear();
@@ -368,6 +374,19 @@ class ModalManager {
 
   _strikeDetailReportEscHandler(e){
   if(e.key === 'Escape') closeStrikeDetailReportModal();
+}
+
+  openInstitutionalStrikeReportModal(){
+  var modal = document.getElementById('strike-detail-report-modal');
+  if(!modal) return false;
+  this._openModal(modal, () => this.closeInstitutionalStrikeReportModal());
+  if(window.simUpdate) simUpdate();
+  return true;
+}
+
+  closeInstitutionalStrikeReportModal(){
+  var modal = document.getElementById('strike-detail-report-modal');
+  if(modal) this._closeModal(modal);
 }
 
   // ── GREEKS BY MONEYNESS CHART EXPAND MODAL ──

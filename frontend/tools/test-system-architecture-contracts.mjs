@@ -6,7 +6,12 @@ import vm from 'node:vm';
 const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const helpers = read('Dashboard/chain/chain-helpers.js');
-const renderer = read('Dashboard/chain/chain-renderer.js');
+const marketContext = read('Dashboard/chain/market-context.js');
+const renderer = [
+  read('Dashboard/chain/chain-dense-renderer.js'),
+  read('Dashboard/chain/chain-dashboard-renderer.js'),
+  read('Dashboard/chain/chain-analytics-renderer.js'),
+].join('\n');
 const store = read('shared/stores/market-store.js');
 const service = read('shared/services/data-service.js');
 const server = read('../ws_server_live.py');
@@ -28,9 +33,9 @@ deltaStore.ingest({
 const patchedRow = deltaStore.state.chain[0];
 
 const checks = [
-  ['ticker rows have stable keys', helpers.includes('data-index-symbol="VIX"') && helpers.includes('data-index-symbol="${backendSymbol}"')],
-  ['routine ticker updates patch fields', helpers.includes('function patchIndexTicker(d)') && helpers.includes("value.textContent = fmtI(idx['Last Price'])")],
-  ['ticker rebuild is structural only', helpers.includes("expected.join('|') !== existing.join('|')")],
+  ['ticker rows have stable keys', marketContext.includes('data-index-symbol="VIX"') && marketContext.includes('data-index-symbol="${backendSymbol}"')],
+  ['routine ticker updates patch fields', marketContext.includes('function patchIndexTicker(d)') && marketContext.includes("value.textContent = fmtI(idx['Last Price'])")],
+  ['ticker rebuild is structural only', marketContext.includes("expected.join('|') !== existing.join('|')")],
   ['live renderer avoids ticker outerHTML replacement', renderer.includes('patchIndexTicker(d)') && !renderer.includes('tickerEl.outerHTML = html')],
   ['full snapshots establish a wire baseline', server.includes('"version": _BASELINE_ID') && store.includes('this.baselineVersion = msg.version || null')],
   ['incompatible deltas are rejected', store.includes('msg.baseVersion !== this.baselineVersion') && store.includes("this.emit('baselineMismatch'")],

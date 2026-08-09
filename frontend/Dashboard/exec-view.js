@@ -185,8 +185,8 @@ class ExecView {
 
   return `
   <div class="oic-card" id="inst-activity-summary-card">
-    <button class="oic-head nav-card-header" onclick="openStrikeDetailReportModal(${top ? top.strike : atm})"
-       aria-label="Open Institutional Activity Crux — view Strike Detail report" title="Open Strike Detail report">
+    <button class="oic-head nav-card-header" onclick="openInstitutionalStrikeReportModal()"
+       aria-label="Open full multi-strike Institutional Activity report" title="Open full Strike Detail Report">
       <div class="oic-head-left">
         <span class="oic-icon icon-amber">🏛️</span>
         <span class="oic-title nav-card-header-label">Institutional Activity Crux <span class="oic-sub">Canonical Footprint • Near-ATM Ledger</span></span>

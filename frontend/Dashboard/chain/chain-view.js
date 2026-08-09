@@ -2,8 +2,8 @@
 // chain-view.js
 // Phase 2 chain-view decomposition (see master optimization prompt, Task
 // "Chain View decomposition"): chain-views.js had grown too large, so its
-// three classes (ChainDenseView, RightPanelView, ChainView) are now split
-// across seven files by concern. This file is the MAIN CONTROLLER — it
+// three classes (ChainDenseView, RightPanelView, ChainView) are split
+// across focused files by concern. This file is the MAIN CONTROLLER — it
 // owns the three class declarations (constructors + the small stateful
 // tab/toggle controller methods that don't build HTML or touch much DOM)
 // so every other split-out file can attach its share of methods onto
@@ -15,12 +15,11 @@
 // so there is no business-logic, UI, or websocket change here.
 //
 // LOAD ORDER: this file MUST load first among the chain-*.js split files,
-// since the other five (chain-template.js, chain-renderer.js,
-// chain-depth.js, chain-greeks.js, chain-sync.js) all do
+// since the template, renderer, depth and Greeks modules all do
 // `ClassName.prototype.method = function(){...}` against the classes
 // declared here — that only works if ChainDenseView/RightPanelView/
-// ChainView already exist. The other five can load in any order relative
-// to each other, but all five must load before dashboard.js, since
+// ChainView already exist. Those modules can load in any order relative
+// to each other, but all must load before dashboard.js, since
 // dashboard.js's App constructor does `new ChainDenseView()` /
 // `new ChainView()` and expects every prototype method already attached.
 // See DashboardPro.html script order.
