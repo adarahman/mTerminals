@@ -217,36 +217,6 @@ class DataService {
   }
   this._updateDataQuality(AppState.wsState);
 
-  // OI dashboard iframe / popup — only push when the panel is actually
-  // open. Previously every SmartAPI/REST tick structured-cloned the full
-  // dashboard payload into the iframe (and optional popup) even when the
-  // OI modal was closed, which is pure main-thread cost for no UI gain.
-  // Coalesce to one postMessage per animation frame via scheduleRender's
-  // rAF, but only emit if a live consumer is present.
-  const oiFrame = document.getElementById("oi-modal-iframe");
-  const oiFrameLive = oiFrame && oiFrame.contentWindow
-    && oiFrame.offsetParent !== null; // hidden/display:none → offsetParent null
-  const oiPopupLive = typeof _oiDashboardWin !== 'undefined'
-    && _oiDashboardWin && !_oiDashboardWin.closed;
-  if (oiFrameLive || oiPopupLive) {
-    if (!this._oiPostScheduled) {
-      this._oiPostScheduled = true;
-      const self = this;
-      requestAnimationFrame(function(){
-        self._oiPostScheduled = false;
-        if(!AppState.wsState) return;
-        const msg = { type: "OI_DASHBOARD_DATA", payload: AppState.wsState };
-        const frame = document.getElementById("oi-modal-iframe");
-        if (frame && frame.contentWindow && frame.offsetParent !== null) {
-          frame.contentWindow.postMessage(msg, "*");
-        }
-        if (typeof _oiDashboardWin !== 'undefined' && _oiDashboardWin && !_oiDashboardWin.closed) {
-          _oiDashboardWin.postMessage(msg, "*");
-        }
-      });
-    }
-  }
-
   // applyExpirySelection() call removed (dead code — see chain-helpers.js):
   // expiry switching is handled by ChainView.onExpiryChange reconnecting
   // the WebSocket with ?expiry=..., not by splicing an alternate expiry's
@@ -281,11 +251,7 @@ class DataService {
     );
   }
 
-  // Drive the native Option Chain table/right panel straight off this same
-  // tick — no separate WebSocket, no postMessage relay, no iframe.
-  // refreshView() itself no-ops (checks for #tbody) when this page doesn't
-  // have the dense chain markup mounted, so this is always safe to call
-  // unconditionally.
+  // Keep canonical Option Chain rows ready for in-dashboard drill-downs.
   app.chainDense.refreshView(AppState.wsState);
 
   // Multiple WS messages (e.g. spot+oi+greeks) often arrive back-to-back

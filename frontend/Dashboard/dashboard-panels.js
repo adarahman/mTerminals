@@ -47,10 +47,7 @@
 // over BroadcastChannel('pc-live-sync') so a price-chart.html tab open
 // in another window stays live, and answering that tab's
 // 'pc-request-snapshot' request on open so it isn't blank until the next
-// tick. This is the same request/reply shape option-chain.js already
-// uses on 'oc-live-sync' — except, unlike that channel (see
-// chain-view.js's commented-out _initBroadcast()), this one is actually
-// wired end to end.
+// tick. This channel is only for the separate Price Chart surface.
 class PriceChartPanel extends LiveSyncPanel {
   constructor() {
     super('priceChart', 'pc-live-sync', 'pc-request-snapshot');
@@ -97,8 +94,7 @@ class OptionChainPanel extends Panel {
     app.chain._rerenderChainPanels();
   }
 
-  // Dense chain payload mapping + BroadcastChannel push to the standalone
-  // option-chain.html tab — was `window.refreshView(payload)`.
+  // Canonical chain payload mapping for dashboard drill-downs.
   refreshDense(payload) {
     app.chainDense.refreshView(payload);
   }
@@ -119,23 +115,6 @@ class OptionChainPanel extends Panel {
 // iframe while it's open, and lifecycle for opening/closing it. Guarded
 // throughout since ModalManager's internals live in Panels/modal-manager.js,
 // which this refactor doesn't otherwise touch.
-class OiDashboardPanel extends Panel {
-  constructor() { super('oiDashboard'); }
-
-  refresh(data) {
-    if (app.modal && typeof app.modal.pushOiDashboardData === 'function') {
-      app.modal.pushOiDashboardData(data);
-    }
-  }
-
-  destroy() {
-    super.destroy();
-    if (app.modal && typeof app.modal.closeOIDashboardModal === 'function') {
-      app.modal.closeOIDashboardModal();
-    }
-  }
-}
-
 // ── 4. Paper Trading ──
 // the paper-trading modules already keep their own
 // UI current as part of the chain template rebuild — the fund-summary

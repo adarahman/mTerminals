@@ -7,6 +7,8 @@
 class OiFlowView {
   constructor() {
     this.oiFlowMode = 'oi';
+    this.nativeChartMode = 'combined';
+    this.nativeChartView = 'butterfly';
   }
 
   buildOiTopMoversStrip(chain, velByStrike, mode){
@@ -33,12 +35,37 @@ class OiFlowView {
 }
 
   buildOiFlowRows(chain, atm, maxOI, velByStrike, velMax, mode){
-  const BFLY_MAX=64;
+  // The native modal has substantially more horizontal room than the old
+  // compact card. Use it so small OI/change proportions remain legible.
+  const BFLY_MAX=260;
+  const COMBINED_MIN_BAR=18;
+  const COMBINED_MIN_SEG=8;
+  const combinedBar=(baseClass,color,width,currentOI,chgOI,anchorRight)=>{
+    const w=Math.max(Math.round(width),1);
+    const outer=`width:${w}px;background:${color};border:1px solid ${color};position:relative;overflow:hidden;box-sizing:border-box;`;
+    if(!chgOI||!currentOI) return `<div class="${baseClass}" style="${outer}"></div>`;
+    // Keep the true ratio for normal changes; reserve an 8px visual floor
+    // only for tiny non-zero changes so dotted/hollow direction is still
+    // recognizable. The exact value below the bar preserves precision.
+    const seg=Math.min(Math.max(Math.round(Math.min(Math.abs(chgOI)/Math.abs(currentOI),1)*w),COMBINED_MIN_SEG),w);
+    const side=anchorRight?'right:0;':'left:0;';
+    if(chgOI>0){
+      return `<div class="${baseClass} oi-combined-bar increase" style="${outer}" title="OI increase: dotted segment">
+        <span class="oi-combined-segment oi-increase-segment" style="${side}width:${seg}px;"></span>
+      </div>`;
+    }
+    return `<div class="${baseClass} oi-combined-bar decrease" style="${outer}" title="OI decrease: hollow segment">
+      <span class="oi-combined-segment oi-decrease-segment" style="${side}width:${seg}px;${anchorRight?'border-left':'border-right'}:1px dashed ${color};"></span>
+    </div>`;
+  };
   const maxDOI=Math.max(...chain.map(r=>Math.max(Math.abs(r.ceChgOI||0),Math.abs(r.peChgOI||0))),1);
   let html='';
   chain.forEach(r=>{
     let ceV,peV,maxV,ceClr,peClr,signed;
-    if(mode==='chg'){
+    if(mode==='combined'){
+      ceV=r.ceOI||0; peV=r.peOI||0; maxV=maxOI;
+      ceClr='var(--ce)'; peClr='var(--pe)'; signed=false;
+    }else if(mode==='chg'){
       ceV=r.ceChgOI||0; peV=r.peChgOI||0; maxV=maxDOI;
       ceClr=ceOiChgClr(ceV); peClr=sClr(peV); signed=true;
     }else if(mode==='vel'){
@@ -49,18 +76,30 @@ class OiFlowView {
       ceV=r.ceOI||0; peV=r.peOI||0; maxV=maxOI;
       ceClr='var(--ce)'; peClr='var(--pe)'; signed=false;
     }
-    const cW=Math.max(Math.round(Math.abs(ceV)/maxV*BFLY_MAX),3);
-    const pW=Math.max(Math.round(Math.abs(peV)/maxV*BFLY_MAX),3);
+    const minBar=mode==='combined'?COMBINED_MIN_BAR:3;
+    const cW=Math.max(Math.round(Math.abs(ceV)/maxV*BFLY_MAX),minBar);
+    const pW=Math.max(Math.round(Math.abs(peV)/maxV*BFLY_MAX),minBar);
     const ia=r.atm||r.strike===atm;
     const sPCR=r.ceOI>0?(r.peOI||0)/r.ceOI:0;
     const pcrClr=sPCR>1?'var(--green)':sPCR<1?'var(--red)':'var(--txt3)';
-    const ceLbl=(signed&&ceV>=0?'+':'')+fmtK(ceV);
-    const peLbl=(signed&&peV>=0?'+':'')+fmtK(peV);
+    let ceLbl=(signed&&ceV>=0?'+':'')+fmtK(ceV);
+    let peLbl=(signed&&peV>=0?'+':'')+fmtK(peV);
+    if(mode==='combined'){
+      const ceChg=r.ceChgOI||0, peChg=r.peChgOI||0;
+      ceLbl += `<small class="oi-combined-change" style="color:${ceOiChgClr(ceChg)}">${ceChg>=0?'+':''}${fmtK(ceChg)}</small>`;
+      peLbl += `<small class="oi-combined-change" style="color:${sClr(peChg)}">${peChg>=0?'+':''}${fmtK(peChg)}</small>`;
+    }
+    const ceBar=mode==='combined'
+      ?combinedBar('oi-ce-bar',ceClr,cW,r.ceOI||0,r.ceChgOI||0,false)
+      :`<div class="oi-ce-bar" style="width:${cW}px;background:${ceClr};"></div>`;
+    const peBar=mode==='combined'
+      ?combinedBar('oi-pe-bar',peClr,pW,r.peOI||0,r.peChgOI||0,true)
+      :`<div class="oi-pe-bar" style="width:${pW}px;background:${peClr};"></div>`;
     html+=`<div class="oi-bfly-wrap" style="${ia?'background:rgba(18,184,134,0.06);border-radius:4px;padding:3px 4px;':''}">
       <span class="oi-bfly-fig" style="text-align:right;color:${ceClr};">${ceLbl}</span>
-      <div class="oi-bfly-ce-track"><div class="oi-ce-bar" style="width:${cW}px;background:${ceClr};"></div></div>
+      <div class="oi-bfly-ce-track">${ceBar}</div>
       <span class="oi-bfly-strike" style="${ia?'color:var(--green);font-weight:600;':''}">${fmtI(r.strike)}${ia?' ★':''}</span>
-      <div class="oi-bfly-pe-track"><div class="oi-pe-bar" style="width:${pW}px;background:${peClr};"></div></div>
+      <div class="oi-bfly-pe-track">${peBar}</div>
       <span class="oi-bfly-fig" style="text-align:left;color:${peClr};">${peLbl}</span>
       <span class="oi-bfly-pcr" style="color:${pcrClr};">(${fmtN(sPCR,2)})</span>
     </div>`;
@@ -78,16 +117,94 @@ class OiFlowView {
   _rerenderChainPanels();
 }
 
-  // Compact "OI Flow Snapshot" card — replaces the full strike-by-strike
-  // butterfly table that used to live in #sec-oi-buildup. That full table
-  // (same buildOiFlowRows()/buildOiTopMoversStrip() logic, same CE|Strike|PE
-  // layout) now lives in the OI Dashboard's "Butterfly" tab (oi-flow.html
-  // / oi-flow.js) so it can be viewed full-size without competing for
-  // space with Greeks/GEX on the main dashboard. This card is the "glance"
-  // version: biggest CE/PE build, a Block Detection readout (same scan the
-  // Vol/OI Velocity by Strike panel runs), and a button straight into that
-  // Butterfly tab — same pattern as the Option Chain Snapshot card that
-  // replaced the old inline chain table.
+  renderNativeChart(mode){
+  this.nativeChartMode = mode || this.nativeChartMode || 'oi';
+  const target = document.getElementById('oi-flow-native-content');
+  if(!target) return;
+  const d = _data || (app.data && app.data.store && app.data.store.state);
+  const chain = d && typeof getFilteredChain === 'function' ? getFilteredChain(d) : [];
+  if(!chain.length){
+    target.innerHTML = '<div class="oic-empty">Awaiting option-chain data…</div>';
+    return;
+  }
+  const atm = activeAtm(d);
+  const maxOI = Math.max(...chain.map(r=>Math.max(Math.abs(r.ceOI||0),Math.abs(r.peOI||0))),1);
+  let renderMode = this.nativeChartMode;
+  let velByStrike = {}, velMax = 1;
+  if(this.nativeChartMode === 'chg' && this.nativeVelocityWindow){
+    const block = (d.oiVelocity||[]).find(b=>Number(b.window)===Number(this.nativeVelocityWindow));
+    if(block && block.rows){
+      block.rows.forEach(r=>{velByStrike[r.strike]=r;});
+      velMax=Math.max(...chain.map(r=>{const v=velByStrike[r.strike]||{};return Math.max(Math.abs(v.ceDOI||0),Math.abs(v.peDOI||0));}),1);
+      renderMode='vel';
+    }
+  }
+  const modeLabel = this.nativeChartMode === 'combined' ? 'Combined OI + ΔOI'
+    : renderMode === 'vel' ? `OI Change Velocity (${this.nativeVelocityWindow}m)`
+    : this.nativeChartMode === 'chg' ? 'Intraday Change in OI' : 'Open Interest';
+  const movers = this.buildOiTopMoversStrip(chain, velByStrike, renderMode);
+  target.innerHTML = `
+    <div class="oi-native-summary"><strong>${modeLabel}</strong><span>${movers}</span><span>CE <b style="color:var(--ce)">■</b> · PE <b style="color:var(--pe)">■</b> · ${this.nativeChartMode==='combined'?'Dotted = increase · Hollow = decrease · ':''}★ ATM</span></div>
+    <div class="oi-native-colhead"><span>CE</span><span>CE Flow</span><span>Strike</span><span>PE Flow</span><span>PE</span><span>PCR</span></div>
+    ${this.nativeChartView==='bar'
+      ?'<div class="oi-native-bar-wrap"><canvas id="oi-native-bar-canvas" role="img" aria-label="CE and PE open interest flow by strike"></canvas></div>'
+      :`<div class="oi-native-chart">${this.buildOiFlowRows(chain, atm, maxOI, velByStrike, velMax, renderMode)}</div>`}`;
+  document.querySelectorAll('[data-oi-native-mode]').forEach(btn=>{
+    const active = btn.dataset.oiNativeMode === this.nativeChartMode;
+    btn.classList.toggle('active-oif', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+  const velocityTabs=document.getElementById('oi-native-velocity-tabs');
+  if(velocityTabs) velocityTabs.hidden=this.nativeChartMode!=='chg';
+  document.querySelectorAll('[data-oi-vel-window]').forEach(btn=>{
+    const active=Number(btn.dataset.oiVelWindow)===Number(this.nativeVelocityWindow||0);
+    btn.classList.toggle('active-oif',active);
+    btn.setAttribute('aria-pressed',String(active));
+  });
+  document.querySelectorAll('[data-oi-native-view]').forEach(btn=>{
+    const active=btn.dataset.oiNativeView===this.nativeChartView;
+    btn.classList.toggle('active-oif',active);
+    btn.setAttribute('aria-pressed',String(active));
+  });
+  if(this.nativeChartView==='bar') requestAnimationFrame(()=>this.renderNativeBarChart(chain,atm,renderMode,velByStrike,velMax));
+}
+
+  switchNativeChart(mode, el){
+  this.renderNativeChart(mode);
+  if(el) el.focus();
+}
+
+  setNativeVelocity(windowMin, el){
+  this.nativeVelocityWindow=Number(windowMin)||null;
+  this.renderNativeChart('chg');
+  if(el) el.focus();
+}
+
+  switchNativeView(view, el){
+  this.nativeChartView=view==='bar'?'bar':'butterfly';
+  this.renderNativeChart(this.nativeChartMode);
+  if(el) el.focus();
+}
+
+  renderNativeBarChart(chain,atm,mode,velByStrike,velMax){
+  const canvas=document.getElementById('oi-native-bar-canvas');
+  if(!canvas||!chain.length)return;
+  const wrap=canvas.parentElement,W=Math.max(640,wrap.clientWidth-8),H=Math.max(360,wrap.clientHeight-8);
+  const ctx=sizeCanvasIfChanged(canvas,W,H);
+  const cs=getComputedStyle(document.documentElement),ce=cs.getPropertyValue('--ce').trim()||'#fa5252',pe=cs.getPropertyValue('--pe').trim()||'#12b886';
+  const txt=cs.getPropertyValue('--text-tertiary').trim()||'#868e96',border=cs.getPropertyValue('--border').trim()||'#333',bg=cs.getPropertyValue('--bg-0').trim()||'#0b0e14';
+  const L=52,R=18,T=26,B=48,cw=W-L-R,ch=H-T-B,zero=mode==='oi'||mode==='combined'?H-B:T+ch/2;
+  const values=chain.map(r=>{const v=velByStrike[r.strike]||{};return mode==='vel'?[v.ceDOI||0,v.peDOI||0]:mode==='chg'?[r.ceChgOI||0,r.peChgOI||0]:[r.ceOI||0,r.peOI||0];});
+  const max=Math.max(...values.flat().map(Math.abs),1),slot=cw/chain.length,bw=Math.max(3,Math.min(18,slot*.32));
+  ctx.clearRect(0,0,W,H);ctx.strokeStyle=border;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(L,zero);ctx.lineTo(W-R,zero);ctx.stroke();
+  const drawPattern=(x,y,w,h,delta,color)=>{if(!delta)return;const seg=Math.min(Math.max(Math.abs(delta)/(max||1)*Math.abs(h),8),Math.abs(h));const sy=y;if(delta<0){ctx.fillStyle=bg;ctx.fillRect(x,sy,w,seg);ctx.strokeStyle=color;ctx.setLineDash([3,2]);ctx.strokeRect(x,sy,w,seg);ctx.setLineDash([]);}else{ctx.fillStyle='rgba(255,255,255,.72)';for(let dx=x+2;dx<x+w;dx+=4)for(let dy=sy+2;dy<sy+seg;dy+=4){ctx.beginPath();ctx.arc(dx,dy,1,0,Math.PI*2);ctx.fill();}}};
+  chain.forEach((r,i)=>{const x=L+i*slot+slot/2;values[i].forEach((v,j)=>{const positiveOnly=mode==='oi'||mode==='combined',h=(positiveOnly?-1:-Math.sign(v))*Math.abs(v)/max*(positiveOnly?ch:ch/2),bx=x+(j?1:-1)*(bw/2)+(j?0:-bw),by=zero+(h<0?h:0);ctx.fillStyle=j?pe:ce;ctx.fillRect(bx,by,bw,Math.max(Math.abs(h),1));if(mode==='combined')drawPattern(bx,by,bw,Math.max(Math.abs(h),1),j?(r.peChgOI||0):(r.ceChgOI||0),j?pe:ce);});if(i===0||i===chain.length-1||r.atm||r.strike===atm||i%Math.max(1,Math.ceil(chain.length/7))===0){ctx.fillStyle=r.strike===atm?'#fcc419':txt;ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText(fmtI(r.strike),x,H-B+16);}});
+  ctx.fillStyle=ce;ctx.fillRect(L,T-14,9,9);ctx.fillStyle=txt;ctx.textAlign='left';ctx.fillText('CE',L+13,T-6);ctx.fillStyle=pe;ctx.fillRect(L+42,T-14,9,9);ctx.fillStyle=txt;ctx.fillText('PE',L+55,T-6);
+}
+
+  // Dashboard-native OI Flow summary. The retired standalone Butterfly
+  // page used this same canonical option-chain state, so this card is now
+  // the single presentation of the flow metrics.
   // Same find-the-biggest-strike logic buildOiTopMoversStrip() uses (kept
   // intact above, still the source for the OI Dashboard's Butterfly tab),
   // just returning the raw {strike,val} pair instead of a pre-joined
@@ -118,6 +235,10 @@ class OiFlowView {
   if(!chain || !chain.length){
     return `
   <div class="oic-card" id="oi-flow-summary-card">
+    <button type="button" class="section-header nav-card-header oi-flow-chart-header" onclick="openOIDashboardModal()" aria-label="Open OI Flow chart">
+      <span class="section-title nav-card-header-label"><span class="section-icon">🌊</span>OI Flow</span>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     <div class="oic-empty">Awaiting chain data…</div>
   </div>`;
   }
@@ -209,15 +330,9 @@ class OiFlowView {
   // used everywhere else on that card), so keeping a second copy here was
   // a straight duplicate. See renderDecisionBoxHtml in chain-template.js.
   //
-  // NOTE (2026-08-02): the "OI Flow Snapshot" header (icon + title) and
-  // its "🦋 Butterfly View →" button were removed at the user's request.
-  // The Butterfly tab itself is still reachable elsewhere — the
-  // "oi-flow-open-btn" in chain-template.js opens the same
-  // openOIDashboardModal('butterfly') call — so nothing was orphaned,
-  // this card just no longer duplicates that entry point. This card is
-  // now purely the Block Detection tile, seated directly under Vol/OI
-  // Velocity inside .oic-merged-card (chain-renderer.js) with no header
-  // of its own.
+  // The former standalone Butterfly/Bar page was removed because it
+  // visualized the same canonical option-chain values. This native card
+  // remains the single OI Flow summary inside the dashboard.
 
   // Block Detection readout: #oi-flow-block-summary is a plain
   // placeholder here, not a computed value — this card doesn't scan for
@@ -240,6 +355,10 @@ class OiFlowView {
   // Detection)" so the tile's icon+label were pure duplication anyway.
   return `
   <div class="oic-card" id="oi-flow-summary-card">
+    <button type="button" class="section-header nav-card-header oi-flow-chart-header" onclick="openOIDashboardModal()" aria-label="Open OI Flow chart">
+      <span class="section-title nav-card-header-label"><span class="section-icon">🌊</span>OI Flow</span>
+      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+    </button>
     <div class="capital-flow-section" aria-label="Capital Flow">
       <div class="capital-flow-heading">
         <span class="capital-flow-heading-icon" aria-hidden="true">₹</span>

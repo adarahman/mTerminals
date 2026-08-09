@@ -97,8 +97,6 @@ curl -sS http://127.0.0.1:5500/metrics
 Then smoke the production pages:
 
 - `/dist/Dashboard/DashboardPro.html`;
-- `/dist/OptionChain/option-chain.html`;
-- `/dist/OIFlow/oi-flow.html`;
 - `/dist/PriceChart/price-chart.html`.
 
 Confirm the Dashboard feed badge agrees with `/health`, a forced WebSocket
@@ -136,7 +134,7 @@ worktree is not clean, preserve or commit the changes before switching.
    `DISCONNECTED`, including a reason.
 5. WebSocket reconnects and returns to `LIVE` after the next valid message.
 6. Expiry change, Option Chain scrolling and Strike Detail handoff pass.
-7. OI Flow, Price Chart and Paper Trading smoke checks pass.
+7. Dashboard-native OI Flow, Price Chart and Paper Trading smoke checks pass.
 8. Runtime state is backed up when operational policy requires it.
 9. `docs/CHANGELOG.md` describes the final candidate.
 10. Create a new annotated semantic-version tag and push it; never move an

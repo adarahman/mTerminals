@@ -13,7 +13,7 @@
   // ATM ± this many strike steps = "near". Shared so the Strike Detail
   // table, the Vol/OI Velocity bars, and the Institutional Activity Crux
   // card can never drift out of sync on where "near" ends — previously
-  // duplicated verbatim in panels-views.js and OptionChain/option-chain.js.
+  // consumed by the canonical dashboard chain and analytics views.
   const INST_NEAR_BAND_STRIKES = 10;
 
   function instBandFor(strike, atm, step) {

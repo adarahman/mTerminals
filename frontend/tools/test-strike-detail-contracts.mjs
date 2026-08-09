@@ -8,7 +8,6 @@ const view = read('Dashboard/strike-detail-report-view.js');
 const modal = read('Dashboard/modal-manager.js');
 const simulator = read('Dashboard/simulator-view.js');
 const sync = read('Dashboard/chain/chain-sync.js');
-const oc = read('OptionChain/option-chain.js');
 const backend = read('../backend/mTerminals_json.py');
 const build = read('build.mjs');
 
@@ -22,7 +21,7 @@ const checks = [
   ['5/15/30 velocity context is rendered', ['5m OI velocity','15m OI velocity','30m OI velocity'].every((label) => view.includes(label))],
   ['partial feed is qualified', view.includes("fs.quality === 'PARTIAL'") && view.includes('sdr-feed-note')],
   ['simulator does not render Strike Detail', !simulator.includes('this.simRenderTable(simGEX')],
-  ['D-05 explicit action remains', sync.includes('openStrikeDetailReportModal(msg.strike)') && (oc.match(/Open Strike Detail/g) || []).length >= 2],
+  ['option-chain strike action opens the in-page report', sync.includes('openStrikeDetailReportModal(n)')],
   ['production bundle includes report view', build.includes('Dashboard/strike-detail-report-view.js')],
 ];
 

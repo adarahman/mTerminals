@@ -103,7 +103,7 @@ chain-template.js               ← pure HTML builders (attaches to ChainView.pr
 chain-renderer.js               ← DOM-writing render/patch methods
 OptionChain/chain-depth.js
 chain-greeks.js
-chain-sync.js                   ← BroadcastChannel sync to option-chain.html tab
+chain-sync.js                   ← in-dashboard strike/detail navigation
 OptionChain/chain-utils.js
 chain-view-models.js            ← Phase 3: pure business-logic (row/strike view models)
 OptionChain/chain-templates.js  ← Phase 3: pure HTML templates consuming those view models
@@ -181,7 +181,7 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 | File | Role |
 |---|---|
 | `panels-views.js` | `OiFlowView` class — `buildOiTopMoversStrip()`, `buildOiFlowRows()`, `buildOiFlowSummaryHtml()`, `switchOiFlowTab()` |
-| `ModalManager` (`panels-views.js`) | `openOIDashboardModal()` / `closeOIDashboardModal()` — iframe modal (`oi-flow.html`) + popup fallback for `file://` protocol |
+| `OiFlowView` | Dashboard-native OI summaries derived from the canonical option-chain state |
 
 ### 🔹 Executive Dashboard / FII-DII / Institutional Activity
 | File | Role |
@@ -199,11 +199,11 @@ paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 |---|---|
 | `panels-views.js` | `SimulatorView` class — `simInit()`, `simUpdate()`, `simRenderGEXChart()`, `simRenderVolGrid()`, `simRenderTable()`, near/far strike banding (`instBandFor`, `INST_THRESHOLDS`), Strike Detail table expand/collapse (`expandStrikeDetail()`/`collapseStrikeDetail()`) |
 
-### 🔹 Modals (all 4)
+### 🔹 Modals
 | File | Role |
 |---|---|
-| `panels-views.js` | `ModalManager` class — OI Dashboard, Greeks/GEX, FII/DII, IV Surface: open/close/Esc-handler for each |
-| `DashboardPro.html` | Modal shell markup for all 4 (`#oi-flow-modal`, `#greeks-dashboard-modal`, `#fiidii-dashboard-modal`, `#iv-surface-modal`) |
+| `panels-views.js` | `ModalManager` class — native Greeks/GEX, FII/DII, IV Surface and simulator modal lifecycle |
+| `DashboardPro.html` | Native modal shell markup; the retired standalone OI Flow iframe is no longer shipped |
 
 ### 🔹 Paper Trading
 | File | Role |
@@ -246,9 +246,8 @@ Exist elsewhere in the project — not part of the files uploaded/reviewed so fa
 - `paper-trading-shared.js` — shared paper-trading internals and `ptComputeFundSummary()`
 - `order-entry.js` / `portfolio-tracker.js` — order and portfolio surfaces
 - `OptionChain/chain-depth.js`, `OptionChain/chain-utils.js`, `OptionChain/chain-templates.js`
-- `option-chain.html` / `option-chain.js` — standalone full dense-chain tab
+- `Dashboard/chain/*` — canonical Option Chain snapshot and strike drill-down
 - `price-chart.html` + `PriceChart/*.js` — standalone price chart tab
-- `oi-flow.html` — OI Dashboard modal iframe content
 
 ---
 

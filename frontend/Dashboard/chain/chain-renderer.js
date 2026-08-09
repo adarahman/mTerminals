@@ -128,13 +128,8 @@ ChainDenseView.prototype.buildRowsHtml = function(rows) {
 };
 
 ChainDenseView.prototype.refreshView = function(payload) {
-    // Everything below this point (expiry options, row mapping, and the
-    // BroadcastChannel push to option-chain.html) must run regardless of
-    // whether the dense in-dashboard chain table exists on this page — it
-    // no longer does on the main dashboard (moved to option-chain.html),
-    // but the main dashboard is exactly the page that has to keep
-    // computing rows and broadcasting them for that standalone tab to stay
-    // live. Only the actual table-DOM writes further down are page-specific.
+    // Keep canonical mapped rows available to dashboard drill-downs even
+    // though the old duplicate standalone chain has been removed.
     window._lastPayload = payload;
     this.lastPayload = payload;
     renderExpiryOptions(payload);
@@ -142,8 +137,6 @@ ChainDenseView.prototype.refreshView = function(payload) {
     this.lastRows = window._lastRows;
     AppState.lastGreeks = payload.greeks || [];
     this.lastGreeks = AppState.lastGreeks;
-    this._broadcastToOptionChainTab(payload);
-
     if (!document.getElementById("tbody")) return; // dense chain markup not on this page
     // payload is expected to already reflect the connection's expiry — the
     // server only ever resolves one expiry's chain per connection (see
@@ -497,7 +490,7 @@ ChainView.prototype.renderDashboard = function(d) {
     return `
         <div class="sim-ctrl-row">
           <span class="sim-ctrl-label">${cfg.label}</span>
-          <input type="range" class="sim-ctrl-slider" id="sim-${cfg.id}-slider" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${value}" oninput="${cfg.overrideVar}=parseFloat(this.value);simUpdate()">
+          <input type="range" class="sim-ctrl-slider" id="sim-${cfg.id}-slider" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${value}" oninput="${cfg.overrideVar}=parseFloat(this.value);app.simulator.gexScenarioDirty=true;simUpdate()">
           <span class="sim-ctrl-val" id="sim-${cfg.id}-val">${cfg.fmt(value)}</span>
         </div>`;
   }
@@ -613,7 +606,7 @@ ChainView.prototype.renderDashboard = function(d) {
 
       <div class="sim-header">
         <div class="sim-title">Scenario — Institutional F&amp;O Simulator</div>
-        <button type="button" class="btn btn-sm" onclick="event.stopPropagation();resetScenario()" aria-label="Reset scenario inputs to current live references" title="Reset scenario inputs only; live data is not reloaded">Reset Scenario</button>
+        <button type="button" class="btn btn-sm" onclick="event.stopPropagation();resetScenario()" aria-label="Reset scenario inputs to current live references" title="Reset scenario inputs only; live data is not reloaded">Reset to Live</button>
       </div>
       <div class="sim-body" style="padding:10px 14px;">
 
@@ -625,7 +618,7 @@ ChainView.prototype.renderDashboard = function(d) {
              same scope note as chain-greeks.js's buildGreeksAlertsHtml. -->
         <div class="sim-chart-area chart-expand-wrap" role="button" tabindex="0" aria-label="Expand simulated Net GEX chart" onclick="openSimGexModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSimGexModal();}" title="Click to expand" style="cursor:zoom-in;padding-bottom:12px;position:relative;" id="sim-chart-container">
           <span class="chart-expand-icon" title="Expand">⤢</span>
-          <div class="sim-chart-label">Net GEX Profile ($B) &#8593; <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;font-size:10px;">(Scenario-Adjusted)</span></div>
+          <div class="sim-chart-label"><span id="sim-gex-title">Live Net GEX Profile ($B)</span> &#8593; <span id="sim-gex-scope" style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;font-size:10px;">(Live Baseline)</span></div>
           <canvas id="sim-gex-canvas" role="img" aria-label="Scenario-adjusted net gamma exposure by strike" height="180">Scenario gamma values are available in the surrounding scenario analysis.</canvas>
           <div class="sim-annot" id="sim-annot"></div>
         </div>
@@ -634,10 +627,10 @@ ChainView.prototype.renderDashboard = function(d) {
              of this same line (after the regime value), since it's the
              control that drives this readout. -->
         <div class="sim-regime-bar" id="sim-regime-bar">
-          <span class="sim-regime-label">Scenario Dealer Regime</span>
+          <span class="sim-regime-label" id="sim-regime-label">Live Dealer Regime</span>
           <div class="sim-regime-track" id="sim-regime-track"><div class="sim-regime-needle" id="sim-regime-needle" style="left:50%;"></div></div>
           <span class="sim-regime-val" id="sim-regime-val">Balanced</span>
-          <select class="sim-dealer-sel" id="sim-dealer-sel" onchange="_simDealerOverride=this.value;simUpdate()" style="flex:none;flex-shrink:0;margin-left:8px;width:12ch;max-width:12ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <select class="sim-dealer-sel" id="sim-dealer-sel" onchange="_simDealerOverride=this.value;app.simulator.gexScenarioDirty=true;simUpdate()" style="flex:none;flex-shrink:0;margin-left:8px;width:12ch;max-width:12ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             <option value="0"${_simDealerOverride===null||_simDealerOverride==='0'?' selected':''}>Auto</option>
             <option value="1"${_simDealerOverride==='1'?' selected':''}>Long Gamma</option>
             <option value="-1"${_simDealerOverride==='-1'?' selected':''}>Short Gamma</option>
@@ -649,7 +642,7 @@ ChainView.prototype.renderDashboard = function(d) {
         <!-- Stats row -->
         <div class="sim-stats-row">
           <div class="sim-stat">
-            <div class="sim-stat-label">Scenario Net GEX ($B)</div>
+            <div class="sim-stat-label" id="sim-stat-gex-label">Live Net GEX ($B)</div>
             <div class="sim-stat-val" id="sim-stat-gex" style="color:${totalGEX>=0?'var(--blue)':'var(--red)'};">${fmtN(totalGEX,2)}</div>
             <div class="sim-stat-sub">${totalGEX>=0?'Scenario: long gamma (dampens)':'Scenario: short gamma (amplifies)'}</div>
           </div>
@@ -659,7 +652,7 @@ ChainView.prototype.renderDashboard = function(d) {
             <div class="sim-stat-sub">IV-flow amplifier</div>
           </div>
           <div class="sim-stat">
-            <div class="sim-stat-label">Scenario-Adjusted Gamma Flip</div>
+            <div class="sim-stat-label" id="sim-stat-flip-label">Live Gamma Flip</div>
             <div class="sim-stat-val" id="sim-stat-flip" style="color:var(--red);">${flipStrike?fmtI(flipStrike):'--'}</div>
             <div class="sim-stat-sub">Short &rarr; Long GEX</div>
           </div>

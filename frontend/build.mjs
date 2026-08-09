@@ -21,7 +21,7 @@
 // tags — they're already off the origin server and shouldn't be bundled.
 
 import { transform } from "esbuild";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 const root = import.meta.dirname;
@@ -74,18 +74,6 @@ const pages = [
     ],
   },
   {
-    html: "OIFlow/oi-flow.html",
-    out: "oi-flow",
-    css: ["styles/theme.css", "OIFlow/oi-flow.css"],
-    js: [["shared/config.js", "shared/logger.js", "OIFlow/oi-flow.js"]],
-  },
-  {
-    html: "OptionChain/option-chain.html",
-    out: "option-chain",
-    css: ["styles/theme.css", "styles/components.css", "OptionChain/option-chain.css"],
-    js: [["engines/market-structure.js", "OptionChain/option-chain.js"]],
-  },
-  {
     html: "PriceChart/price-chart.html",
     out: "price-chart",
     css: [
@@ -133,6 +121,10 @@ async function concatJS(files) {
 
 async function main() {
   await mkdir(outDir, { recursive: true });
+  // Remove the retired duplicate Option Chain application from existing
+  // distributions too; otherwise an incremental build leaves stale HTML.
+  await rm(path.join(outDir, "OptionChain"), { recursive: true, force: true });
+  await rm(path.join(outDir, "OIFlow"), { recursive: true, force: true });
   const report = [];
 
   for (const page of pages) {

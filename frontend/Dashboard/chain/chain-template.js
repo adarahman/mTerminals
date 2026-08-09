@@ -578,23 +578,21 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 
   // Compact "Option Chain Snapshot" card — sits between the Executive
   // boxes and OI Flow (see renderDashboard below). This was previously
-  // only a comment/placeholder; the dense chain now lives on the dedicated D-05 surface
-  // block to be moved into it, but that block was removed from
-  // DashboardPro.html) — nothing was ever actually built here. The full
-  // strike-by-strike ledger (Greeks toggle, buy/sell click cells, Bid/Ask
-  // depth) still lives at option-chain.html; this card is just the ATM
-  // read plus a link there.
+  // the canonical Option Chain surface. It deliberately uses only red for
+  // CE and green for PE; strike links open the dashboard-native detail view.
 ChainView.prototype.buildChainSummaryHtml = function(d) {
   const chain = getFilteredChain(d);
+  const tableOpen = this.chainTableOpen === true;
+  const greeksVisible = this.chainGreeksVisible === true;
+  const greeksByStrike = new Map((d.greeks || []).map(g => [Number(g.strike), g]));
 
   if(!chain.length){
     return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <button class="section-header nav-card-header" onclick="openOptionChain()"
-       aria-label="Open Option Chain Snapshot — view full option chain"
-       title="Open full option chain">
+    <button type="button" class="section-header nav-card-header" onclick="toggleOptionChainSnapshot(this)"
+      aria-expanded="${tableOpen}" aria-controls="option-chain-table">
       <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+      <span class="nav-card-header-arrow" aria-hidden="true">${tableOpen?'▾':'↗'}</span>
     </button>
     <div class="dd-empty">Awaiting chain data…</div>
   </div>`;
@@ -644,16 +642,17 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <button class="section-header nav-card-header" onclick="openOptionChain()"
-       aria-label="Open Option Chain Snapshot — view full option chain"
-       title="Open full option chain">
+    <button type="button" class="section-header nav-card-header" onclick="toggleOptionChainSnapshot(this)"
+      aria-expanded="${tableOpen}" aria-controls="option-chain-table">
       <span class="oi-snap-heading nav-card-header-label">
-        <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="0" y="8" width="4" height="8" rx="1" fill="var(--neg)"/><rect x="6" y="4" width="4" height="12" rx="1" fill="var(--warn)"/><rect x="12" y="0" width="4" height="16" rx="1" fill="var(--pos)"/></svg>
+        <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--neg)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pos)"/></svg>
         Option Chain Snapshot
       </span>
       <span class="oi-snap-badge">${rngLabel}</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+      <span class="nav-card-header-arrow" aria-hidden="true">${tableOpen?'▾':'↗'}</span>
     </button>
+
+    <div class="oi-snap-content">
 
     <div class="oi-snap-grid">
 
@@ -670,6 +669,10 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <div class="oi-snap-value ${netOi>=0?'pos':'neg'}">${signedFmt(netOi)}</div>
           </div>
           ${buildSparkline('var(--pos)', netOi>=0)}
+        </div>
+        <div class="oi-snap-sides" aria-label="Call and put open interest totals">
+          <span class="ce"><small>CE OI</small><strong>${fmtCrLK(totalCe)}</strong></span>
+          <span class="pe"><small>PE OI</small><strong>${fmtCrLK(totalPe)}</strong></span>
         </div>
         <div class="oi-snap-footer">
           <span class="oi-snap-footer-label">Range PCR <span style="font-weight:400;text-transform:none;">(${rngTag})</span></span>
@@ -691,6 +694,10 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <div class="oi-snap-value ${netChgOi>=0?'pos':'neg'}">${signedFmt(netChgOi)}</div>
           </div>
           ${buildSparkline('var(--info)', netChgOi>=0)}
+        </div>
+        <div class="oi-snap-sides" aria-label="Call and put change in open interest totals">
+          <span class="ce"><small>CE ΔOI</small><strong>${signedFmt(totalCeChg)}</strong></span>
+          <span class="pe"><small>PE ΔOI</small><strong>${signedFmt(totalPeChg)}</strong></span>
         </div>
         <div class="oi-snap-footer">
           <span class="oi-snap-footer-label">Range PCR Δ</span>
@@ -714,6 +721,56 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
         <span class="oi-snap-kpi-label">PE Vol/OI</span>
         <strong class="oi-snap-kpi-value pe">${fmtN(peVolOi,2)}x</strong>
       </div>
+    </div>
+
+    <div class="oc-native-chain" id="option-chain-table" ${tableOpen?'':'hidden'}>
+      <div class="oc-ledger-tools">
+        <span>Live strike ledger</span>
+        <button type="button" onclick="event.stopPropagation();toggleOptionChainGreeks(this)"
+          aria-pressed="${greeksVisible}" class="${greeksVisible?'active':''}">▸ Greeks</button>
+      </div>
+      <div class="oc-native-scroll">
+        <table class="oc-ledger-table" aria-label="Option Chain ledger by strike">
+          <colgroup>
+            <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-ltp"><col class="c-ltp">
+            <col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-sig"><col class="c-foot"><col class="c-struct">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>IV <small>PE / CE</small></th>
+              <th>Volume <small>PE / CE</small></th>
+              <th>Premium ₹ <small>PE / CE</small></th>
+              <th class="ce">CE LTP <small>change</small></th>
+              <th class="pe">PE LTP <small>change</small></th>
+              <th class="strike">Strike <small>PCR</small></th>
+              <th>Open Int <small>PE / CE</small></th>
+              <th>Chg OI <small>PE / CE</small></th>
+              <th>Signal <small>composite</small></th>
+              <th>Footprint <small>0–100</small></th>
+              <th>Structure <small>strike</small></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
+              <td><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
+              <td><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
+              <td><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
+              <td class="ltp ce"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button></td>
+              <td class="ltp pe"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button></td>
+              <td class="strike"><button type="button" onclick="event.stopPropagation();openOptionChainAtStrike(${Number(r.strike)})" aria-label="Open Strike Detail for ${fmtI(r.strike)}"><strong>${fmtI(r.strike)}</strong><small>PCR ${r.ceOI?fmtN((r.peOI||0)/r.ceOI,2):'—'}</small></button></td>
+              <td><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peOI)}</span><span class="ce">${fmtCrLK(r.ceOI)}</span></div></td>
+              <td><div class="oc-ledger-stack"><span class="pe ${r.peChgOI>=0?'up':'down'}">${signedFmt(r.peChgOI)}</span><span class="ce ${r.ceChgOI>=0?'up':'down'}">${signedFmt(r.ceChgOI)}</span></div></td>
+              <td class="signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
+              <td class="footprint"><strong>${r.footprintScore==null?'—':fmtN(r.footprintScore,0)}</strong></td>
+              <td class="structure">${isAtm?'ATM':d.maxPain===r.strike?'MAX PAIN':'—'}</td>
+            </tr><tr class="oc-ledger-greeks" ${greeksVisible?'':'hidden'}><td colspan="11">
+              <div><b class="ce">CE</b> Δ ${fmtN(g.cDelta,3)} · Γ ${fmtN(g.cGamma,5)} · Θ ${fmtN(g.cTheta,2)} · Vega ${fmtN(g.cVega,2)}</div>
+              <div><b class="pe">PE</b> Δ ${fmtN(g.pDelta,3)} · Γ ${fmtN(g.pGamma,5)} · Θ ${fmtN(g.pTheta,2)} · Vega ${fmtN(g.pVega,2)}</div>
+            </td></tr>`; }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
     </div>
   </div>`;
 };
@@ -801,9 +858,9 @@ ChainView.prototype.buildIvSurfaceHtml = function(d, chain, atm) {
   const maxIV = Math.max(...ivRows.map(r => Math.max(r.ceIV||0, r.peIV||0)), 1);
 
   const headerHtml = `<div style="display:grid;grid-template-columns:1fr 84px 1fr;align-items:center;gap:8px;padding:0 10px 6px;border-bottom:1px solid var(--border);margin-bottom:4px;">
-      <div style="text-align:right;font-size:0.6875rem;font-weight:700;color:var(--ce);text-transform:uppercase;letter-spacing:.06em;">CE IV</div>
+      <div style="text-align:right;font-size:0.6875rem;font-weight:700;color:var(--neg);text-transform:uppercase;letter-spacing:.06em;">CE IV</div>
       <div style="text-align:center;font-size:0.6875rem;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;">Strike</div>
-      <div style="text-align:left;font-size:0.6875rem;font-weight:700;color:var(--pe);text-transform:uppercase;letter-spacing:.06em;">PE IV</div>
+      <div style="text-align:left;font-size:0.6875rem;font-weight:700;color:var(--pos);text-transform:uppercase;letter-spacing:.06em;">PE IV</div>
     </div>`;
 
   let rowsHtml = '';
@@ -815,9 +872,9 @@ ChainView.prototype.buildIvSurfaceHtml = function(d, chain, atm) {
     const peWidthPct = Math.max((peIV / maxIV) * 100, 3);
     rowsHtml += `<div style="display:grid;grid-template-columns:1fr 84px 1fr;align-items:center;gap:8px;padding:2px 10px;${ia?'background:rgba(18,184,134,0.08);border-radius:6px;':''}">
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
-        <span style="font-size:0.75rem;font-family:var(--mono);color:var(--ce);font-weight:600;white-space:nowrap;min-width:44px;text-align:right;">${fmtN(ceIV,2)}%</span>
+        <span style="font-size:0.75rem;font-family:var(--mono);color:var(--neg);font-weight:600;white-space:nowrap;min-width:44px;text-align:right;">${fmtN(ceIV,2)}%</span>
         <div style="flex:1 1 auto;min-width:0;display:flex;justify-content:flex-end;">
-          <div style="height:7px;border-radius:2px 0 0 2px;background:var(--ce);width:${ceWidthPct}%;min-width:4px;"></div>
+          <div style="height:7px;border-radius:2px 0 0 2px;background:var(--neg);width:${ceWidthPct}%;min-width:4px;"></div>
         </div>
       </div>
       <div style="text-align:center;padding:0 4px;">
@@ -825,9 +882,9 @@ ChainView.prototype.buildIvSurfaceHtml = function(d, chain, atm) {
       </div>
       <div style="display:flex;align-items:center;justify-content:flex-start;gap:6px;">
         <div style="flex:1 1 auto;min-width:0;">
-          <div style="height:7px;border-radius:0 2px 2px 0;background:var(--pe);width:${peWidthPct}%;min-width:4px;"></div>
+          <div style="height:7px;border-radius:0 2px 2px 0;background:var(--pos);width:${peWidthPct}%;min-width:4px;"></div>
         </div>
-        <span style="font-size:0.75rem;font-family:var(--mono);color:var(--pe);font-weight:600;white-space:nowrap;min-width:44px;">${fmtN(peIV,2)}%</span>
+        <span style="font-size:0.75rem;font-family:var(--mono);color:var(--pos);font-weight:600;white-space:nowrap;min-width:44px;">${fmtN(peIV,2)}%</span>
       </div>
     </div>`;
   });
@@ -836,7 +893,7 @@ ChainView.prototype.buildIvSurfaceHtml = function(d, chain, atm) {
   return `<div style="display:flex;flex-direction:column;">${headerHtml}<div style="display:flex;flex-direction:column;gap:2px;">${rowsHtml}</div></div>
     <div style="font-size:0.8125rem;color:var(--text-tertiary);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap;">
       <span>Skew <strong style="color:var(--warn);">${fmtN(d.atmSkew,2)}%</strong> at ATM</span>
-      <span>Max IV <strong style="color:var(--ce);">${fmtN(maxIV,2)}%</strong></span>
-      <span>Min IV <strong style="color:var(--pe);">${fmtN(minIV,2)}%</strong></span>
+      <span>Max IV <strong style="color:var(--neg);">${fmtN(maxIV,2)}%</strong></span>
+      <span>Min IV <strong style="color:var(--pos);">${fmtN(minIV,2)}%</strong></span>
     </div>`;
 };

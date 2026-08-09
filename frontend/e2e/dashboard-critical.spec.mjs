@@ -16,20 +16,27 @@ test('dashboard loads and exposes primary tools without page errors', async ({ p
   expect(pageErrors).toEqual([]);
 });
 
-test('OI Flow modal opens, traps focus, and restores its invoker', async ({ page }) => {
+test('native OI Flow chart opens and switches measure', async ({ page }) => {
   await openDashboard(page);
-  await page.locator('#rail-tools-toggle').click();
-  const trigger = page.locator('#oi-flow-open-btn');
-  await trigger.click();
-
+  await page.getByRole('button', { name:'Open OI Flow chart' }).first().click();
   const modal = page.locator('#oi-flow-modal');
   await expect(modal).toHaveClass(/open/);
-  await expect(modal).toHaveAttribute('role', 'dialog');
-  await expect(modal).toHaveAttribute('aria-modal', 'true');
-
-  await page.keyboard.press('Escape');
+  await expect(page.locator('#oi-flow-native-content')).toContainText('Combined OI + ΔOI');
+  await expect(page.locator('#oi-flow-native-content .oi-combined-change').first()).toBeVisible();
+  await page.getByRole('button', { name:'OI Bar Chart', exact:true }).click();
+  await expect(page.locator('#oi-native-bar-canvas')).toBeVisible();
+  await page.getByRole('button', { name:'Butterfly', exact:true }).click();
+  await page.getByRole('button', { name:'OI Chg', exact:true }).click();
+  await expect(page.locator('#oi-native-velocity-tabs')).toBeVisible();
+  await page.locator('#oi-native-velocity-tabs').getByRole('button', { name:'5m', exact:true }).click();
+  await expect(page.locator('#oi-flow-native-content')).toContainText('OI Change Velocity (5m)');
+  await page.getByRole('button', { name:'Combined', exact:true }).click();
+  await expect(page.locator('#oi-flow-native-content')).toContainText('Combined OI + ΔOI');
+  await expect(page.locator('#oi-flow-native-content .oi-combined-change').first()).toBeVisible();
+  await expect(page.locator('#oi-flow-native-content .oi-increase-segment').first()).toBeVisible();
+  await expect(page.locator('#oi-flow-native-content .oi-decrease-segment').first()).toBeVisible();
+  await page.getByRole('button', { name:'Close OI Flow chart' }).click();
   await expect(modal).not.toHaveClass(/open/);
-  await expect(trigger).toBeFocused();
 });
 
 test('Backtest modal uses the shared accessible modal contract', async ({ page }) => {
@@ -49,7 +56,7 @@ test('Backtest modal uses the shared accessible modal contract', async ({ page }
   await expect(trigger).toBeFocused();
 });
 
-test('Option Chain hands Strike Detail back to the Dashboard', async ({ page }) => {
+test('Option Chain strike opens dashboard-native Strike Detail', async ({ page }) => {
   await openDashboard(page);
   const strike = 24_600;
   const chainRow = {
@@ -70,34 +77,46 @@ test('Option Chain hands Strike Detail back to the Dashboard', async ({ page }) 
     window.parseAndRender(JSON.stringify(fixture));
   }, { row: chainRow });
 
-  const popupPromise = page.waitForEvent('popup');
   await page.evaluate((selectedStrike) => window.openOptionChainAtStrike(selectedStrike), strike);
-  const optionChain = await popupPromise;
-  await optionChain.waitForLoadState('domcontentloaded');
-
-  await page.evaluate(({ row }) => {
-    const chan = new BroadcastChannel('oc-live-sync');
-    chan.postMessage({
-      rows: [{
-        strike: row.strike, isAtm: true, pcr: '0.83', pcrChg: '+0.02',
-        ce: { oi: row.ceOI, oiChg: row.ceChgOI, vol: row.ceVol, ltp: row.ceLTP, signal: row.ceSignal },
-        pe: { oi: row.peOI, oiChg: row.peChgOI, vol: row.peVol, ltp: row.peLTP, signal: row.peSignal },
-      }],
-      symbol: 'NIFTY', spot: row.strike, expiry: '31-DEC-2099',
-      expiryDates: ['31-DEC-2099'], range: 10,
-      feedState: { status: 'LIVE', quality: 'FULL', marketSession: 'LIVE' },
-    });
-    chan.close();
-  }, { row: chainRow });
-
-  const firstRow = optionChain.locator('#ocBody .oc-row').first();
-  await expect(firstRow).toBeVisible({ timeout: 20_000 });
-  await firstRow.click();
-  await optionChain.getByRole('button', { name: /Open Strike Detail/ }).click();
-
-  await expect.poll(() => optionChain.isClosed()).toBe(true);
   await expect(page.locator('#strike-detail-report-modal')).toHaveClass(/open/);
   await expect(page.locator('#strike-detail-report-content .sdr-hero')).toBeVisible();
+});
+
+test('Option Chain Snapshot header opens and closes the native chain table', async ({ page }) => {
+  await openDashboard(page);
+  const header = page.locator('#chain-summary-card .section-header');
+  const table = page.locator('#option-chain-table');
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  await expect(table).toBeHidden();
+  await header.click();
+  await expect(header).toHaveAttribute('aria-expanded', 'true');
+  await expect(table).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: /CE LTP/ })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: /PE LTP/ })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: /Footprint/ })).toBeVisible();
+  await table.locator('.oc-ledger-tools').getByRole('button', { name: /Greeks/ }).click();
+  await expect(table.locator('.oc-ledger-greeks').first()).toBeVisible();
+  await table.locator('.oc-ledger-row td.ltp.ce button').first().click();
+  await expect(page.locator('#pt-quick-popover')).toBeVisible();
+  await page.locator('#pt-quick-popover .pt-qp-close').click();
+  await header.click();
+  await expect(table).toBeHidden();
+});
+
+test('Simulator GEX switches between live baseline and scenario-adjusted modes', async ({ page }) => {
+  await openDashboard(page);
+  const scope = page.locator('#sim-gex-scope');
+  await expect(scope).toHaveText('(Live Baseline)');
+  await page.locator('#sim-iv-slider').evaluate((slider) => {
+    slider.value = String(Number(slider.value) + Number(slider.step || 1));
+    slider.dispatchEvent(new Event('input', { bubbles:true }));
+  });
+  await expect(scope).toHaveText('(Scenario-Adjusted)');
+  // The simulator disclosure starts collapsed in the production layout;
+  // exercise the same public action used by its Reset to Live button.
+  await page.evaluate(() => window.resetScenario());
+  await expect(scope).toHaveText('(Live Baseline)');
+  await expect(page.locator('#sim-gex-title')).toHaveText('Live Net GEX Profile ($B)');
 });
 
 test('compact dashboard keeps primary navigation within the viewport', async ({ page }) => {

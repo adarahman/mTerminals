@@ -12,6 +12,7 @@ const capital = read('../backend/oi/capital_metrics.py');
 const panelsCss = read('styles/panels.css');
 
 const checks = [
+  ['OI Flow header opens the native chart', flow.includes('onclick="openOIDashboardModal()"') && flow.includes('aria-label="Open OI Flow chart"')],
   ['flow is explicitly day-session scope', flow.includes('Day-session ΔOI × LTP · visible range')],
   ['flow and concentration remain separate', flow.includes('capital-flow-section') && exec.includes('Capital Concentration')],
   ['Stage-1 foundation is visible', ['Premium locked','Premium turnover','Gross strike notional'].every((x) => flow.includes(x))],

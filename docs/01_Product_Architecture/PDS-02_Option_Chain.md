@@ -3,8 +3,8 @@
 
 > **Product:** mTerminals  
 > **Architecture baseline:** 2026-08-07 project snapshot  
-> **Version:** 1.1
-> **Status:** Implemented — P0/P1/P2 closure aligned 2026-08-07
+> **Version:** 1.2
+> **Status:** Implemented — dashboard-native surface aligned 2026-08-09
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -19,9 +19,9 @@ It SHALL be analytical, fast and stable under live updates.
 
 ## Primary surface
 
-Current implementation: `frontend/OptionChain/option-chain.html`,
-`option-chain.js`, `option-chain.css`, with Dashboard chain logic shared through
-`Dashboard/chain/*`.
+Current implementation: the canonical dashboard snapshot and in-page Strike
+Detail surface in `frontend/Dashboard/chain/*`. The former standalone
+OptionChain page was removed to avoid duplicated state and navigation.
 
 ## Information hierarchy
 
@@ -60,8 +60,7 @@ The table SHALL maintain stable column order during a session.
 
 - Expiry follows the shared/global selection when launched from Dashboard.
 - Feed/session semantics SHALL reuse shared application state, including PARTIAL, MARKET CLOSED and HOLIDAY where available.
-- A standalone Option Chain MAY expose context controls, but it SHALL synchronize
-  them through the application state model rather than maintain contradictory state.
+- Option Chain controls SHALL use the dashboard's canonical application state.
 - Range selection changes visibility, not analytics.
 
 ## Interaction contract

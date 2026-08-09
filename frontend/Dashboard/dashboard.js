@@ -49,7 +49,7 @@ class App {
     this.simulator = new SimulatorView();
     this.strikeDetail = new StrikeDetailReportView();
     this.modal = new ModalManager();
-    this.chainDense = new ChainDenseView();      // slimmed: expiry options + BroadcastChannel sync to option-chain.html only
+    this.chainDense = new ChainDenseView();      // canonical mapped rows for dashboard drill-downs
 
     // ── Panel Manager (Phase 4) ──
     // Registers the six panels named in the task against the view
@@ -62,7 +62,6 @@ class App {
     this.panelManager = new PanelManager();
     this.panelManager.register(new PriceChartPanel());
     this.panelManager.register(new OptionChainPanel());
-    this.panelManager.register(new OiDashboardPanel());
     this.panelManager.register(new PaperTradingPanel());
     this.panelManager.register(new DecisionBoxPanel());
     this.panelManager.register(new MarketBreadthPanel());
@@ -115,6 +114,9 @@ window.buildOiTopMoversStrip = (...args) => app.oiFlow.buildOiTopMoversStrip(...
 window.buildOiFlowRows = (...args) => app.oiFlow.buildOiFlowRows(...args);
 window.buildOiFlowSummaryHtml = (...args) => app.oiFlow.buildOiFlowSummaryHtml(...args);
 window.switchOiFlowTab = (...args) => app.oiFlow.switchOiFlowTab(...args);
+window.switchNativeOiFlowChart = (...args) => app.oiFlow.switchNativeChart(...args);
+window.setNativeOiVelocity = (...args) => app.oiFlow.setNativeVelocity(...args);
+window.switchNativeOiFlowView = (...args) => app.oiFlow.switchNativeView(...args);
 window.renderExecutiveDashboard = (...args) => app.exec.renderExecutiveDashboard(...args);
 window.buildFiiDiiCard = (...args) => app.exec.buildFiiDiiCard(...args);
 window.buildFiiDiiSummaryCard = (...args) => app.exec.buildFiiDiiSummaryCard(...args);
@@ -131,8 +133,6 @@ window.resetScenario = (...args) => app.simulator.resetScenario(...args);
 window.renderStrikeDetailReport = (...args) => app.strikeDetail.render(...args);
 window.openOIDashboardModal = (...args) => app.modal.openOIDashboardModal(...args);
 window.closeOIDashboardModal = (...args) => app.modal.closeOIDashboardModal(...args);
-window._oiEscHandler = (...args) => app.modal._oiEscHandler(...args);
-window._openOIDashboardPopupFallback = (...args) => app.modal._openOIDashboardPopupFallback(...args);
 window.openGreeksModal = (...args) => app.modal.openGreeksModal(...args);
 window.closeGreeksModal = (...args) => app.modal.closeGreeksModal(...args);
 window._greeksEscHandler = (...args) => app.modal._greeksEscHandler(...args);
@@ -158,11 +158,10 @@ window.openGreeksChartModal = (...args) => app.modal.openGreeksChartModal(...arg
 window.closeGreeksChartModal = (...args) => app.modal.closeGreeksChartModal(...args);
 window._greeksChartEscHandler = (...args) => app.modal._greeksChartEscHandler(...args);
 
-// ── Ported from option-chain.js — now just expiry-dropdown population and
-// the BroadcastChannel sync to the standalone option-chain.html tab. The
+// ── Canonical option-chain row mapping and expiry population. The
 // dense in-dashboard table, its right analytics panel, and their
 // currentRange/velocityWindowMin/selectedDepthStrike state have all been
-// removed — see ChainView.buildChainSummaryHtml() in chain-views.js for
+// removed — see ChainView.buildChainSummaryHtml() for
 // the compact snapshot card that replaced them.
 window.mapPayloadToRows = (...args) => app.chainDense.mapPayloadToRows(...args);
 window.buildVelocityLookup = (...args) => app.chainDense.buildVelocityLookup(...args);
@@ -277,16 +276,6 @@ Object.defineProperty(window, '_simState', {
   get() { return app.simulator.simState; },
   set(v) { app.simulator.simState = v; },
 });
-Object.defineProperty(window, '_oiDashboardWin', {
-  configurable: true,
-  get() { return app.modal.oiDashboardWin; },
-  set(v) { app.modal.oiDashboardWin = v; },
-});
-Object.defineProperty(window, '_oiFrameLoaded', {
-  configurable: true,
-  get() { return app.modal.oiFrameLoaded; },
-  set(v) { app.modal.oiFrameLoaded = v; },
-});
 
 // ── GLOBAL EVENT REGISTRATION ──
 
@@ -317,12 +306,10 @@ document.addEventListener('DOMContentLoaded', function(){
     document.getElementById('rail-context-menu')?.removeAttribute('open');
     document.getElementById('rail-tools-menu')?.removeAttribute('open');
   }
-  var modal = document.getElementById('oi-flow-modal');
-  if(modal){
-    modal.addEventListener('click', function(e){
-      if(e.target === modal) closeOIDashboardModal();
-    });
-  }
+  var oiModal = document.getElementById('oi-flow-modal');
+  if(oiModal) oiModal.addEventListener('click', function(e){
+    if(e.target === oiModal) closeOIDashboardModal();
+  });
   var greeksModal = document.getElementById('greeks-dashboard-modal');
   if(greeksModal){
     greeksModal.addEventListener('click', function(e){

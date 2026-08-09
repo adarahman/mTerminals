@@ -55,21 +55,10 @@ class ChainDenseView {
     this.lastPayload = null;
     this.lastRows = null;
     this.lastGreeks = [];
-    this._initBroadcast();
   }
 
-  // Mirrors PriceChartPanel.destroy() / FiiDiiPanel.destroy() in
-  // dashboard-panels.js (both close/null their own BroadcastChannel).
-  // ChainDenseView isn't currently wrapped in the Panel lifecycle — it's
-  // constructed once in dashboard.js's App constructor and lives for the
-  // page's lifetime, so this is a no-op today — but _ocChan (chain-sync.js
-  // _initBroadcast()) was the one live BroadcastChannel in the codebase
-  // with no matching close(), so this keeps the cleanup story consistent
-  // for the day ChainDenseView does get torn down/rebuilt (e.g. if it's
-  // ever folded into PanelManager alongside the other panels).
-  destroy() {
-    if (this._ocChan) { this._ocChan.close(); this._ocChan = null; }
-  }
+  // Kept for compatibility with the view lifecycle contract.
+  destroy() {}
 }
 
 class RightPanelView {
@@ -87,6 +76,8 @@ class ChainView {
     this.greeksVisible = false;
     this.pcrVisible = false;
     this.selStrike = null;
+    this.chainTableOpen = false;
+    this.chainGreeksVisible = false;
     this.selectedExpiry = null;
     this.expiryViewCache = {};
     // Last spot value actually rendered — compared against the incoming
@@ -149,17 +140,6 @@ class ChainView {
 
   if(_data) _rerenderChainPanels();
 
-  // Push the new range to the option-chain tab right away — everything
-  // inside this page (Greeks/FII-DII/IV-Surface modals, dense table if
-  // present) already reads the shared _chainRange global via
-  // getFilteredChain()/filterRowsByRange(), so this button is already
-  // "global" to those. The standalone option-chain.html tab is a
-  // separate window though, so it only finds out via BroadcastChannel —
-  // and would otherwise have to wait for the next live tick to hear
-  // about it via refreshView()'s regular broadcast.
-  if (app.chainDense && app.chainDense.lastPayload) {
-    app.chainDense._broadcastToOptionChainTab(app.chainDense.lastPayload);
-  }
   if (window.eventBus) window.eventBus.emit('range:change', { range });
 }
 

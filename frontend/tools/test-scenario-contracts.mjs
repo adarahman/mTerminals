@@ -7,10 +7,11 @@ const dashboard = fs.readFileSync(new URL('../Dashboard/dashboard.js', import.me
 const scenario = fs.readFileSync(new URL('../Dashboard/scenario-analysis-view.js', import.meta.url), 'utf8');
 const backtest = fs.readFileSync(new URL('../Dashboard/backtest-view.js', import.meta.url), 'utf8');
 
-assert.match(renderer, /Scenario Net GEX/, 'derived GEX must be scenario-qualified');
-assert.match(renderer, /Scenario-Adjusted Gamma Flip/, 'derived gamma flip must be scenario-qualified');
-assert.match(renderer, /Scenario Dealer Regime/, 'derived dealer regime must be scenario-qualified');
-assert.match(renderer, /Reset Scenario/, 'scenario must have an explicit reset action');
+assert.match(renderer, /Live Net GEX/, 'neutral simulator must identify the live GEX baseline');
+assert.match(simulator, /Scenario-Adjusted Gamma Flip/, 'derived gamma flip must be scenario-qualified');
+assert.match(simulator, /Scenario Dealer Regime/, 'derived dealer regime must be scenario-qualified');
+assert.match(renderer, /Reset to Live/, 'scenario must have an explicit reset action');
+assert.match(simulator, /isLiveBaseline[\s\S]*Live Baseline[\s\S]*Scenario-Adjusted/, 'simulator must label live and adjusted GEX modes dynamically');
 assert.match(dashboard, /window\.resetScenario/, 'reset action must be callable from rendered controls');
 assert.match(simulator, /resetScenario\(\)[\s\S]*simSpotOverride = null[\s\S]*simIvOverride = null[\s\S]*simUpdate\(\)/,
   'reset must clear local overrides and recompute without reloading market data');
@@ -35,4 +36,4 @@ assert.match(backtest, /transaction costs.*excluded/s,
 assert.match(backtest, /does not recompute historical Decision Engine scoring/,
   'backtest must explain that captured decisions are replayed rather than rescored');
 
-console.log('Scenario contracts: 16/16 passed');
+console.log('Scenario contracts: 20/20 passed');

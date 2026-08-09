@@ -17,20 +17,6 @@ const jobs = [
     // remove the now-duplicated original CDN line (it's inside jsBlock originally between the two)
   },
   {
-    src: "OIFlow/oi-flow.html", out: "OIFlow/oi-flow.html",
-    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">\s*<link rel="stylesheet" href="oi-flow\.css">/,
-    cssReplacement: `<link rel="stylesheet" href="oi-flow.bundle.css">`,
-    jsBlock: /<script src="\.\.\/shared\/config\.js"><\/script>\s*<script src="\.\.\/shared\/logger\.js"><\/script>\s*<script src="oi-flow\.js"><\/script>/,
-    jsReplacement: `<script src="oi-flow.bundle.1.js"></script>`,
-  },
-  {
-    src: "OptionChain/option-chain.html", out: "OptionChain/option-chain.html",
-    cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">[\s\S]*?<link rel="stylesheet" href="option-chain\.css">/,
-    cssReplacement: `<link rel="stylesheet" href="option-chain.bundle.css">`,
-    jsBlock: /<script src="\.\.\/engines\/market-structure\.js"><\/script>\s*<script src="option-chain\.js"><\/script>/,
-    jsReplacement: `<script src="option-chain.bundle.1.js"></script>`,
-  },
-  {
     src: "PriceChart/price-chart.html", out: "PriceChart/price-chart.html",
     cssBlock: /<link rel="stylesheet" href="\.\.\/styles\/theme\.css">\s*<link rel="stylesheet" href="price-chart-components\.css">\s*<link rel="stylesheet" href="pc-order-panel\.css">\s*<link rel="stylesheet" href="price-chart-standalone\.css">/,
     cssReplacement: `<link rel="stylesheet" href="price-chart.bundle.css">`,

@@ -427,12 +427,12 @@
    Chain Snapshot, Greeks/GEX Alerts, IV Surface Alerts, and FII/DII
    Sentiment — the four cards called out as "as per template". */
 
-.dot.ce{background:var(--ce);}
-.dot.pe{background:var(--pe);}
+.dot.ce{background:var(--neg);}
+.dot.pe{background:var(--pos);}
 
 .chain-bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0 10px;background:var(--bg-2);}
-.chain-bar .ce{background:var(--ce);}
-.chain-bar .pe{background:var(--pe);}
+.chain-bar .ce{background:var(--neg);}
+.chain-bar .pe{background:var(--pos);}
 
 .chain-legend{display:flex;gap: var(--space-5);font-size:var(--fs-base);color:var(--text-secondary);margin-bottom: var(--space-3);}
 .chain-legend span{display:flex;align-items:center;gap: var(--space-2);}
@@ -668,12 +668,7 @@ details.card summary .card-head{margin:0;}
 
 .section-footer strong{color:var(--text-primary);}
 
-/* ── SHARED IN-PAGE MODAL CHROME (in-page, same tab) ──
-   Generic overlay/panel/iframe styling, used only by the OI Dashboard
-   modal (#oi-flow-modal). Option Chain never used a modal either
-   before or after its in-dashboard table was removed — it now lives
-   entirely at option-chain.html, one click away via the "Full Chain"
-   button on the Option Chain Snapshot card. */
+/* ── SHARED IN-PAGE MODAL CHROME (in-page, same tab) ── */
 
 /* .oc-modal's shared overlay mechanics (display/position/inset/z-index/
    background/justify-content + .open toggle) moved to components.css —
@@ -708,8 +703,8 @@ details.card summary .card-head{margin:0;}
 
 /* Left-corner back button, replacing the old top-right "✕ Close" button
    on all 4 modals (OI Dashboard / Greeks-GEX / FII-DII / IV Surface) —
-   matches option-chain.html's .oc-back pattern (circular arrow button
-   next to the title) instead of a right-aligned red close pill.
+   uses a circular arrow button next to the title instead of a
+   right-aligned red close pill.
    NOTE: the previous #oc-modal-close / #oc-modal-close:hover rules here
    used to target an id ("oc-modal-close") that none of the actual
    buttons in DashboardPro.html ever had (they used oi-modal-close /
@@ -742,6 +737,35 @@ details.card summary .card-head{margin:0;}
   width:100%;
   border:none;
   background:#0b0e11;
+}
+
+.oi-native-modal-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:14px;overflow:hidden;}
+.oi-native-tabs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.oi-native-view-tabs{display:flex;gap:4px;}
+.oi-native-tab-sep{height:22px;width:1px;background:var(--border);margin:0 3px;}
+.oi-native-velocity-tabs{display:flex;gap:4px;padding-left:8px;margin-left:2px;border-left:1px solid var(--border);}
+.oi-native-velocity-tabs[hidden]{display:none;}
+.oi-native-velocity-tabs .tab-btn{padding:5px 8px;font-size:var(--fs-xs);}
+.oi-native-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:4px 6px 12px;color:var(--text-secondary);font-size:var(--fs-sm);}
+.oi-native-summary>span{display:flex;align-items:center;gap:10px;}
+.oi-native-colhead{display:grid;grid-template-columns:100px 1fr 100px 1fr 100px 70px;gap:10px;padding:8px 14px;color:var(--text-tertiary);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);}
+.oi-native-colhead span:nth-child(1),.oi-native-colhead span:nth-child(2){text-align:right;}
+.oi-native-colhead span:nth-child(3){text-align:center;}
+.oi-native-chart{flex:1;min-height:0;overflow:auto;padding:8px 6px;}
+.oi-native-bar-wrap{flex:1;min-height:360px;overflow:hidden;padding:8px;}
+#oi-native-bar-canvas{width:100%;height:100%;display:block;}
+.oi-native-chart .oi-bfly-wrap{grid-template-columns:100px 1fr 100px 1fr 100px 70px;max-width:none;}
+.oi-native-chart .oi-ce-bar,.oi-native-chart .oi-pe-bar{height:14px;max-width:100%;}
+.oi-native-chart .oi-bfly-fig:has(.oi-combined-change){display:flex;flex-direction:column;line-height:1.2;}
+.oi-native-chart .oi-bfly-fig:first-child:has(.oi-combined-change){align-items:flex-end;}
+.oi-combined-change{font-size:9px;font-weight:600;}
+.oi-combined-bar{isolation:isolate;}
+.oi-combined-segment{position:absolute;top:0;bottom:0;display:block;box-sizing:border-box;}
+.oi-increase-segment{background-color:rgba(255,255,255,.08);background-image:radial-gradient(circle,rgba(255,255,255,.9) 1px,transparent 1.2px);background-size:4px 4px;}
+.oi-decrease-segment{background:var(--bg-0);}
+@media (max-width:700px){
+  .oi-native-colhead,.oi-native-chart .oi-bfly-wrap{grid-template-columns:72px minmax(45px,1fr) 76px minmax(45px,1fr) 72px 52px;gap:5px;}
+  .oi-native-summary{align-items:flex-start;flex-direction:column;}
 }
 
 /* ── ANALYTICS SUMMARY STRIP ──
@@ -801,6 +825,30 @@ details.card summary .card-head{margin:0;}
    components.css's NAVIGABLE CARD HEADERS block, .nav-card-header). */
 
 .oi-snap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;}
+.oc-native-chain[hidden]{display:none;}
+.oc-native-chain{margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--border);}
+.oc-native-scroll{overflow:auto;max-height:640px;border:1px solid var(--border);border-radius:var(--radius-lg);background:#12151c;box-shadow:0 20px 50px -20px rgba(0,0,0,.6);}
+.oc-ledger-tools{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:var(--text-tertiary);font-size:var(--fs-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+.oc-ledger-tools button{border:1px solid var(--border);border-radius:999px;background:var(--bg-2);color:var(--text-secondary);padding:6px 12px;font:600 var(--fs-xs) var(--font-sans);cursor:pointer}.oc-ledger-tools button:hover,.oc-ledger-tools button.active{color:var(--text-primary);border-color:var(--info);background:var(--info-dim)}
+.oc-ledger-table{width:100%;min-width:1320px;border-collapse:separate;border-spacing:0;font-family:var(--font-mono);font-size:12px;font-variant-numeric:tabular-nums;}
+.oc-ledger-table .c-iv{width:7%}.oc-ledger-table .c-vol{width:8%}.oc-ledger-table .c-prem{width:9%}.oc-ledger-table .c-ltp{width:9%}.oc-ledger-table .c-strike{width:11%}.oc-ledger-table .c-oi{width:10%}.oc-ledger-table .c-chg{width:10%}.oc-ledger-table .c-sig{width:11%}.oc-ledger-table .c-foot{width:7%}.oc-ledger-table .c-struct{width:7%}
+.oc-ledger-table th{position:sticky;top:0;z-index:2;padding:12px 10px;background:#171b24;color:var(--text-primary);border-bottom:2px solid var(--info);box-shadow:0 3px 8px rgba(0,0,0,.35);font-family:var(--font-sans);font-size:11px;letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;text-align:center;}
+.oc-ledger-table th small{display:block;margin-top:2px;color:var(--text-tertiary);font-size:9px;font-weight:500;letter-spacing:.02em;text-transform:none;}
+.oc-ledger-table th.ce{color:var(--pos)}.oc-ledger-table th.pe{color:var(--neg)}.oc-ledger-table th.strike{color:var(--warn)}
+.oc-ledger-table td{padding:9px 11px;text-align:right;border-bottom:1px solid var(--border-2);white-space:nowrap;vertical-align:middle;}
+.oc-ledger-row{background:#12151c}.oc-ledger-row:nth-child(even){background:#0d1017}.oc-ledger-row:hover{background:#191e29}
+.oc-ledger-row.atm{background:linear-gradient(90deg,transparent,rgba(245,159,0,.08) 43%,rgba(245,159,0,.08) 57%,transparent)}
+.oc-ledger-stack{display:flex;flex-direction:column;gap:2px;align-items:flex-end}.oc-ledger-stack .ce{color:var(--pos)}.oc-ledger-stack .pe{color:var(--neg)}
+.oc-ledger-table td.ltp button{appearance:none;border:0;background:transparent;color:inherit;font:inherit;width:100%;padding:2px 4px;text-align:right;cursor:pointer;border-radius:4px}.oc-ledger-table td.ltp button:hover,.oc-ledger-table td.ltp button:focus-visible{background:var(--info-dim);outline:1px dashed var(--info)}
+.oc-ledger-table td.ltp strong{display:block;font-size:13px}.oc-ledger-table td.ltp.ce strong{color:var(--pos)}.oc-ledger-table td.ltp.pe strong{color:var(--neg)}
+.oc-ledger-table td.ltp small,.oc-ledger-table td.strike small{display:block;margin-top:2px;font-size:10px;color:var(--text-tertiary)}
+.oc-ledger-table .up{color:var(--pos)!important}.oc-ledger-table .down{color:var(--neg)!important}
+.oc-ledger-table td.strike{position:relative;text-align:center;background:#171b24;border-left:1px solid var(--border);border-right:1px solid var(--border)}
+.oc-ledger-row.atm td.strike{box-shadow:inset 2px 0 var(--warn),inset -2px 0 var(--warn)}
+.oc-ledger-table td.strike button{border:0;background:transparent;color:var(--text-primary);font:inherit;cursor:pointer;padding:3px 8px;border-radius:4px}.oc-ledger-table td.strike button strong{display:block;font-family:var(--font-display);font-size:15px}.oc-ledger-table td.strike button:hover,.oc-ledger-table td.strike button:focus-visible{color:var(--warn);outline:2px solid var(--warn);outline-offset:1px}
+.oc-ledger-table td.signal{text-align:left}.oc-ledger-signal{display:inline-flex;padding:4px 9px;border-radius:999px;background:var(--bg-2);font-family:var(--font-sans);font-size:10px;font-weight:700}.oc-ledger-signal.bull{color:var(--pos);background:var(--pos-dim)}.oc-ledger-signal.bear{color:var(--neg);background:var(--neg-dim)}
+.oc-ledger-table td.footprint,.oc-ledger-table td.structure{text-align:center}.oc-ledger-table td.footprint strong{color:var(--info)}.oc-ledger-table td.structure{color:var(--warn);font-size:10px;font-weight:700}
+.oc-ledger-greeks[hidden]{display:none}.oc-ledger-greeks td{padding:8px 16px!important;background:#0a0c11;text-align:center!important}.oc-ledger-greeks td>div{display:inline-block;margin:0 18px;color:var(--text-secondary);font-size:11px}.oc-ledger-greeks b.ce{color:var(--pos)}.oc-ledger-greeks b.pe{color:var(--neg)}
 
 .oi-snap-card{
   border-radius:var(--radius);border:1px solid;
@@ -824,6 +872,12 @@ details.card summary .card-head{margin:0;}
 }
 
 .oi-snap-body{display:flex;align-items:flex-end;justify-content:space-between;gap: var(--space-3);min-width:0;}
+.oi-snap-sides{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 0;border-top:1px solid var(--border-2);border-bottom:1px solid var(--border-2);}
+.oi-snap-sides span{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0;}
+.oi-snap-sides span+span{padding-left:8px;border-left:1px solid var(--border-2);}
+.oi-snap-sides small{font-size:var(--fs-xs);font-weight:700;letter-spacing:.04em;white-space:nowrap;}
+.oi-snap-sides strong{font-family:var(--font-mono);font-size:var(--fs-sm);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.oi-snap-sides .ce{color:var(--neg);}.oi-snap-sides .pe{color:var(--pos);}
 
 .oi-snap-label{font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:3px;}
 
@@ -850,8 +904,8 @@ details.card summary .card-head{margin:0;}
 .oi-snap-kpi{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;min-width:0;}
 .oi-snap-kpi-label{font-size:var(--fs-xs);font-weight:650;color:var(--text-secondary);white-space:nowrap;}
 .oi-snap-kpi-value{font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-primary);white-space:nowrap;}
-.oi-snap-kpi-value.ce{color:var(--ce);}
-.oi-snap-kpi-value.pe{color:var(--pe);}
+.oi-snap-kpi-value.ce{color:var(--neg);}
+.oi-snap-kpi-value.pe{color:var(--pos);}
 
 .oi-flow-card{
   background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);
@@ -869,12 +923,6 @@ details.card summary .card-head{margin:0;}
 .oi-flow-clock{color:#8c6eff;}
 .oi-flow-val{font-family:var(--font-mono);font-weight:700;font-size:var(--fs-xl);}
 .oi-flow-divider{width:1px;align-self:stretch;background:var(--border);margin:0 14px;}
-.oi-flow-open-btn{
-  width:42px;height:42px;flex:0 0 42px;border-radius:50%;border:1px solid var(--info);
-  background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
-}
-.oi-flow-open-btn:hover{background:var(--info-dim);}
-
 @media (max-width:640px){
   .oi-snap-grid{grid-template-columns:1fr;}
   .oi-flow-body{flex-direction:column;gap: var(--space-5);}
@@ -908,8 +956,8 @@ details.card summary .card-head{margin:0;}
 }
 .strike-link:hover,.strike-link:focus-visible{text-decoration:underline;color:var(--text-primary);outline:none;}
 .strike-link:focus-visible{box-shadow:0 0 0 2px var(--info-dim);border-radius:3px;}
-.strike-link.ce{color:var(--ce);}
-.strike-link.pe{color:var(--pe);}
+.strike-link.ce{color:var(--neg);}
+.strike-link.pe{color:var(--pos);}
 .capital-flow-section{padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-2);}
 .capital-flow-heading{display:flex;align-items:center;gap:7px;min-width:0;}
 .capital-flow-heading-icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:var(--green-dim);color:var(--green);font-family:var(--font-mono);font-weight:800;}
@@ -1128,12 +1176,8 @@ details.card summary .card-head{margin:0;}
 .sim-vol-bar-val{font-size:var(--fs-base);font-weight:700;font-family:var(--font-mono);min-width:40px;text-align:right;}
 
 /* ═══════════════════════════════════════════════════════════════════
-   The full standalone Option Chain page CSS that used to be merged in
-   here (option_chain.html's entire stylesheet, including a second
-   :root redefining --bg/--text/--mono/etc for the old in-dashboard
-   dense chain table) has been removed along with that table. The full
-   ledger UI now lives only in option-chain.css, loaded solely by
-   option-chain.html — it no longer needs to duplicate into this file.
+   The former standalone Option Chain CSS and its duplicate root palette
+   were removed. The dashboard snapshot now uses the shared design system.
    ═══════════════════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════════════════
    OI FLOW SNAPSHOT + INSTITUTIONAL ACTIVITY CRUX — redesign
@@ -1222,6 +1266,11 @@ details.card summary .card-head{margin:0;}
      chart, not a boxed sub-card of its own, so it doesn't need a full
      card's worth of top padding pushing it away from the divider above. */
   padding:10px 20px 14px;
+}
+.oic-merged-card #oi-flow-summary-card .oi-flow-chart-header{
+  --section-accent:var(--info);
+  margin:-10px -20px 12px;
+  padding:10px 20px 9px;
 }
 
 /* Plain caption line for the Block Detection readout — deliberately NOT
@@ -1345,8 +1394,8 @@ button.oic-head.nav-card-header{
 
 .oic-atm-figs{display:flex;align-items:baseline;gap: var(--space-3);font-family:var(--font-mono);flex-wrap:wrap;}
 .oic-atm-figs .fig{font-size:var(--fs-2xl);font-weight:700;line-height:1;}
-.oic-atm-figs .fig.ce{color:var(--ce);}
-.oic-atm-figs .fig.pe{color:var(--pe);}
+.oic-atm-figs .fig.ce{color:var(--neg);}
+.oic-atm-figs .fig.pe{color:var(--pos);}
 .oic-atm-figs .sep{font-size:var(--fs-xs);color:var(--text-tertiary);font-weight:500;font-family:var(--font-sans);}
 
 .oic-pcr{margin-top:10px;font-size:var(--fs-sm);font-weight:700;}
@@ -1354,8 +1403,8 @@ button.oic-head.nav-card-header{
 .oic-build-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:var(--fs-sm);color:var(--text-secondary);}
 .oic-build-row:not(:last-child){border-bottom:1px solid var(--border-2);}
 .oic-build-row .val{font-family:var(--font-mono);font-weight:700;}
-.oic-build-row .val.ce{color:var(--ce);}
-.oic-build-row .val.pe{color:var(--pe);}
+.oic-build-row .val.ce{color:var(--neg);}
+.oic-build-row .val.pe{color:var(--pos);}
 .oic-build-row .delta{font-size:var(--fs-sm);font-weight:700;margin-left:5px;}
 .oic-build-row .delta.up{color:var(--pos);}
 
@@ -1427,8 +1476,8 @@ button.oic-ledger-link:last-of-type{border-bottom:0}
 button.oic-ledger-link:hover,button.oic-ledger-link:focus-visible{background:color-mix(in srgb,var(--info) 8%,transparent);outline:none}
 .oic-ledger-row .bull{color:var(--pos)}
 .oic-ledger-row .bear{color:var(--neg)}
-.oic-ledger-row .ce{color:var(--ce)}
-.oic-ledger-row .pe{color:var(--pe)}
+.oic-ledger-row .ce{color:var(--neg)}
+.oic-ledger-row .pe{color:var(--pos)}
 .oic-ledger-empty{padding:9px;color:var(--text-tertiary);font-size:var(--fs-xs)}
 
 .verdict-data-quality{margin-top:4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;color:var(--warn);text-transform:uppercase;}

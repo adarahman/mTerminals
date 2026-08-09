@@ -19,7 +19,7 @@ const strikeReport = read('Dashboard/strike-detail-report-view.js');
 const formatterContext = {};
 vm.runInNewContext(formatters, formatterContext);
 const chartSources = [
-  read('OIFlow/oi-flow.html'), read('Dashboard/DashboardPro.html'),
+  read('Dashboard/DashboardPro.html'),
   read('PriceChart/price-chart.js'), read('Dashboard/chain/chain-renderer.js'),
 ].join('\n').replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 const docsDir = path.join(root, '../docs/03_UI_System');

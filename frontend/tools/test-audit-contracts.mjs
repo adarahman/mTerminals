@@ -9,7 +9,6 @@ const current = read('docs/07_Audits/DASHBOARD_PDS01_IMPLEMENTATION_AUDIT_v1.2.m
 const pds = read('docs/01_Product_Architecture/PDS-01_Dashboard.md');
 const template = read('frontend/Dashboard/chain/chain-template.js');
 const sync = read('frontend/Dashboard/chain/chain-sync.js');
-const optionChain = read('frontend/OptionChain/option-chain.js');
 const modal = read('frontend/Dashboard/modal-manager.js');
 const execView = read('frontend/Dashboard/exec-view.js');
 const chart = read('frontend/Dashboard/chart-legend.js');
@@ -23,7 +22,7 @@ const checks = [
   ['current audit has no open P0 or P1 violation', current.toLowerCase().includes('no open p0 or p1') && current.includes('closed compliant')],
   ['all 22 historical findings have a disposition', (current.match(/\| P[012]-\d\d /g) || []).length === 22],
   ['persistent feed status evidence exists', template.includes('feed-status-pill') && template.includes('feed-status-reason')],
-  ['strike handoff evidence exists', sync.includes('openOptionChainAtStrike') && sync.includes('oc-focus-strike') && optionChain.includes('focusStrike(data.strike)')],
+  ['strike handoff evidence exists', sync.includes('openOptionChainAtStrike') && sync.includes('openStrikeDetailReportModal(n)')],
   ['compact breakpoint evidence exists', responsive.includes('@media (max-width:1279px)') && responsive.includes('.exec-grid{grid-template-columns:1fr;}')],
   ['modal accessibility evidence exists', modal.includes('aria-modal') && modal.includes('invoker.focus()') && modal.includes("e.key !== 'Tab'")],
   ['metric ownership evidence exists', template.includes('oi-snap-kpi-label">Max Pain') && execView.includes('capital-wall-owner') && execView.includes('FII / DII Cash Flow')],

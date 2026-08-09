@@ -10,6 +10,7 @@ class SimulatorView {
     this.simIvOverride = null;
     this.simVelOverride = null;
     this.simDealerOverride = null;
+    this.gexScenarioDirty = false;
     this.simState = {
   spot: 0, iv: 15, vel: 1.2, dealerBias: 0,
   greeks: [], atm: 0, step: 50, volOiRatios: {}
@@ -57,6 +58,7 @@ class SimulatorView {
   this.simIvOverride = null;
   this.simVelOverride = null;
   this.simDealerOverride = null;
+  this.gexScenarioDirty = false;
   var dealerEl = document.getElementById('sim-dealer-sel');
   if (dealerEl) dealerEl.value = '0';
   this._syncPristineControlsToLive();
@@ -102,6 +104,20 @@ class SimulatorView {
   var simIV   = ivEl  ? parseFloat(ivEl.value)  : (this.simState.iv  || 15);
   var simVel  = velEl ? parseFloat(velEl.value) : (this.simState.vel || 1.2);
   var simBias = selEl ? parseFloat(selEl.value) : (this.simState.dealerBias || 0);
+  // Track intent explicitly. Rendering can quantize a live value to the
+  // slider step, but that must not turn the untouched live chart into a
+  // scenario. Only a user edit marks GEX as scenario-adjusted.
+  var isLiveBaseline = !this.gexScenarioDirty;
+
+  var setText = function(id, value) {
+    var node = document.getElementById(id);
+    if (node) node.textContent = value;
+  };
+  setText('sim-gex-title', isLiveBaseline ? 'Live Net GEX Profile ($B)' : 'Scenario-Adjusted Net GEX Profile ($B)');
+  setText('sim-gex-scope', isLiveBaseline ? '(Live Baseline)' : '(Scenario-Adjusted)');
+  setText('sim-regime-label', isLiveBaseline ? 'Live Dealer Regime' : 'Scenario Dealer Regime');
+  setText('sim-stat-gex-label', isLiveBaseline ? 'Live Net GEX ($B)' : 'Scenario Net GEX ($B)');
+  setText('sim-stat-flip-label', isLiveBaseline ? 'Live Gamma Flip' : 'Scenario-Adjusted Gamma Flip');
 
   var spotValEl = document.getElementById('sim-spot-val');
   if (spotValEl) spotValEl.textContent = fmtI(Math.round(simSpot));
@@ -136,7 +152,8 @@ class SimulatorView {
     gexEl.textContent = fmtN(totalGEX, 2);
     gexEl.style.color = totalGEX >= 0 ? 'var(--blue)' : 'var(--red)';
     var sub = gexEl.nextElementSibling;
-    if (sub) sub.textContent = totalGEX >= 0 ? 'Scenario: long gamma (dampens)' : 'Scenario: short gamma (amplifies)';
+    if (sub) sub.textContent = (isLiveBaseline ? 'Live: ' : 'Scenario: ')
+      + (totalGEX >= 0 ? 'long gamma (dampens)' : 'short gamma (amplifies)');
   }
   var vannaEl = document.getElementById('sim-stat-vanna');
   if (vannaEl) vannaEl.textContent = fmtN(vannaMultiplier, 2);
@@ -236,6 +253,36 @@ class SimulatorView {
     ctx.strokeRect(bx, by, barW, Math.max(barH, 1));
   }
 
+  // Persistent strike-axis labels: the chart must remain readable without
+  // requiring a mouse hover. Space labels according to the available width
+  // and always retain both ends of the displayed strike range.
+  var maxStrikeLabels = Math.max(2, Math.floor(chartW / 62));
+  var strikeLabelStep = Math.max(1, Math.ceil((gexData.length - 1) / (maxStrikeLabels - 1)));
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.fillStyle = clrTxt3;
+  ctx.strokeStyle = clrBorder;
+  ctx.lineWidth = 1;
+  for (var li = 0; li < gexData.length; li += strikeLabelStep) {
+    var labelIdx = li;
+    var labelX = PAD_L + labelIdx * barGap + barGap / 2;
+    ctx.beginPath();
+    ctx.moveTo(labelX, H - PAD_B);
+    ctx.lineTo(labelX, H - PAD_B + 4);
+    ctx.stroke();
+    ctx.textAlign = labelIdx === 0 ? 'left' : 'center';
+    ctx.fillText(fmtI(gexData[labelIdx].strike), labelX, H - PAD_B + 15);
+  }
+  if ((gexData.length - 1) % strikeLabelStep !== 0) {
+    var lastIdx = gexData.length - 1;
+    var lastX = PAD_L + lastIdx * barGap + barGap / 2;
+    ctx.beginPath();
+    ctx.moveTo(lastX, H - PAD_B);
+    ctx.lineTo(lastX, H - PAD_B + 4);
+    ctx.stroke();
+    ctx.textAlign = 'right';
+    ctx.fillText(fmtI(gexData[lastIdx].strike), lastX, H - PAD_B + 15);
+  }
+
   // Spot marker
   var spotIdx = 0;
   var minDist = Infinity;
@@ -321,7 +368,7 @@ class SimulatorView {
       ctx.stroke();
 
       ctx.fillStyle = clrRed;
-      ctx.fillText('FLIP ZONE', flipX, zeroY+16);
+      ctx.fillText('FLIP ' + fmtI(Math.round(flipStrike)), flipX, zeroY+16);
 
     } // fi
 

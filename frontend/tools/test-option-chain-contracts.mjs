@@ -4,21 +4,22 @@ import process from 'node:process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
-const oc = read('OptionChain/option-chain.js');
-const html = read('OptionChain/option-chain.html');
 const sync = read('Dashboard/chain/chain-sync.js');
+const template = read('Dashboard/chain/chain-template.js');
+const styles = read('styles/panels.css');
+const build = read('build.mjs');
 const spec = read('../docs/01_Product_Architecture/PDS-02_Option_Chain.md');
 
 const checks = [
-  ['shared feed state is broadcast', sync.includes("type:'oc-feed-state'") && sync.includes('feedState: (window.AppState && AppState.feedState)')],
-  ['D-05 consumes shared feed state', oc.includes('sharedFeedState') && oc.includes('MARKET_CLOSED') && oc.includes('HOLIDAY') && oc.includes('PARTIAL')],
-  ['dead iframe order path removed', !oc.includes('window._ocPlaceOrder') && !oc.includes('embedded in the dashboard\'s iframe')],
-  ['Capital PCR preserves unavailable state', oc.includes('function capitalSummary') && oc.includes('return { pcr: "—", share: "—" }')],
-  ['ATM/selected state appears in accessible row label', oc.includes('${r.isAtm ? ", ATM" : ""}') && oc.includes('${state.selectedStrike === r.strike ? ", selected" : ""}')],
-  ['quick-order close has accessible label', oc.includes('aria-label="Close quick order"')],
-  ['IV legend describes current IV', html.includes('<b>IV</b> implied volatility') && !html.includes('implied vol vs prior snapshot')],
+  ['standalone Option Chain page is not built', !build.includes('OptionChain/option-chain.html')],
+  ['strike navigation stays in dashboard', sync.includes('openStrikeDetailReportModal(n)') && !sync.includes('window.open(')],
+  ['chain header no longer advertises a duplicate full page', !template.includes('Open full option chain')],
+  ['snapshot header opens earlier ledger-style table', template.includes('oc-ledger-table') && template.includes('Premium ₹') && template.includes('Footprint') && sync.includes('table.hidden = !nextExpanded')],
+  ['LTP cells restore Buy Sell quick order', template.includes("ptOpenQuickOrder(event") && template.includes('Buy or sell')],
+  ['Greeks toggle restores per-strike rows', template.includes('toggleOptionChainGreeks(this)') && template.includes('oc-ledger-greeks') && sync.includes("row.hidden = !visible")],
+  ['CE uses red and PE uses green', styles.includes('.strike-link.ce{color:var(--neg);}') && styles.includes('.strike-link.pe{color:var(--pos);}')],
+  ['snapshot exposes CE and PE totals separately', ['CE OI','PE OI','CE ΔOI','PE ΔOI'].every(label => template.includes(label))],
   ['PDS permits paired bilateral stacks', spec.includes('paired bilateral PE/CE stacks')],
-  ['strike drawer survives compatible context replay', oc.includes('Preserve an investigation drawer') && oc.includes('row.strike === state.selectedStrike')],
 ];
 
 let failed = 0;

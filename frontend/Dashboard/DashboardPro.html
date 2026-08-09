@@ -66,24 +66,36 @@
 </head>
 <body><div class="db">
 
-<!-- Option Chain no longer has an in-page table here — the dashboard now
-     shows a compact snapshot card (built inline by
-     ChainView.buildChainSummaryHtml() in chain-views.js, between the
-     Decision/Executive boxes and OI Flow) with a link to the full,
-     dedicated ledger at option-chain.html. See that file / option-chain.js
-     for the full CE/PE strike-by-strike table, Greeks toggle, and
-     buy/sell click-to-trade cells. -->
+<!-- Canonical Option Chain is the compact red/green dashboard snapshot;
+     strike actions stay in-page and open the Strike Detail report. -->
 
-<!-- ── OI Flow MODAL OVERLAY (same-screen, no new window) ── -->
+<!-- Native OI Flow chart: shares the dashboard's canonical chain state;
+     no duplicate standalone HTML application or second data connection. -->
 <div id="oi-flow-modal" class="oc-modal">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">
       <div class="oc-modal-id">
-        <button id="oi-modal-close" class="oc-modal-back" onclick="closeOIDashboardModal()" title="Back to dashboard">←</button>
-        <span class="oc-modal-title">📈 OI Flow</span>
+        <button id="oi-modal-close" class="oc-modal-back" onclick="closeOIDashboardModal()" aria-label="Close OI Flow chart">←</button>
+        <span class="oc-modal-title">🌊 OI Flow by Strike</span>
+      </div>
+      <div class="oi-native-tabs" role="group" aria-label="OI Flow measure">
+        <span class="oi-native-view-tabs" role="group" aria-label="OI chart presentation">
+          <button type="button" class="tab-btn active-oif" data-oi-native-view="butterfly" onclick="switchNativeOiFlowView('butterfly',this)">Butterfly</button>
+          <button type="button" class="tab-btn" data-oi-native-view="bar" onclick="switchNativeOiFlowView('bar',this)">OI Bar Chart</button>
+        </span>
+        <span class="oi-native-tab-sep" aria-hidden="true"></span>
+        <button type="button" class="tab-btn" data-oi-native-mode="oi" onclick="switchNativeOiFlowChart('oi',this)">Open Interest</button>
+        <button type="button" class="tab-btn" data-oi-native-mode="chg" onclick="switchNativeOiFlowChart('chg',this)">OI Chg</button>
+        <button type="button" class="tab-btn active-oif" data-oi-native-mode="combined" onclick="switchNativeOiFlowChart('combined',this)">Combined</button>
+        <span id="oi-native-velocity-tabs" class="oi-native-velocity-tabs" hidden>
+          <button type="button" class="tab-btn" data-oi-vel-window="0" onclick="setNativeOiVelocity(0,this)">Intraday</button>
+          <button type="button" class="tab-btn" data-oi-vel-window="5" onclick="setNativeOiVelocity(5,this)">5m</button>
+          <button type="button" class="tab-btn" data-oi-vel-window="15" onclick="setNativeOiVelocity(15,this)">15m</button>
+          <button type="button" class="tab-btn" data-oi-vel-window="30" onclick="setNativeOiVelocity(30,this)">30m</button>
+        </span>
       </div>
     </div>
-    <iframe id="oi-modal-iframe" class="oc-modal-iframe" title="OI Flow"></iframe>
+    <div id="oi-flow-native-content" class="oi-native-modal-body"></div>
   </div>
 </div>
 
@@ -444,7 +456,7 @@
        toggleControlSidebar(), which just toggles the 'open' class on
        #ctrl-sidebar — the panel markup/logic underneath is untouched. -->
   <button class="sec-btn" id="ctrl-sidebar-toggle-btn" onclick="toggleControlSidebar()" title="Range & velocity controls"><span>🎛️</span>Range Vel</button>
-  <button class="sec-btn" id="oi-flow-open-btn" onclick="openOIDashboardModal()" title="Open the full OI Flow dashboard"><span>🌊</span>OI Flow</button>
+  <button class="sec-btn" id="oi-flow-open-btn" onclick="openOIDashboardModal()" title="Open OI Flow chart"><span>🌊</span>OI Flow</button>
   <!-- Algo status and Paper trading toggles — relocated here (2026-08-02)
        from their old floating fixed positions (bottom-left/bottom-right
        of the viewport, always visible on top of whatever table row
@@ -528,13 +540,8 @@
     <div id="err-msg"></div>
   </div>
 </div>
-<!-- ── OPTION CHAIN ──
-     D-04 is the compact Dashboard snapshot. The dense D-05 ledger lives
-     on the dedicated OptionChain surface and stays synchronized through
-     the shared Option Chain channel; there is no duplicate Dashboard table.
-     Flow or IV Surface. The full strike-by-strike ledger (Greeks toggle,
-     buy/sell click cells, Bid/Ask depth) lives at option-chain.html,
-     one click away via the snapshot card's "Full Chain" button. -->
+<!-- Option Chain is intentionally dashboard-native: the compact red/green
+     snapshot is canonical, and strike actions open the in-page detail report. -->
 
 
 <!-- ── DASHBOARD ──

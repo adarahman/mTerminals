@@ -7,15 +7,8 @@
 // previously the last class in panels-views.js — no behavior change.
 //
 // ModalManager is the single instance (app.modal, constructed in
-// dashboard.js) that owns open/close + Escape-key handling for all seven
-// full-screen modals (OI Dashboard, Greeks, FII-DII, IV Surface, Strategy
-// Payoff, Sim GEX, Vol/OI Velocity, Greeks-by-Moneyness). Every bare-name
-// reference inside these methods (closeOIDashboardModal(), _oiEscHandler,
-// _oiFrameLoaded, etc., instead of this.foo) is intentional, not a bug —
-// dashboard.js's global shim block (window.openOIDashboardModal = (...args)
-// => app.modal.openOIDashboardModal(...args), plus the Object.defineProperty
-// shims for _oiDashboardWin/_oiFrameLoaded) is what makes those bare names
-// resolve back to this instance. That shim layer is what keeps every
+// dashboard.js) that owns open/close + Escape-key handling for the native
+// full-screen dashboard modals. The global shim layer keeps every
 // existing onclick="..." attribute in DashboardPro.html and every
 // cross-file bare call (data-service.js, dashboard-panels.js) working
 // unchanged after this split — see dashboard.js's shim block for the
@@ -29,8 +22,6 @@
 
 class ModalManager {
   constructor() {
-    this.oiDashboardWin = null;
-    this.oiFrameLoaded = false;
     this._activeModal = null;
     this._activeCloseFn = null;
     this._modalInvokers = new WeakMap();
@@ -147,57 +138,16 @@ class ModalManager {
   }
 }
 
-  openOIDashboardModal(tab){
-  if(location.protocol === 'file:'){
-    _openOIDashboardPopupFallback(tab);
-    return;
-  }
+  openOIDashboardModal(){
   var modal = document.getElementById('oi-flow-modal');
-  var frame = document.getElementById('oi-modal-iframe');
-  if(!modal || !frame) return;
-  if(!_oiFrameLoaded){
-    frame.onload = function () {
-        if (app.data.store.state) {
-            frame.contentWindow.postMessage(
-                { type: "OI_FLOW_DATA", payload: app.data.store.state },
-                "*"
-            );
-        }
-        if (tab) {
-            frame.contentWindow.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
-        }
-    };
-    frame.src = '../OIFlow/oi-flow.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''); // OIFlow/ is a sibling of Dashboard/, not nested under it
-    _oiFrameLoaded = true;
-  }
-  // Every time the modal opens, send the latest state so reopening
-  // doesn't show stale data.
-  if (frame.contentWindow && app.data.store.state) {
-    frame.contentWindow.postMessage(
-        { type: "OI_FLOW_DATA", payload: app.data.store.state },
-        "*"
-    );
-  }
-  // Re-selecting the tab on every open (not just the first load) matters
-  // because the iframe is created once and reused — a later call asking
-  // for 'butterfly' after the panel already booted on 'oi' would otherwise
-  // silently land on whatever tab was last active instead.
-  if (tab && frame.contentWindow) {
-    frame.contentWindow.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
-  }
+  if(!modal) return;
   this._openModal(modal, () => this.closeOIDashboardModal());
-  document.addEventListener('keydown', _oiEscHandler);
+  app.oiFlow.renderNativeChart(app.oiFlow.nativeChartMode || 'oi');
 }
 
   closeOIDashboardModal(){
   var modal = document.getElementById('oi-flow-modal');
-  if(!modal) return;
-  this._closeModal(modal);
-  document.removeEventListener('keydown', _oiEscHandler);
-}
-
-  _oiEscHandler(e){
-  if(e.key === 'Escape') closeOIDashboardModal();
+  if(modal) this._closeModal(modal);
 }
 
   // ── GREEKS / GEX MODAL ──
@@ -227,22 +177,6 @@ class ModalManager {
 
   _greeksEscHandler(e){
   if(e.key === 'Escape') closeGreeksModal();
-}
-
-  _openOIDashboardPopupFallback(tab){
-  if(_oiDashboardWin && !_oiDashboardWin.closed){
-    _oiDashboardWin.focus();
-    if (tab) _oiDashboardWin.postMessage({ type: "OI_FLOW_SET_TAB", tab: tab }, "*");
-    return;
-  }
-  var w = Math.min(1200, Math.round(screen.availWidth * 0.85));
-  var h = Math.min(850, Math.round(screen.availHeight * 0.85));
-  var left = Math.round((screen.availWidth - w) / 2);
-  var top = Math.round((screen.availHeight - h) / 2);
-  var features = 'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top +
-    ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no';
-  _oiDashboardWin = window.open('../OIFlow/oi-flow.html?v=' + Date.now() + (tab ? ('&tab=' + encodeURIComponent(tab)) : ''), 'oiDashboardPopup', features);
-  if(_oiDashboardWin) _oiDashboardWin.focus();
 }
 
   // ── FII / DII MODAL ──

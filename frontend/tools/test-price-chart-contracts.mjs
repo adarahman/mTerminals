@@ -23,7 +23,7 @@ assert.doesNotMatch(standalone, /function onStateChange[\s\S]{0,700}priceChart\.
   'WebSocket state callback must not render synchronously');
 assert.doesNotMatch(dashboardHtml, /PriceChart\/(?:chart-data|chart-renderer|indicator-engine|history-loader|price-chart)\.js/,
   'Dashboard must not load the standalone chart analytics engine');
-const dashboardPageBlock = build.slice(build.indexOf('html: "Dashboard/DashboardPro.html"'), build.indexOf('html: "OIFlow/oi-flow.html"'));
+const dashboardPageBlock = build.slice(build.indexOf('html: "Dashboard/DashboardPro.html"'), build.indexOf('html: "PriceChart/price-chart.html"'));
 assert.doesNotMatch(dashboardPageBlock, /PriceChart\/(?:chart-data|chart-renderer|indicator-engine|history-loader|price-chart)\.js/,
   'Dashboard production bundle must not own chart analytics');
 

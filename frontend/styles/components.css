@@ -525,9 +525,8 @@
 
 /* ══════════════════════════════════════════════════════════════════
    NAVIGABLE CARD HEADERS
-   Reusable pattern for .section-card headers that link out to a
-   dedicated detail page — e.g. "Option Chain Snapshot" -> the full
-   option-chain.html tab. Replaces the old "standalone pill button
+   Reusable pattern for .section-card headers that link to a
+   dedicated detail surface. Replaces the old "standalone pill button
    inside the header" approach (.oi-snap-fullchain's "Full Chain",
    and any future "View"/"Open" button following the same shape):
    instead of a button competing for space next to the title, the
@@ -536,12 +535,9 @@
    this element, so nothing there becomes accidentally clickable —
    only apply this to the header, never wrap a whole card in an <a>.
 
-   Markup (see chain-template.js's buildChainSummaryHtml for the first
-   real usage):
+   Example markup:
      <a class="section-header nav-card-header"
-        href="../OptionChain/option-chain.html" target="_blank" rel="noopener"
-        aria-label="Open Option Chain Snapshot — view full option chain"
-        title="Open full option chain">
+        href="detail.html" aria-label="Open detail">
        <span class="oi-snap-heading nav-card-header-label">…title…</span>
        <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
      </a>
