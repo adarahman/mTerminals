@@ -439,8 +439,13 @@ class ModalManager {
   this._openModal(modal, () => this.closeGreeksChartModal());
   document.addEventListener('keydown', _greeksChartEscHandler);
   if(app.data.store.state && window.updateGreeksMoneynessChart){
-    window.updateGreeksMoneynessChart(app.data.store.state);
+    window.updateGreeksMoneynessChart(app.data.store.state, true);
   }
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (window.resizeGreeksMoneynessChart) {
+      window.resizeGreeksMoneynessChart('greeksChart-modal');
+    }
+  }));
 }
 
   closeGreeksChartModal(){

@@ -147,7 +147,14 @@ class DataService {
       label += ` ${Math.max(1, Math.floor((Date.now()-fs.lastMessageAt)/1000))}s`;
     }
     const missingTxt = fs.missing && fs.missing.length ? ` Missing: ${fs.missing.join(', ')}.` : '';
-    const reasonText = fs.reason || (fs.quality === 'PARTIAL' ? missingTxt.trim() : '');
+    const rawReasonText = fs.reason || (fs.quality === 'PARTIAL' ? missingTxt.trim() : '');
+    // The MARKET CLOSED / HOLIDAY badge already communicates the normal
+    // session state. Repeating "Market session is market closed" beside
+    // it wastes top-bar width; preserve only actionable/non-redundant
+    // reasons here. The full reason remains in the badge title above.
+    const redundantSessionReason = (fs.marketSession === 'MARKET_CLOSED' || fs.marketSession === 'HOLIDAY')
+      && /market session|market closed|holiday/i.test(rawReasonText);
+    const reasonText = redundantSessionReason ? '' : rawReasonText;
     if (el) {
       el.textContent = label;
       el.dataset.status = visualStatus.toLowerCase().replace('_','-');

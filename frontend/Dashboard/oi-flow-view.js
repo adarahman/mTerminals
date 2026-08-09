@@ -284,7 +284,6 @@ class OiFlowView {
           </div>`).join('')}
       </div>
     </div>
-    <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading…</div>
   </div>`;
 }
 }

@@ -26,7 +26,7 @@ const checks = [
   ['modal accessibility evidence exists', modal.includes('aria-modal') && modal.includes('invoker.focus()') && modal.includes("e.key !== 'Tab'")],
   ['metric ownership evidence exists', template.includes('oi-snap-kpi-label">Max Pain') && execView.includes('capital-wall-owner') && execView.includes('FII / DII Cash Flow')],
   ['D-12 ledger evidence exists', execView.includes('oic-ledger-row') && execView.includes('footprintRanked')],
-  ['unchanged Greeks skip redraw', chart.includes('lastGreeksSignature') && chart.includes('if(signature === lastGreeksSignature')],
+  ['unchanged Greeks skip redraw', chart.includes('lastGreeksSignature') && chart.includes('if(!force && signature === lastGreeksSignature && !canvasChanged) return;')],
   ['residual performance risks have triggers', current.includes('R-01 — Hot-card patch granularity') && current.includes('R-02 — Deferred heavy rendering') && current.includes('Trigger:')],
 ];
 

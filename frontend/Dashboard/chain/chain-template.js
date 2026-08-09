@@ -59,6 +59,8 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const feedReason = String(feedReasonRaw).replace(/[&<>"']/g, ch => ({
     '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
   })[ch]);
+  const feedReasonVisible = ((marketSession === 'MARKET_CLOSED' || marketSession === 'HOLIDAY')
+    && /market session|market closed|holiday/i.test(String(feedReasonRaw))) ? '' : feedReason;
   let feedLabel = rawFeedStatus;
   let feedStatus = rawFeedStatus.toLowerCase();
   if (marketSession === 'HOLIDAY') {
@@ -118,20 +120,20 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       </select>
       <!-- Only matters once priceSource=FUT is picked above, but shown
            always for a stable layout rather than popping in/out. -->
-      <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Which monthly futures contract to use as FUT source" onchange="onFuturesExpiryPicked(this.value)">
+      <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Which monthly futures contract to use as FUT source" onchange="onFuturesExpiryPicked(this.value)"${d.priceSource==='FUT'?'':' hidden'}>
         <option value="NEAR"${(d.futuresExpiry||'NEAR')==='NEAR'?' selected':''}>NEAR</option>
         <option value="NEXT"${d.futuresExpiry==='NEXT'?' selected':''}>NEXT</option>
         <option value="FAR"${d.futuresExpiry==='FAR'?' selected':''}>FAR</option>
       </select>
       <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}${d.priceSource==='FUT'?` <small class="price-source-tag">(FUT ${d.futuresExpiry||'NEAR'})</small>`:''}</span>
-      ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}% (${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)})</span>`:''}
+      ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}" title="${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>`:''}
       ${renderIndexTicker(d)}
     </div>
     <div class="expiry-strip">
       <div class="expiry-pill feed-health-pill">
         <span class="expiry-pill-label">Feed</span>
-        <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedState.reason || ''}">${feedLabel}</span>
-        <span class="feed-status-reason" id="feed-status-reason"${feedReason?'':' hidden'}>${feedReason}</span>
+        <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedReason}">${feedLabel}</span>
+        <span class="feed-status-reason" id="feed-status-reason"${feedReasonVisible?'':' hidden'}>${feedReasonVisible}</span>
       </div>
       <div class="expiry-divider"></div>
       <!-- Expiry is its own dedicated pill, separate from DTE, and sits
@@ -141,16 +143,11 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            so its option list and current value survive live ticks. -->
       <div class="expiry-pill">
         <span class="expiry-pill-label">Expiry</span>
-        <span id="expiry-slot"></span>
+        <span class="expiry-value-row"><span id="expiry-slot"></span><span class="expiry-dte" id="dte-display">· ${(d.dte||0)}d</span></span>
       </div>
       <div class="expiry-divider"></div>
       <div class="expiry-pill">
-        <span class="expiry-pill-label">DTE</span>
-        <span class="expiry-pill-val dte-val" id="dte-display">${(d.dte||0)}d</span>
-      </div>
-      <div class="expiry-divider"></div>
-      <div class="expiry-pill">
-        <span class="expiry-pill-label">As of</span>
+        <span class="expiry-pill-label">Updated</span>
         <span class="expiry-pill-val time-val" id="time-display">${d.refreshTime||'--'}</span>
       </div>
     </div>
@@ -356,8 +353,21 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       const idx = s.indexOf('—');
       return idx > -1 ? s.slice(idx + 1).trim() : '';
     };
+    const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    })[ch]);
 
     const atm = (typeof activeAtm === 'function') ? activeAtm(d) : (d.atm || 0);
+
+    // The hero follows the trader's reading order: decision -> why ->
+    // levels -> action. Complete evidence remains in the detail panel.
+    const heroSignals = sigs.slice(0, 3);
+    const heroWhyHtml = heroSignals.length
+      ? heroSignals.map(s => `<div class="decision-flow-line">
+          <span class="decision-flow-dot" style="color:${sevClr(s.severity)};">${sevDot(s.severity)}</span>
+          <span title="${escapeHtml(s.text)}">${escapeHtml(s.text)}</span>
+        </div>`).join('')
+      : `<div class="decision-flow-line"><span class="decision-flow-dot">·</span><span>${explainVal(vrd.pcr) || explainVal(vrd.vix) || 'No strong confirming signal yet.'}</span></div>`;
 
     // CE Wall / PE Wall now rendered in the same 🏛️-tile style OI Flow
     // Snapshot used (build-rows with strike + OI delta), not the old flat
@@ -415,36 +425,23 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-conf-label">Evidence Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
         <div class="verdict-conf-msg">Coverage ${evidenceCoverage}%</div>
-        ${act && act !== '—' ? `<div class="verdict-conf-msg">${act}</div>` : ''}
         ${decisionDegraded ? `<div class="verdict-data-quality" title="Missing: ${decisionMissing.join(', ')}">DEGRADED${decisionMissing.length ? ' · '+decisionMissing.join(', ') : ''}</div>` : ''}
         ${partialData ? `<div class="verdict-data-quality" title="Missing: ${partialMissing.join(', ')}">PARTIAL DATA${partialMissing.length ? ' · '+partialMissing.join(', ') : ''}</div>` : ''}
       </div>
-      ${risk.tradeGrade && risk.tradeGrade !== '—' ? `
-      <div class="verdict-grade">
-        <div class="verdict-conf-label">Trade Grade</div>
-        <div class="verdict-grade-big" style="color:${gradeColor};">${risk.tradeGrade}</div>
-      </div>` : ''}
     </div>
-    <div class="verdict-strip" style="grid-template-columns:repeat(4,minmax(0,1fr));">
-      <div class="verdict-stat">
-        <div class="k">PCR</div><div class="v" title="${vrd.pcr || ''}">${shortVal(vrd.pcr)}</div>
-        ${explainVal(vrd.pcr) ? `<div class="verdict-stat-explain" title="${vrd.pcr}">${explainVal(vrd.pcr)}</div>` : ''}
-      </div>
-      <div class="verdict-stat verdict-stat-2line">
-        <div class="verdict-stat-line"><div class="k">India VIX</div><div class="v" title="${vrd.vix || ''}">${shortVal(vrd.vix)}</div></div>
-        <div class="verdict-stat-line"><div class="k">IV Regime</div><div class="v" style="color:${ivRgColor};">${risk.ivRegime || '—'}</div></div>
-        ${explainVal(vrd.vix) ? `<div class="verdict-stat-explain" title="${vrd.vix}">${explainVal(vrd.vix)}</div>` : ''}
-      </div>
-      <div class="verdict-stat verdict-stat-2line">
-        <div class="verdict-stat-line"><div class="k">Max Pain</div><div class="v">${d.maxPain!=null?fmtI(d.maxPain):'—'}</div></div>
-        <div class="verdict-stat-line"><div class="k">ATM Strike</div><div class="v">${atm?fmtI(atm):'—'}</div></div>
-        <!-- No vrd.maxPain narrative field exists in the payload today —
-             this hook is wired for when/if the backend adds one, and
-             renders nothing in the meantime rather than fabricating text. -->
-        ${explainVal(vrd.maxPain) ? `<div class="verdict-stat-explain" title="${vrd.maxPain}">${explainVal(vrd.maxPain)}</div>` : ''}
-      </div>
-      <div class="verdict-stat verdict-stat-2line">
-        <div class="oic-tile" style="padding:0;border:0;background:transparent;">
+    <div class="decision-flow" aria-label="Decision summary">
+      <section class="decision-flow-block decision-flow-why">
+        <div class="decision-flow-label">Why</div>
+        <div class="decision-flow-content">${heroWhyHtml}</div>
+        <div class="decision-flow-foot" title="${vrd.pcr || ''} · ${vrd.vix || ''}">PCR ${shortVal(vrd.pcr)} · VIX ${shortVal(vrd.vix)}</div>
+      </section>
+      <section class="decision-flow-block decision-flow-levels">
+        <div class="decision-flow-label">Key Levels</div>
+        <div class="decision-flow-level-grid">
+          <div><span>ATM</span><strong>${atm?fmtI(atm):'—'}</strong></div>
+          <div><span>Max Pain</span><strong>${d.maxPain!=null?fmtI(d.maxPain):'—'}</strong></div>
+        </div>
+        <div class="oic-tile decision-flow-walls">
           ${wallBuild.ceStrike!==null ? `
           <div class="oic-build-row">
             <span>CE Wall</span>
@@ -457,33 +454,22 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           </div>` : ''}
           ${wallBuild.ceStrike===null && wallBuild.peStrike===null ? '<div class="oic-empty">—</div>' : ''}
         </div>
-        <!-- ₹ Wall = highest-PREMIUM strike (oi.capital_metrics'
-             ce_capital_wall_strike/pe_capital_wall_strike — OI x LTP), as
-             opposed to CE/PE Wall above (highest raw OI). Always shown
-             (not just on divergence) so the capital-weighted view is
-             visible on the dashboard at a glance; when it matches the
-             raw-OI wall that's itself useful confirmation, not noise. -->
-        ${(() => {
-          const capCe = d.capitalCeWallStrike, capPe = d.capitalPeWallStrike;
-          if (!capCe && !capPe) return '';
-          return `<div class="oic-tile" style="padding:0;border:0;background:transparent;margin-top:2px;" title="Highest premium-locked strike — OI x LTP, can differ from the raw-OI wall above">
-            ${capCe ? `<div class="oic-build-row"><span>₹ CE Wall</span><button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${capCe})">${fmtI(capCe)}</button></div>` : ''}
-            ${capPe ? `<div class="oic-build-row"><span>₹ PE Wall</span><button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${capPe})">${fmtI(capPe)}</button></div>` : ''}
-          </div>`;
-        })()}
-        ${(() => {
-          const wallExplain = [explainVal(vrd.ceWall), explainVal(vrd.peWall)].filter(Boolean).join(' · ');
-          const wallTitle = [vrd.ceWall, vrd.peWall].filter(Boolean).join(' · ');
-          return wallExplain ? `<div class="verdict-stat-explain" title="${wallTitle}">${wallExplain}</div>` : '';
-        })()}
-      </div>
+      </section>
+      <section class="decision-flow-block decision-flow-action">
+        <div class="decision-flow-label">Action</div>
+        <div class="decision-flow-action-text">${act && act !== '—' ? act : 'Wait for a clearer edge'}</div>
+        <div class="decision-flow-action-meta">
+          <span>Grade <strong style="color:${gradeColor};">${risk.tradeGrade || '—'}</strong></span>
+          <span>IV <strong style="color:${ivRgColor};">${risk.ivRegime || '—'}</strong></span>
+        </div>
+      </section>
     </div>
   </div>
 
   <!-- ── DECISION DETAIL — Tier-3 collapsible ── -->
   <details class="card" id="decision-detail-card" style="margin-bottom:10px;" ${detailOpen ? 'open' : ''}>
     <summary>
-      <div class="card-head"><span class="ic">🧭</span>Decision Detail</div>
+      <div class="card-head"><span class="ic">🧭</span>Full Evidence &amp; Risk Levels</div>
       <span class="chev">▶</span>
     </summary>
     <div class="detail-body">

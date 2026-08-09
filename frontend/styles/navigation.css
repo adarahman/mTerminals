@@ -14,7 +14,7 @@
    based on .active. */
 
 .index-ticker{
-  display:flex;gap: var(--space-3);flex-wrap:nowrap;
+  display:flex;gap:6px;flex-wrap:nowrap;
   align-items:center;
   overflow-x:auto;-webkit-overflow-scrolling:touch;
   scrollbar-width:none;
@@ -26,14 +26,14 @@
   font:inherit;
   color:inherit;
   appearance:none;
-  display:flex;align-items:center;gap: var(--space-3);
+  display:flex;align-items:center;gap:6px;
   /* #15171c was an unmigrated near-copy of --bg-1 (#16181D), off by
      ~1 hex unit per channel — repointed, same pattern as
      paper-trading.css's #0f1116/--bg-0 fix. */
   background:var(--bg-1);
   border:2px solid transparent;
   border-radius:999px;
-  padding:6px 14px;
+  padding:5px 9px;
   cursor:pointer;
   flex-shrink:0;
   box-shadow:0 2px 8px rgba(0,0,0,0.16);
@@ -48,11 +48,11 @@
 
 /* highlights the currently-connected symbol; position stays fixed */
 
-.idx-pill-sym{font-family:var(--font-display);font-size:var(--fs-base);font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;}
+.idx-pill-sym{font-family:var(--font-display);font-size:var(--fs-sm);font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;}
 
-.idx-pill-val{font-size:var(--fs-base);font-weight:600;color:#fff;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:6ch;text-align:right;display:inline-block;}
+.idx-pill-val{font-size:var(--fs-sm);font-weight:600;color:#fff;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:6ch;text-align:right;display:inline-block;}
 
-.idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:var(--fs-base);font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
+.idx-pill-chg{display:flex;align-items:center;gap:3px;font-size:var(--fs-sm);font-weight:700;font-family:var(--font-mono);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:5.5ch;justify-content:flex-end;}
 
 /* Exact copies of --pos/--neg/--text-tertiary, unmigrated. Repointed. */
 .idx-pill-chg.up{color:var(--pos);}
@@ -104,17 +104,17 @@
   border-radius:20px;
   overflow:visible;
   flex-shrink:0;
-  padding:4px 10px 4px 4px;
+  padding:3px 7px 3px 3px;
 }
 
 .expiry-pill{
   display:flex;flex-direction:column;align-items:center;
-  padding: var(--space-1) var(--space-3);
+  padding:3px 7px;
   gap:1px;
 }
 
 .expiry-pill-label{
-  font-size:var(--fs-sm);font-weight:600;color:var(--text-tertiary);
+  font-size:var(--fs-xs);font-weight:600;color:var(--text-tertiary);
   text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;
 }
 
@@ -135,7 +135,7 @@
 .feed-status-pill[data-status="connecting"]{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:var(--warn-dim);}
 .feed-status-pill[data-status="disconnected"]{color:var(--neg);border-color:color-mix(in srgb,var(--neg) 45%,var(--border));background:var(--neg-dim);}
 .feed-status-reason{
-  max-width:220px;
+  max-width:120px;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
@@ -145,6 +145,8 @@
 .feed-status-reason[hidden]{display:none;}
 
 .dte-val{color:var(--warn);}
+.expiry-value-row{display:flex;align-items:center;gap:5px;white-space:nowrap;}
+.expiry-dte{font-family:var(--font-mono);font-size:var(--fs-sm);font-weight:700;color:var(--warn);}
 
 /* Expiry dropdown, relocated from the old horizontal .sec-nav into the
    top-bar's DTE pill slot (see #expirySelect in DashboardPro.html — it's
@@ -168,7 +170,7 @@
 
 #expirySelect:focus{color:var(--info);}
 
-.time-val{color:var(--info);font-size:var(--fs-base);}
+.time-val{color:var(--info);font-size:var(--fs-sm);}
 
 .expiry-divider{width:1px;height:28px;background:var(--border);flex-shrink:0;}
 
@@ -178,14 +180,17 @@
 
 .top-bar-left{
   display:flex;align-items:center;
-  gap:14px;
+  gap:10px;
   flex-wrap:nowrap;
+  flex:1 1 auto;
   min-width:0; /* lets .index-ticker's own overflow-x scroll instead of pushing the bar wider */
 }
 
 .top-bar-left .index-ticker{
-  padding-left:14px;
+  padding-left:10px;
   border-left:1px solid var(--border);
+  flex:1 1 auto;
+  min-width:0;
 }
 
 .symbol{font-family:var(--font-display);font-size:var(--fs-base);font-weight:700;color:var(--text-tertiary);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;}
@@ -214,6 +219,8 @@
   padding:6px 22px 6px 14px;
   box-shadow:0 2px 8px rgba(0,0,0,0.16);
   background-position:right 14px center;
+  width:clamp(132px,12vw,188px);
+  min-width:0;
 }
 
 /* Same visual language as .symbol-select, deliberately smaller/muted —
@@ -233,7 +240,7 @@
   font-weight:700;
   color:var(--text-tertiary);
   border:1.5px solid var(--border);
-  padding:4px 20px 4px 10px;
+  padding:4px 18px 4px 8px;
   background-position:right 8px center;
 }
 
@@ -241,7 +248,7 @@
 
 /* 1.8687rem (29.9px) -> --fs-3xl (28px): closer than --fs-4xl (34.4px)
    by 1.9px vs 4.5px. */
-.spot{font-size:var(--fs-3xl);font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:8ch;text-align:right;}
+.spot{font-size:var(--fs-3xl);font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:7ch;text-align:right;}
 
 .spot.bearish{color:var(--neg);}
 

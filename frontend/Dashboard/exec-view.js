@@ -18,49 +18,28 @@ class ExecView {
   const dec       = d.decision || {};
   const decBias   = dec.bias || '';           // BULLISH | BEARISH | NEUTRAL | CONFLICTED
 
-  // isBearBias/isBullBias now shared via chain-helpers.js — same semantics
-  // as before in this file (decision.bias governs when present).
-  const isBull = isBullBias(d);
-  const isBear = isBearBias(d);
-
-  const pcr    = d.totalPCR || 1;
-
-
   return `
 <div id="exec-section-wrap">
 <div class="exec-grid">
 
-  <!-- ── CARD 1: MARKET HEALTH + STORY (merged) ── -->
-  <!-- One narrative card: raw canonical context + a concise market story.
-       Presentation-layer Momentum/OI/Theta scores were removed in P1 so
-       this card explains the state instead of acting like a second
-       decision engine. Max Pain remains owned by D-04 Chain Snapshot. -->
+  <!-- ── CARD 1: MARKET CONTEXT & RANGE ── -->
+  <!-- Only context not already owned by the hero/top bar lives here. -->
   <div class="exec-card c-blue">
-    <div class="exec-title">📊 Market Health &amp; Story</div>
+    <div class="exec-title">📊 Market Context &amp; Range</div>
     ${(() => {
-      const oiChgPcr = d.oiChgPCR || pcr;
       const atmStraddlePrem = (d.callPremium||0) + (d.putPremium||0);
       const stratName = dec.autoStrategy?.name || null;
-      const storyText = isBull
-        ? 'Put-side support and price structure remain constructive; prefer buying weakness while the thesis holds.'
-        : isBear
-          ? 'Call-side pressure and price structure remain defensive; prefer selling strength while the thesis holds.'
-          : 'Positioning is mixed; wait for clearer price/flow agreement before increasing conviction.';
       return `
-        <div style="font-size:12px;line-height:1.55;color:var(--txt2);padding:2px 0 10px;">${storyText}</div>
+        <div style="font-size:12px;line-height:1.55;color:var(--txt2);padding:2px 0 10px;">Expected range and premium context for the selected expiry.</div>
         <div class="kv-grid">
-          <div class="kv"><span class="k">Spot Move</span><span class="v" style="color:${signColor(d.spotChgPct,'var(--txt3)')};">${fmtSigned(d.spotChgPct||0,2)}%</span></div>
           <div class="kv"><span class="k">Fut Basis</span><span class="v">${fmtSigned(d.basis||0,1)}</span></div>
-          <div class="kv"><span class="k">Total PCR</span><span class="v">${fmtN(pcr,2)}</span></div>
-          <div class="kv"><span class="k">ΔOI PCR</span><span class="v">${fmtN(oiChgPcr,2)}</span></div>
+          <div class="kv"><span class="k">Expected Move</span><span class="v">±${Math.round(atmStraddlePrem)}</span></div>
+          <div class="kv"><span class="k">ATM Straddle</span><span class="v">₹${fmtN(atmStraddlePrem,1)}</span></div>
+          <div class="kv"><span class="k">Call Premium</span><span class="v">₹${fmtN(d.callPremium||0,1)}</span></div>
+          <div class="kv"><span class="k">Put Premium</span><span class="v">₹${fmtN(d.putPremium||0,1)}</span></div>
           <div class="kv"><span class="k">ATM Θ / day</span><span class="v">${fmtN(d.atmTheta,2)}</span></div>
-          <div class="kv"><span class="k">DTE</span><span class="v">${d.dte||0}</span></div>
         </div>
-        <div style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);">
-          <div class="story">±Expected Move <strong style="color:var(--blue);">${Math.round(atmStraddlePrem)}</strong></div>
-          <div class="story">ATM Straddle Prem <strong>CE ₹${fmtN(d.callPremium||0,1)} + PE ₹${fmtN(d.putPremium||0,1)}</strong></div>
-          ${stratName ? `<div class="story">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}
-        </div>`;
+        ${stratName ? `<div class="story" style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}`;
     })()}
   </div>
 
@@ -199,6 +178,10 @@ class ExecView {
   const nearLedger = flagged.filter(f => f.band === 'near').sort((a,b) => b.strength - a.strength).slice(0,5);
   const biasBadgeClass = ceCount > peCount ? 'b-red' : peCount > ceCount ? 'b-green' : 'b-blue';
   const signalClr = top && top.oiDominant==='CE' ? 'var(--neg)' : 'var(--pos)';
+  const fmtSignedCompact = (value) => {
+    const n = Number(value) || 0;
+    return `${n>0?'+':n<0?'−':''}${fmtK(Math.abs(n))}`;
+  };
 
   return `
   <div class="oic-card" id="inst-activity-summary-card">
@@ -222,7 +205,7 @@ class ExecView {
     ${nearLedger.length ? `
     <div class="oic-ledger-wrap">
       <div class="oic-ledger-head"><span>Strike</span><span>Side</span><span>OI</span><span>ΔOI</span><span>Vol/OI</span></div>
-      ${nearLedger.map(r => `<button type="button" class="oic-ledger-row" onclick="event.stopPropagation();openOptionChainAtStrike(${r.strike})" title="Open Option Chain at ${fmtI(r.strike)}"><span>${fmtI(r.strike)}</span><span class="${r.oiDominant==='CE'?'ce':'pe'}">${r.oiDominant}</span><span>${fmtK(r.totalOI)}</span><span style="color:${signColor(r.dominantDOI,'var(--txt3)')};">${fmtSigned(r.dominantDOI,0)}</span><span>${fmtN(r.volRatio,2)}</span></button>`).join('')}
+      ${nearLedger.map(r => `<button type="button" class="oic-ledger-row" onclick="event.stopPropagation();openOptionChainAtStrike(${r.strike})" title="Open Option Chain at ${fmtI(r.strike)} · Exact ΔOI ${Number(r.dominantDOI).toLocaleString('en-IN')}"><span>${fmtI(r.strike)}</span><span class="${r.oiDominant==='CE'?'ce':'pe'}">${r.oiDominant}</span><span>${fmtK(r.totalOI)}</span><span style="color:${signColor(r.dominantDOI,'var(--txt3)')};">${fmtSignedCompact(r.dominantDOI)}</span><span>${fmtN(r.volRatio,2)}</span></button>`).join('')}
     </div>` : `<div class="oic-empty" style="margin-top:8px;">No ranked footprint strike is currently inside the near-ATM band.</div>`}
     `}
   </div>`;
@@ -281,6 +264,9 @@ class ExecView {
   const confirmColor = sm.capitalConfirms === true ? 'var(--green)'
                       : sm.capitalConfirms === false ? 'var(--red)'
                       : 'var(--txt3)';
+  const regimeDescription = String(mr.description || '').trim();
+  const smartMoneySummary = String(sm.summary || '').trim();
+  const showSmartMoneySummary = smartMoneySummary && smartMoneySummary !== regimeDescription;
 
   return `
   <div class="exec-card c-blue">
@@ -306,7 +292,7 @@ class ExecView {
         <span style="font-size:12px;font-weight:700;color:${biasColor};">${sm.bias || 'Neutral'}</span>
         <span style="font-size:10px;color:${confirmColor};">${confirmTxt}</span>
       </div>
-      <div class="story" style="margin-top:4px;">${sm.summary || ''}</div>
+      ${showSmartMoneySummary ? `<div class="story" style="margin-top:4px;">${smartMoneySummary}</div>` : ''}
     </div>
   </div>`;
 }

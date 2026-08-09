@@ -141,51 +141,8 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
     <div style="display:flex;flex-direction:column;padding:2px 0;">
       ${rows}
     </div>
-    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
-      <div style="font-size:10px;color:var(--txt3);margin-bottom:6px;">ATM Greeks ${fmtI(d.atm)}</div>
-      <div class="metric-strip">
-        <div class="metric-cell"><div class="k">Delta</div><div class="v">${fmtN(d.atmDelta,4)}</div>${mgBar(d.atmDelta,'delta')}</div>
-        <div class="metric-cell" title="Gamma scaled ×10,000 for readability — raw gamma per contract is a small decimal"><div class="k">Gamma ×10⁴</div><div class="v">${fmtN(d.atmGamma,4)}</div>${mgBar(d.atmGamma,'gamma')}</div>
-        <div class="metric-cell"><div class="k">Theta / day</div><div class="v bear">${fmtN(d.atmTheta,2)}</div>${mgBar(d.atmTheta,'theta')}</div>
-        <div class="metric-cell"><div class="k">Vega</div><div class="v">${fmtN(d.atmVega,2)}</div>${mgBar(d.atmVega,'vega')}</div>
-      </div>
-    </div>
   </div>`;
 };
-
-  // ── ATM GREEKS DETAIL ──
-  // Folded into buildGreeksAlertsHtml() above (2026-08-01) — the Tier-3
-  // collapsible this used to live in had shrunk to a single sibling card
-  // (IV vs HV/Skew) once this moved out, which was leaving the row3 grid's
-  // second column visibly blank. mgBar/MG_BAR_MAX/MG_BAR_LEN below are
-  // still used by the inline call above (function/const hoisting makes the
-  // declaration order safe); the standalone <details> wrapper and its
-  // "atm-greeks-detail-card" id are gone, along with the incremental
-  // refresh block that targeted it in chain-renderer.js and the
-  // #sec-tier3 row it used to share with IV vs HV/Skew (that card is also
-  // now removed — see chain-renderer.js's history comment).
-  // Bar fill below is a proportion of a per-Greek reference max, not a
-  // fixed 0–100 scale — atm_delta is bounded (call delta, 0–1) so that
-  // one's exact, but atm_gamma/theta/vega have no natural ceiling (they
-  // scale with lot size, premium, and time to expiry). These are
-  // tunable heuristics for a reasonable "how full does this look" read,
-  // same spirit as GREEKS_ALERT_THETA_PCT above — adjust to whatever
-  // range this instrument/lot-size combo actually produces day to day.
-  // Uses the actual █/░ glyphs (not a DOM/CSS reimplementation) — safe
-  // here because atmDelta/Gamma/Theta/Vega are all non-negative as sent
-  // (atm_theta is abs()'d server-side, atm_delta is call-delta 0–1), so
-  // there's no negative-value case this bar needs to represent.
-  const MG_BAR_MAX = { delta: 1.0, gamma: 30, theta: 150, vega: 400 };
-  const MG_BAR_LEN = 9; // matches the ████████░ reference look
-
-  function mgBar(value, greek) {
-    const v = Math.abs(Number(value) || 0);
-    const pct = Math.max(0, Math.min(1, v / MG_BAR_MAX[greek]));
-    const filled = Math.round(pct * MG_BAR_LEN);
-    const filledStr = '█'.repeat(filled);
-    const emptyStr  = '░'.repeat(MG_BAR_LEN - filled);
-    return `<span class="mg-bar-text"><span class="on ${greek}">${filledStr}</span><span class="off">${emptyStr}</span></span>`;
-  }
 
   // Merged Greeks + Net GEX table. One <td> per strike shared by both
   // datasets (previously two separate cards each repeating the strike

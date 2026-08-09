@@ -231,12 +231,15 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
     const badgeEl = document.getElementById('topbar-badge');
     if (badgeEl && d.spotChgPct !== undefined) {
       badgeEl.className = 'badge ' + (d.spotChgPct >= 0 ? 'badge-bull' : 'badge-bear');
-      badgeEl.textContent = `${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}% (${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)})`;
+      badgeEl.textContent = `${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%`;
+      badgeEl.title = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points`;
     }
+    const futuresExpiryEl = document.getElementById('futuresExpirySelect');
+    if (futuresExpiryEl) futuresExpiryEl.hidden = d.priceSource !== 'FUT';
     const tickerEl = document.getElementById('index-ticker-bar');
     if (tickerEl && window.patchIndexTicker) patchIndexTicker(d);
     const dteEl = document.getElementById('dte-display');
-    if (dteEl) dteEl.textContent = (d.dte||0) + 'd';
+    if (dteEl) dteEl.textContent = '· ' + (d.dte||0) + 'd';
     const timeEl = document.getElementById('time-display');
     if (timeEl) timeEl.textContent = d.refreshTime || '--';
   }
@@ -326,6 +329,30 @@ ChainView.prototype._bindDecisionDetailGuard = function() {
   if (details) details.addEventListener('toggle', clearPending);
 };
 
+ChainView.prototype.buildGreeksMoneynessHtml = function(d) {
+  return `
+    <div id="sec-greeks-moneyness" class="section-card sc-violet greeks-moneyness-card">
+      <div class="section-header"><span class="section-title"><span class="section-icon">Δ</span>Greeks by Moneyness</span></div>
+      <div class="greeks-moneyness-legend">
+        <span><i style="background:#2a78d6;"></i>Delta (call)</span>
+        <span><i style="background:#1baf7a;"></i>Gamma</span>
+        <span><i style="background:#e34948;"></i>|Theta| decay</span>
+        <span><i style="background:#eda100;"></i>Vega</span>
+      </div>
+      <div class="chart-expand-wrap greeks-moneyness-chart" role="button" tabindex="0" aria-label="Expand Greeks by Moneyness chart" onclick="openGreeksChartModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openGreeksChartModal();}" title="Click to expand">
+        <span class="chart-expand-icon" title="Expand">⤢</span>
+        <canvas id="greeksChart" role="img" aria-label="Line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain.">Delta rises steadily from OTM to ITM. Gamma, theta decay, and vega all peak at the at-the-money strike and fall off toward both deep ITM and deep OTM.</canvas>
+      </div>
+      <div class="atm-greeks-summary" aria-label="ATM Greeks at ${fmtI(d.atm)}">
+        <div class="atm-greeks-heading" id="atm-greeks-heading">ATM ${fmtI(d.atm)}</div>
+        <div><span>Delta</span><strong id="atm-greek-delta">${fmtN(d.atmDelta,4)}</strong></div>
+        <div title="Gamma scaled ×10,000 for readability"><span>Gamma ×10⁴</span><strong id="atm-greek-gamma">${fmtN(d.atmGamma,4)}</strong></div>
+        <div><span>Theta/day</span><strong id="atm-greek-theta" class="bear">${fmtN(d.atmTheta,2)}</strong></div>
+        <div><span>Vega</span><strong id="atm-greek-vega">${fmtN(d.atmVega,2)}</strong></div>
+      </div>
+    </div>`;
+};
+
 ChainView.prototype.renderDashboard = function(d) {
   _data=d;
   const atm=activeAtm(d);
@@ -384,9 +411,12 @@ ChainView.prototype.renderDashboard = function(d) {
   // Divider styling (was inline `style=`, repeated identically at all
   // four zone boundaries) moved to .zone-divider/.zone-divider--* in
   // layout.css as of step 5 — see that block for the weight rationale.
-  h += '<div id="zone-structure" class="zone-divider zone-divider--primary">Structure &amp; Positioning</div>';
+  h += '<div id="zone-structure" class="zone-divider zone-divider--primary">Positioning Evidence</div>';
 
-  // ── LARGE EXECUTIVE BOXES (3-col grid: Market Health & Story | Greeks/GEX Alerts | Option Chain Snapshot) ──
+  // Built here and mounted later beside Institutional Activity Crux.
+  const greeksMoneynessHtml = this.buildGreeksMoneynessHtml(d);
+
+  // ── LARGE EXECUTIVE BOXES (original 3-column positioning grid) ──
   // Keep the exact markup so the live-refresh path can later compare it
   // without immediately rebuilding this entire section on its first tick.
   const executiveDashboardHtml = renderExecutiveDashboard(d);
@@ -411,39 +441,6 @@ ChainView.prototype.renderDashboard = function(d) {
   const velByStrike={};
   if(velBlock&&velBlock.rows)velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
   const velMax=Math.max(...chain.map(r=>{const vr=velByStrike[r.strike]||{};return Math.max(Math.abs(vr.ceDOI||0),Math.abs(vr.peDOI||0));}),1);
-
-  // ── Greeks by Moneyness (Structure & Positioning zone) ──
-  // Moved here from the old #sec-tier2 row, where it was paired with
-  // Institutional Activity Crux for no reason tied to either card's
-  // question — Greeks by Moneyness answers "what gamma regime are we
-  // in," same family as Greeks/GEX Alerts above, not an institutional
-  // question. Institutional Activity Crux now renders in the
-  // Institutional zone instead (see below). Single-column now instead of
-  // paired 1fr/1fr, same #sec-greeks-moneyness id/markup so the
-  // interactive-subtree-preserving swap in _rerenderChainPanels below
-  // still finds it.
-  h += `<div id="sec-tier2" class="row2" style="grid-template-columns:1fr;align-items:stretch;">
-    <div id="sec-greeks-moneyness" class="section-card sc-violet" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
-      <div class="section-header"><span class="section-title"><span class="section-icon">Δ</span>Greeks by Moneyness</span></div>
-      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;font-size:11px;color:var(--txt3);flex-shrink:0;">
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#2a78d6;"></span>Delta (call)</span>
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#1baf7a;"></span>Gamma</span>
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#e34948;"></span>|Theta| decay</span>
-        <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:5px;border-radius:2px;background:#eda100;"></span>Vega</span>
-      </div>
-      <!-- flex:1 + min-height:0 is the standard fix for Chart.js (responsive +
-           maintainAspectRatio:false) inside a flex column: without min-height:0
-           the flex item's default min-height:auto fights the canvas's own
-           measurement and the box grows/shrinks abruptly on every render.
-           Click-to-expand (openGreeksChartModal()) — same treatment as the
-           Strategy Payoff / Net GEX charts, so all three chart-style cards
-           behave consistently instead of only two of them being expandable. -->
-      <div class="chart-expand-wrap" role="button" tabindex="0" aria-label="Expand Greeks by Moneyness chart" onclick="openGreeksChartModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openGreeksChartModal();}" title="Click to expand" style="cursor:zoom-in;position:relative;width:100%;flex:0.9;min-height:280px;">
-        <span class="chart-expand-icon" title="Expand">⤢</span>
-        <canvas id="greeksChart" role="img" aria-label="Line chart showing how delta, gamma, theta, and vega change shape from deep OTM through ATM to deep ITM for a call option, updated live from the option chain.">Delta rises steadily from OTM to ITM. Gamma, theta decay, and vega all peak at the at-the-money strike and fall off toward both deep ITM and deep OTM.</canvas>
-      </div>
-    </div>
-  </div>`;
 
   // NOTE: the old always-visible #sec-iv "IV Surface" alerts section, and
   // the Tier-3 "IV vs HV / Skew" collapsible it later merged into, are
@@ -684,66 +681,27 @@ ChainView.prototype.renderDashboard = function(d) {
   }
   }
 
-  // ── OI FLOW SECTION ──
-  // Vol/OI Velocity by Strike (Block Detection) + OI Flow Snapshot +
-  // Institutional Activity Crux, wrapped together in one shared
-  // #oi-flow-section container so Vol/OI Velocity reads as part of OI
-  // Flow (not a separate card sitting above it). It used to live inside
-  // #sdt-panel gated behind `if(strats.length)` above — a strategies-only
-  // gate that never made sense for it (it only reads live greeks + the
-  // vel scenario slider, nothing strategy-specific), so days with no open
-  // strategies lost the whole block-detection read; this wrapper renders
-  // unconditionally, same as OI Flow itself always has.
-  //
-  // Vol/OI Velocity keeps its own #sdt-panel identity as a direct child
-  // here (rather than being folded into oi-flow-summary-card's own
-  // markup) because oi-flow-summary-card is outerHTML-diffed on every WS
-  // tick (patchOuterHtmlIfChanged below) whenever its block-print count
-  // changes — near-constant. That diff-and-swap has no drag-guard for a
-  // <input type=range> (bindCardClickGuard only tracks buttons/[onclick]),
-  // so a slider nested inside that card would get torn out from under an
-  // in-progress drag on almost every tick — the exact flicker/lost-
-  // interaction bug #sdt-panel's own old/fresh node-swap below already
-  // exists to prevent. Keeping it a sibling child of this same wrapper
-  // gets it visually and structurally inside OI Flow while keeping that
-  // protection intact. renderSimRangeRow()/velControl are hoisted above
-  // the (former) `if(strats.length)` gate — see that comment — so this is
-  // still their only call site, no second copy of either.
-  //
-  // #sdt-panel and #oi-flow-summary-card are wrapped in a shared
-  // .oic-merged-card container (2026-08-02) so the two read as ONE card
-  // (Vol/OI Velocity stacked on top of OI Flow Snapshot, divided by a
-  // single hairline) instead of two separately-bordered boxes stacked
-  // with a gap between them. #sdt-panel drops its old .sim-wrap chrome
-  // (own border/background/shadow) in favor of .oic-merged-vel, which is
-  // chromeless and just borrows the outer wrapper's card surface;
-  // .oic-merged-card also strips #oi-flow-summary-card's own .oic-card
-  // border/background/shadow via a descendant-selector override in
-  // panels.css so it seats flush under the velocity panel — none of that
-  // touches buildOiFlowSummaryHtml() itself (still the same markup,
-  // still the same outerHTML-patch target), only how it looks once
-  // nested here.
-  //
   // ── ZONE: CAPITAL FLOW ──
-  // Where is money moving intraday — OI Flow + FII/DII, a coherent
-  // "where is money moving" pair instead of OI Flow sitting next to an
-  // institutional-positioning card. Institutional Activity Crux (this
-  // grid's second column previously) now lives in its own Institutional
-  // zone below, alongside Market Regime & Smart Money / Institutional
-  // Footprint Score / Capital Concentration — see "ZONE: INSTITUTIONAL"
-  // further down.
+  // Left owns capital/OI flow. Right stacks participant cash flow with
+  // Vol/OI Velocity and its derived block-print summary. Keeping #sdt-panel
+  // separate preserves its interactive subtree across live refreshes.
   h += `<div id="oi-flow-section">
 
-  <div id="zone-capital-flow" class="zone-divider zone-divider--primary">Capital Flow</div>
+  <div id="zone-capital-flow" class="zone-divider zone-divider--primary">Market &amp; Capital Flow</div>
   <div class="capital-flow-grid">
+    <div class="capital-flow-column capital-flow-column--primary">
+      ${buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity)}
+    </div>
 
-    <div class="oic-merged-card">
-      <div id="sdt-panel" class="oic-merged-vel">
+    <div class="capital-flow-column capital-flow-column--secondary">
+      ${buildFiiDiiSummaryCard(d)}
+      <div id="sdt-panel" class="section-card sc-neutral velocity-summary-card">
         <button class="section-header nav-card-header" onclick="openVolOiVelocityModal()"
            aria-label="Open Vol/OI Velocity by Strike — view block-detection chart" title="Open the block-detection chart">
           <span class="section-title nav-card-header-label"><span class="section-icon">⚡</span>Vol/OI Velocity by Strike <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;">(Block Detection)</span></span>
           <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
         </button>
+        <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading block-print scan…</div>
         <!-- The Vol/OI Velocity slider that used to sit here has moved
              into the Vol/OI Velocity modal itself (opened by the header
              above) — see the renderSimRangeRow() comment near the top of
@@ -759,11 +717,7 @@ ChainView.prototype.renderDashboard = function(d) {
              above is now the single click target for this card), the
              leftover background/border/radius box had no content and no
              function, just a visual remnant of the old click affordance.
-             Block-print summary line ("N block prints flagged •
-             strongest STRIKE SIDE") lives at #oi-flow-block-summary
-             inside the OI Flow Snapshot card right below, written by
-             simRenderVolGrid() (simulator-view.js) every tick/scenario-
-             slider move. -->
+             The block-print summary remains directly below this header. -->
 
         <!-- Strike Detail table itself lives only in the Strike Detail
              Report modal now (opened via the "📄 Strike Detail Report →"
@@ -774,10 +728,7 @@ ChainView.prototype.renderDashboard = function(d) {
              them directly into the modal's #sdt-rows/#sdt-stat-* elements;
              no inline element needed here to do so. -->
       </div>
-      ${buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity)}
     </div>
-
-    ${buildFiiDiiSummaryCard(d)}
   </div>
 
   </div>`;
@@ -797,9 +748,18 @@ ChainView.prototype.renderDashboard = function(d) {
   // Advanced Analytics for now; it's a derived input to that card's
   // verdict, not a standalone ranking, so it doesn't map to Probability
   // the way the ranking itself did.
-  h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary">Institutional</div>';
-  h += app.exec.renderInstitutionalGrid(d);
-  h += app.exec.buildInstitutionalActivitySummaryCard(d);
+  h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary">Institutional Activity</div>';
+  h += `<div class="institutional-crux-grid">
+    ${greeksMoneynessHtml}
+    ${app.exec.buildInstitutionalActivitySummaryCard(d)}
+  </div>`;
+  h += `<details class="card" id="institutional-detail-card">
+    <summary>
+      <div class="card-head"><span class="ic">🏦</span>Institutional Positioning Detail<span class="fill"></span></div>
+      <span class="chev">▶</span>
+    </summary>
+    <div class="detail-body">${app.exec.renderInstitutionalGrid(d)}</div>
+  </details>`;
 
   // ── ZONE: CONFIRMATION ──
   // Supporting evidence that validates or challenges the Decision
@@ -823,7 +783,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // strategy payoff / GEX-scenario exposure) — built earlier
   // (stratSimulatorHtml, needs strats/spot/greeksData in scope) but
   // appended here so build order matches display order.
-  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary">Confirmation</div>';
+  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary">Validation &amp; Advanced Analysis</div>';
   h += this.buildVolatilityHtml(d);
   h += this.buildProbabilityHtml(d);
   h += this.buildScenarioAnalysisHtml(d);
@@ -901,6 +861,7 @@ ChainView.prototype.renderDashboard = function(d) {
   if (this._decisionDetailPending
       || (typeof isCardClickPending === 'function'
           && (isCardClickPending('chainSummary')
+              || isCardClickPending('greeksMoneyness')
               || isCardClickPending('fiiDiiSummary')
               || isCardClickPending('instActivity')))) {
     setTimeout(() => this.renderDashboard(d), 60);
@@ -999,6 +960,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // this full rebuild is already protected, not just ticks after the
   // first incremental swap.
   bindCardClickGuard(document.getElementById('chain-summary-card'), 'chainSummary');
+  bindCardClickGuard(document.getElementById('sec-greeks-moneyness'), 'greeksMoneyness');
   bindCardClickGuard(document.getElementById('fiidii-summary-card'), 'fiiDiiSummary');
   bindCardClickGuard(document.getElementById('inst-activity-summary-card'), 'instActivity');
   setTimeout(function(){
@@ -1023,8 +985,12 @@ ChainView.prototype.renderDashboard = function(d) {
   const dteDisplay = document.getElementById('dte-display');
   const timeDisplay = document.getElementById('time-display');
   if(expDisplay) expDisplay.textContent = d.expiry || '--';
-  if(dteDisplay) dteDisplay.textContent = (d.dte||0) + 'd';
+  if(dteDisplay) dteDisplay.textContent = '· ' + (d.dte||0) + 'd';
   if(timeDisplay) timeDisplay.textContent = d.refreshTime || '--';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if(window.updateGreeksMoneynessChart) window.updateGreeksMoneynessChart(d, true);
+    if(window.resizeGreeksMoneynessChart) window.resizeGreeksMoneynessChart('greeksChart');
+  }));
 };
 
 ChainView.prototype.sizeAndScrollChain = function(prevScrollTop) {
@@ -1205,7 +1171,7 @@ ChainView.prototype._rerenderChainPanels = function() {
   const dteEl = document.getElementById('dte-display');
   if(dteEl){
     const dte = _data.dte || 0;
-    dteEl.textContent = dte+'d';
+    dteEl.textContent = '· '+dte+'d';
     dteEl.style.color = dte<=1?'var(--red)':dte<=3?'var(--amber)':'var(--amber)';
   }
 
@@ -1471,4 +1437,15 @@ ChainView.prototype._rerenderChainPanels = function() {
   }, { guardKey: 'chainSummary' });
 
   if (window.updateGreeksMoneynessChart) window.updateGreeksMoneynessChart(_data);
+  const atmGreekText = {
+    'atm-greeks-heading': `ATM ${fmtI(_data.atm)}`,
+    'atm-greek-delta': fmtN(_data.atmDelta,4),
+    'atm-greek-gamma': fmtN(_data.atmGamma,4),
+    'atm-greek-theta': fmtN(_data.atmTheta,2),
+    'atm-greek-vega': fmtN(_data.atmVega,2)
+  };
+  Object.entries(atmGreekText).forEach(([id,value]) => {
+    const el = document.getElementById(id);
+    if(el) el.textContent = value;
+  });
 };

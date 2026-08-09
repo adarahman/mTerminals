@@ -439,11 +439,9 @@ simRenderVolGrid(gexData, simVel) {
   // measuring the same thing, so they're allowed to disagree. Recomputes
   // over the same near/far pools buildSection already built, rather than
   // parsing its HTML output back apart.
-  // Writes into #oi-flow-block-summary, which now lives inside the OI
-  // Flow Snapshot card (oi-flow-view.js) instead of this panel's own
-  // #sdt-voi-summary — moved there per the redesign so the read sits next
-  // to the rest of the OI Flow glance card rather than duplicated in both
-  // places. This is still the only place that computes it.
+  // Writes into #oi-flow-block-summary inside the Vol/OI Velocity card.
+  // Block prints are a velocity-derived result, so the summary stays with
+  // the control that owns the scan instead of the general Capital Flow card.
   var summaryEl = document.getElementById('oi-flow-block-summary');
   if (summaryEl) {
     var flaggedAll = [];

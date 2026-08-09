@@ -121,6 +121,17 @@
     return chart;
   }
 
+  // A Chart.js canvas created while its modal is display:none measures at
+  // zero width/height. Resize it only after the modal has entered layout;
+  // otherwise an unchanged data signature can leave a valid chart instance
+  // painted as an empty black panel on first open.
+  window.resizeGreeksMoneynessChart = function(canvasId) {
+    const chart = ensureGreeksChart(canvasId || 'greeksChart-modal');
+    if (!chart) return;
+    chart.resize();
+    chart.update('none');
+  };
+
   // ── Live data wiring ──────────────────────────────────────────────────
   // Call window.updateGreeksMoneynessChart(payload) from wherever the
   // dashboard's WebSocket onmessage handler dispatches the parsed JSON
@@ -132,7 +143,7 @@
   // relative to ATM (negative = OTM side/higher strikes, positive = ITM
   // side/lower strikes for a call). Strikes beyond ±3 steps fold into the
   // Deep OTM / Deep ITM buckets and are averaged together.
-  window.updateGreeksMoneynessChart = function(payload) {
+  window.updateGreeksMoneynessChart = function(payload, force) {
     // Update every canvas that currently has a live Chart.js instance —
     // the inline card (#greeksChart, always present) and the expand
     // modal's copy (#greeksChart-modal, present once DOM has loaded,
@@ -153,7 +164,7 @@
     const mainCanvas = mainChart ? mainChart.canvas : null;
     const modalCanvas = modalChart ? modalChart.canvas : null;
     const canvasChanged = mainCanvas !== lastMainCanvas || modalCanvas !== lastModalCanvas;
-    if(signature === lastGreeksSignature && !canvasChanged) return;
+    if(!force && signature === lastGreeksSignature && !canvasChanged) return;
     lastGreeksSignature = signature;
     lastMainCanvas = mainCanvas;
     lastModalCanvas = modalCanvas;

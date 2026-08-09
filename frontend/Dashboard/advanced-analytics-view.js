@@ -228,18 +228,11 @@ ChainView.prototype.buildAdvancedAnalyticsHtml = function(d) {
       <span class="chev">\u25b6</span>
     </summary>
     <div class="detail-body">
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 GEX \u00b7 OI Velocity \u00b7 Greeks \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div style="grid-column:1/-1;">${buildConvictionGaugeHtml(d)}</div>
-        ${_aaGexTableHtml(d)}
-        ${_aaOiVelocityHtml(d)}
-        ${_aaPerStrikeGreeksHtml(d)}
         ${_aaCapitalConfirmationHtml(d)}
-        <!-- 5 sub-cards in a 2-col grid leaves an odd count — the last one
-             would otherwise sit alone in its row with a dangling empty
-             cell beside it. Spans full width instead, same treatment as
-             Conviction Multiplier above. -->
-        <div style="grid-column:1/-1;">${_aaFuturesOptionsDivergenceHtml(d)}</div>
+        ${_aaFuturesOptionsDivergenceHtml(d)}
       </div>
     </div>
   </details>`;
