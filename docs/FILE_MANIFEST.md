@@ -3,7 +3,7 @@
 > **Baseline:** post-v1.6.0 documentation maintenance
 > **Status:** CI-enforced
 
-Total tracked documentation files: **64**.
+Total tracked documentation files: **65**.
 
 Transient `.DS_Store` files and generated build output are excluded. Byte sizes
 are deliberately not recorded because they turn ordinary edits into unrelated
@@ -20,7 +20,7 @@ manifest churn; the durable contract is file presence and package ownership.
 | Diagrams | `06_Diagrams/` | 9 | implementation-aligned Mermaid views |
 | Audits | `07_Audits/` | 2 | historical and current PDS-01 audits |
 | Preserved project docs | `Existing_Project_Docs/` | 2 | original snapshot references |
-| Root documentation | `docs/` | 5 | README, changelogs, manifest and current release notes |
+| Root documentation | `docs/` | 6 | README, design blueprint, changelogs, manifest and current release notes |
 
 ## Root documentation files
 
@@ -28,10 +28,11 @@ manifest churn; the durable contract is file presence and package ownership.
 - `README.md`
 - `CHANGELOG.md`
 - `ARCHITECTURE_CHANGELOG.md`
+- `DESIGN_SYSTEM.md`
 - `FILE_MANIFEST.md`
 - `RELEASE_NOTES_v1.6.0.md`
 
-The master index is counted separately from the five root-support files in the
+The master index is counted separately from the six root-support files in the
 table. Package file names are enforced by their dedicated CI contract suites;
 this manifest gate verifies the recursive total, package counts and required
 root documents.

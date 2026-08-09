@@ -9,6 +9,9 @@
 
 ## Product architecture
 
+`DESIGN_SYSTEM.md` contains the broader product vision and component blueprint;
+PDS-00 remains authoritative for implemented global UI requirements.
+
 | ID | Document | Purpose |
 |---|---|---|
 | PDS-00 | Global Design System | Shared visual/interaction rules |

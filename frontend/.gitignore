@@ -28,6 +28,8 @@ __pycache__/
 
 # Test / Coverage
 coverage/
+playwright-report/
+test-results/
 .cache/
 .parcel-cache/
 .turbo/

@@ -55,7 +55,7 @@ include = [
 py-modules = [
     "engine", "paths", "pipeline_config", "expiry_manager", "lot_sizes",
     "market_api", "mTerminals_json", "option_chain_json", "paper_trading",
-    "nse_eod_fetch", "index_contributors", "volume_profile",
+    "nse_eod_fetch", "index_contributors",
     "diag_lotsize", "smartapi_feed_adapter", "smartapi_pipeline_adapter",
     "operational_metrics", "operational_readiness",
 ]

@@ -16,6 +16,7 @@ aligned with them.
 
 1. Start with `00_MASTER_INDEX.md`.
 2. Product/UI work begins with `01_Product_Architecture/PDS-00_Global_Design_System.md`.
+   `DESIGN_SYSTEM.md` preserves the broader product and component blueprint.
 3. Dashboard work must comply with `PDS-01_Dashboard.md`.
 4. Engineering refactors should read `02_System_Architecture/System_Architecture.md`
    and `05_Engineering/Folder_Structure.md` together.

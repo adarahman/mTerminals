@@ -22,7 +22,7 @@
 // Must load after panel-manager.js (extends Panel) and after chain-
 // view.js/chain-renderer.js/chain-depth.js/chain-greeks.js/panels-views.js
 // (calls into ChainView/ChainDenseView/OiFlowView/ModalManager instances)
-// and price-chart.js/paper-trading.js (calls into their globals). Must
+// and price-chart.js/the split paper-trading modules (calls into their globals). Must
 // load before dashboard.js, whose App constructor instantiates these.
 // See DashboardPro.html script order.
 // ============================================================
@@ -137,12 +137,12 @@ class OiDashboardPanel extends Panel {
 }
 
 // ── 4. Paper Trading ──
-// paper-trading.js (not touched by this refactor) already keeps its own
+// the paper-trading modules already keep their own
 // UI current as part of the chain template rebuild — the fund-summary
 // pill in the top bar calls ptComputeFundSummary() directly from
 // chain-template.js on every renderDashboard()/patch() pass — plus
-// whatever tick handling paper-trading.js does internally. This panel
-// exists so paper-trading.js can opt into an explicit panel-level refresh
+// whatever tick handling those modules do internally. This panel exists so
+// they can opt into an explicit panel-level refresh
 // hook later without this file needing to know its internals; today it's
 // a guarded no-op unless that hook exists.
 class PaperTradingPanel extends Panel {

@@ -75,7 +75,7 @@ PT_STARTING_CAPITAL = 100_000.0        # ₹1,00,000 paper capital — mirrors
                                         # keep both in sync manually, same as LOT_SIZES.
 SHORT_MARGIN_PCT = 0.12                # crude SPAN+exposure stand-in for short/
                                         # written options — mirrors PT_SHORT_MARGIN_PCT
-                                        # in paper-trading.js's ptEstimateMarginBlocked.
+                                        # in paper-trading-shared.js's ptEstimateMarginBlocked.
 MAX_NOTIONAL_PER_ORDER = 1_00_00_000.0  # ₹1 crore per-order cap ("Max Position
                                         # Limits" / total order value category).
 PRICE_BAND_PCT = 0.20                  # LIMIT orders priced more than ±20% away
@@ -353,7 +353,7 @@ class PaperTradingEngine:
     def get_fund_summary(self, spot_price: float | None = None,
                           current_prices: dict[str, float] | None = None,
                           account_capital: float = PT_STARTING_CAPITAL) -> dict:
-        """Server-side equivalent of paper-trading.js's ptComputeFundSummary()
+        """Server-side equivalent of paper-trading-shared.js's ptComputeFundSummary()
         for the paper-mode branch — lets a caller show the same fund/margin
         figures without duplicating the estimation logic client-side."""
         margin_blocked = self._estimate_margin_blocked(spot_price)

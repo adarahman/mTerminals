@@ -26,18 +26,10 @@ review flagging files that are safe to delete.
 behavior/perf changes). Status below reflects the codebase as it stands
 now.*
 
-**Correction — not deleted after all:** an earlier pass of this cleanup
-deleted `volume_profile.py` based on a `.py`-only grep showing zero
-importers. That check was too narrow: `backend/pyproject.toml`'s
-`[tool.setuptools] py-modules` list includes `"volume_profile"` alongside
-unambiguously-live modules (`engine`, `market_api`, `paper_trading`, etc.)
-— someone deliberately staged it for the packaged distribution even though
-nothing imports it *yet*. That's exactly the "planning to wire it in later"
-case this doc already called out as a reason to keep it. File restored.
-Still zero runtime importers, so it's not reachable from the live pipeline
-today — but it's a deliberate build-config inclusion, not orphaned code,
-and deleting it would silently break `pip install .` (missing py-module).
-Leave it; if it's still unimported next time this doc gets updated, ask
+`volume_profile.py` was removed after confirming that it had no runtime,
+test, CLI, or documented product consumer. Its stale `py-modules` packaging
+entry was removed at the same time, so editable and wheel installs remain
+internally consistent.
 whoever owns the pyproject.toml entry before touching it again.
 
 **Done this pass:**
@@ -100,7 +92,7 @@ event-bus.js                    ← Phase 5, loads first so every eventBus guard
 Chart.js (CDN)
 chart-legend.js
 PriceChart/*.js                 (chart-data, chart-renderer, indicator-engine,
-                                  interaction-controller, history-loader, price-chart)
+                                  history-loader, price-chart)
 formatters.js
 dom-utils.js                    ← $i, err, setHtmlIfChanged, sizeCanvasIfChanged
 range-tabs.js
@@ -123,7 +115,7 @@ ui-controls.js
 panel-manager.js                ← Phase 4: Panel base class + PanelManager registry
 dashboard-panels.js             ← Phase 4: 6 Panel subclasses (wraps the above)
 dashboard.js                    ← APP BOOTSTRAP ONLY (see §3)
-paper-trading.js
+paper-trading-shared.js + order-entry.js + portfolio-tracker.js
 ```
 
 ---
@@ -216,7 +208,8 @@ paper-trading.js
 ### 🔹 Paper Trading
 | File | Role |
 |---|---|
-| `paper-trading.js` | Not in original upload — owns `ptComputeFundSummary()` (called by `chain-template.js`'s `renderFundPillHtml`) and panel internals |
+| `paper-trading-shared.js` | Shared paper-trading state, calculations, transport helpers, and `ptComputeFundSummary()` |
+| `order-entry.js` / `portfolio-tracker.js` | Order-entry and portfolio panel behavior split from the retired paper-trading monolith |
 | `dashboard-panels.js` | `PaperTradingPanel` — guarded no-op hook (`window.ptRefreshPanel`) for future explicit refresh |
 
 ### 🔹 Price Chart
@@ -250,7 +243,8 @@ Exist elsewhere in the project — not part of the files uploaded/reviewed so fa
 - `data-service.js` — `DataService` (WS/file/paste loading, auto-refresh, render scheduling)
 - `ui-controls.js` — `UiControls` (sticky offsets, timer tabs, range/vel flyout, section-jump nav)
 - `app-state.js` — `AppState` (e.g. `AppState.lastGreeks`, `AppState.selectedDepthStrike`)
-- `paper-trading.js` — Paper Trading module internals, `ptComputeFundSummary()`
+- `paper-trading-shared.js` — shared paper-trading internals and `ptComputeFundSummary()`
+- `order-entry.js` / `portfolio-tracker.js` — order and portfolio surfaces
 - `OptionChain/chain-depth.js`, `OptionChain/chain-utils.js`, `OptionChain/chain-templates.js`
 - `option-chain.html` / `option-chain.js` — standalone full dense-chain tab
 - `price-chart.html` + `PriceChart/*.js` — standalone price chart tab
@@ -370,14 +364,13 @@ oi/chain_metrics.py
 |---|---|
 | `ml/build_training_warehouse.py` | Offline ETL — reads `oi_history_log.parquet`, writes the training warehouse `ml/inference.py`/`ml/training.py` consume *by file path*, not by import. Meant to run manually/on a schedule. This is the renamed successor to the old `virtual_oi_estimator.py` — split into `ml/training.py` (fits the Huber regressor pipelines) and `ml/inference.py` (serves predictions at runtime). |
 | `ml/training.py` | Manual/scheduled training script — produces `production_oi_pipeline_ce.pkl` / `_pe.pkl`, which `ml/inference.py` loads by file path, not by import. |
-| `diag_lotsize.py` | Own docstring: "run this from the same directory/venv as `ws_server_live.py`." Manual CLI diagnostic for lot-size resolution. Working as intended, not wired into the live server on purpose. |
+| `tools/diag_lotsize.py` | Manual CLI diagnostic for lot-size resolution. Run from `backend/` with `python -m tools.diag_lotsize`; intentionally not wired into the live server. |
 | `backfill_eod.py` | One-off manual backfill for `nse_eod_fetch.py`'s EOD datasets — run by hand, not imported by the live pipeline. |
 | `tests/*.py` | Run via `pytest`, not imported by application code — expected to show zero importers. |
 
 ### 🗑️ Genuinely orphaned — zero importers anywhere, no standalone-tool justification
-Just `volume_profile.py` now — `nse_bse_fundamentals.py` and
-`compare_feeds.py` (the other two flagged in the last pass) have already
-been removed from the codebase. See §1.
+None currently. `volume_profile.py`, `nse_bse_fundamentals.py`, and
+`compare_feeds.py` have been removed from the codebase. See §1.
 
 ---
 

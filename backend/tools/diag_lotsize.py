@@ -1,11 +1,10 @@
 """
-Run this from the same directory/venv as ws_server_live.py:
+Run this from the backend directory with the project environment active:
 
-    python3 diag_lotsize.py
+    python3 -m tools.diag_lotsize
 
-It will NOT hit the network if today's cache file already exists
-(.angelone_cache/instrument_master_<today>.json) — it reads whatever
-smartapi_instruments.InstrumentResolver would read.
+It will NOT hit the network if today's instrument-master cache already
+exists; it reads whatever smartapi_instruments.InstrumentResolver reads.
 
 Lot sizes are resolved from FUTSTK/FUTIDX only (not CE/PE options).
 """
@@ -54,4 +53,3 @@ stocks = sorted(
 )
 for s in stocks[:15]:
     print(f"  {s:16s} -> {resolver._lot_size_map[s]}")
-

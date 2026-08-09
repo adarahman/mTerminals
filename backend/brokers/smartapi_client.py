@@ -1319,7 +1319,7 @@ def get_funds():
     "Fund" readout always showing the paper-trading estimate even in
     Live mode: nothing in this file called rmsLimit() at all, so there
     was nothing for ws_server_live.py to broadcast. Powers
-    paper-trading.js's ptComputeFundSummary() once ws_server_live.py
+    paper-trading-shared.js's ptComputeFundSummary() once ws_server_live.py
     calls this and pushes it as a `{type:"funds", payload:{...}}` WS
     message (see the note in that file — not added here since this repo
     doesn't have ws_server_live.py's dispatch loop to hook into safely

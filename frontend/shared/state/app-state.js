@@ -15,7 +15,7 @@
 //
 // Must load before ANY file that references AppState: chain-view.js,
 // chain-sync.js, chain-renderer.js, chain-depth.js, ws-manager.js,
-// market-store.js, data-service.js, panels-views.js, paper-trading.js,
+// market-store.js, data-service.js, panels-views.js, and the paper-trading modules,
 // dashboard.js. See DashboardPro.html script order — this tag goes
 // first, before chart-legend.js.
 //

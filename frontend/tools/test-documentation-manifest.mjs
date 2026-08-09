@@ -27,11 +27,11 @@ const packageCounts = {
 };
 const requiredRoot = [
   '00_MASTER_INDEX.md','README.md','CHANGELOG.md','ARCHITECTURE_CHANGELOG.md',
-  'FILE_MANIFEST.md','RELEASE_NOTES_v1.6.0.md',
+  'DESIGN_SYSTEM.md','FILE_MANIFEST.md','RELEASE_NOTES_v1.6.0.md',
 ];
 
 const checks = [
-  ['recursive documentation total matches manifest', allFiles.length === 64 && manifest.includes('files: **64**')],
+  ['recursive documentation total matches manifest', allFiles.length === 65 && manifest.includes('files: **65**')],
   ['every package count matches', Object.entries(packageCounts).every(([dir, count]) => filesUnder(path.join(docsRoot, dir)).length === count)],
   ['all root documentation files are present', requiredRoot.every((name) => fs.existsSync(path.join(docsRoot, name)) && manifest.includes(`\`${name}\``))],
   ['transient metadata is excluded', !allFiles.some((file) => path.basename(file) === '.DS_Store') && manifest.includes('`.DS_Store`')],

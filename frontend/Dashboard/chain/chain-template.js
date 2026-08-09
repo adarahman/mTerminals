@@ -160,7 +160,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   // Tracker panel (#pt-portfolio-panel, opened from the "Portfolio"
   // #pt-toggle-btn in the left #sec-nav-bar rail) instead of duplicating
   // it in the top-bar's already-crowded expiry strip. ptComputeFundSummary()
-  // in paper-trading.js is still the source of that data — it's just
+  // in paper-trading-shared.js is still the source of that data — it's just
   // consumed directly by ptRenderPortfolioSummary() now, not here.
 
   // ── MINI SPARKLINE — small live price trace shown in the Decision
