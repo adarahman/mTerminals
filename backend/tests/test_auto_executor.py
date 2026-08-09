@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from decision.auto_executor import AutoExecutor, ExecutionDecision
+from decision.auto_executor import AutoExecutor
 
 
 class _FakeGuard:
@@ -215,3 +215,25 @@ def test_maybe_execute_handles_submit_failure_gracefully():
     assert "submission failed" in outcome.reason
     # state should not advance on a failed submission
     assert "NIFTY" not in ex._last_execution_ts
+
+
+def test_concurrent_ticks_cannot_submit_the_same_signal_twice():
+    calls = []
+
+    async def fake_submit(*args):
+        calls.append(args)
+        await asyncio.sleep(0.01)
+
+    async def scenario():
+        ex = _executor(submit_order_fn=fake_submit, cooldown_seconds=300)
+        return await asyncio.gather(
+            ex.maybe_execute(_good_decision(), "NIFTY", "28AUG2026"),
+            ex.maybe_execute(_good_decision(), "NIFTY", "28AUG2026"),
+        )
+
+    first, second = asyncio.run(scenario())
+
+    assert first.should_execute is True
+    assert second.should_execute is False
+    assert "cooldown active" in second.reason
+    assert len(calls) == 1

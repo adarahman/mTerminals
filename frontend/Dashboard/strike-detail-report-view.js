@@ -149,5 +149,5 @@ class StrikeDetailReportView {
   }
   _number(v) { const n = Number(v); return v == null || v === '' || !Number.isFinite(n) ? null : n; }
   _fmt(v, decimals) { const n = this._number(v); return n == null ? '—' : n.toLocaleString('en-IN', {minimumFractionDigits: decimals, maximumFractionDigits: decimals}); }
-  _escape(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  _escape(v) { return escapeHtml(v); }
 }

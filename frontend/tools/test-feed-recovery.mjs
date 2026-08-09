@@ -107,13 +107,22 @@ function loadDataService() {
 
   service.wsManager.emit('open');
   assert.equal(AppState.feedState.status, 'RECOVERING');
+  service.wsManager.emit('message', { type: 'portfolio', payload: { positions: [] } });
+  assert.equal(AppState.feedState.status, 'RECOVERING', 'auxiliary traffic must not claim market recovery');
+  assert.equal(AppState.feedState.lastMessageAt, null, 'auxiliary traffic must not move the market clock');
+  assert.equal(AppState.feedState.lastTransportAt, 1_000_000, 'auxiliary traffic still records transport activity');
   service.wsManager.emit('message', { type: 'full', payload: {} });
   assert.equal(AppState.feedState.status, 'LIVE', 'first message must restore LIVE');
 
   advance(12_001);
   service._checkFeedFreshness();
   assert.equal(AppState.feedState.status, 'STALE');
-  assert.match(AppState.feedState.reason, /No feed message for 12s/);
+  assert.match(AppState.feedState.reason, /No market snapshot for 12s/);
+
+  const staleMarketAt = AppState.feedState.lastMessageAt;
+  service.wsManager.emit('message', { type: 'algoStatus', payload: { running: true } });
+  assert.equal(AppState.feedState.status, 'STALE', 'auxiliary traffic must not conceal stale market data');
+  assert.equal(AppState.feedState.lastMessageAt, staleMarketAt);
 
   service.wsManager.emit('message', { type: 'delta', payload: {} });
   assert.equal(AppState.feedState.status, 'LIVE', 'fresh message must recover from STALE');
@@ -128,4 +137,5 @@ console.log('PASS  WebSocket disconnect schedules one reconnect');
 console.log('PASS  Explicit connect cancels an obsolete reconnect timer');
 console.log('PASS  Open socket remains RECOVERING until data arrives');
 console.log('PASS  Feed transitions LIVE → STALE → LIVE deterministically');
-console.log('\n4/4 feed recovery checks passed.');
+console.log('PASS  Auxiliary traffic cannot refresh market freshness');
+console.log('\n5/5 feed recovery checks passed.');

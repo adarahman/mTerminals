@@ -44,7 +44,11 @@ function _scenPnlHtml(d) {
     </tr>`;
   }).join('');
 
-  return `<table class="t"><thead><tr><th>Spot Move</th><th>Scenario Spot</th><th>Straddle P&amp;L</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `
+    <div class="legend-foot" style="margin-bottom:7px;">
+      Assumptions: ATM ${fmtI(atm)} · entry premium ₹${fmtN(straddle,2)} per option unit · held to expiry · intrinsic payoff only · excludes lot multiplier, brokerage, taxes, fees and slippage.
+    </div>
+    <table class="t"><thead><tr><th>Spot Move</th><th>Scenario Spot</th><th>P&amp;L / unit (gross)</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ── top-level wrapper ──
@@ -66,7 +70,7 @@ ChainView.prototype.buildScenarioAnalysisHtml = function(d) {
           <span class="section-title"><span class="section-icon">\ud83c\udfaf</span>Scenario P&amp;L</span>
         </div>
         <div style="padding:2px 0;">${_scenPnlHtml(d)}</div>
-        <div class="legend-foot" style="margin-top:6px;">Long ATM straddle payoff if held to expiry, per spot-move scenario — not a live mark-to-market re-price.</div>
+        <div class="legend-foot" style="margin-top:6px;">Scenario estimate only — long ATM straddle payoff if held to expiry; not a live mark-to-market price or expected return.</div>
       </div>
     </div>
   </details>`;

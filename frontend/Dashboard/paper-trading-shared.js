@@ -52,8 +52,9 @@ window.sendWsMessage = sendWsMessage;
 // empty and fills in as ptGetLotSize() below resolves each symbol.
 const PT_LOT_SIZES = {};
 
-// Symbols this UI actually offers in the dropdown (see PT_LOT_SIZES.forEach
-// usage further down) — used to warm the cache on load.
+// First-paint fallback before the backend's full fnoSymbols universe arrives.
+// The Order selector replaces this list with grouped indices/stocks as soon
+// as a normal dashboard payload is received.
 const PT_KNOWN_SYMBOLS = ['NIFTY', 'BANKNIFTY', 'MIDCPNIFTY', 'SENSEX', 'FINNIFTY'];
 
 // Only used if the backend lookup has never succeeded for this symbol AND
@@ -388,9 +389,7 @@ function ptFmtN(n, d){
 // reason dropped into data-reason="..."). Reasons come from the backend
 // and may contain quotes/HTML-ish characters we don't control.
 function ptEscAttr(s){
-  return String(s==null?'':s)
-    .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
-    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return escapeHtml(s);
 }
 
 function ptPnlClass(v){
@@ -478,6 +477,7 @@ function ptToggleLiveMode(){
   // LIVE_TRADING_ENABLED (a deliberate restart-only decision — see
   // ws_server_live.py) regardless of what this sends.
   sendWsMessage('toggle_live_mode', { enabled: _ptLiveMode });
+  if(AppState.wsState) renderPaperTradingPanel(AppState.wsState);
 }
 window.ptToggleLiveMode = ptToggleLiveMode;
 
@@ -527,7 +527,8 @@ function ptTogglePanelNear(panelId, btnId){
   el.classList.toggle('open');
   ptSyncToggleBtnActive(panelId, btnId);
   if(opening){
-    const btn = $i(btnId);
+    const proxyBtn = $i(btnId);
+    const btn = proxyBtn && proxyBtn.offsetParent ? proxyBtn : $i('rail-tools-toggle');
     if(btn){
       const r = btn.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;
@@ -582,11 +583,12 @@ function ptFindMatchingConfirmedOrder(pending, orders){
 }
 
 function _ptSendOrderNow(payload, errEl, btn){
-  // Stable submission identity: if the WS frame is retried or replayed
-  // after reconnect, the paper engine returns the original durable order
-  // instead of creating another simulated fill.
-  if(!payload.live && !payload.client_order_id){
-    payload.client_order_id = 'paper_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  // Stable, broker-compatible submission identity: paper orders deduplicate
+  // durably, while live retries reuse the AngelOne order tag and cannot
+  // submit the same confirmed intent twice. Keep it alphanumeric and <=20.
+  if(!payload.client_order_id){
+    payload.client_order_id = (payload.live ? 'l' : 'p')
+      + Date.now().toString(36) + Math.random().toString(36).slice(2,10);
   }
   const ok = sendWsMessage('place_order', payload);
   const priceBit = {
@@ -671,14 +673,28 @@ function ptDispatchOrder(payload, errEl, btn){
   }[payload.order_type] || 'MKT';
   const label = payload.symbol + ' ' + (payload.strike ? payload.strike+' '+payload.instrument_type : payload.instrument_type);
   const sideColor = payload.side === 'BUY' ? 'var(--pos,#2ecc71)' : 'var(--neg,#e74c3c)';
+  const lotSize = ptGetLotSize(payload.symbol);
+  const totalUnits = lotSize == null ? null : Number(payload.qty_lots) * lotSize;
+  const liveLtp = typeof ptResolveLtp === 'function'
+    ? ptResolveLtp(payload.symbol, payload.instrument_type, payload.expiry, Number(payload.strike))
+    : null;
+  const referencePrice = payload.order_type === 'LIMIT' ? Number(payload.limit_price) : Number(liveLtp);
+  const estimatedValue = totalUnits != null && Number.isFinite(referencePrice) && referencePrice > 0
+    ? totalUnits * referencePrice : null;
+  const safeLabel = ptEscAttr(label);
+  const safeExpiry = ptEscAttr(payload.expiry || 'N/A');
 
   const body = $i('pt-live-confirm-body');
   if(body){
     body.innerHTML =
-      '<b>' + label + '</b><br>' +
-      'Side: <b style="color:' + sideColor + '">' + payload.side + '</b> &nbsp; ' +
-      'Qty: <b>' + payload.qty_lots + ' lot' + (payload.qty_lots===1?'':'s') + '</b><br>' +
+      '<b>' + safeLabel + '</b><br>' +
+      'Expiry: <b>' + safeExpiry + '</b><br>' +
+      'Side: <b style="color:' + sideColor + '">' + ptEscAttr(payload.side) + '</b> &nbsp; ' +
+      'Qty: <b>' + payload.qty_lots + ' lot' + (payload.qty_lots===1?'':'s') + '</b>' +
+      (totalUnits == null ? '' : ' · <b>' + totalUnits + ' units</b>') + '<br>' +
+      'Lot size: <b>' + (lotSize == null ? 'unresolved' : lotSize) + '</b><br>' +
       'Type: <b>' + payload.order_type + '</b> &nbsp; Price: <b>' + priceBit + '</b><br>' +
+      'Estimated value: <b>' + (estimatedValue == null ? 'unavailable' : '₹' + ptFmtN(estimatedValue,2)) + '</b><br>' +
       '<span style="opacity:.7;font-size:11px;">This will place a REAL order on your AngelOne account.</span>';
   }
 

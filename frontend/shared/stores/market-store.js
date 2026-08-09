@@ -56,9 +56,15 @@ function applyDelta(target, diff, keyField='strike'){
           // a wholesale replace here was wiping out ce_oi_chg/net_oi/Greeks
           // for any strike a partial tick touched, until the next full
           // NSE-driven compute_diff() cycle happened to restore them.
-          Object.assign(existingRow, row);
+          const removedFields = Array.isArray(row._removed) ? row._removed : [];
+          const patch = { ...row };
+          delete patch._removed;
+          Object.assign(existingRow, patch);
+          for(const field of removedFields) delete existingRow[field];
         } else {
-          byKey.set(row[kf], row); // brand-new row, nothing to merge into
+          const inserted = { ...row };
+          delete inserted._removed;
+          byKey.set(row[kf], inserted); // brand-new row, nothing to merge into
         }
       }
       if(v._removed_keys) for(const rk of v._removed_keys) byKey.delete(rk);
@@ -89,8 +95,8 @@ class MarketStore {
     return this;
   }
 
-  emit(event, payload) {
-    (this.listeners[event] || []).forEach(fn => fn(payload));
+  emit(event, ...args) {
+    (this.listeners[event] || []).forEach(fn => fn(...args));
   }
 
   // Feed one raw parsed WS message in. Moved verbatim out of the old
@@ -131,7 +137,9 @@ class MarketStore {
       if(!this.state) this.state = {};
       deepMerge(this.state, {[msg.type]: msg.payload});
     }
-    this.emit('change', this.state);
+    this.emit('change', this.state, {
+      messageType: msg && msg.type ? msg.type : 'full',
+    });
     // Phase 5 (event-bus.js): same merged state, published on the shared
     // bus as 'market:update' alongside the existing 'change' emit above —
     // DataService's store.on('change', ...) subscription (data-service.js)

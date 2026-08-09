@@ -10,5 +10,15 @@ assert.match(source, /dec\.degraded/, 'decision view must expose degraded state'
 assert.match(source, /dec\.missingInputs/, 'decision view must expose missing inputs');
 assert.doesNotMatch(source, /confidence\s*=\s*.*(?:pcr|oi_score|composite)/i,
   'frontend must not recompute decision confidence');
+assert.match(source, /escapeHtml\(s\.text\)/,
+  'active signal text must be escaped before insertion into the dashboard');
+assert.match(source, /escapeHtml\(c\.label \|\| c\.key \|\| 'Signal'\)/,
+  'expanded contributor labels must be escaped before insertion');
+assert.match(source, /data-signal-id=/,
+  'active signals must expose their stable backend identity');
+assert.match(source, /signalObservedAt/,
+  'active signals must expose their observation time');
+assert.match(source, /signalFreshness/,
+  'active signals must show current feed freshness');
 
-console.log('Decision contracts: 6/6 passed');
+console.log('Decision contracts: 11/11 passed');

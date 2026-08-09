@@ -149,10 +149,21 @@ function btRenderResults(data){
   if(!resultsEl) return;
 
   const s = data.summary || {};
+  const m = data.metadata || {};
   const pnlCls = (s.total_pnl || 0) < 0 ? 'bt-neg' : 'bt-pos';
+  const coverage = m.dataStart && m.dataEnd
+    ? `${ptEscAttr(m.dataStart)} → ${ptEscAttr(m.dataEnd)}`
+    : 'No captured snapshots in the requested range';
+  const assumptionsHtml = `
+    <div class="bt-empty" style="text-align:left;margin-bottom:10px;">
+      <strong>Coverage:</strong> ${coverage} · ${m.snapshotCount ?? 0} decision snapshots.<br>
+      <strong>Fill model:</strong> ${ptEscAttr(m.entryFillModel || 'not reported')}; exits use ${ptEscAttr(m.exitFillModel || 'not reported')}.<br>
+      <strong>P&amp;L basis:</strong> ${ptEscAttr(m.pnlBasis || 'gross')} — transaction costs ${m.transactionCostsIncluded ? 'included' : 'excluded'}; slippage ${m.slippageIncluded ? 'included' : 'excluded'}.<br>
+      <strong>Scope:</strong> replays captured decisions; it does not recompute historical Decision Engine scoring. Session ${ptEscAttr(m.marketSession || 'not reported')}.
+    </div>`;
 
   if(!s.num_trades){
-    resultsEl.innerHTML = `
+    resultsEl.innerHTML = assumptionsHtml + `
       <div class="bt-empty">
         No trades in this range/threshold combination.
         ${s.unpriced_signals ? `${s.unpriced_signals} signal(s) cleared AutoExecutor's gates but had no LTP data to fill against — try a wider date range or check backtest/snapshot_logger.py's captured history for this symbol.` : ''}
@@ -172,7 +183,7 @@ function btRenderResults(data){
     </div>
   `;
 
-  resultsEl.innerHTML = summaryHtml
+  resultsEl.innerHTML = assumptionsHtml + summaryHtml
     + `<div class="bt-section-title">Equity curve</div>`
     + `<div id="bt-equity-curve">${_btBuildEquityCurveSvg(data.equityCurve || [])}</div>`
     + `<div class="bt-section-title">Trades (${(data.trades || []).length})</div>`

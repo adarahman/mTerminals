@@ -24,14 +24,10 @@ constant fix.
    the right per-symbol value must call get_dividend_yield(symbol) and
    pass it explicitly — nothing here infers the symbol automatically.
 
-NOTE: oi/oi_analysis.py's calculate_greeks()/calculate_greeks_vectorized()
-remain a SEPARATE, independent formula implementation — they are not
-wrappers around this module's bs_greeks_vectorized(). The two are
-formula-identical as of this pass (verified line by line) and both now
-receive the correct per-symbol q from engine.py's build_engine_result(),
-so there's no live numeric divergence today, but a genuine second copy
-of the math still exists and can drift again silently. Collapsing them
-into one implementation is a separate, not-yet-scheduled follow-up.
+This module is the single source of truth for Black-Scholes Greeks. Both
+the live OI master-table pipeline and the compatibility OptionChainEngine
+delegate batch calculations to bs_greeks_vectorized(), while point lookups
+use the scalar bs_* functions below.
 """
 
 from __future__ import annotations

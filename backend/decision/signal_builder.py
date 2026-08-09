@@ -94,7 +94,8 @@ def score_vix(vix: float, out: DecisionResult) -> str:
         out.verdicts["vix"] = (f"{vix:.1f} — Complacency zone · "
                                f"premium sellers have structural edge")
         out.active_signals.append(ActiveSignal(
-            f"VIX {vix:.1f} (low) — sell-premium regime: straddle / strangle edge", "ok", 5))
+            f"VIX {vix:.1f} (low) — sell-premium regime: straddle / strangle edge",
+            "ok", 5, "vix:low"))
 
     elif vix < T.VIX_NORMAL:
         tag = "NORMAL"
@@ -105,21 +106,24 @@ def score_vix(vix: float, out: DecisionResult) -> str:
         out.verdicts["vix"] = (f"{vix:.1f} — Elevated fear · "
                                f"reduce naked short gamma; use spreads")
         out.active_signals.append(ActiveSignal(
-            f"VIX {vix:.1f} (elevated) — hedge before selling premium", "warn", 4))
+            f"VIX {vix:.1f} (elevated) — hedge before selling premium",
+            "warn", 4, "vix:elevated"))
 
     elif vix < T.VIX_PANIC:
         tag = "VERY_HIGH"
         out.verdicts["vix"] = (f"{vix:.1f} — High fear · "
                                f"spreads only; no naked positions")
         out.active_signals.append(ActiveSignal(
-            f"VIX {vix:.1f} — high vol · use defined-risk spreads only", "warn", 3))
+            f"VIX {vix:.1f} — high vol · use defined-risk spreads only",
+            "warn", 3, "vix:high"))
 
     else:
         tag = "PANIC"
         out.verdicts["vix"] = (f"{vix:.1f} — PANIC · "
                                f"long vol only; avoid all short-premium")
         out.active_signals.append(ActiveSignal(
-            f"VIX {vix:.1f} PANIC — buy straddle / strangle; no short gamma", "warn", 1))
+            f"VIX {vix:.1f} PANIC — buy straddle / strangle; no short gamma",
+            "warn", 1, "vix:panic"))
 
     return tag
 
@@ -170,7 +174,7 @@ def score_iv_crush(vix: float, fut_signal: str, out: DecisionResult) -> None:
     out.active_signals.append(ActiveSignal(
         f"IV crush: VIX {peak:.1f} → {vix:.1f} ({pct_drop:.1f}% drop within "
         f"{T.IV_CRUSH_WINDOW_SECONDS//60}m) — {open_note}",
-        severity, 0 if still_open else 6))
+        severity, 0 if still_open else 6, "vix:iv-crush"))
 
 
 def score_max_pain(spot, max_pain, dist, dte, atm_theta,
@@ -191,7 +195,8 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
         out.verdicts["maxPain"] = (f"₹{max_pain:,.0f} — Spot pinned "
                                    f"(₹{dist:.0f} away) · expiry pin likely")
         out.active_signals.append(ActiveSignal(
-            f"Spot within ₹{dist:.0f} of Max Pain ₹{max_pain:,.0f} — pin risk high", "info", 10))
+            f"Spot within ₹{dist:.0f} of Max Pain ₹{max_pain:,.0f} — pin risk high",
+            "info", 10, "max-pain:pin"))
         return 0.0
 
     elif dist < T.MP_GRAVITY:
@@ -205,7 +210,8 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
         out.verdicts["maxPain"] = (f"₹{max_pain:,.0f} — Spot ₹{dist:.0f} {direction} · "
                                    f"strong gravity toward ₹{max_pain:,.0f}")
         out.active_signals.append(ActiveSignal(
-            f"Spot ₹{dist:.0f} {direction} Max Pain — strong reversion before expiry", severity, 8))
+            f"Spot ₹{dist:.0f} {direction} Max Pain — strong reversion before expiry",
+            severity, 8, "max-pain:gravity"))
         raw = -gap / (dist + 1e-9)
         return max(-1.0, min(1.0, raw))
 
@@ -322,7 +328,8 @@ def score_oi_velocity(vel_df, spot: float, step: int,
                 out.active_signals.append(ActiveSignal(
                     f"{otype} {action} at {strike}{atm_tag} ({pct:+.0%})"
                     f" — {label} {direction}{vol_tag}",
-                    sev, 15 + len(strike_scores)))
+                    sev, 15 + len(strike_scores),
+                    f"oi-velocity:{otype.lower()}:{strike}:{action.lower()}"))
 
         strike_scores.append(max(-1.0, min(1.0, s_score)))
 
@@ -368,19 +375,19 @@ def score_walls(ce_wall, pe_wall, spot, atm, step,
     if 0 < ce_dist <= step * 2:
         out.active_signals.append(ActiveSignal(
             f"CE wall ₹{ce_wall:,.0f} only {ce_dist:.0f}pts above — strong resistance cap",
-            "warn", 12))
+            "warn", 12, "wall:ce"))
 
     if 0 < pe_dist <= step * 2:
         out.active_signals.append(ActiveSignal(
             f"PE wall ₹{pe_wall:,.0f} only {pe_dist:.0f}pts below — strong support floor",
-            "ok", 12))
+            "ok", 12, "wall:pe"))
 
     # Iron condor — spot must be between walls, range >= 2 steps
     spot_is_trapped = (ce_wall > spot > pe_wall)
     if spot_is_trapped and 0 < range_pts <= step * 4 and range_pts >= step * 2:
         out.active_signals.append(ActiveSignal(
             f"Spot trapped CE ₹{ce_wall:,.0f} / PE ₹{pe_wall:,.0f} "
-            f"({range_pts:.0f}pts) — iron condor zone", "info", 20))
+            f"({range_pts:.0f}pts) — iron condor zone", "info", 20, "wall:range"))
 
 
 def score_smart_money(smart_money_top, spot: float, atm: float,
@@ -431,7 +438,7 @@ def score_smart_money(smart_money_top, spot: float, atm: float,
                 out.active_signals.append(ActiveSignal(
                     f"Smart money: {side} vol/OI {ratio:.1f}× at ₹{strike:,.0f} "
                     f"— {'bearish call writing' if ce_relevant else 'bullish put writing'} conviction",
-                    sev, 22))
+                    sev, 22, f"smart-money:{side.lower()}:{int(strike)}"))
                 signals_fired = True
 
     except Exception:
@@ -463,7 +470,7 @@ def verdict_pcr(pcr: float, oi_chg_pcr: float, out: DecisionResult):
                 else "falling (intraday call writing picking up)"
         out.active_signals.append(ActiveSignal(
             f"OI-chg PCR {oi_chg_pcr:.2f} vs total PCR {pcr:.2f} — sentiment {drift}",
-            "info", 25))
+            "info", 25, "pcr:intraday-drift"))
 
 
 def verdict_iv(base_iv: float, iv_rank: float, out: DecisionResult):

@@ -14,6 +14,8 @@ const modal = read('frontend/Dashboard/modal-manager.js');
 const execView = read('frontend/Dashboard/exec-view.js');
 const chart = read('frontend/Dashboard/chart-legend.js');
 const responsive = read('frontend/styles/responsive.css');
+const renderer = read('frontend/Dashboard/chain/chain-renderer.js');
+const domUtils = read('frontend/shared/utils/dom-utils.js');
 
 const checks = [
   ['historical audit is explicitly superseded', historical.includes('Historical record — superseded') && historical.includes('SHALL NOT be read as the current')],
@@ -28,6 +30,7 @@ const checks = [
   ['D-12 ledger evidence exists', execView.includes('oic-ledger-row') && execView.includes('footprintRanked')],
   ['unchanged Greeks skip redraw', chart.includes('lastGreeksSignature') && chart.includes('if(!force && signature === lastGreeksSignature && !canvasChanged) return;')],
   ['residual performance risks have triggers', current.includes('R-01 — Hot-card patch granularity') && current.includes('R-02 — Deferred heavy rendering') && current.includes('Trigger:')],
+  ['closed heavy modals skip live rendering', domUtils.includes('function isModalOpen') && renderer.includes("if(isModalOpen('greeks-dashboard-modal')) renderGreeksGex") && renderer.includes("if(isModalOpen('iv-surface-modal')) this.renderIvSurfaceModal") && modal.includes('if(window.renderGreeksGex) renderGreeksGex') && modal.includes('app.chain.renderIvSurfaceModal()')],
 ];
 
 let failed = 0;

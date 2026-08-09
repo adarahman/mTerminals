@@ -52,7 +52,8 @@ function toggleAlgoPanel(){
   const opening = !el.classList.contains('open');
   el.classList.toggle('open');
   if(opening){
-    const btn = $i('algo-toggle-btn');
+    const proxyBtn = $i('algo-toggle-btn');
+    const btn = proxyBtn && proxyBtn.offsetParent ? proxyBtn : $i('rail-tools-toggle');
     if(btn){
       const r = btn.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;

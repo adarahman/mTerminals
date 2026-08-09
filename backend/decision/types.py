@@ -65,6 +65,7 @@ class ActiveSignal:
     text:     str
     severity: str = "info"     # "ok" | "info" | "warn"
     priority: int = 99         # lower surfaces first
+    signal_id: str = ""        # stable semantic identity across live ticks
 
 
 @dataclass
@@ -118,8 +119,19 @@ class DecisionResult:
     _debug: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        sigs = sorted(self.active_signals,
-                      key=lambda s: (_SEVERITY_ORDER.get(s.severity, 9), s.priority))
+        ordered = sorted(self.active_signals,
+                         key=lambda s: (_SEVERITY_ORDER.get(s.severity, 9), s.priority))
+        # One semantic signal can be discovered by more than one scoring
+        # path. Keep the highest-ranked occurrence while preserving distinct
+        # strikes/sides through their explicit signal_id values.
+        sigs = []
+        seen = set()
+        for signal in ordered:
+            identity = signal.signal_id or signal.text
+            if identity in seen:
+                continue
+            seen.add(identity)
+            sigs.append(signal)
         return {
             "decisionTimestamp": self.decision_timestamp,
             "stateVersion":      self.state_version,
@@ -138,7 +150,11 @@ class DecisionResult:
             "suggestedStrategy": self.suggested_strategy,
             "executeRecommended": self.execute_recommended,
             "strategyCaution":    self.strategy_caution,
-            "activeSignals":     [{"text": s.text, "severity": s.severity}
+            "activeSignals":     [{"id": s.signal_id or s.text,
+                                    "text": s.text,
+                                    "severity": s.severity,
+                                    "priority": s.priority,
+                                    "observedAt": self.decision_timestamp}
                                   for s in sigs],
             "verdicts":          self.verdicts,
             "oiAnnotations":     self.oi_annotations,

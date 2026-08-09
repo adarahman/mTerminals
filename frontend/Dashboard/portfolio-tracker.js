@@ -23,27 +23,27 @@ function ptMountPortfolioPanel(){
   const portfolioPanel = document.createElement('div');
   portfolioPanel.id = 'pt-portfolio-panel';
   portfolioPanel.innerHTML = `
-    <h4><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <button type="button" class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')" aria-label="Close portfolio panel">✕</button></h4>
-    <div class="pt-section" style="font-size:10px;line-height:1.45;color:var(--text-muted,#888);">
-      <strong style="color:var(--text-primary,#eee);">SIMULATION ONLY</strong> — fills are not exchange confirmations. MARKET fills use the backend's latest live tick; LIMIT fills use the live tick that crosses the limit. No added slippage or artificial delay; quantity is lots × resolved lot size.
+    <h4 class="pt-portfolio-header"><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <button type="button" class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')" aria-label="Close portfolio panel">✕</button></h4>
+    <div class="pt-section pt-simulation-note" id="pt-portfolio-source-note">
+      <strong>SIMULATION ONLY</strong> — fills are not exchange confirmations. MARKET fills use the backend's latest live tick; LIMIT fills use the live tick that crosses the limit. No added slippage or artificial delay; quantity is lots × resolved lot size.
     </div>
-    <div class="pt-section">
+    <div class="pt-section pt-portfolio-summary-grid">
       <div class="pt-summary"><span>Realized</span><span id="pt-realized">—</span></div>
       <div class="pt-summary"><span>Unrealized</span><span id="pt-unrealized">—</span></div>
       <div class="pt-summary"><span>Total P&amp;L (gross)</span><span id="pt-total">—</span></div>
-      <div class="pt-summary" style="opacity:.85;">
+      <div class="pt-summary pt-summary-muted">
         <span title="Charges on FILLED orders since the last Reset (matches the trade log below) — click Reset to zero this out along with the log. Total P&amp;L above is the backend's real portfolio state and always reflects full history regardless of Reset.">Charges (since reset, <span id="pt-charges-count">0</span> orders)</span><span id="pt-charges">—</span>
       </div>
-      <div class="pt-summary" style="font-weight:800;border-top:1px solid var(--border,#333);padding-top:4px;margin-top:2px;">
+      <div class="pt-summary pt-summary-key">
         <span>Net P&amp;L (after charges)</span><span id="pt-net-pnl">—</span>
       </div>
-      <div class="pt-summary" style="opacity:.7;font-size:11px;">
+      <div class="pt-summary pt-summary-muted">
         <span title="Estimated — assumes exit fills at current LTP; a real MARKET order can slip.">If squared off now (est.)</span><span id="pt-net-pnl-if-flat">—</span>
       </div>
-      <div class="pt-summary" style="opacity:.7;font-size:11px;">
+      <div class="pt-summary pt-summary-muted">
         <span title="Approximate — long options at premium paid, short/written options at PT_SHORT_MARGIN_PCT of notional (no real SPAN+exposure calc available client-side).">Margin used (approx.)</span><span id="pt-margin-used">—</span>
       </div>
-      <div class="pt-summary" style="font-weight:800;border-top:1px solid var(--border,#333);padding-top:4px;margin-top:2px;">
+      <div class="pt-summary pt-summary-fund">
         <span title="Backend paper equity (₹1,00,000 starting capital plus gross realized/unrealized P&amp;L) minus approximate open-position margin. Simulated charges are shown separately and are not deducted from this gross fund figure.">Fund (available, gross)</span><span id="pt-fund">—</span>
       </div>
       <div id="pt-fund-warn" style="display:none;font-size:10px;color:var(--neg,#e74c3c);margin-top:4px;">⚠ Fund running low — consider squaring off open positions.</div>
@@ -98,18 +98,31 @@ window.togglePortfolioPanel = togglePortfolioPanel;
 // once the next portfolio broadcast lands (place_order -> _apply_fill_to_position
 // nets it to zero, and get_positions() only returns net_qty_lots != 0 rows).
 function ptSquareOffPosition(symbol, expiry, strike, instrument_type, net_qty_lots){
+  // The table currently consumes wsState.portfolio, which is the paper
+  // engine's book even while the order panel is armed for live execution.
+  // Never turn a simulated position into a real opposite-side order.
+  // Re-enable only when this table is sourced from a broker-position feed.
+  if(_ptLiveMode){
+    ptToast('Live square-off blocked — this table contains paper positions, not broker positions', 'err');
+    return false;
+  }
   const qty = Math.abs(net_qty_lots);
-  if(!qty) return;
+  if(!qty) return false;
   const side = net_qty_lots > 0 ? 'SELL' : 'BUY';
   const payload = {
     symbol, instrument_type, expiry, strike, side,
     qty_lots: qty, order_type: 'MARKET', limit_price: null,
   };
   ptDispatchOrder(payload, null);
+  return true;
 }
 window.ptSquareOffPosition = ptSquareOffPosition;
 
 function ptSquareOffAll(){
+  if(_ptLiveMode){
+    ptToast('Live square-off blocked — broker positions are not shown in this table', 'err');
+    return;
+  }
   const positions = (AppState.wsState && AppState.wsState.portfolio && AppState.wsState.portfolio.positions) || [];
   const open = positions.filter(p => p.net_qty_lots);
   if(!open.length) return;
@@ -232,11 +245,11 @@ function ptRenderPositionsTable(view){
       ? p.strike + ' ' + p.instrument_type : p.instrument_type;
     const hasExpiry = p.instrument_type === 'CE' || p.instrument_type === 'PE' || p.instrument_type === 'FUT';
     const expCell = hasExpiry ? ptFmtExpiry(p.expiry) : '—';
-    const exitBtn = '<button type="button" onclick="ptSquareOffPosition(\''+p.symbol+'\',\''+(p.expiry||'')+'\','
+    const exitBtn = '<button type="button" '+(_ptLiveMode?'disabled ':'')+'onclick="ptSquareOffPosition(\''+p.symbol+'\',\''+(p.expiry||'')+'\','
       + (p.strike==null?'null':p.strike) + ',\''+p.instrument_type+'\','+p.net_qty_lots+')" '
-      + 'title="Exit this position (opposite-side MARKET order)" '
+      + 'title="'+(_ptLiveMode?'Disabled: this is a paper position, not a broker position':'Exit this paper position (opposite-side MARKET order)')+'" '
       + 'style="cursor:pointer;font-size:9px;font-weight:800;padding:1px 6px;border-radius:4px;'
-      + 'background:var(--neg,#e74c3c);color:#fff;border:0;" aria-label="Exit this position">✕</button>';
+      + 'background:var(--neg,#e74c3c);color:#fff;border:0;opacity:'+(_ptLiveMode?'.35':'1')+';" aria-label="Exit this position">✕</button>';
     return '<tr><td>'+p.symbol+'</td><td title="'+(p.expiry||'')+'">'+expCell+'</td><td>'+label+'</td><td>'+p.net_qty_lots+'</td>'
       + '<td>'+ptFmtN(p.avg_price)+'</td><td>'+ptFmtN(p.last_price)+(p._live?' <span title="live" style="color:var(--pos,#2ecc71);">●</span>':'')+'</td>'
       + '<td class="'+ptPnlClass(p.unrealized_pnl)+'">'+ptFmtN(p.unrealized_pnl)+'</td>'
@@ -245,10 +258,13 @@ function ptRenderPositionsTable(view){
   setHtmlIfChanged($i('pt-positions-table').querySelector('tbody'), posRows);
   const squareOffBtn = $i('pt-squareoff-all-btn');
   if(squareOffBtn){
-    const hasPositions = (pf.positions || []).length > 0;
-    squareOffBtn.disabled = !hasPositions;
-    squareOffBtn.style.opacity = hasPositions ? '1' : '.4';
-    squareOffBtn.style.cursor = hasPositions ? 'pointer' : 'default';
+    const canSquareOff = !_ptLiveMode && (pf.positions || []).length > 0;
+    squareOffBtn.disabled = !canSquareOff;
+    squareOffBtn.title = _ptLiveMode
+      ? 'Disabled: positions shown are from the paper simulator, not AngelOne'
+      : 'Send an opposite-side MARKET order to flatten every paper position';
+    squareOffBtn.style.opacity = canSquareOff ? '1' : '.4';
+    squareOffBtn.style.cursor = canSquareOff ? 'pointer' : 'default';
   }
 }
 
@@ -366,6 +382,13 @@ function renderPaperTradingPanel(wsState){
   // genuinely does need the backend's paper-trading portfolio feed, so
   // this is the right place — and the ONLY place — to bail on it missing.
   if(!wsState.portfolio) return;
+
+  const sourceNote = $i('pt-portfolio-source-note');
+  if(sourceNote){
+    sourceNote.innerHTML = _ptLiveMode
+      ? '<strong>LIVE FUNDS · PAPER POSITIONS</strong> — AngelOne funds are shown when available, but P&amp;L, positions and trade history below remain from the simulator. Live square-off is disabled until broker positions are wired into this table.'
+      : '<strong>SIMULATION ONLY</strong> — fills are not exchange confirmations. MARKET fills use the backend\'s latest live tick; LIMIT fills use the live tick that crosses the limit. No added slippage or artificial delay; quantity is lots × resolved lot size.';
+  }
 
   const view = ptComputePortfolioView(wsState);
   ptRenderPortfolioSummary(view);

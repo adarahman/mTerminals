@@ -44,14 +44,17 @@ class DataService {
     });
     // Raw wire message -> MarketStore interprets it -> 'change' fires with
     // the merged state, which is what actually drives a re-render. Feed
-    // freshness is updated BEFORE ingest so the top bar built by the same
-    // tick already renders LIVE rather than one tick behind.
+    // market freshness is updated BEFORE ingest so the top bar built by the
+    // same tick already renders LIVE rather than one tick behind. Auxiliary
+    // messages (portfolio, orders, funds, algoStatus, indexQuotes) prove the
+    // transport is active but must not keep a frozen market snapshot LIVE.
     this.wsManager.on('message', (raw) => {
-      this._markFeedMessage();
+      this._markTransportMessage();
+      if (this._isMarketSnapshotMessage(raw)) this._markFeedMessage();
       this.store.ingest(raw);
     });
     this.feedStatusTimer = setInterval(() => this._checkFeedFreshness(), 1000);
-    this.store.on('change', (state) => this.updateDashboard(state));
+    this.store.on('change', (state, change) => this.updateDashboard(state, change));
     this.store.on('baselineMismatch', () => {
       this._setFeedStatus('RECOVERING', 'Refreshing incompatible market snapshot');
       this.wsManager.connect(undefined, true);
@@ -70,11 +73,23 @@ class DataService {
       missing: prev.missing || [],
       marketSession: prev.marketSession || 'UNKNOWN',
       lastMessageAt: prev.lastMessageAt || null,
+      lastTransportAt: prev.lastTransportAt || null,
       lastStatusAt: Date.now(),
       reason: reason || '',
     };
     this._updateFeedStatusDom();
     if (window.eventBus) window.eventBus.emit('feed:status', AppState.feedState);
+  }
+
+  _isMarketSnapshotMessage(raw){
+    // A missing envelope is the legacy plain full-snapshot shape. Only the
+    // versioned full/delta stream owns chain/Greeks/decision freshness.
+    return !raw || !raw.type || raw.type === 'full' || raw.type === 'delta';
+  }
+
+  _markTransportMessage(){
+    const prev = AppState.feedState || {};
+    AppState.feedState = { ...prev, lastTransportAt: Date.now() };
   }
 
   _markFeedMessage(){
@@ -86,6 +101,7 @@ class DataService {
       missing: prev.missing || [],
       marketSession: prev.marketSession || 'UNKNOWN',
       lastMessageAt: now,
+      lastTransportAt: prev.lastTransportAt || now,
       lastStatusAt: prev.status === 'LIVE' ? (prev.lastStatusAt || now) : now,
       reason: '',
     };
@@ -120,7 +136,7 @@ class DataService {
     const age = Date.now() - fs.lastMessageAt;
     const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 12000;
     if (age > staleAfter && fs.status !== 'STALE') {
-      this._setFeedStatus('STALE', `No feed message for ${Math.floor(age/1000)}s`);
+      this._setFeedStatus('STALE', `No market snapshot for ${Math.floor(age/1000)}s`);
     } else if (fs.status === 'STALE') {
       // Keep the age label moving without causing a Dashboard re-render.
       this._updateFeedStatusDom();
@@ -158,7 +174,7 @@ class DataService {
     if (el) {
       el.textContent = label;
       el.dataset.status = visualStatus.toLowerCase().replace('_','-');
-      el.title = (fs.reason || (fs.lastMessageAt ? `Last feed message ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt;
+      el.title = (fs.reason || (fs.lastMessageAt ? `Last market snapshot ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt;
     }
     const reasonEl = $i('feed-status-reason');
     if (reasonEl) {
@@ -175,9 +191,30 @@ class DataService {
   // Called with the already-merged state (MarketStore.ingest ran before
   // emitting 'change') — this function is now pure side-effects: no more
   // branching on msg.type here, that lives in WSManager.
-  updateDashboard(state){
+  updateDashboard(state, change){
   AppState.wsState = state;
   if(!AppState.wsState) return;
+  const messageType = change && change.messageType;
+
+  // Generic side-channel messages share the socket/store but do not change
+  // chain, Greeks, decisions, charts, or market summaries. Route each one
+  // directly to its owner instead of scheduling the entire dashboard pass.
+  if(messageType === 'portfolio' || messageType === 'orders' || messageType === 'funds'){
+    if(window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
+    return;
+  }
+  if(messageType === 'algoStatus'){
+    if(window.renderAlgoStatusPanel) window.renderAlgoStatusPanel(AppState.wsState);
+    return;
+  }
+  if(messageType === 'reconciliationAlert'){
+    if(window.renderReconciliationAlerts) renderReconciliationAlerts(AppState.wsState);
+    return;
+  }
+  if(messageType === 'indexQuotes'){
+    if(window.patchIndexTicker) window.patchIndexTicker(AppState.wsState);
+    return;
+  }
   this._updateDataQuality(AppState.wsState);
 
   // OI dashboard iframe / popup — only push when the panel is actually

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from decision.confidence import compute_confidence
 from decision.decision_engine import DecisionEngine
+from decision.types import ActiveSignal, DecisionResult
 
 
 def _engine_result(**overrides):
@@ -39,8 +40,23 @@ def test_missing_required_input_degrades_and_disables_execution():
     result = DecisionEngine().evaluate(_engine_result(total_pcr=0), {}).to_dict()
     assert result["degraded"] is True
     assert "pcr" in result["missingInputs"]
+    assert result["actionType"] == "WAIT"
+    assert result["suggestedStrike"] is None
     assert result["executeRecommended"] is False
     assert "Required decision evidence" in result["strategyCaution"]
+
+
+def test_directional_setup_fails_closed_below_execution_confidence():
+    # Expiry-day decay can leave the weighted direction intact while reducing
+    # confidence below the execution boundary. The headline must not continue
+    # to recommend a directional order in that state.
+    result = DecisionEngine().evaluate(_engine_result(dte=0), {}).to_dict()
+    assert result["bias"] == "BULLISH"
+    assert result["confidence"] < 40
+    assert result["actionType"] == "WAIT"
+    assert result["suggestedStrike"] is None
+    assert "below execution threshold" in result["action"]
+    assert result["executeRecommended"] is False
 
 
 def test_evidence_coverage_reduces_confidence():
@@ -52,3 +68,24 @@ def test_evidence_coverage_reduces_confidence():
                                   evidence_coverage=.8, critical_inputs_missing=True)
     assert partial < complete
     assert degraded <= 35
+
+
+def test_active_signals_have_identity_timestamp_priority_and_are_deduplicated():
+    decision = DecisionResult(decision_timestamp="2026-08-08T10:00:00+05:30")
+    decision.active_signals.extend([
+        ActiveSignal("First rendering", "info", 20, "wall:ce"),
+        ActiveSignal("Higher-severity rendering", "warn", 5, "wall:ce"),
+        ActiveSignal("Different strike", "ok", 10, "oi-velocity:pe:24000:writing"),
+    ])
+
+    signals = decision.to_dict()["activeSignals"]
+
+    assert len(signals) == 2
+    assert signals[0] == {
+        "id": "wall:ce",
+        "text": "Higher-severity rendering",
+        "severity": "warn",
+        "priority": 5,
+        "observedAt": "2026-08-08T10:00:00+05:30",
+    }
+    assert signals[1]["id"] == "oi-velocity:pe:24000:writing"

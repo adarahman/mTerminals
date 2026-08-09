@@ -5,159 +5,27 @@ eliminating pandas iteration overhead, and utilizing fast dictionary mapping.
 Fully unifies column names into standard snake_case without spaces.
 """
 import logging
-import math
 import os
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from scipy.special import ndtr
-from storage.caches import DirtyFrameStore
+
+from oi.pricing import (
+    ANNUAL_RISK_FREE_RATE,
+    DIVIDEND_YIELD,
+    bs_greeks_vectorized,
+)
 from paths import CACHE_DIR
+from storage.caches import DirtyFrameStore
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------
 # Configurable constants
 # ---------------------------------------------------------------
-ANNUAL_RISK_FREE_RATE = 0.07     # India ~ repo/T-bill rate
-DIVIDEND_YIELD = 0.0123          # approx NIFTY dividend yield
 HIGH_VOLUME_THRESHOLD = 500000   # contracts
 ATM_BAND = 50                    # +/- points from spot considered ATM
-
-# Fast lookup math caches
-SQRT_2 = math.sqrt(2)
-SQRT_2_PI = math.sqrt(2 * math.pi)
-
-
-# ---------------------------------------------------------------
-# Black-Scholes Greeks Engine
-# ---------------------------------------------------------------
-def _norm_cdf(x):
-    return 0.5 * (1 + math.erf(x / SQRT_2))
-
-
-def _norm_pdf(x):
-    return math.exp(-0.5 * x ** 2) / SQRT_2_PI
-
-
-# TODO(dedup-greeks): this is a second, independent Black-Scholes Greeks
-# implementation — see oi/pricing.py's bs_delta/bs_gamma/bs_vega/bs_theta/
-# bs_rho, which lack the dividend yield (q) and charm/vanna this one has.
-# Both feed the same EngineResult (via build_master_table_nse() here vs.
-# _build_greeks_table() in oi/chain_metrics.py). Per the v3 migration plan,
-# reconciling which formula is authoritative when q != 0 is a deliberate
-# follow-up decision, not something to fold silently into a file move.
-def calculate_greeks(spot, strike, t, r, q, sigma, option_type):
-    """Returns (delta, gamma, theta, vega, rho, charm, vanna) for one option leg."""
-    if spot <= 0 or strike <= 0 or t <= 0 or sigma <= 0:
-        return (0, 0, 0, 0, 0, 0, 0)
-
-    sqrt_t = math.sqrt(t)
-    d1 = (math.log(spot / strike) + (r - q + 0.5 * sigma ** 2) * t) / (sigma * sqrt_t)
-    d2 = d1 - sigma * sqrt_t
-    nd1, nd2 = _norm_cdf(d1), _norm_cdf(d2)
-    pdf_d1 = _norm_pdf(d1)
-    exp_qt = math.exp(-q * t)
-    exp_rt = math.exp(-r * t)
-
-    gamma = exp_qt * pdf_d1 / (spot * sigma * sqrt_t)
-    vega = spot * exp_qt * pdf_d1 * sqrt_t / 100
-    vanna = -exp_qt * pdf_d1 * d2 / sigma
-
-    if option_type.upper() == "CE":
-        delta = exp_qt * nd1
-        theta = ((-spot * exp_qt * pdf_d1 * sigma) / (2 * sqrt_t)
-                 - r * strike * exp_rt * nd2 + q * spot * exp_qt * nd1) / 365
-        rho = strike * t * exp_rt * nd2 / 100
-        charm = (-q * exp_qt * nd1 - exp_qt * pdf_d1 *
-                 ((2 * (r - q) * t - d2 * sigma * sqrt_t) / (2 * t * sigma * sqrt_t)))
-    else:
-        nd1n, nd2n = _norm_cdf(-d1), _norm_cdf(-d2)
-        delta = exp_qt * (nd1 - 1)
-        theta = ((-spot * exp_qt * pdf_d1 * sigma) / (2 * sqrt_t)
-                 + r * strike * exp_rt * nd2n - q * spot * exp_qt * nd1n) / 365
-        rho = -strike * t * exp_rt * nd2n / 100
-        charm = (q * exp_qt * nd1n - exp_qt * pdf_d1 *
-                 ((2 * (r - q) * t - d2 * sigma * sqrt_t) / (2 * t * sigma * sqrt_t)))
-
-    return delta, gamma, theta, vega, rho, charm, vanna
-
-
-def calculate_greeks_vectorized(spot, strikes, t, r, q, sigma, option_type):
-    """
-    Vectorized twin of calculate_greeks() — same Black-Scholes formulas,
-    same edge-case behavior (0 wherever spot/strike/t/sigma are invalid),
-    but computed as NumPy array ops over an ENTIRE strike column at once
-    instead of one Python function call (with several math.exp/erf/log
-    calls each) per row. This is the CPU-heavy part of
-    build_master_table_nse() — with ~100-150 strikes recomputed for the
-    main chain plus every extra expiry chain (NEAR/MONTHLY) each tick,
-    the per-row Python loop was the dominant non-network cost per refresh.
-
-    ndtr() is scipy's standard normal CDF — mathematically identical to
-    the 0.5*(1+erf(x/sqrt(2))) formula used in the scalar version above
-    (verified: ndtr(0.5) == 0.5*(1+math.erf(0.5/sqrt(2))) to full float
-    precision), just vectorized in C rather than looped in Python.
-
-    Parameters
-    ----------
-    spot : float                    (single spot price for the whole chain)
-    strikes, t, sigma : array-like  (per-row values, same length)
-    r, q : float                    (risk-free rate, dividend yield)
-    option_type : "CE" or "PE"
-
-    Returns
-    -------
-    7 float64 ndarrays: delta, gamma, theta, vega, rho, charm, vanna
-    (0.0 at any index where spot/strike/t/sigma was invalid — matches
-    calculate_greeks()'s early-return behavior exactly).
-    """
-    strikes = np.asarray(strikes, dtype=np.float64)
-    t       = np.asarray(t, dtype=np.float64)
-    sigma   = np.asarray(sigma, dtype=np.float64)
-    n = strikes.shape[0]
-
-    delta = np.zeros(n); gamma = np.zeros(n); theta = np.zeros(n)
-    vega  = np.zeros(n); rho   = np.zeros(n); charm = np.zeros(n); vanna = np.zeros(n)
-
-    valid = (spot > 0) & (strikes > 0) & (t > 0) & (sigma > 0)
-    if not np.any(valid):
-        return delta, gamma, theta, vega, rho, charm, vanna
-
-    K, T, sg = strikes[valid], t[valid], sigma[valid]
-    sqrt_t = np.sqrt(T)
-    d1 = (np.log(spot / K) + (r - q + 0.5 * sg ** 2) * T) / (sg * sqrt_t)
-    d2 = d1 - sg * sqrt_t
-    nd1, nd2 = ndtr(d1), ndtr(d2)
-    pdf_d1  = np.exp(-0.5 * d1 ** 2) / SQRT_2_PI
-    exp_qt  = np.exp(-q * T)
-    exp_rt  = np.exp(-r * T)
-
-    g  = exp_qt * pdf_d1 / (spot * sg * sqrt_t)
-    v  = spot * exp_qt * pdf_d1 * sqrt_t / 100
-    vn = -exp_qt * pdf_d1 * d2 / sg
-
-    if option_type.upper() == "CE":
-        d  = exp_qt * nd1
-        th = ((-spot * exp_qt * pdf_d1 * sg) / (2 * sqrt_t)
-              - r * K * exp_rt * nd2 + q * spot * exp_qt * nd1) / 365
-        rh = K * T * exp_rt * nd2 / 100
-        ch = (-q * exp_qt * nd1 - exp_qt * pdf_d1 *
-              ((2 * (r - q) * T - d2 * sg * sqrt_t) / (2 * T * sg * sqrt_t)))
-    else:
-        nd1n, nd2n = ndtr(-d1), ndtr(-d2)
-        d  = exp_qt * (nd1 - 1)
-        th = ((-spot * exp_qt * pdf_d1 * sg) / (2 * sqrt_t)
-              + r * K * exp_rt * nd2n - q * spot * exp_qt * nd1n) / 365
-        rh = -K * T * exp_rt * nd2n / 100
-        ch = (q * exp_qt * nd1n - exp_qt * pdf_d1 *
-              ((2 * (r - q) * T - d2 * sg * sqrt_t) / (2 * T * sg * sqrt_t)))
-
-    delta[valid] = d;  gamma[valid] = g;  theta[valid] = th
-    vega[valid]  = v;  rho[valid]   = rh
-    charm[valid] = ch; vanna[valid] = vn
-
-    return delta, gamma, theta, vega, rho, charm, vanna
 
 
 # ---------------------------------------------------------------
@@ -285,7 +153,7 @@ def build_master_table_nse(df, spot, risk_free_rate=ANNUAL_RISK_FREE_RATE,
     # calls) — the dominant CPU cost of this function, paid again for
     # every extra expiry chain (NEAR/MONTHLY) every tick. Instead, pull
     # the per-row inputs into flat arrays once, run the whole column
-    # through calculate_greeks_vectorized() in one shot per side (CE/PE),
+    # through the canonical bs_greeks_vectorized() in one shot per side,
     # then have the per-row loop below just index into the results.
     # Validity conditions (iv > 0 and oi > 0) are preserved exactly —
     # output is identical to the old row-by-row version, just computed
@@ -311,13 +179,13 @@ def build_master_table_nse(df, spot, risk_free_rate=ANNUAL_RISK_FREE_RATE,
     pe_valid = (pe_iv_arr > 0) & (pe_oi_arr > 0)
 
     (ce_delta_arr, ce_gamma_arr, ce_theta_arr, ce_vega_arr,
-     ce_rho_arr, ce_charm_arr, ce_vanna_arr) = calculate_greeks_vectorized(
+     ce_rho_arr, ce_charm_arr, ce_vanna_arr) = bs_greeks_vectorized(
         spot, strikes_arr, t_arr, risk_free_rate, dividend_yield, ce_iv_arr / 100.0, "CE")
     (pe_delta_arr, pe_gamma_arr, pe_theta_arr, pe_vega_arr,
-     pe_rho_arr, pe_charm_arr, pe_vanna_arr) = calculate_greeks_vectorized(
+     pe_rho_arr, pe_charm_arr, pe_vanna_arr) = bs_greeks_vectorized(
         spot, strikes_arr, t_arr, risk_free_rate, dividend_yield, pe_iv_arr / 100.0, "PE")
 
-    # calculate_greeks_vectorized only zeroes out spot/strike/t/sigma
+    # bs_greeks_vectorized only zeroes out spot/strike/t/sigma
     # invalidity — the original also required ce_oi/pe_oi > 0 before even
     # attempting the calculation, so enforce that here too.
     for arr in (ce_delta_arr, ce_gamma_arr, ce_theta_arr, ce_vega_arr,
@@ -330,8 +198,6 @@ def build_master_table_nse(df, spot, risk_free_rate=ANNUAL_RISK_FREE_RATE,
     for i, r in enumerate(records):
         strike = r['StrikePrice']
         expiry_str = r['Expiry']
-
-        t = t_arr[i]
 
         ce_oi, pe_oi = r['CE_OI'] * lot_size, r['PE_OI'] * lot_size
         ce_oi_chg, pe_oi_chg = r['CE_ChgOI'] * lot_size, r['PE_ChgOI'] * lot_size
@@ -498,7 +364,7 @@ def get_strike_step(strikes, default=DEFAULT_STRIKE_STEP):
 LEGACY_OI_HISTORY_LOG_PATH = os.path.join(CACHE_DIR, "oi_history_log.parquet")
 JSON_HISTORY_LOG_PATH = os.path.join(CACHE_DIR, "oi_velocity_history.parquet")
 
-_VELOCITY_RETENTION_MINUTES = 35
+VELOCITY_RETENTION_MINUTES = 35
 
 _FLUSH_INTERVAL_SECONDS = 60  # write to disk at most once per minute
 
@@ -519,7 +385,17 @@ def _ensure_history_loaded(log_path):
             logger.warning(f"Couldn't read {log_path} ({e}). Starting from an empty in-memory log.")
             df = pd.DataFrame()
 
+    original_len = len(df)
+    if (log_path == JSON_HISTORY_LOG_PATH and not df.empty
+            and "snapshot_time" in df.columns):
+        cutoff = pd.Timestamp.now() - pd.Timedelta(minutes=VELOCITY_RETENTION_MINUTES)
+        timestamps = pd.to_datetime(df["snapshot_time"], errors="coerce")
+        df = df[timestamps >= cutoff].copy()
+
     _HISTORY_MEM.load(df, log_path)
+    if len(df) != original_len:
+        # Persist the startup prune on the next periodic/graceful flush.
+        _HISTORY_MEM.replace(df)
 
 
 def read_last_json_snapshot(symbol, log_path=JSON_HISTORY_LOG_PATH):
@@ -542,7 +418,7 @@ def read_last_json_snapshot(symbol, log_path=JSON_HISTORY_LOG_PATH):
 def append_json_history(
     history_df,
     log_path=JSON_HISTORY_LOG_PATH,
-    max_age_minutes=_VELOCITY_RETENTION_MINUTES,
+    max_age_minutes=VELOCITY_RETENTION_MINUTES,
     flush_interval_seconds=_FLUSH_INTERVAL_SECONDS,
 ):
     """Append to the bounded live-velocity window and periodically flush.

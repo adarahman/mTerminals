@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import vm from 'node:vm';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -11,6 +12,12 @@ const components = read('styles/components.css');
 const modal = read('Dashboard/modal-manager.js');
 const algo = read('Dashboard/algo-status.js');
 const depth = read('Dashboard/chain/chain-depth.js');
+const formatters = read('shared/utils/formatters.js');
+const chainTemplate = read('Dashboard/chain/chain-template.js');
+const paperTrading = read('Dashboard/paper-trading-shared.js');
+const strikeReport = read('Dashboard/strike-detail-report-view.js');
+const formatterContext = {};
+vm.runInNewContext(formatters, formatterContext);
 const chartSources = [
   read('OIFlow/oi-flow.html'), read('Dashboard/DashboardPro.html'),
   read('PriceChart/price-chart.js'), read('Dashboard/chain/chain-renderer.js'),
@@ -31,6 +38,8 @@ const checks = [
   ['all shipped canvases expose an accessible chart question', canvases.length > 0 && canvases.every((tag) => /role="img"/.test(tag) && /aria-label="[^"]+"/.test(tag))],
   ['every UI-system document records implementation status', docs.length === 10 && docs.every((doc) => doc.includes('## Implementation status'))],
   ['focus treatment uses a semantic token', components.includes('.depth-reset:focus-visible') && components.includes('var(--info)')],
+  ['HTML escaping has one shared implementation', formatterContext.escapeHtml(`<b title="x">'&`) === '&lt;b title=&quot;x&quot;&gt;&#39;&amp;' && !chainTemplate.includes('const escapeHtml =') && paperTrading.includes('return escapeHtml(s)') && strikeReport.includes('return escapeHtml(v)')],
+  ['Indian compact totals use one shared formatter', formatterContext.fmtCrLK(12_500_000) === '1.25Cr' && formatterContext.fmtCrLK(-250_000) === '-2.50L' && !chainTemplate.includes('const fmtCrLK =')],
 ];
 
 let failed = 0;

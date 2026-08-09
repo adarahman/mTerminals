@@ -73,7 +73,8 @@ class UiControls {
     // position the flyout right next to wherever that button actually is
     // (its section-nav position can shift slightly depending on which
     // sec-btn-* items are visible) instead of a stale hardcoded spot.
-    const btn = $i('ctrl-sidebar-toggle-btn');
+    const proxyBtn = $i('ctrl-sidebar-toggle-btn');
+    const btn = proxyBtn && proxyBtn.offsetParent ? proxyBtn : $i('rail-tools-toggle');
     if(btn){
       const r = btn.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;

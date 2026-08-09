@@ -100,9 +100,9 @@ def compute_capital_metrics(master: pd.DataFrame, spot: float, lot_size: int) ->
                                                             pe_delta is already
                                                             signed negative
                                                             coming out of
-                                                            oi_analysis.
-                                                            calculate_greeks_
-                                                            vectorized, so
+                                                            oi.pricing.
+                                                            bs_greeks_vectorized,
+                                                            so
                                                             summing the two
                                                             legs nets them
                                                             correctly; do not
@@ -151,8 +151,8 @@ def compute_capital_metrics(master: pd.DataFrame, spot: float, lot_size: int) ->
     out["ce_premium_turnover"] = out["ce_volume"] * lot_size * out["ce_ltp"]
     out["pe_premium_turnover"] = out["pe_volume"] * lot_size * out["pe_ltp"]
 
-    # NOTE ON SIGN: pe_delta is already negative (see calculate_greeks_
-    # vectorized in oi_analysis.py — PE delta = exp_qt*(N(d1)-1), which is
+    # NOTE ON SIGN: pe_delta is already negative (see bs_greeks_vectorized
+    # in oi/pricing.py — PE delta = exp_qt*(N(d1)-1), which is
     # < 0 for any normal input). Do not `abs()` or re-sign it here or in a
     # caller — that would silently break net_delta_exposure below.
     # Greeks are only verified when the corresponding leg has positive IV

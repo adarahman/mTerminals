@@ -42,70 +42,10 @@ Design notes:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import math
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from scipy.special import ndtr
-
-from oi.oi_analysis import build_master_table_nse, classify_buildup, signal_strength
-from oi.oi_analysis import get_strike_step, get_oi_velocity
-
-# Black-Scholes pricing/Greeks primitives — moved to oi/pricing.py (Step 4a
-# of the v3 migration plan). engine.py keeps only what OptionChainEngine,
-# _detect_traps, and build_engine_result still need directly; solve_iv,
-# get_atm_iv, bs_rho, norm_pdf/norm_cdf are used by nothing else in this
-# file (confirmed via grep before the move) and are NOT re-imported here —
-# consumers reach them via `from oi.pricing import ...` directly.
-from oi.pricing import (
-    ANNUAL_RISK_FREE_RATE,
-    DEFAULT_BASE_IV,
-    _MIN_T_YEARS,
-    _IV_SKEW_FLOOR,
-    _SQRT_2PI,
-    bs_call,
-    bs_put,
-    bs_delta,
-    bs_gamma,
-    bs_vega,
-    bs_theta,
-    get_iv_skew,
-    get_dividend_yield,
-)
-
-# Chain-level metrics — moved to oi/chain_metrics.py (Step 4a).
-from oi.chain_metrics import (
-    _atm_window,
-    compute_max_pain,
-    compute_total_pcr,
-    _build_greeks_table,
-    _summarize_gex,
-    _build_smart_money_top,
-    _build_vol_oi_ratios,
-    _compute_iv_rank_hv30,
-)
-
-# Capital-weighted per-strike metrics (notional, premium locked, capital
-# flow, delta/gamma exposure) — computed once off `master` here so every
-# consumer reads the same numbers instead of re-deriving them.
-from oi.capital_metrics import compute_capital_metrics
-from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
 from analytics.market_regime import classify_market_regime
-
-# Strategy definitions, rule-based scoring, and scenario P&L — moved to
-# strategy/strategies.py (Step 4b). build_engine_result() calls these three
-# directly; _STRATEGY_DIRECTION/_STRATEGY_MAX_SCORE are internal to
-# _score_strategies and are not used anywhere else in engine.py, so they
-# stay in strategy/strategies.py and are not re-imported here.
-from strategy.strategies import (
-    _build_strategies,
-    _score_strategies,
-    _build_scenario_pnl,
-)
-
-# Risk meters — moved to risk/risk_meters.py (Step 4c).
-from risk.risk_meters import _build_risk_meters
 
 # Trap detector — moved to decision/signal_builder.py as the public
 # detect_traps() (previously decision/decision_engine.py's private
@@ -114,6 +54,60 @@ from risk.risk_meters import _build_risk_meters
 from decision.signal_builder import detect_traps as _detect_traps
 from decision.types import T
 
+# Capital-weighted per-strike metrics (notional, premium locked, capital
+# flow, delta/gamma exposure) — computed once off `master` here so every
+# consumer reads the same numbers instead of re-deriving them.
+from oi.capital_metrics import compute_capital_metrics
+
+# Chain-level metrics — moved to oi/chain_metrics.py (Step 4a).
+from oi.chain_metrics import (
+    _atm_window,
+    _build_greeks_table,
+    _build_smart_money_top,
+    _build_vol_oi_ratios,
+    _compute_iv_rank_hv30,
+    _summarize_gex,
+    compute_max_pain,
+    compute_total_pcr,
+)
+from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
+from oi.oi_analysis import build_master_table_nse, get_oi_velocity, get_strike_step
+
+# Black-Scholes pricing/Greeks primitives — moved to oi/pricing.py (Step 4a
+# of the v3 migration plan). engine.py keeps only what OptionChainEngine,
+# _detect_traps, and build_engine_result still need directly; solve_iv,
+# get_atm_iv, bs_rho, norm_pdf/norm_cdf are used by nothing else in this
+# file (confirmed via grep before the move) and are NOT re-imported here —
+# consumers reach them via `from oi.pricing import ...` directly.
+from oi.pricing import (
+    _IV_SKEW_FLOOR,
+    _MIN_T_YEARS,
+    ANNUAL_RISK_FREE_RATE,
+    DEFAULT_BASE_IV,
+    bs_call,
+    bs_delta,
+    bs_gamma,
+    bs_greeks_vectorized,
+    bs_put,
+    bs_theta,
+    bs_vega,
+    get_dividend_yield,
+    get_iv_skew,
+)
+
+# Risk meters — moved to risk/risk_meters.py (Step 4c).
+from risk.risk_meters import _build_risk_meters
+
+# Strategy definitions, rule-based scoring, and scenario P&L — moved to
+# strategy/strategies.py (Step 4b). build_engine_result() calls these three
+# directly; _STRATEGY_DIRECTION/_STRATEGY_MAX_SCORE are internal to
+# _score_strategies and are not used anywhere else in engine.py, so they
+# stay in strategy/strategies.py and are not re-imported here.
+from strategy.strategies import (
+    _build_scenario_pnl,
+    _build_strategies,
+    _score_strategies,
+)
 
 __all__ = [
     "OptionChainEngine",
@@ -163,12 +157,9 @@ class OptionChainEngine:
                pe_oi_col:  str = "PE_OI") -> pd.DataFrame:
         """Add Greek columns to `chain` and return it.
 
-        Vectorized over the whole chain with numpy/scipy.special.ndtr —
-        this used to be a per-row Python loop calling the scalar bs_delta/
-        bs_gamma/bs_theta/bs_vega functions once per strike, per tick, per
-        expiry. Same class of cost oi_analysis.calculate_greeks_vectorized
-        already eliminated elsewhere; this brings enrich() in line with
-        that so there's one fast path instead of two divergent ones.
+        Vectorized over the whole chain through oi.pricing's canonical
+        batch calculator. This used to carry an independent copy of the
+        formulas, which could drift from the live OI pipeline.
         The scalar bs_* functions are untouched and still used for
         single-point lookups (atm_greeks(), solve_iv(), scenario P&L).
         """
@@ -181,34 +172,20 @@ class OptionChainEngine:
         # Same skew curve as get_iv_skew(), vectorized: iv = max(base_iv + slope*(K-S), floor)
         iv = np.maximum(self.base_iv + self.skew_slope * (K - S), _IV_SKEW_FLOOR)
 
-        valid = (T > 0) & (iv > 0) & (S > 0) & (K > 0)
-        sqrt_T = math.sqrt(T) if T > 0 else 0.0
+        t = np.full(K.shape, T, dtype=float)
+        ce_delta, gamma, ce_theta, vega, *_ = bs_greeks_vectorized(
+            S, K, t, r, 0.0, iv, "CE"
+        )
+        pe_delta, _, pe_theta, _, *_ = bs_greeks_vectorized(
+            S, K, t, r, 0.0, iv, "PE"
+        )
 
-        with np.errstate(divide="ignore", invalid="ignore"):
-            d1 = np.where(
-                valid,
-                (np.log(np.where(K > 0, S / K, 1.0)) + (r + 0.5 * iv ** 2) * T) / (iv * sqrt_T),
-                0.0,
-            )
-        d2 = d1 - iv * sqrt_T
-
-        cdf_d1, cdf_neg_d1 = ndtr(d1), ndtr(-d1)
-        cdf_d2, cdf_neg_d2 = ndtr(d2), ndtr(-d2)
-        pdf_d1 = np.exp(-0.5 * d1 ** 2) / _SQRT_2PI
-
-        # Degenerate (T<=0 / iv<=0) fallback matches the scalar bs_delta()'s
-        # intrinsic-based edge case: delta -> 1/0 (call) or -1/0 (put).
-        ce_delta = np.where(valid, cdf_d1, np.where(S > K, 1.0, 0.0))
-        pe_delta = np.where(valid, cdf_d1 - 1.0, np.where(S < K, -1.0, 0.0))
-
-        gamma = np.where(valid, pdf_d1 / (S * iv * sqrt_T), 0.0)
-
-        vega = np.where(valid, S * pdf_d1 * sqrt_T / 100.0, 0.0)
-
-        decay = np.where(valid, -(S * pdf_d1 * iv) / (2.0 * sqrt_T), 0.0)
-        disc  = math.exp(-r * T)
-        ce_theta = np.where(valid, (decay - r * K * disc * cdf_d2) / 365.0, 0.0)
-        pe_theta = np.where(valid, (decay + r * K * disc * cdf_neg_d2) / 365.0, 0.0)
+        # Preserve this public compatibility class's historical intrinsic
+        # delta fallback for invalid strikes. The canonical live batch path
+        # deliberately returns zero for all invalid inputs.
+        invalid = (S <= 0) | (K <= 0)
+        ce_delta = np.where(invalid, np.where(S > K, 1.0, 0.0), ce_delta)
+        pe_delta = np.where(invalid, np.where(S < K, -1.0, 0.0), pe_delta)
 
         c_oi = pd.to_numeric(chain.get(ce_oi_col, 0), errors="coerce").fillna(0).to_numpy(dtype=float)
         p_oi = pd.to_numeric(chain.get(pe_oi_col, 0), errors="coerce").fillna(0).to_numpy(dtype=float)

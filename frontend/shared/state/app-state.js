@@ -44,7 +44,8 @@ const AppState = {
     quality: 'UNKNOWN',        // FULL | PARTIAL | UNKNOWN
     missing: [],               // critical analytical inputs currently unavailable
     marketSession: 'UNKNOWN',  // OPEN | MARKET_CLOSED | HOLIDAY | UNKNOWN
-    lastMessageAt: null,
+    lastMessageAt: null,       // last canonical market full/delta snapshot
+    lastTransportAt: null,     // any WS traffic, including portfolio/algo
     lastStatusAt: Date.now(),
     reason: '',
   },

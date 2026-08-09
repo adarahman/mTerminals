@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import vm from 'node:vm';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -11,6 +12,20 @@ const service = read('shared/services/data-service.js');
 const server = read('../ws_server_live.py');
 const modal = read('Dashboard/modal-manager.js');
 const chainView = read('Dashboard/chain/chain-view.js');
+const storeContext = vm.createContext({ window: {} });
+vm.runInContext(`${store}\nthis.MarketStore = MarketStore;`, storeContext);
+const deltaStore = new storeContext.MarketStore();
+deltaStore.ingest({
+  type: 'full', version: 'NIFTY:EXP:1',
+  payload: { chain: [{ strike: 24000, ceLTP: 100, ceOI: 500, temporary: true }] },
+});
+deltaStore.ingest({
+  type: 'delta', baseVersion: 'NIFTY:EXP:1',
+  payload: { chain: { _keyed: true, _key_field: 'strike', changed: [
+    { strike: 24000, ceLTP: 101.5, _removed: ['temporary'] },
+  ] } },
+});
+const patchedRow = deltaStore.state.chain[0];
 
 const checks = [
   ['ticker rows have stable keys', helpers.includes('data-index-symbol="VIX"') && helpers.includes('data-index-symbol="${backendSymbol}"')],
@@ -23,6 +38,8 @@ const checks = [
   ['market events carry metadata rather than snapshots', store.includes('messageType: msg && msg.type') && !store.includes("emit('market:update', this.state)")],
   ['semantic navigation events are published', chainView.includes("emit('range:change'") && renderer.includes("emit('expiry:change'") && modal.includes("emit('strike:select'")],
   ['modal lifecycle is semantic and restores focus', modal.includes("emit('modal:open'") && modal.includes("emit('modal:close'") && modal.includes('requestAnimationFrame(() => invoker.focus())')],
+  ['partial keyed deltas patch and remove row fields', patchedRow.ceLTP === 101.5 && patchedRow.ceOI === 500 && !('temporary' in patchedRow) && !('_removed' in patchedRow)],
+  ['auxiliary store changes bypass full market rendering', store.includes("messageType: msg && msg.type") && service.includes("messageType === 'portfolio'") && service.includes("messageType === 'algoStatus'") && service.includes("messageType === 'indexQuotes'") && service.includes('window.patchIndexTicker(AppState.wsState)')],
 ];
 
 let failed = 0;

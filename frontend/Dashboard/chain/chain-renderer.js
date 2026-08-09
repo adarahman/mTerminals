@@ -941,7 +941,7 @@ ChainView.prototype.renderDashboard = function(d) {
   
   // ── POST-RENDER ──
   renderVelocity(_velWin);
-  renderGreeksGex(_grkView);
+  if(isModalOpen('greeks-dashboard-modal')) renderGreeksGex(_grkView);
   // BUGFIX: this call was documented (see renderIvSurfaceModal's own
   // comment and openIvSurfaceModal's) as already wired into every
   // render/tick, but it was never actually added anywhere except inside
@@ -952,7 +952,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // _rerenderChainPanels below (incremental refresh, which is what
   // switchChainRange actually calls) so both paths keep it current
   // exactly like Greeks/GEX and OI Velocity already are.
-  this.renderIvSurfaceModal();
+  if(isModalOpen('iv-surface-modal')) this.renderIvSurfaceModal();
   this._bindDecisionDetailGuard();
   // Same click-guard the incremental per-tick refresh binds after each of
   // its own outerHTML swaps (see chain-renderer.js's chainSummaryEl /
@@ -1396,7 +1396,7 @@ ChainView.prototype._rerenderChainPanels = function() {
   });
 
   // ── 7. Greeks & GEX panels ───────────────────────────────────────────────
-  renderGreeksGex(_grkView);
+  if(isModalOpen('greeks-dashboard-modal')) renderGreeksGex(_grkView);
 
   // ── 7b. IV Surface modal ─────────────────────────────────────────────────
   // See the matching BUGFIX note in renderDashboard's post-render block —
@@ -1404,7 +1404,7 @@ ChainView.prototype._rerenderChainPanels = function() {
   // click (switchChainRange -> _rerenderChainPanels, not a full
   // renderDashboard rebuild) left the modal showing the old range's chain
   // if it happened to be open at the time.
-  this.renderIvSurfaceModal();
+  if(isModalOpen('iv-surface-modal')) this.renderIvSurfaceModal();
 
   // ── 8. OI Velocity panel ─────────────────────────────────────────────────
   renderVelocity(_velWin);

@@ -46,16 +46,19 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from paths import CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(CACHE_DIR, "decision_snapshot_log.db")
+RETENTION_DAYS = max(1, int(os.getenv("DECISION_SNAPSHOT_RETENTION_DAYS", "45")))
+PRUNE_INTERVAL_SECONDS = max(60, int(os.getenv("DECISION_SNAPSHOT_PRUNE_INTERVAL_SECONDS", "3600")))
 
 _lock = threading.Lock()
 _schema_ready_for: set[str] = set()
+_last_pruned_at: dict[str, datetime] = {}
 
 
 def _ensure_schema(db_path: str):
@@ -133,6 +136,15 @@ def log_decision_snapshot(engine_result, decision_dict: dict, db_path: str = DB_
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
+            now = datetime.now()
+            last_pruned = _last_pruned_at.get(db_path)
+            if last_pruned is None or (now - last_pruned).total_seconds() >= PRUNE_INTERVAL_SECONDS:
+                cutoff = (now - timedelta(days=RETENTION_DAYS)).isoformat(timespec="seconds")
+                conn.execute(
+                    "DELETE FROM decision_snapshots WHERE snapshot_time < ?",
+                    (cutoff,),
+                )
+                _last_pruned_at[db_path] = now
     except Exception as e:
         # Logged, never raised — see docstring.
         logger.warning(f"[snapshot_logger] could not log decision snapshot: {e}")

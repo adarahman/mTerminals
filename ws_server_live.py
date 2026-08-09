@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, time as dtime
 
@@ -215,6 +216,7 @@ _BASELINE_SEQ = 0
 _BASELINE_ID = None
 PROCESS_STARTED_AT = datetime.now().astimezone()
 _LAST_HEALTH_LOG_STATE = None
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 METRICS = OperationalMetrics(started_at=PROCESS_STARTED_AT)
 _NODE_SESSION = None
 # Most recent real-account funds snapshot from _funds_poll_body() below —
@@ -290,6 +292,9 @@ LIVE_TRADING_KILL_SWITCH_FILE = str(SCRIPT_DIR / "LIVE_TRADING_KILL")
 LIVE_MAX_LOTS_PER_ORDER = int(os.environ.get("LIVE_MAX_LOTS_PER_ORDER", "1"))
 LIVE_MAX_ORDERS_PER_MINUTE = int(os.environ.get("LIVE_MAX_ORDERS_PER_MINUTE", "5"))
 _live_order_timestamps = []  # sliding window for the per-minute cap, main-thread only
+_LIVE_ORDER_SUBMIT_LOCK = threading.Lock()
+_LIVE_ORDER_RESULTS = {}
+_LIVE_ORDER_RESULTS_MAX = 500
 
 if LIVE_TRADING_ENABLED:
     print(
@@ -400,6 +405,31 @@ def _check_live_rate_limit():
     return True
 
 
+def _completed_live_order(client_order_id):
+    """Returns a previously completed live submission, if any."""
+    with _LIVE_ORDER_SUBMIT_LOCK:
+        return _LIVE_ORDER_RESULTS.get(client_order_id)
+
+
+def _submit_live_order_idempotent(client_order_id, *args, **kwargs):
+    """Serializes live submissions and collapses retries by client ID.
+
+    AngelOne's order tag is also set to the same identity, so the broker
+    adapter can recover an accepted order after an uncertain response.
+    """
+    with _LIVE_ORDER_SUBMIT_LOCK:
+        existing = _LIVE_ORDER_RESULTS.get(client_order_id)
+        if existing is not None:
+            return existing, True
+        order_id = smartapi_place_order(
+            *args, **kwargs, order_tag=client_order_id,
+        )
+        _LIVE_ORDER_RESULTS[client_order_id] = order_id
+        while len(_LIVE_ORDER_RESULTS) > _LIVE_ORDER_RESULTS_MAX:
+            _LIVE_ORDER_RESULTS.pop(next(iter(_LIVE_ORDER_RESULTS)))
+        return order_id, False
+
+
 def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
     """Resolves (exchange, tradingsymbol, symboltoken) for a live order.
     Mirrors the same underlying/exchange logic used for the SmartAPI tick
@@ -445,6 +475,11 @@ _SYMBOL_SWITCH_EVENT = asyncio.Event()
 # comes first, bounded by MIN_TICK_RECOMPUTE_SECONDS as a floor and
 # POLL_SECONDS as a ceiling — see engine_loop() for the full reasoning.
 _TICK_ACTIVITY_EVENT = asyncio.Event()
+# Serializes the canonical full/delta stream and its backing snapshots.
+# compute_diff runs in a worker thread, so without this lock SmartAPI's
+# async tick path could mutate _LAST_SENT/LAST_PAYLOAD while that thread
+# was traversing them. New-client snapshot handoff uses the same lock.
+_MARKET_STREAM_LOCK = asyncio.Lock()
 
 
 def _json_default(obj):
@@ -483,8 +518,18 @@ def compute_diff(old, new, key_field="strike"):
             for row in new:
                 k = row.get(key_field)
                 old_row = old_by_key.get(k)
-                if old_row is None or old_row != row:
+                if old_row is None:
                     changed_rows.append(row)
+                elif old_row != row:
+                    row_diff = compute_diff(old_row, row, key_field)
+                    if isinstance(row_diff, dict):
+                        # The client patches keyed rows in place, so send only
+                        # changed fields plus identity instead of the entire
+                        # strike row (Greeks/evidence rows are comparatively
+                        # wide). `_removed` is applied client-side too.
+                        changed_rows.append({key_field: k, **row_diff})
+                    else:
+                        changed_rows.append(row)
             new_keys = {row.get(key_field) for row in new}
             removed_keys = [k for k in old_by_key if k not in new_keys]
             if not changed_rows and not removed_keys:
@@ -497,6 +542,33 @@ def compute_diff(old, new, key_field="strike"):
             return new  # unkeyed list, replace wholesale if different
 
     return new  # scalars or type mismatch
+
+
+def _background_task_done(task: asyncio.Task, task_name: str):
+    """Retain detached tasks and surface unexpected subsystem exits."""
+    _BACKGROUND_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "background task failed: %s",
+            task_name,
+            extra={
+                "event": "background_task.failed",
+                "subsystem": task_name,
+                "status": "failed",
+                "reason": str(exc),
+            },
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+def _create_background_task(awaitable, task_name: str) -> asyncio.Task:
+    task = asyncio.create_task(awaitable, name=task_name)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(lambda done: _background_task_done(done, task_name))
+    return task
 
 
 def _eod_task_done(task: asyncio.Task):
@@ -603,11 +675,12 @@ async def ws_handler(request):
         # (If switch_symbol() just cleared LAST_PAYLOAD above, this is
         # skipped on purpose — better to wait for the next tick's real data
         # on the new symbol than hand back a snapshot of the old one.)
-        if LAST_PAYLOAD is not None:
-            msg_str = orjson.dumps({
-                "type": "full", "payload": LAST_PAYLOAD, "version": _BASELINE_ID,
-            }, default=_json_default).decode()
-            await ws.send_str(msg_str)
+        async with _MARKET_STREAM_LOCK:
+            if LAST_PAYLOAD is not None:
+                msg_str = orjson.dumps({
+                    "type": "full", "payload": LAST_PAYLOAD, "version": _BASELINE_ID,
+                }, default=_json_default).decode()
+                await ws.send_str(msg_str)
         if INDEX_QUOTES:
             msg_str = orjson.dumps({"type": "indexQuotes", "payload": INDEX_QUOTES}, default=_json_default).decode()
             await ws.send_str(msg_str)
@@ -814,18 +887,62 @@ async def _handle_place_order(payload):
     function didn't raise. Manual callers (ws_handler) don't currently
     use the return value, so this is purely additive."""
     symbol = (payload.get("symbol") or "").strip().upper()
-    instrument_type = payload.get("instrument_type") or "INDEX"
-    expiry = payload.get("expiry") or ""
-    strike = payload.get("strike")
-    side = payload.get("side")
-    order_type = payload.get("order_type") or "MARKET"
-    limit_price = payload.get("limit_price")
+    instrument_type = str(payload.get("instrument_type") or "INDEX").strip().upper()
+    expiry = str(payload.get("expiry") or "").strip()
+    side = str(payload.get("side") or "").strip().upper()
+    order_type = str(payload.get("order_type") or "MARKET").strip().upper()
     client_order_id = payload.get("client_order_id")
 
     try:
-        qty_lots = int(payload.get("qty_lots") or 0)
+        qty_value = float(payload.get("qty_lots") or 0)
+        qty_lots = int(qty_value) if np.isfinite(qty_value) and qty_value.is_integer() else 0
     except (TypeError, ValueError):
         qty_lots = 0
+
+    try:
+        strike_raw = payload.get("strike")
+        strike = None if strike_raw in (None, "") else float(strike_raw)
+        if strike is not None and not np.isfinite(strike):
+            strike = None
+    except (TypeError, ValueError):
+        strike = None
+
+    try:
+        limit_raw = payload.get("limit_price")
+        limit_price = None if limit_raw in (None, "") else float(limit_raw)
+        if limit_price is not None and not np.isfinite(limit_price):
+            limit_price = None
+    except (TypeError, ValueError):
+        limit_price = None
+
+    # Treat the browser as untrusted input. In particular, the old live
+    # mapping interpreted every side other than BUY as SELL, so a missing or
+    # malformed side could become a real sell order. Reject malformed intent
+    # before building a price key, touching paper positions, consuming the
+    # live rate limit, or calling the broker.
+    validation_reason = None
+    if not symbol:
+        validation_reason = "symbol is required"
+    elif side not in ("BUY", "SELL"):
+        validation_reason = f"unsupported side {side or '(missing)'}"
+    elif instrument_type not in ("CE", "PE", "FUT", "EQ", "INDEX"):
+        validation_reason = f"unsupported instrument_type {instrument_type}"
+    elif order_type not in ("MARKET", "LIMIT"):
+        validation_reason = f"unsupported order_type {order_type}"
+    elif qty_lots < 1:
+        validation_reason = "qty_lots must be a positive whole number"
+    elif instrument_type in ("CE", "PE") and (not expiry or strike is None or strike <= 0):
+        validation_reason = "CE/PE orders require a valid expiry and positive strike"
+    elif instrument_type == "FUT" and not expiry:
+        validation_reason = "FUT orders require an expiry"
+    elif order_type == "LIMIT" and (limit_price is None or limit_price <= 0):
+        validation_reason = "LIMIT orders require a positive finite limit_price"
+
+    if validation_reason:
+        print(f"[order] REJECTED malformed intent: {validation_reason}", flush=True)
+        current_prices = _build_current_prices(LAST_PAYLOAD)
+        await _broadcast_portfolio(current_prices)
+        return {"status": "rejected", "reason": validation_reason}
 
     current_prices = _build_current_prices(LAST_PAYLOAD)
     key = _instrument_key(symbol, expiry, strike, instrument_type)
@@ -835,15 +952,32 @@ async def _handle_place_order(payload):
 
     if wants_live:
         rejection_reason = None
-        if not LIVE_TRADING_ENABLED:
+        if (
+            not isinstance(client_order_id, str)
+            or not 8 <= len(client_order_id) <= 20
+            or not client_order_id.isalnum()
+        ):
+            rejection_reason = "live orders require an 8-20 character alphanumeric client_order_id"
+        else:
+            completed_order_id = _completed_live_order(client_order_id)
+            if completed_order_id is not None:
+                await _broadcast_portfolio(current_prices)
+                return {
+                    "status": "placed",
+                    "order_id": completed_order_id,
+                    "client_order_id": client_order_id,
+                    "duplicate": True,
+                }
+
+        if rejection_reason is None and not LIVE_TRADING_ENABLED:
             rejection_reason = "live trading disabled on server"
-        elif _live_trading_kill_switch_active():
+        elif rejection_reason is None and _live_trading_kill_switch_active():
             rejection_reason = "live trading kill switch active"
-        elif qty_lots < 1 or qty_lots > LIVE_MAX_LOTS_PER_ORDER:
+        elif rejection_reason is None and (qty_lots < 1 or qty_lots > LIVE_MAX_LOTS_PER_ORDER):
             rejection_reason = f"qty_lots {qty_lots} outside allowed range (1-{LIVE_MAX_LOTS_PER_ORDER})"
-        elif not _check_live_rate_limit():
+        elif rejection_reason is None and not _check_live_rate_limit():
             rejection_reason = f"rate limit exceeded ({LIVE_MAX_ORDERS_PER_MINUTE}/min)"
-        elif symbol not in PT_LOT_SIZES:
+        elif rejection_reason is None and symbol not in PT_LOT_SIZES:
             # A real order's quantity = qty_lots * lot_size — silently
             # falling back to a guessed lot size (the old `.get(symbol, 65)`
             # default) for a symbol NSE's circular doesn't match here would
@@ -852,7 +986,7 @@ async def _handle_place_order(payload):
             # against NSE's current circular — see that dict's own comment)
             # before it can be traded live.
             rejection_reason = f"no verified lot size for {symbol} — refusing to guess on a live order"
-        else:
+        elif rejection_reason is None:
             # Account-level checks — evaluated across the whole trading
             # day, not just this order. See risk/account_guard.py.
             guard_tripped, guard_trip_reason = _ACCOUNT_GUARD.is_tripped()
@@ -901,14 +1035,20 @@ async def _handle_place_order(payload):
         transaction_type = "BUY" if (side or "").upper() == "BUY" else "SELL"
 
         try:
-            order_id = await asyncio.to_thread(
-                smartapi_place_order,
+            order_id, duplicate = await asyncio.to_thread(
+                _submit_live_order_idempotent,
+                client_order_id,
                 tradingsymbol, symboltoken, exchange, transaction_type, quantity,
                 order_type=order_type, price=limit_price or 0.0,
             )
             print(f"[live-trading] PLACED: {tradingsymbol} {transaction_type} {quantity} "
                   f"qty (order_id={order_id})", flush=True)
-            live_result = {"status": "placed", "order_id": order_id}
+            live_result = {
+                "status": "placed",
+                "order_id": order_id,
+                "client_order_id": client_order_id,
+                "duplicate": duplicate,
+            }
         except Exception as e:
             print(f"[live-trading] FAILED: {tradingsymbol} {transaction_type} {quantity} — {e}", flush=True)
             live_result = {"status": "failed", "reason": str(e)}
@@ -983,6 +1123,7 @@ async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_
         "side": side,
         "order_type": "MARKET",
         "qty_lots": qty_lots,
+        "client_order_id": "a" + uuid.uuid4().hex[:19],
         "live": True,
         "confirmed": True,
     })
@@ -1612,6 +1753,12 @@ def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
 
 
 async def _smartapi_sync_and_broadcast(message):
+    """Serialize SmartAPI mutations with engine full/delta computation."""
+    async with _MARKET_STREAM_LOCK:
+        await _smartapi_sync_and_broadcast_locked(message)
+
+
+async def _smartapi_sync_and_broadcast_locked(message):
     """Wraps broadcast() for the SmartAPI feed specifically: before sending
     a tick delta to clients, also merges it into LAST_PAYLOAD/_LAST_SENT's
     matching chain rows (IF the feed's expiry matches what's currently
@@ -2429,7 +2576,7 @@ def start_funds_polling():
     if _funds_task is not None and not _funds_task.done():
         return
     print("[funds] starting funds polling (live mode toggled on)", flush=True)
-    _funds_task = asyncio.create_task(_funds_poll_body())
+    _funds_task = _create_background_task(_funds_poll_body(), "funds_poll")
 
 
 def stop_funds_polling():
@@ -2516,9 +2663,6 @@ async def engine_loop():
             # Transport/session context is part of the canonical payload so the
             # Dashboard can distinguish an exchange closure from a broken feed.
             payload['marketSession'] = _market_session_status(now)
-            LAST_PAYLOAD = payload
-            LAST_PAYLOAD_AT = datetime.now().astimezone()
-
             # Strategy -> execution bridge: hand this tick's decision
             # block to the auto-executor. No-op unless
             # AUTO_STRATEGY_EXECUTION_ENABLED=true; see
@@ -2527,7 +2671,10 @@ async def engine_loop():
             # delay this tick's own broadcast below.
             decision_block = payload.get("decision")
             if decision_block:
-                asyncio.create_task(_AUTO_EXECUTOR.maybe_execute(decision_block, SYMBOL, EXPIRY))
+                _create_background_task(
+                    _AUTO_EXECUTOR.maybe_execute(decision_block, SYMBOL, EXPIRY),
+                    "auto_executor",
+                )
 
             # Feed NSE's authoritative changeinOpenInterest into the
             # SmartAPI aggregator's OI baselines every cycle (not just at
@@ -2566,30 +2713,33 @@ async def engine_loop():
                 if baselines:
                     _smartapi_aggregator.seed_session_baseline(baselines)
 
-            if not USE_DELTA or _LAST_SENT is None:
-                await broadcast({"type": "full", "payload": payload})
-            else:
-                diff_start = time.monotonic()
-                # compute_diff walks the ENTIRE payload (all expiries, OI
-                # velocity buckets, virtual-OI, greeks) doing recursive
-                # old==new equality checks + keyed-list reconciliation.
-                # That's real CPU time — running it inline on the event
-                # loop (like before) froze WS heartbeats/broadcasts/static
-                # serving for the duration. Offload it exactly like the
-                # pipeline itself already is.
-                diff = await asyncio.to_thread(compute_diff, _LAST_SENT, payload)
-                diff_elapsed = time.monotonic() - diff_start
-                if diff_elapsed > 0.25:
-                    print(f"[ws] WARNING: compute_diff took {diff_elapsed:.2f}s "
-                          f"— this was blocking the event loop before this fix",
-                          flush=True)
-                if diff is not None:
-                    await broadcast({"type": "delta", "payload": diff})
+            async with _MARKET_STREAM_LOCK:
+                # Publish the new canonical snapshot and derive its wire
+                # update atomically relative to SmartAPI's in-place patches.
+                LAST_PAYLOAD = payload
+                LAST_PAYLOAD_AT = datetime.now().astimezone()
+                if not USE_DELTA or _LAST_SENT is None:
+                    await broadcast({"type": "full", "payload": payload})
                 else:
-                    print("[ws] tick unchanged, skipping broadcast", flush=True)
+                    diff_start = time.monotonic()
+                    # compute_diff walks the ENTIRE payload (all expiries, OI
+                    # velocity buckets, virtual-OI, greeks) doing recursive
+                    # old==new equality checks + keyed-list reconciliation.
+                    # Keep the event loop responsive by using a worker while
+                    # the stream lock prevents concurrent snapshot mutation.
+                    diff = await asyncio.to_thread(compute_diff, _LAST_SENT, payload)
+                    diff_elapsed = time.monotonic() - diff_start
+                    if diff_elapsed > 0.25:
+                        print(f"[ws] WARNING: compute_diff took {diff_elapsed:.2f}s "
+                              f"— this was blocking the event loop before this fix",
+                              flush=True)
+                    if diff is not None:
+                        await broadcast({"type": "delta", "payload": diff})
+                    else:
+                        print("[ws] tick unchanged, skipping broadcast", flush=True)
 
-            _LAST_SENT = payload
-            asyncio.create_task(_post_to_node(payload))
+                _LAST_SENT = payload
+            _create_background_task(_post_to_node(payload), "node_relay")
             print(
                 f"[ws] broadcast tick -> {len(CONNECTED)} client(s) "
                 f"(pipeline {pipeline_elapsed:.2f}s)",
@@ -2932,6 +3082,7 @@ async def backtest_handler(request):
     return web.json_response({
         "symbol": req_symbol,
         "summary": result.summary(),
+        "metadata": result.metadata(),
         "trades": trades,
         "equityCurve": equity_curve,
     })
@@ -3138,17 +3289,20 @@ async def main():
     # compute_diff() in engine_loop(): anything blocking goes through a
     # thread, never runs inline on the loop.
     if USE_SMARTAPI:
-        asyncio.create_task(asyncio.to_thread(start_smartapi_feed, loop))
+        _create_background_task(
+            asyncio.to_thread(start_smartapi_feed, loop),
+            "smartapi_startup",
+        )
     else:
         print("[smartapi] skipped at startup (--no-smartapi) — chain served from "
               "market_api.py REST polling only, no AngelOne websocket connection made", flush=True)
 
     try:
-        asyncio.create_task(index_quote_loop())
-        asyncio.create_task(bridge_loop())
-        asyncio.create_task(algo_status_loop())
+        _create_background_task(index_quote_loop(), "index_quote_loop")
+        _create_background_task(bridge_loop(), "bridge_loop")
+        _create_background_task(algo_status_loop(), "algo_status_loop")
         if LIVE_TRADING_ENABLED:
-            asyncio.create_task(reconcile_loop())
+            _create_background_task(reconcile_loop(), "position_reconcile_loop")
         # No funds_loop() task here anymore — funds polling starts/stops
         # live via the {"type":"toggle_live_mode",...} WS message (see
         # ws_handler + start_funds_polling()/stop_funds_polling() above),
@@ -3156,6 +3310,11 @@ async def main():
         # directly over the socket, no server restart required.
         await engine_loop()
     finally:
+        background_tasks = list(_BACKGROUND_TASKS)
+        for task in background_tasks:
+            task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
         if _NODE_SESSION is not None and not _NODE_SESSION.closed:
             await _NODE_SESSION.close()
         # oi_analysis.py now keeps oi_history_log.parquet in memory and only

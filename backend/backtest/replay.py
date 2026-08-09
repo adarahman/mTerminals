@@ -58,14 +58,13 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Optional
 
 import pandas as pd
 
-from decision.auto_executor import AutoExecutor
 from backtest.snapshot_logger import load_decision_snapshots
-from oi.oi_analysis import JSON_HISTORY_LOG_PATH
+from decision.auto_executor import AutoExecutor
+from oi.oi_analysis import JSON_HISTORY_LOG_PATH, VELOCITY_RETENTION_MINUTES
 
 _OPPOSITE_SIDE = {"BUY": "SELL", "SELL": "BUY"}
 _ACTION_INSTRUMENT_SIDE = {
@@ -81,6 +80,7 @@ _ACTION_INSTRUMENT_SIDE = {
 # for a position that should have squared off at the real 15:30 close.
 MARKET_OPEN_TIME = "09:15:00"
 MARKET_CLOSE_TIME = "15:30:00"
+MAX_FILL_LOOKAHEAD_SECONDS = 60
 
 
 def _in_market_hours(ts: pd.Timestamp) -> bool:
@@ -126,6 +126,11 @@ class BacktestResult:
     symbol: str
     trades: list = field(default_factory=list)
     unpriced_signals: int = 0  # cleared entries we couldn't fill — no LTP data at that strike/tick
+    snapshot_count: int = 0
+    data_start: Optional[str] = None
+    data_end: Optional[str] = None
+    requested_start: Optional[str] = None
+    requested_end: Optional[str] = None
 
     @property
     def closed_trades(self):
@@ -152,12 +157,32 @@ class BacktestResult:
             "unpriced_signals": self.unpriced_signals,
         }
 
+    def metadata(self) -> dict:
+        return {
+            "snapshotCount": self.snapshot_count,
+            "dataStart": self.data_start,
+            "dataEnd": self.data_end,
+            "requestedStart": self.requested_start,
+            "requestedEnd": self.requested_end,
+            "marketSession": f"{MARKET_OPEN_TIME}–{MARKET_CLOSE_TIME}",
+            "entryFillModel": f"first logged LTP within {MAX_FILL_LOOKAHEAD_SECONDS}s after the decision tick",
+            "exitFillModel": "opposite signal, session boundary, or final logged LTP",
+            "transactionCostsIncluded": False,
+            "slippageIncluded": False,
+            "pnlBasis": "gross before brokerage, taxes, fees and slippage",
+            "decisionScoringRecomputed": False,
+            "historyLimit": (
+                "decision snapshots may span the configured archive, but fill pricing "
+                f"is limited to the latest {VELOCITY_RETENTION_MINUTES} minutes of rolling LTP history"
+            ),
+        }
+
 
 class LtpHistory:
-    """Point-in-time CE/PE LTP lookups for one symbol, sourced from
-    oi/oi_analysis.py's oi_history_log.parquet (45-day rolling window —
-    this bounds how far back a backtest can meaningfully go until more
-    days accumulate)."""
+    """Point-in-time CE/PE LTP lookups for one symbol, sourced from the
+    bounded live-velocity parquet. This is intentionally a short rolling
+    window, so older decision snapshots remain inspectable but cannot be
+    reliably priced by this replay model."""
 
     def __init__(self, symbol: str, log_path: str = JSON_HISTORY_LOG_PATH):
         self.symbol = symbol
@@ -178,7 +203,8 @@ class LtpHistory:
     def _series(self, expiry: str, strike: int):
         return self._by_key.get((str(expiry), int(strike)))
 
-    def price_at(self, expiry: str, strike: int, instrument_type: str, ts) -> Optional[tuple]:
+    def price_at(self, expiry: str, strike: int, instrument_type: str, ts,
+                 max_lookahead_seconds: int = MAX_FILL_LOOKAHEAD_SECONDS) -> Optional[tuple]:
         """Nearest tick AT OR AFTER `ts` (entry fill semantics). Returns
         (fill_timestamp, price) or None if no data exists for this
         instrument at/after ts."""
@@ -187,6 +213,10 @@ class LtpHistory:
             return None
         col = "CE_LTP" if instrument_type == "CE" else "PE_LTP"
         after = g[g["snapshot_time"] >= ts]
+        if max_lookahead_seconds is not None:
+            after = after[
+                after["snapshot_time"] <= ts + pd.Timedelta(seconds=max_lookahead_seconds)
+            ]
         if after.empty:
             return None
         row = after.iloc[0]
@@ -241,15 +271,16 @@ async def run_backtest(
     from backtest import snapshot_logger
     snapshots = load_decision_snapshots(symbol, start, end,
                                          db_path=db_path or snapshot_logger.DB_PATH)
-    result = BacktestResult(symbol=symbol)
+    result = BacktestResult(
+        symbol=symbol,
+        snapshot_count=len(snapshots),
+        data_start=str(snapshots[0]["snapshot_time"]) if snapshots else None,
+        data_end=str(snapshots[-1]["snapshot_time"]) if snapshots else None,
+        requested_start=start,
+        requested_end=end,
+    )
     if not snapshots:
         return result
-    if override_execute_recommended:
-        for row in snapshots:
-            decision = json.loads(row["decision_json"])
-            decision["executeRecommended"] = decision.get("confidence", 0) >= min_confidence
-            row["decision_json"] = json.dumps(decision)
-
     if override_execute_recommended:
         for row in snapshots:
             decision = json.loads(row["decision_json"])

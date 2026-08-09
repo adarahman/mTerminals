@@ -307,6 +307,16 @@ window.addEventListener('load', function(){
 
 // Click on the dark backdrop (outside the panel) also closes it.
 document.addEventListener('DOMContentLoaded', function(){
+  // The vertical desktop rail can afford to keep Context expanded. Below
+  // the compact breakpoint the rail becomes a horizontal block above the
+  // dashboard; leaving five context buttons open there consumed roughly a
+  // third of a 768px-high viewport before any analysis was visible. Start
+  // both disclosure groups collapsed on compact screens while preserving
+  // their one-click access and the user's state after that first paint.
+  if(window.matchMedia('(max-width: 900px)').matches){
+    document.getElementById('rail-context-menu')?.removeAttribute('open');
+    document.getElementById('rail-tools-menu')?.removeAttribute('open');
+  }
   var modal = document.getElementById('oi-flow-modal');
   if(modal){
     modal.addEventListener('click', function(e){

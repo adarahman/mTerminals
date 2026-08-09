@@ -10,13 +10,15 @@ async function openDashboard(page) {
 
 test('dashboard loads and exposes primary tools without page errors', async ({ page }) => {
   const pageErrors = await openDashboard(page);
-  await expect(page.locator('#oi-flow-open-btn')).toBeVisible();
-  await expect(page.locator('#backtest-toggle-btn')).toBeVisible();
+  await expect(page.locator('#rail-context-toggle')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Decision/ })).toBeVisible();
+  await expect(page.locator('#rail-tools-toggle')).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 
 test('OI Flow modal opens, traps focus, and restores its invoker', async ({ page }) => {
   await openDashboard(page);
+  await page.locator('#rail-tools-toggle').click();
   const trigger = page.locator('#oi-flow-open-btn');
   await trigger.click();
 
@@ -32,6 +34,7 @@ test('OI Flow modal opens, traps focus, and restores its invoker', async ({ page
 
 test('Backtest modal uses the shared accessible modal contract', async ({ page }) => {
   await openDashboard(page);
+  await page.locator('#rail-tools-toggle').click();
   const trigger = page.locator('#backtest-toggle-btn');
   await trigger.click();
 
@@ -103,4 +106,13 @@ test('compact dashboard keeps primary navigation within the viewport', async ({ 
   await expect(page.locator('#sec-nav-bar')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   expect(overflow).toBe(false);
+});
+
+test('narrow dashboard starts rail disclosures collapsed', async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 700 });
+  await openDashboard(page);
+  await expect(page.locator('#rail-context-menu')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#rail-tools-menu')).not.toHaveAttribute('open', '');
+  const navHeight = await page.locator('#sec-nav-bar').evaluate(el => el.getBoundingClientRect().height);
+  expect(navHeight).toBeLessThan(150);
 });

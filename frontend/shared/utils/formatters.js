@@ -31,6 +31,28 @@ function fmtI(v){return(parseFloat(v)||0).toLocaleString('en-IN',{minimumFractio
 function sClr(v){return v>=0?'var(--green)':'var(--red)';}
 function ceOiChgClr(v){return v>=0?'var(--red)':'var(--green)';}
 
+// Safe for both HTML text and quoted attribute values. Keeping this in the
+// shared formatter layer prevents backend-supplied labels/reasons from being
+// escaped differently by each dashboard surface.
+function escapeHtml(value){
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  })[ch]);
+}
+
+// Indian compact units on an unscaled raw number. Unlike fmtK(), this keeps
+// crore support for chain-level OI and volume totals.
+function fmtCrLK(value){
+  const v = Number(value);
+  if(value == null || value === '' || !Number.isFinite(v)) return '—';
+  const a = Math.abs(v);
+  const prefix = v < 0 ? '-' : '';
+  if(a >= 1e7) return prefix + (a / 1e7).toFixed(2) + 'Cr';
+  if(a >= 1e5) return prefix + (a / 1e5).toFixed(2) + 'L';
+  if(a >= 1e3) return prefix + (a / 1e3).toFixed(1) + 'K';
+  return prefix + a.toFixed(0);
+}
+
 // v > 0 -> pos, v < 0 -> neg, v === 0 -> neutralVar (default --text-primary).
 // Replaces netClr()/arpClr(), each independently reimplemented in
 // exec-view.js, chain-template.js, chain-depth.js, and chain-renderer.js

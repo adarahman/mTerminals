@@ -16,6 +16,38 @@
 // fires before connectWebSocket()'s first tick, so at mount time there is
 // no live symbol to prefill from yet).
 let _ptSymbolTouched = false;
+let _ptSymbolUniverseSig = '';
+
+// Mirrors the main dashboard symbol picker: consume the backend-supplied
+// complete F&O universe, group indices and stocks, and preserve whichever
+// value the order form currently owns. The small static list is only a
+// first-paint fallback before fnoSymbols arrives on the live payload.
+function ptPopulateOrderSymbols(fnoSymbols, preferredSymbol){
+  const select = $i('pt-symbol');
+  if(!select) return;
+  const indices = Array.isArray(fnoSymbols && fnoSymbols.indices) ? fnoSymbols.indices : PT_KNOWN_SYMBOLS;
+  const stocks = Array.isArray(fnoSymbols && fnoSymbols.stocks) ? fnoSymbols.stocks : [];
+  const preferred = preferredSymbol || select.value || indices[0] || '';
+  const normalizedIndices = indices.includes(preferred) || stocks.includes(preferred)
+    ? indices : [preferred, ...indices].filter(Boolean);
+  const signature = normalizedIndices.join('|') + '::' + stocks.join('|');
+  if(signature === _ptSymbolUniverseSig){
+    if(preferred && Array.from(select.options).some(o=>o.value===preferred)) select.value=preferred;
+    return;
+  }
+  _ptSymbolUniverseSig = signature;
+  select.innerHTML = '';
+  const appendGroup = (label, symbols) => {
+    if(!symbols.length) return;
+    const group = document.createElement('optgroup');
+    group.label = label;
+    symbols.forEach(sym=>group.appendChild(new Option(sym, sym)));
+    select.appendChild(group);
+  };
+  appendGroup('Indices', normalizedIndices);
+  appendGroup('Stocks', stocks);
+  if(preferred && Array.from(select.options).some(o=>o.value===preferred)) select.value=preferred;
+}
 
 // Builds #pt-order-panel's DOM and wires every control inside it. Called
 // once by portfolio-tracker.js's ptMountPanel() orchestrator (which also
@@ -35,14 +67,26 @@ function ptMountOrderPanel(){
   const orderPanel = document.createElement('div');
   orderPanel.id = 'pt-order-panel';
   orderPanel.innerHTML = `
-    <h4><span id="pt-panel-title">Order GUI</span> <button type="button" id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Switch between Paper and Live trading">📝 PAPER</button> <button type="button" class="pt-close" onclick="ptClosePanel('pt-order-panel','pt-order-toggle-btn')" aria-label="Close order panel">✕</button></h4>
-    <div class="pt-section">
+    <h4 class="pt-order-header"><span id="pt-panel-title">Order Entry</span> <button type="button" id="pt-mode-toggle" class="pt-mode-toggle paper" onclick="ptToggleLiveMode()" title="Switch between Paper and Live trading">📝 PAPER</button> <button type="button" class="pt-close" onclick="ptClosePanel('pt-order-panel','pt-order-toggle-btn')" aria-label="Close order panel">✕</button></h4>
+    <div class="pt-section pt-order-form">
       <div class="pt-row">
         <select id="pt-symbol"></select>
-        <select id="pt-instype">
-          <option value="CE">CE</option><option value="PE">PE</option>
-          <option value="FUT">FUT</option><option value="INDEX">INDEX</option>
+        <div class="pt-toggle-group pt-asset-toggle" id="pt-asset-toggle" role="group" aria-label="Instrument class">
+          <button type="button" class="pt-toggle-btn" data-value="EQ">EQ</button>
+          <button type="button" class="pt-toggle-btn" data-value="FUT">FUT</button>
+          <button type="button" class="pt-toggle-btn active" data-value="OPT">OPT</button>
+        </div>
+        <select id="pt-asset-class" style="display:none;"><option value="EQ">EQ</option><option value="FUT">FUT</option><option value="OPT" selected>OPT</option></select>
+        <select id="pt-instype" style="display:none;">
+          <option value="CE" selected>CE</option><option value="PE">PE</option>
+          <option value="FUT">FUT</option><option value="INDEX">EQ</option>
         </select>
+      </div>
+      <div class="pt-row pt-option-type-row" id="pt-option-type-row">
+        <div class="pt-toggle-group" id="pt-option-type-toggle" role="group" aria-label="Option type">
+          <button type="button" class="pt-toggle-btn pt-toggle-ce active" data-value="CE">CE</button>
+          <button type="button" class="pt-toggle-btn pt-toggle-pe" data-value="PE">PE</button>
+        </div>
       </div>
       <div class="pt-row">
         <select id="pt-expiry"><option value="">Expiry…</option></select>
@@ -56,7 +100,7 @@ function ptMountOrderPanel(){
         <select id="pt-side" style="display:none;"><option value="BUY">BUY</option><option value="SELL">SELL</option></select>
         <input id="pt-qty" type="number" min="1" value="1" placeholder="Lots">
       </div>
-      <div id="pt-lotsize-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">Lot size: — · Total qty: —</div>
+      <div id="pt-lotsize-hint" class="pt-order-hint">Lot size: — · Total qty: —</div>
       <div class="pt-row">
         <div class="pt-toggle-group" id="pt-ordtype-toggle" role="group" aria-label="Order type">
           <button type="button" class="pt-toggle-btn active" data-value="MARKET">MARKET</button>
@@ -77,14 +121,14 @@ function ptMountOrderPanel(){
         <select id="pt-trigger-mode" style="display:none;"><option value="abs">abs</option><option value="pct">pct</option></select>
         <input id="pt-trigger-price" type="number" placeholder="Trigger price">
       </div>
-      <div id="pt-trigger-pct-hint" style="display:none;font-size:10px;opacity:.65;margin:-4px 0 6px;"></div>
+      <div id="pt-trigger-pct-hint" class="pt-order-hint" style="display:none;"></div>
       <div class="pt-row" id="pt-trail-row" style="display:none;">
         <input id="pt-trail-value" type="number" min="0.05" step="0.05" placeholder="Trail by (points)">
       </div>
       <div class="pt-row" id="pt-gtt-row" style="display:none;">
         <input id="pt-gtt-expiry" type="number" min="1" value="30" placeholder="GTT valid for (days)">
       </div>
-      <div id="pt-ltp-hint" style="font-size:10px;opacity:.65;margin:-4px 0 6px;">LTP: —</div>
+      <div id="pt-ltp-hint" class="pt-order-hint pt-order-ltp">LTP: —</div>
       <div class="pt-row" id="pt-submit-row">
       </div>
       <div id="pt-err"></div>
@@ -92,10 +136,8 @@ function ptMountOrderPanel(){
   `;
   document.body.appendChild(orderPanel);
 
-  PT_KNOWN_SYMBOLS.forEach(sym=>{
-    const o = document.createElement('option'); o.value = sym; o.textContent = sym;
-    $i('pt-symbol').appendChild(o);
-  });
+  ptPopulateOrderSymbols(AppState.wsState && AppState.wsState.fnoSymbols,
+    AppState.wsState && AppState.wsState.symbol);
 
   // Each order type needs a different subset of the four extra fields
   // (limit price / trigger price / trail value / GTT expiry). Rather than
@@ -140,11 +182,29 @@ function ptMountOrderPanel(){
       sel.dispatchEvent(new Event('change'));
     });
   }
+  function ptUpdateAssetClassUi(){
+    const assetClass = $i('pt-asset-class').value;
+    const optionRow = $i('pt-option-type-row');
+    const instype = $i('pt-instype');
+    optionRow.style.display = assetClass === 'OPT' ? '' : 'none';
+    if(assetClass === 'OPT'){
+      const activeOption = $i('pt-option-type-toggle').querySelector('.pt-toggle-btn.active');
+      instype.value = activeOption ? activeOption.dataset.value : 'CE';
+    } else {
+      // The backend prices the cash underlying under its historical INDEX
+      // instrument key; the visible trader-facing label remains EQ.
+      instype.value = assetClass === 'FUT' ? 'FUT' : 'INDEX';
+    }
+    instype.dispatchEvent(new Event('change'));
+  }
   ptWireToggleGroup('pt-side-toggle', 'pt-side');
+  ptWireToggleGroup('pt-asset-toggle', 'pt-asset-class');
+  ptWireToggleGroup('pt-option-type-toggle', 'pt-instype');
   ptWireToggleGroup('pt-ordtype-toggle', 'pt-ordtype');
   ptWireToggleGroup('pt-trigger-mode-toggle', 'pt-trigger-mode');
   $i('pt-trigger-mode').onchange = ptUpdateTriggerModeUi;
   $i('pt-trigger-price').addEventListener('input', ptUpdateTriggerPctHint);
+  $i('pt-asset-class').onchange = ptUpdateAssetClassUi;
   $i('pt-instype').onchange = ptRefreshExpiryStrikeOptions;
   $i('pt-expiry').onchange  = ptRefreshStrikeOptions;
   $i('pt-strike').onchange  = ptUpdateLtpHint;
@@ -174,6 +234,7 @@ function ptMountOrderPanel(){
   ptRefreshLotSizes();
   ptUpdateLotSizeHint();
   ptUpdateOrdTypeFields();
+  ptUpdateAssetClassUi();
 }
 
 function toggleOrderPanel(){
@@ -589,6 +650,10 @@ function ptExecuteLeg(symbol, expiry, strike, instrument_type, side, lots, ltp){
 window.ptExecuteLeg = ptExecuteLeg;
 
 function ptExecuteStrategy(){
+  if(_ptLiveMode){
+    ptToast('Bulk live strategy blocked — confirm and place each leg individually', 'err');
+    return;
+  }
   const stratSel = document.getElementById('strat-select');
   const strikeSel = document.getElementById('strat-strike-select');
   if(!stratSel || !_data) return;
@@ -625,6 +690,10 @@ window.ptExecuteStrategy = ptExecuteStrategy;
 // selected strategy. No strike-shift offset here since the decision box
 // has no strike picker of its own — legs execute at the strikes shown.
 function ptExecuteDecisionStrategy(){
+  if(_ptLiveMode){
+    ptToast('Bulk live strategy blocked — confirm and place each leg individually', 'err');
+    return;
+  }
   if(!_data){ ptToast('No live data yet — nothing to execute', 'err'); return; }
   const auto = (_data.decision && _data.decision.autoStrategy) || {};
   const legs = auto.legs || [];
@@ -677,6 +746,8 @@ function ptSyncFormFromWsState(wsState){
   // the backend was actually streaming e.g. BANKNIFTY the form stayed
   // pinned to NIFTY forever and expiry/strike lookups never matched.
   const symSel = $i('pt-symbol');
+  const preferredSymbol = !_ptSymbolTouched ? wsState.symbol : (symSel && symSel.value);
+  ptPopulateOrderSymbols(wsState.fnoSymbols, preferredSymbol);
   if(symSel && !_ptSymbolTouched && wsState.symbol && symSel.value !== wsState.symbol
      && Array.from(symSel.options).some(o=>o.value===wsState.symbol)){
     symSel.value = wsState.symbol;

@@ -204,13 +204,9 @@ class ModalManager {
   // Unlike the OI Dashboard modal above, this isn't an iframe to a
   // separate document — the full Greeks/GEX table (renderGreeksGex() in
   // ChainView) already renders straight into #grkgex-content/#grkgex-footer,
-  // which now live inside this modal's markup in DashboardPro.html instead
-  // of inline in the main dashboard template. Those elements are never
-  // destroyed by a dashboard rebuild (they're outside the rebuilt
-  // #dashboard container), so they're kept continuously up to date by the
-  // normal render/tick path whether or not the modal is currently open —
-  // opening it is purely a visibility toggle, same chrome/Esc/backdrop
-  // behavior as the OI Dashboard modal.
+  // which now live inside this modal's markup in DashboardPro.html. Closed
+  // modals are not rendered on live ticks; opening refreshes from the latest
+  // canonical state immediately, avoiding hidden table rebuilds.
   openGreeksModal(){
   var modal = document.getElementById('greeks-dashboard-modal');
   if(!modal) return;
@@ -286,11 +282,9 @@ class ModalManager {
 }
 
   // ── IV SURFACE MODAL ──
-  // Same treatment as the Greeks/FII-DII modals above: plain in-page
-  // markup (#iv-surface-content) kept continuously current by
-  // ChainView.renderIvSurfaceModal() via _rerenderChainPanels
-  // (chain-views.js) on every render/tick, whether or not this modal is
-  // open. openIvSurfaceModal() was already being called by
+  // Plain in-page markup (#iv-surface-content) is refreshed only while the
+  // modal is visible, plus once immediately on open. openIvSurfaceModal()
+  // was already being called by
   // buildIvAlertsHtml()'s "Full Surface →" button, but this method itself
   // (and closeIvSurfaceModal/_ivSurfaceEscHandler) had never actually been
   // written, so that button threw a ReferenceError — root-cause fixed here.

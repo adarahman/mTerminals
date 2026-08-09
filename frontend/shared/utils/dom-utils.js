@@ -20,6 +20,7 @@
 
 function $i(id){return document.getElementById(id);}
 function err(m){const el=$i('err-msg');if(el)el.textContent=m;}
+function isModalOpen(id){const el=$i(id);return !!(el && el.classList.contains('open'));}
 
 // ── FLICKER HELPERS ──────────────────────────────────────────────────────
 // OI Flow never flickers because #oi-flow-body is small, text/color-only

@@ -47,31 +47,65 @@
 }
 
 #pt-order-panel{
-  /* First attempt (2026-08-04) only nudged lightness (bg-1 -> near bg-0,
-     a ~9-unit RGB shift — invisible) and faded the accent wash to ~3%
-     opacity by the panel's midpoint, so most of the panel was still
-     plain neutral-gray/black indistinguishable from every card behind
-     it. Fixed: the base itself is now hue-shifted (a dark violet-tinted
-     charcoal, not neutral gray) and the accent gradient stays visible
-     edge-to-edge instead of fading out, so the whole panel reads as
-     chromatically distinct from the dashboard's neutral --bg-0/--bg-1,
-     not merely a shade darker. */
   background:
-    linear-gradient(160deg, rgba(139,92,246,0.30), rgba(139,92,246,0.14)),
-    #17111f;
-  border:2px solid #8b5cf6; /* --retail (theme.css) — reserved as the paper-trading module's own accent, unused elsewhere in #sec-nav-bar so it never collides with the blue/red/green/amber already claimed by Chain/Risk/Strats/Decision */
-  box-shadow:0 8px 32px rgba(139,92,246,0.32), var(--shadow-lg);
+    radial-gradient(circle at 15% 0%,rgba(151,117,250,.16),transparent 42%),
+    linear-gradient(155deg,rgba(35,27,57,.97),rgba(12,14,23,.985) 64%);
+  border:1px solid rgba(151,117,250,.66);
+  box-shadow:0 18px 52px rgba(0,0,0,.5),0 0 0 1px rgba(151,117,250,.08),var(--shadow-lg);
 }
+#pt-order-panel .pt-order-header{margin:-4px -2px 10px;padding:4px 2px 11px;border-bottom:1px solid rgba(151,117,250,.25);color:#f1ecff;letter-spacing:.02em;}
+#pt-order-panel .pt-close{color:#b9acd9;transition:color .15s ease,opacity .15s ease;}
+#pt-order-panel .pt-close:hover{color:#fff;opacity:1;}
+#pt-order-panel .pt-order-form{padding:11px;border:1px solid rgba(151,117,250,.16);border-radius:10px;background:rgba(5,7,13,.27);}
+#pt-order-panel .pt-row{gap:8px;}
+#pt-order-panel .pt-order-form input,#pt-order-panel .pt-order-form select{min-height:34px;border-color:rgba(151,117,250,.2);background:rgba(7,8,15,.7);color:#ede9f7;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;}
+#pt-order-panel .pt-order-form input:hover,#pt-order-panel .pt-order-form select:hover{border-color:rgba(151,117,250,.4);}
+#pt-order-panel .pt-order-form input:focus,#pt-order-panel .pt-order-form select:focus{border-color:#9775fa;background:rgba(12,10,22,.88);box-shadow:0 0 0 2px rgba(151,117,250,.16);outline:none;}
+#pt-order-panel .pt-toggle-group{overflow:hidden;border:1px solid rgba(151,117,250,.2);border-radius:7px;background:rgba(7,8,15,.62);}
+#pt-order-panel .pt-toggle-btn{background:transparent;color:#ada5be;}
+#pt-order-panel .pt-toggle-btn:hover:not(.active){background:rgba(151,117,250,.09);color:#ddd4f3;}
+#pt-order-panel .pt-asset-toggle{flex:1.35;}
+#pt-order-panel .pt-asset-toggle .pt-toggle-btn.active{background:linear-gradient(135deg,#6f4bd1,#9472ef);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);}
+#pt-order-panel .pt-option-type-row{margin-top:-1px;}
+#pt-order-panel #pt-option-type-toggle{max-width:100%;}
+#pt-order-panel #pt-option-type-toggle .pt-toggle-ce.active{background:linear-gradient(135deg,#2166b2,#3388df);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);}
+#pt-order-panel #pt-option-type-toggle .pt-toggle-pe.active{background:linear-gradient(135deg,#b56d13,#e29a2d);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);}
+#pt-order-panel #pt-side-toggle .pt-toggle-buy.active{background:linear-gradient(135deg,#158a68,#20b98c);color:#fff;box-shadow:0 0 0 1px rgba(32,201,151,.26),inset 0 1px rgba(255,255,255,.16);}
+#pt-order-panel #pt-side-toggle .pt-toggle-sell.active{background:linear-gradient(135deg,#c74848,#f06565);color:#fff;box-shadow:0 0 0 1px rgba(255,107,107,.28),inset 0 1px rgba(255,255,255,.16);}
+#pt-order-panel #pt-ordtype-toggle .pt-toggle-btn.active{background:linear-gradient(135deg,#7250d5,#9775fa);}
+#pt-order-panel .pt-order-hint{margin:-2px 2px 7px;color:#9188a4;font-family:var(--font-mono);font-size:10px;}
+#pt-order-panel .pt-order-ltp{padding:5px 7px;border-radius:5px;background:rgba(151,117,250,.07);color:#c8bcec;}
+#pt-order-panel #pt-submit-btn{min-height:38px;background:linear-gradient(135deg,#7b59dc,#a78bfa);color:#110c1d;box-shadow:0 7px 18px rgba(123,89,220,.24);letter-spacing:.025em;}
+#pt-order-panel #pt-submit-btn:hover{background:linear-gradient(135deg,#8a68e8,#b69cff);box-shadow:0 9px 22px rgba(123,89,220,.34);transform:translateY(-1px);}
+#pt-order-panel #pt-err{padding:0 2px;}
 #pt-portfolio-panel{
-  /* Was orange (--pe) — switched to the same olive used on the paper-mode
-     badge above, so the whole Portfolio window reads as the deprecated/
-     legacy surface it's flagged as, not an active accent color. */
+  width:min(960px,96vw);
   background:
-    linear-gradient(160deg, rgba(124,124,30,0.30), rgba(124,124,30,0.14)),
-    #1a1a0c;
-  border:2px solid #7C7C1E;
-  box-shadow:0 8px 32px rgba(124,124,30,0.32), var(--shadow-lg);
+    radial-gradient(circle at 85% 0%, rgba(73,190,166,.14), transparent 38%),
+    linear-gradient(155deg, rgba(20,58,62,.96), rgba(10,18,24,.98) 62%);
+  border:1px solid rgba(91,192,174,.62);
+  box-shadow:0 18px 52px rgba(0,0,0,.48),0 0 0 1px rgba(91,192,174,.08),var(--shadow-lg);
 }
+#pt-portfolio-panel .pt-portfolio-header{margin:-4px -2px 10px;padding:4px 2px 11px;border-bottom:1px solid rgba(91,192,174,.24);color:#e8fffa;letter-spacing:.02em;}
+#pt-portfolio-panel .pt-close{color:#a9c9c2;transition:color .15s ease,opacity .15s ease;}
+#pt-portfolio-panel .pt-close:hover{color:#fff;opacity:1;}
+#pt-portfolio-mode-badge.paper{background:rgba(215,181,109,.13);border-color:rgba(215,181,109,.55);color:#e5c987;}
+#pt-portfolio-panel .pt-section{border-top-color:rgba(91,192,174,.18);}
+#pt-portfolio-panel .pt-simulation-note{padding:9px 10px;border:1px solid rgba(215,181,109,.22);border-radius:8px;background:rgba(215,181,109,.055);color:#9eb4b0;font-size:10px;line-height:1.5;}
+#pt-portfolio-panel .pt-simulation-note strong{color:#e5c987;letter-spacing:.06em;}
+#pt-portfolio-panel .pt-portfolio-summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding-top:0;border-top:0;}
+#pt-portfolio-panel .pt-summary{margin:0;padding:8px 10px;border:1px solid rgba(91,192,174,.14);border-radius:7px;background:rgba(255,255,255,.025);align-items:center;}
+#pt-portfolio-panel .pt-summary>span:first-child{color:#91aaa5;letter-spacing:.015em;}
+#pt-portfolio-panel .pt-summary>span:last-child{font-family:var(--font-mono);font-weight:700;color:#e8f3f1;}
+#pt-portfolio-panel .pt-summary-muted{background:rgba(255,255,255,.012);opacity:.82;}
+#pt-portfolio-panel .pt-summary-key{grid-column:1/-1;border-color:rgba(91,192,174,.34);background:linear-gradient(90deg,rgba(41,142,123,.18),rgba(255,255,255,.018));font-weight:800;}
+#pt-portfolio-panel .pt-summary-fund{grid-column:1/-1;border-color:rgba(215,181,109,.38);background:linear-gradient(90deg,rgba(215,181,109,.13),rgba(255,255,255,.018));font-weight:800;}
+#pt-portfolio-panel .pt-table-scroll{border:1px solid rgba(91,192,174,.16);border-radius:8px;background:rgba(3,10,14,.32);}
+#pt-portfolio-panel #pt-positions-table{min-width:820px;}
+#pt-portfolio-panel #pt-orders-table{min-width:1120px;}
+#pt-portfolio-panel .pt-table th,#pt-portfolio-panel .pt-table td{overflow:visible;text-overflow:clip;}
+#pt-portfolio-panel .pt-table th{background:#11272a;color:#a9c9c2;border-color:rgba(91,192,174,.18);}
+#pt-portfolio-panel .pt-table tbody tr:hover{background:rgba(91,192,174,.07);}
 #pt-order-panel h4, #pt-portfolio-panel h4{margin:0 0 8px; font-size:var(--fs-sm); display:flex; justify-content:space-between; align-items:center;}
 #pt-order-panel .pt-section, #pt-portfolio-panel .pt-section{margin-bottom:var(--space-4); border-top:1px solid var(--border); padding-top:var(--space-3);}
 #pt-order-panel .pt-pos, #pt-portfolio-panel .pt-pos{color:var(--pos);}
@@ -224,8 +258,13 @@
 #pt-order-toggle-btn.active::after{background:#8b5cf6;}
 
 #pt-toggle-btn.active{
-  background:linear-gradient(135deg, rgba(124,124,30,0.22), rgba(124,124,30,0.08));
-  color:#7C7C1E; border-color:#7C7C1E; font-weight:700;
-  box-shadow:0 2px 16px rgba(124,124,30,0.30);
+  background:linear-gradient(135deg, rgba(91,192,174,.24), rgba(91,192,174,.08));
+  color:#5bc0ae; border-color:#5bc0ae; font-weight:700;
+  box-shadow:0 2px 16px rgba(91,192,174,.28);
 }
-#pt-toggle-btn.active::after{background:#7C7C1E;}
+#pt-toggle-btn.active::after{background:#5bc0ae;}
+
+@media (max-width:560px){
+  #pt-portfolio-panel .pt-portfolio-summary-grid{grid-template-columns:1fr;}
+  #pt-portfolio-panel .pt-summary-key,#pt-portfolio-panel .pt-summary-fund{grid-column:auto;}
+}

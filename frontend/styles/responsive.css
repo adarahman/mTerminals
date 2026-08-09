@@ -67,9 +67,12 @@
 @media (max-width:900px){
   .sec-nav{
     position:sticky;top:8px;bottom:auto;left:auto;
-    flex-direction:row;flex-wrap:wrap;width:auto;height:auto;
+    display:flex;flex-direction:row;flex-wrap:wrap;width:auto;height:auto;
     margin-bottom: var(--space-2);
   }
+  .rail-context-menu,.rail-tools-menu{min-width:100%;}
+  .rail-tools-menu{padding-top:var(--space-2);}
+  .rail-context-list,.rail-tools-list{grid-template-columns:repeat(3,minmax(0,1fr));}
 }
 
 /* was inline after: .sec-btn.active::after  —  @media (max-width:900px) */

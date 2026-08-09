@@ -242,6 +242,22 @@ def test_missing_ltp_data_marks_unpriced_not_fabricated(tmp_path):
     assert result.unpriced_signals == 1
 
 
+def test_signal_does_not_fill_from_a_much_later_quote(tmp_path):
+    db_path = str(tmp_path / "snapshots.db")
+    ltp_path = str(tmp_path / "ltp.parquet")
+    _seed_snapshots(db_path, "NIFTY", [
+        ("2026-08-01T09:20:00", "07AUG2026", _decision(action_type="BUY_CE", strike=20000)),
+    ])
+    _seed_ltp(ltp_path, "NIFTY", "07AUG2026", 20000, [
+        ("2026-08-01T10:20:00", 100.0, 80.0),
+    ])
+
+    result = run_backtest_sync("NIFTY", db_path=db_path, ltp_log_path=ltp_path)
+
+    assert result.trades == []
+    assert result.unpriced_signals == 1
+
+
 def test_cooldown_prevents_reentry_immediately_after_exit(tmp_path):
     db_path = str(tmp_path / "snapshots.db")
     ltp_path = str(tmp_path / "ltp.parquet")
@@ -274,3 +290,27 @@ def test_empty_history_returns_empty_result(tmp_path):
                                 ltp_log_path=str(tmp_path / "missing.parquet"))
     assert result.trades == []
     assert result.summary()["num_trades"] == 0
+    assert result.metadata()["snapshotCount"] == 0
+    assert result.metadata()["transactionCostsIncluded"] is False
+    assert result.metadata()["slippageIncluded"] is False
+
+
+def test_result_reports_actual_snapshot_coverage_and_model_assumptions(tmp_path):
+    db_path = str(tmp_path / "snapshots.db")
+    rows = [
+        ("2026-08-01T09:20:00", "07AUG2026", _decision(action_type="WAIT")),
+        ("2026-08-01T09:25:00", "07AUG2026", _decision(action_type="WAIT")),
+    ]
+    _seed_snapshots(db_path, "NIFTY", rows)
+
+    result = run_backtest_sync(
+        "NIFTY", start="2026-08-01", end="2026-08-02", db_path=db_path,
+        ltp_log_path=str(tmp_path / "missing.parquet"),
+    )
+    metadata = result.metadata()
+
+    assert metadata["snapshotCount"] == 2
+    assert metadata["dataStart"] == "2026-08-01T09:20:00"
+    assert metadata["dataEnd"] == "2026-08-01T09:25:00"
+    assert metadata["requestedStart"] == "2026-08-01"
+    assert metadata["decisionScoringRecomputed"] is False

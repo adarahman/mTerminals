@@ -27,7 +27,7 @@ class WSManager {
     this.url = url;
     this.ws = null;
     this.reconnectTimer = null;
-    this.reconnectDelayMs = 3000;
+    this.reconnectDelayMs = (typeof Config !== 'undefined' && Config.ws && Config.ws.reconnectDelayMs) || 3000;
     this.listeners = { open: [], close: [], message: [] };
   }
 

@@ -146,7 +146,8 @@ class DecisionEngine:
         if conflict:
             out.conflict_flag = True
             out.active_signals.append(ActiveSignal(
-                "⚠ Sub-signals are split — reduce size or wait for alignment", "warn", 0))
+                "⚠ Sub-signals are split — reduce size or wait for alignment",
+                "warn", 0, "decision:conflict"))
 
         # ── Composite score (conviction-weighted) ─────────────────────────────
         # Weights must sum to 1.0.
@@ -182,6 +183,18 @@ class DecisionEngine:
             critical_inputs_missing=critical_missing)
         out.action, out.action_type, out.suggested_strike = derive_action(
             out.bias, out.bias_strength, atm, strike_step, vix_tag, iv_rank)
+
+        # The headline answers "what should I do now?", so it must fail
+        # closed at the same confidence boundary used by execution.  Keeping
+        # a directional SELL/BUY headline while execute_recommended is false
+        # gives two contradictory instructions.  The hypothetical strategy
+        # is still calculated below for inspection, but the actionable output
+        # remains WAIT until enough evidence supports execution.
+        if (out.action_type != "WAIT" and
+                out.confidence < T.CONFIDENCE_EXECUTE_MIN):
+            out.action = "Wait — evidence confidence below execution threshold"
+            out.action_type = "WAIT"
+            out.suggested_strike = None
         # Optional: real OTM wing LTPs for Iron Condor / PANIC strangle pricing.
         # Not every caller populates this yet — gracefully falls back to None
         # inside suggest_strategy, which reports netPremium as None (unknown)

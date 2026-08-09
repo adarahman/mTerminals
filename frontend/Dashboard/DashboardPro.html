@@ -424,13 +424,19 @@
      top-bar's dedicated Expiry pill on every render instead of rebuilding it — so its
      option list and current selection survive live ticks). -->
 <div class="sec-nav" id="sec-nav-bar">
-  <span class="sec-nav-label">⚡ Zones</span>
-  <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
-  <button class="sec-btn" onclick="secJump('zone-structure')"><span>⌗</span>Position</button>
-  <button class="sec-btn" onclick="secJump('zone-capital-flow')"><span>₹</span>Flow</button>
-  <button class="sec-btn" onclick="secJump('zone-institutional')"><span>🏦</span>Funds</button>
-  <button class="sec-btn" onclick="secJump('zone-confirmation')"><span>✓</span>Validate</button>
-  <span class="sec-nav-label sec-nav-label-tools">Tools</span>
+  <details class="rail-context-menu" id="rail-context-menu" open onToggle="if(this.open){document.getElementById('rail-tools-menu')?.removeAttribute('open')}">
+    <summary class="rail-group-toggle" id="rail-context-toggle">Context</summary>
+    <div class="rail-context-list">
+      <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
+      <button class="sec-btn" onclick="secJump('zone-structure')"><span>⌗</span>Position</button>
+      <button class="sec-btn" onclick="secJump('zone-capital-flow')"><span>₹</span>Flow</button>
+      <button class="sec-btn" onclick="secJump('zone-institutional')"><span>🏦</span>Funds</button>
+      <button class="sec-btn" onclick="secJump('zone-confirmation')"><span>✓</span>Validate</button>
+    </div>
+  </details>
+  <details class="rail-tools-menu" id="rail-tools-menu" onToggle="if(this.open){document.getElementById('rail-context-menu')?.removeAttribute('open')}">
+    <summary class="rail-group-toggle" id="rail-tools-toggle">Tools</summary>
+    <div class="rail-tools-list">
   <!-- Range & velocity toggle — relocated here from its old floating
        .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
        there). Reuses the sec-btn styling so it sits inline with the other
@@ -461,6 +467,8 @@
   <button class="sec-btn" id="pt-order-toggle-btn" onclick="toggleOrderPanel()" title="Place a paper/live order"><span>📝</span>Order</button>
   <button class="sec-btn" id="pt-toggle-btn" onclick="togglePortfolioPanel()" title="Portfolio tracker — P&amp;L, fund, positions, trade log"><span>📊</span>Portfolio</button>
   <button class="sec-btn" id="backtest-toggle-btn" onclick="toggleBacktestModal()" title="Backtest decision engine thresholds"><span>📈</span>Backtest</button>
+    </div>
+  </details>
 </div>
 
 <!-- Global expiry control — the ONLY expiry selector in the app. Kept as

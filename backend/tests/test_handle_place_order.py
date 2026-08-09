@@ -54,6 +54,7 @@ def _order_payload(**overrides):
         "side": "SELL",
         "order_type": "MARKET",
         "qty_lots": 1,
+        "client_order_id": "liveorder00000001",
         "live": True,
         "confirmed": True,
     }
@@ -81,6 +82,7 @@ def live_env(ws_server_live, monkeypatch, tmp_path):
     monkeypatch.setattr(m, "LIVE_MAX_LOTS_PER_ORDER", 5)
     monkeypatch.setattr(m, "LIVE_MAX_ORDERS_PER_MINUTE", 5)
     monkeypatch.setattr(m, "_live_order_timestamps", [])
+    monkeypatch.setattr(m, "_LIVE_ORDER_RESULTS", {})
     monkeypatch.setattr(m, "_ACCOUNT_GUARD", _FakeGuard())
     monkeypatch.setattr(m, "smartapi_get_positions", lambda: [])
     # PT_LOT_SIZES (lot_sizes.LOT_SIZES) is a dict subclass that only
@@ -162,6 +164,37 @@ def test_qty_lots_zero_rejects(resolvable):
     assert "args" not in placed
 
 
+@pytest.mark.parametrize("side", [None, "", "HOLD"])
+def test_invalid_side_is_rejected_before_broker_or_paper(live_env, monkeypatch, side):
+    m = live_env
+    broker_calls = {}
+    paper_calls = {}
+    monkeypatch.setattr(m, "smartapi_place_order", lambda *a, **k: broker_calls.setdefault("called", True))
+    monkeypatch.setattr(m.PT_ENGINE, "place_order", lambda *a, **k: paper_calls.setdefault("called", True))
+
+    result = _run(m._handle_place_order(_order_payload(side=side)))
+
+    assert result["status"] == "rejected"
+    assert "side" in result["reason"]
+    assert "called" not in broker_calls
+    assert "called" not in paper_calls
+
+
+@pytest.mark.parametrize("overrides", [
+    {"order_type": "LIMIT", "limit_price": 0},
+    {"order_type": "LIMIT", "limit_price": "NaN"},
+    {"order_type": "SL-M"},
+    {"instrument_type": "CE", "strike": None},
+    {"instrument_type": "FUT", "expiry": ""},
+    {"qty_lots": 1.5},
+])
+def test_malformed_order_intent_never_reaches_broker(resolvable, overrides):
+    m, placed = resolvable
+    result = _run(m._handle_place_order(_order_payload(**overrides)))
+    assert result["status"] == "rejected"
+    assert "args" not in placed
+
+
 def test_qty_lots_over_max_rejects(resolvable, monkeypatch):
     m, placed = resolvable
     monkeypatch.setattr(m, "LIVE_MAX_LOTS_PER_ORDER", 1)
@@ -172,11 +205,36 @@ def test_qty_lots_over_max_rejects(resolvable, monkeypatch):
 def test_rate_limit_exceeded_rejects_second_order(resolvable, monkeypatch):
     m, placed = resolvable
     monkeypatch.setattr(m, "LIVE_MAX_ORDERS_PER_MINUTE", 1)
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._handle_place_order(_order_payload(client_order_id="liveorder00000001")))
     assert "args" in placed, "first order should still go through and consume the window's one slot"
     placed.clear()
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._handle_place_order(_order_payload(client_order_id="liveorder00000002")))
     assert "args" not in placed, "second order within the same window should be rejected pre-broker"
+
+
+@pytest.mark.parametrize("client_order_id", [None, "short", "live_order_000001", "x" * 21])
+def test_live_order_requires_bounded_alphanumeric_client_identity(resolvable, client_order_id):
+    m, placed = resolvable
+    result = _run(m._handle_place_order(_order_payload(client_order_id=client_order_id)))
+    assert result["status"] == "rejected"
+    assert "client_order_id" in result["reason"]
+    assert "args" not in placed
+
+
+def test_replayed_live_order_returns_original_without_second_broker_call(resolvable):
+    m, placed = resolvable
+    first = _run(m._handle_place_order(_order_payload()))
+    first_args = placed["args"]
+    first_kwargs = placed["kwargs"]
+    placed.clear()
+
+    replay = _run(m._handle_place_order(_order_payload()))
+
+    assert first["order_id"] == replay["order_id"] == "ORDER123"
+    assert replay["duplicate"] is True
+    assert "args" not in placed
+    assert first_args
+    assert first_kwargs["order_tag"] == "liveorder00000001"
 
 
 def test_unknown_symbol_rejects_without_guessing_lot_size(resolvable):
@@ -273,10 +331,10 @@ def test_broker_exception_during_placement_is_caught_not_raised(resolvable, monk
 
 def test_buy_and_sell_sides_map_to_correct_transaction_type(resolvable):
     m, placed = resolvable
-    _run(m._handle_place_order(_order_payload(side="buy")))
+    _run(m._handle_place_order(_order_payload(side="buy", client_order_id="liveorder00000001")))
     assert placed["args"][3] == "BUY"
     placed.clear()
-    _run(m._handle_place_order(_order_payload(side="sell")))
+    _run(m._handle_place_order(_order_payload(side="sell", client_order_id="liveorder00000002")))
     assert placed["args"][3] == "SELL"
 
 

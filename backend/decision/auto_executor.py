@@ -42,6 +42,7 @@ Scope of v1 — deliberately narrow:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -153,6 +154,10 @@ class AutoExecutor:
         # auto-execution, not a tick-by-tick decision trace. Newest entry
         # first (list.insert(0, ...)), capped at AUTO_TRADE_HISTORY_MAX.
         self._history: list[dict] = []
+        # Gate evaluation and broker submission as one critical section.
+        # Otherwise a second tick can clear cooldown/daily-cap checks while
+        # the first tick is still awaiting its broker response.
+        self._execution_lock = asyncio.Lock()
 
     def _record_history(self, symbol: str, outcome: "ExecutionDecision", status: str, detail: str):
         """status is 'executed' (submit_order_fn succeeded — the order
@@ -293,6 +298,10 @@ class AutoExecutor:
         inside that callback since it's the same path a manual order
         takes; this method's guard check above is a fast pre-filter, not
         a replacement for that."""
+        async with self._execution_lock:
+            return await self._maybe_execute_locked(decision, symbol, expiry)
+
+    async def _maybe_execute_locked(self, decision: dict, symbol: str, expiry: str) -> ExecutionDecision:
         outcome = self.evaluate(decision, symbol)
         if not outcome.should_execute:
             return outcome

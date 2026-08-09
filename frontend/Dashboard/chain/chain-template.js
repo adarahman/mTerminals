@@ -56,9 +56,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const feedReasonRaw = feedState.reason
     || (feedState.quality === 'PARTIAL' && Array.isArray(feedState.missing) && feedState.missing.length
       ? `Missing: ${feedState.missing.join(', ')}` : '');
-  const feedReason = String(feedReasonRaw).replace(/[&<>"']/g, ch => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
-  })[ch]);
+  const feedReason = escapeHtml(feedReasonRaw);
   const feedReasonVisible = ((marketSession === 'MARKET_CLOSED' || marketSession === 'HOLIDAY')
     && /market session|market closed|holiday/i.test(String(feedReasonRaw))) ? '' : feedReason;
   let feedLabel = rawFeedStatus;
@@ -299,6 +297,11 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const feedState = (window.AppState && AppState.feedState) || {};
     const partialData = feedState.quality === 'PARTIAL';
     const partialMissing = Array.isArray(feedState.missing) ? feedState.missing : [];
+    const signalObservedAt = (sigs.find(s=>s.observedAt) || {}).observedAt || dec.decisionTimestamp || '';
+    const signalObservedLabel = signalObservedAt
+      ? new Date(signalObservedAt).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'})
+      : 'time unavailable';
+    const signalFreshness = String(feedState.status || 'UNKNOWN').toUpperCase();
 
     const biasIsBull = bias === 'BULLISH';
     const biasIsBear = bias === 'BEARISH';
@@ -353,20 +356,29 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       const idx = s.indexOf('—');
       return idx > -1 ? s.slice(idx + 1).trim() : '';
     };
-    const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
-      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
-    })[ch]);
-
     const atm = (typeof activeAtm === 'function') ? activeAtm(d) : (d.atm || 0);
 
-    // The hero follows the trader's reading order: decision -> why ->
-    // levels -> action. Complete evidence remains in the detail panel.
-    const heroSignals = sigs.slice(0, 3);
-    const heroWhyHtml = heroSignals.length
-      ? heroSignals.map(s => `<div class="decision-flow-line">
-          <span class="decision-flow-dot" style="color:${sevClr(s.severity)};">${sevDot(s.severity)}</span>
-          <span title="${escapeHtml(s.text)}">${escapeHtml(s.text)}</span>
-        </div>`).join('')
+    // "Why" explains the weighted decision calculation; Active Signals
+    // below remains the single owner of live alerts and confirmations.
+    // Ranking by absolute weighted contribution surfaces the evidence that
+    // moved the composite score most, irrespective of bullish/bearish sign.
+    const heroContributors = contributors
+      .filter(c => c.available !== false && Number.isFinite(Number(c.weightedContribution)))
+      .sort((a,b) => Math.abs(Number(b.weightedContribution)) - Math.abs(Number(a.weightedContribution)))
+      .slice(0,3);
+    const heroWhyHtml = heroContributors.length
+      ? heroContributors.map(c => {
+          const contribution = Number(c.weightedContribution);
+          const direction = contribution > 0 ? 'Bullish' : contribution < 0 ? 'Bearish' : 'Neutral';
+          const color = contribution > 0 ? 'var(--pos)' : contribution < 0 ? 'var(--neg)' : 'var(--text-tertiary)';
+          const marker = contribution > 0 ? '\u2191' : contribution < 0 ? '\u2193' : '\u00b7';
+          const label = escapeHtml(c.label || c.key || 'Evidence');
+          const title = escapeHtml(`${c.weight || 0}% weight · ${contribution >= 0 ? '+' : ''}${contribution.toFixed(3)} contribution`);
+          return `<div class="decision-flow-line">
+            <span class="decision-flow-dot" style="color:${color};">${marker}</span>
+            <span title="${title}">${label} · ${direction}</span>
+          </div>`;
+        }).join('')
       : `<div class="decision-flow-line"><span class="decision-flow-dot">·</span><span>${explainVal(vrd.pcr) || explainVal(vrd.vix) || 'No strong confirming signal yet.'}</span></div>`;
 
     // CE Wall / PE Wall now rendered in the same 🏛️-tile style OI Flow
@@ -483,7 +495,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
               ? `${Number(c.weightedContribution) >= 0 ? '+' : ''}${Number(c.weightedContribution).toFixed(3)}`
               : 'unavailable';
             return `<div class="dd-sig">
-              <span style="color:${available?'var(--text-primary)':'var(--neg)'};font-weight:700;min-width:170px;">${c.label || c.key || 'Signal'}</span>
+              <span style="color:${available?'var(--text-primary)':'var(--neg)'};font-weight:700;min-width:170px;">${escapeHtml(c.label || c.key || 'Signal')}</span>
               <span style="color:var(--text-tertiary);">${available ? `${c.weight || 0}% weight · ${contribution}` : 'Missing — excluded from score'}</span>
             </div>`;
           }).join('') : '<div class="dd-empty">Contributor evidence unavailable.</div>'}
@@ -509,12 +521,14 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
            than leaving the shorter side looking sparse. -->
       <div class="dd-grid">
         <div class="dd-col">
-          <div class="dd-col-title">Active Signals</div>
+          <div class="dd-col-title">Active Signals · ${sigs.length} · ${escapeHtml(signalFreshness)}</div>
+          <div style="font-size:9px;color:var(--text-tertiary);margin:-2px 0 6px;">Observed ${escapeHtml(signalObservedLabel)}</div>
           <div class="dd-sig-list">
             ${sigs.length ? sigs.map(s=>`
-              <div class="dd-sig">
+              <div class="dd-sig" data-signal-id="${escapeHtml(s.id || s.text)}">
                 <span style="color:${sevClr(s.severity)};font-weight:700;flex-shrink:0;">${sevDot(s.severity)}</span>
-                <span style="color:${s.severity==='warn'||s.severity==='ok'?'var(--text-primary)':'var(--text-tertiary)'};">${s.text}</span>
+                <span style="color:${s.severity==='warn'||s.severity==='ok'?'var(--text-primary)':'var(--text-tertiary)'};">${escapeHtml(s.text)}</span>
+                <span style="margin-left:auto;font-size:8px;font-weight:800;color:${sevClr(s.severity)};">${s.severity==='warn'?'WARNING':s.severity==='ok'?'CONFIRM':'INFO'}</span>
               </div>`).join('') : '<div class="dd-empty">No active signals.</div>'}
           </div>
         </div>
@@ -525,7 +539,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           <div class="dd-trap">
             <span class="ic">\u26A0</span>
             <span class="lbl">Trap Warning</span>
-            <span class="txt" title="${risk.trapWarn}">${risk.trapWarn}</span>
+            <span class="txt" title="${escapeHtml(risk.trapWarn)}">${escapeHtml(risk.trapWarn)}</span>
           </div>` : ''}
           ${(()=>{
             const r1   = d.ceWall || 0;
@@ -586,20 +600,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   </div>`;
   }
 
-  // Unit-aware K/L/Cr formatter on the RAW number (not pre-scaled) — same
-  // approach as option-chain.js's fmt(), which this card is modeled on.
-  // chain-views.js's own global fmt()/fmtK() stop at "L" and never scale
-  // to "Cr", so a separate helper is needed here to match that reference
-  // layout's units exactly.
-  const fmtCrLK = (v) => {
-    if(v==null||isNaN(v)) return '—';
-    const a = Math.abs(v);
-    const s = v<0 ? '-' : '';
-    if(a>=1e7) return s+(a/1e7).toFixed(2)+'Cr';
-    if(a>=1e5) return s+(a/1e5).toFixed(2)+'L';
-    if(a>=1e3) return s+(a/1e3).toFixed(1)+'K';
-    return s+a.toFixed(0);
-  };
+  // Unit-aware K/L/Cr formatting comes from shared/utils/formatters.js.
   const signedFmt = (v) => (v>0?'+':'') + fmtCrLK(v);
   // signColor()'s default neutral is already --text-primary, matching the
   // reference mockup's "0 stays bold/white, not greyed out" behavior.
@@ -727,22 +728,9 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   // collapsible card so the always-visible Snapshot grid shows 2 cards
   // (OI Summary, Chg OI Summary) instead of 3. Same calculation and
   // arp-vratio-* markup as before, just relocated + collapsed by default;
-  // fmtCrLK is duplicated from buildChainSummaryHtml/buildDoiDetailHtml
-  // rather than shared, for the same self-contained-render-function reason
-  // noted on buildDoiDetailHtml.
 ChainView.prototype.buildVolOiDetailHtml = function(d) {
   const chain = getFilteredChain(d);
   if(!chain.length) return '';
-
-  const fmtCrLK = (v) => {
-    if(v==null||isNaN(v)) return '—';
-    const a = Math.abs(v);
-    const s = v<0 ? '-' : '';
-    if(a>=1e7) return s+(a/1e7).toFixed(2)+'Cr';
-    if(a>=1e5) return s+(a/1e5).toFixed(2)+'L';
-    if(a>=1e3) return s+(a/1e3).toFixed(1)+'K';
-    return s+a.toFixed(0);
-  };
 
   // computeRangeChainTotals (metrics.js, IA redesign step 6) — same OI
   // totals as buildChainSummaryHtml above; only totalCe/totalPe are used
