@@ -4,6 +4,23 @@
 // Handles fetching and caching OHLCV history from backend
 // ============================================================
 
+// All chart surfaces share one browser-side request per symbol/range.
+// Empty/error results are also cooled down so an upstream SmartAPI timeout
+// cannot make every live render retry the same rate-limited endpoint.
+const _marketHistoryRequests = new Map();
+window.fetchMarketHistory = function(symbol, range, force = false){
+  const key = String(symbol).toUpperCase() + '|' + range;
+  const now = Date.now();
+  const cached = _marketHistoryRequests.get(key);
+  if(!force && cached && now - cached.startedAt < 60000) return cached.promise;
+  const promise = fetch(`${Config.api.history}?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`)
+    .then(res => res.ok ? res.json() : [])
+    .then(rows => Array.isArray(rows) ? rows : [])
+    .catch(() => []);
+  _marketHistoryRequests.set(key, { startedAt: now, promise });
+  return promise;
+};
+
 class HistoryLoader {
   constructor(chartData, onRenderRequest) {
     this.chartData = chartData;
@@ -26,13 +43,7 @@ class HistoryLoader {
     this.chartData.setHydrating(range, sym, true);
     
     try {
-      const res = await fetch(`${Config.api.history}?symbol=${encodeURIComponent(sym)}&range=${encodeURIComponent(range)}`);
-      if (!res.ok) {
-        Logger.warn('historyLoader', 'hydrateRange failed:', res.status, res.statusText, sym, range);
-        return;
-      }
-      
-      const rows = await res.json();
+      const rows = await window.fetchMarketHistory(sym, range, force);
       if (!Array.isArray(rows)) return;
       
       const bars = rows

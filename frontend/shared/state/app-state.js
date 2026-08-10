@@ -48,6 +48,8 @@ const AppState = {
     lastTransportAt: null,     // any WS traffic, including portfolio/algo
     lastStatusAt: Date.now(),
     reason: '',
+    pipelineDelayed: false,
+    pipelineReason: '',
   },
 };
 

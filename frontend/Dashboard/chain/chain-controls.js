@@ -25,28 +25,16 @@ function openOptionChain() {
 }
 
 function toggleOptionChainSnapshot(button) {
-  const card = button && button.closest('#chain-summary-card');
-  const table = card && card.querySelector('.oc-native-chain');
-  if (!table) return false;
-  const expanded = button.getAttribute('aria-expanded') !== 'false';
-  const nextExpanded = !expanded;
-  button.setAttribute('aria-expanded', String(nextExpanded));
-  table.hidden = !nextExpanded;
-  const arrow = button.querySelector('.nav-card-header-arrow');
-  if (arrow) arrow.textContent = nextExpanded ? '▾' : '↗';
-  if (typeof app !== 'undefined' && app.chain) {
-    app.chain.chainTableOpen = nextExpanded;
-  }
-  if (nextExpanded) table.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  if (typeof openOptionChainModal === 'function') openOptionChainModal(button);
   return false;
 }
 
 function toggleOptionChainGreeks(button) {
-  const card = button && button.closest('#chain-summary-card');
+  const table = document.getElementById('option-chain-table');
   const visible = button.getAttribute('aria-pressed') !== 'true';
   button.setAttribute('aria-pressed', String(visible));
   button.classList.toggle('active', visible);
-  card && card.querySelectorAll('.oc-ledger-greeks').forEach((row) => {
+  table && table.querySelectorAll('.oc-ledger-greeks').forEach((row) => {
     row.hidden = !visible;
   });
   if (typeof app !== 'undefined' && app.chain) app.chain.chainGreeksVisible = visible;

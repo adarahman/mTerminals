@@ -7,6 +7,14 @@
 class StrategyView {
   constructor() {
     this.selStratIdx = 0;
+    this.selectionTouched = false;
+    this.selectionSymbol = null;
+  }
+
+  selectStrategy(value){
+    this.selStratIdx = parseInt(value, 10) || 0;
+    this.selectionTouched = true;
+    this.renderStratPayoff();
   }
 
   renderStratPayoff(){

@@ -82,6 +82,13 @@ class ModalManager {
 
   const keyHandler = (e) => {
     if(e.key === 'Escape'){
+      const quickOrder = document.getElementById('pt-quick-popover');
+      if(quickOrder && quickOrder.style.display !== 'none'){
+        e.preventDefault();
+        e.stopPropagation();
+        quickOrder.style.display = 'none';
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       if(typeof closeFn === 'function') closeFn();
@@ -142,6 +149,42 @@ class ModalManager {
   if(invoker && invoker.isConnected){
     requestAnimationFrame(() => invoker.focus());
   }
+}
+
+  openOptionChainModal(){
+  var modal = document.getElementById('option-chain-modal');
+  var host = document.getElementById('option-chain-modal-body');
+  var table = document.getElementById('option-chain-table');
+  if(!modal || !host || !table) return;
+  table.hidden = false;
+  host.appendChild(table);
+  var card = document.getElementById('chain-summary-card');
+  if(card){
+    var header = card.querySelector('.nav-card-header');
+    if(header) header.setAttribute('aria-expanded', 'true');
+    var arrow = card.querySelector('.nav-card-header-arrow');
+    if(arrow) arrow.textContent = '▾';
+  }
+  if(typeof app !== 'undefined' && app.chain) app.chain.chainTableOpen = true;
+  this._openModal(modal, () => this.closeOptionChainModal());
+}
+
+  closeOptionChainModal(){
+  var modal = document.getElementById('option-chain-modal');
+  var table = document.getElementById('option-chain-table');
+  var card = document.getElementById('chain-summary-card');
+  if(table){
+    table.hidden = true;
+    if(card) card.appendChild(table);
+  }
+  if(typeof app !== 'undefined' && app.chain) app.chain.chainTableOpen = false;
+  if(card){
+    var header = card.querySelector('.nav-card-header');
+    if(header) header.setAttribute('aria-expanded', 'false');
+    var arrow = card.querySelector('.nav-card-header-arrow');
+    if(arrow) arrow.textContent = '↗';
+  }
+  if(modal) this._closeModal(modal);
 }
 
   openOIDashboardModal(){

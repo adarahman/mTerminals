@@ -196,6 +196,7 @@ function ptMountOrderPanel(){
       instype.value = assetClass === 'FUT' ? 'FUT' : 'INDEX';
     }
     instype.dispatchEvent(new Event('change'));
+    ptUpdateLotSizeHint();
   }
   ptWireToggleGroup('pt-side-toggle', 'pt-side');
   ptWireToggleGroup('pt-asset-toggle', 'pt-asset-class');
@@ -208,7 +209,19 @@ function ptMountOrderPanel(){
   $i('pt-instype').onchange = ptRefreshExpiryStrikeOptions;
   $i('pt-expiry').onchange  = ptRefreshStrikeOptions;
   $i('pt-strike').onchange  = ptUpdateLtpHint;
-  $i('pt-symbol').onchange  = ()=>{ _ptSymbolTouched = true; ptRefreshExpiryStrikeOptions(); ptUpdateLotSizeHint(); };
+  $i('pt-symbol').onchange  = ()=>{
+    _ptSymbolTouched = true;
+    const symbol = $i('pt-symbol').value;
+    ptRefreshExpiryStrikeOptions();
+    ptUpdateLotSizeHint();
+    if(AppState.wsState && AppState.wsState.symbol !== symbol && typeof onSymbolPicked === 'function'){
+      const ltpHint = $i('pt-ltp-hint');
+      if(ltpHint) ltpHint.textContent = 'LTP: Loading ' + symbol + '…';
+      onSymbolPicked(symbol);
+    } else {
+      ptUpdateLtpHint();
+    }
+  };
   $i('pt-qty').addEventListener('input', ptUpdateLotSizeHint);
 
   // First live call site for MTButton (components/mt-button.js) — see
@@ -248,6 +261,30 @@ window.toggleOrderPanel = toggleOrderPanel;
 // (AppState.wsState.symbol) has expiry/strike data available client-side; for
 // any other symbol picked in pt-symbol the dropdowns are left disabled
 // with a note, since there's no chain to source options from.
+function ptMonthlyFuturesExpiries(wsState){
+  if(!wsState) return [];
+  const available = Array.from(new Set([
+    ...(Array.isArray(wsState.expiryDates) ? wsState.expiryDates : []),
+    ...Object.keys(wsState.chains || {}),
+  ]));
+  const months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  const parsed = available.map(value => {
+    const match = String(value).match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+    if(!match) return null;
+    const month = months[match[2].toLowerCase()];
+    if(month == null) return null;
+    const date = new Date(Number(match[3]), month, Number(match[1]));
+    return Number.isNaN(date.getTime()) ? null : { value, date };
+  }).filter(Boolean).sort((a,b) => a.date-b.date);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const lastByMonth = new Map();
+  parsed.forEach(item => {
+    if(item.date >= today) lastByMonth.set(`${item.date.getFullYear()}-${item.date.getMonth()}`, item);
+  });
+  return Array.from(lastByMonth.values()).sort((a,b) => a.date-b.date).slice(0,3).map(item => item.value);
+}
+
 function ptRefreshExpiryStrikeOptions(){
   const instype = $i('pt-instype').value;
   const symbol  = $i('pt-symbol').value;
@@ -261,6 +298,7 @@ function ptRefreshExpiryStrikeOptions(){
   if(!expiries.length && sameSymbol && (AppState.wsState.expiry || (AppState.wsState._activeExpiry))) {
     expiries = [AppState.wsState._primaryExpiry || AppState.wsState.expiry];
   }
+  if(instype === 'FUT') expiries = ptMonthlyFuturesExpiries(sameSymbol ? AppState.wsState : null);
 
   const prevExpiry = expSel.value;
   expSel.innerHTML = '';
@@ -326,9 +364,14 @@ let _ptLastAutoLimit = null;
 // hand). Centralizing this means every order path checks price
 // availability the same way instead of each guessing independently.
 function ptResolveLtp(symbol, instrument_type, expiry, strike){
-  if(!(AppState.wsState && AppState.wsState.symbol === symbol)) return null;
-  if(instrument_type === 'INDEX') return parseFloat(AppState.wsState.spot) || null;
-  if(instrument_type === 'FUT') return parseFloat(AppState.wsState.futLTP || AppState.wsState.spot) || null;
+  if(!AppState.wsState) return null;
+  const sameSymbol = AppState.wsState.symbol === symbol;
+  if(instrument_type === 'INDEX'){
+    const cached = AppState.wsState.indexQuotes && AppState.wsState.indexQuotes[symbol];
+    return parseFloat(sameSymbol ? AppState.wsState.spot : (cached && cached.spot)) || null;
+  }
+  if(!sameSymbol) return null;
+  if(instrument_type === 'FUT') return parseFloat(AppState.wsState.futLTP || AppState.wsState.future || AppState.wsState.spot) || null;
   if(!expiry || strike == null || isNaN(strike)) return null;
   let rows = (AppState.wsState.chains && AppState.wsState.chains[expiry]) ? AppState.wsState.chains[expiry]
     : (expiry === AppState.wsState.expiry ? (AppState.wsState.chain||[]) : []);
@@ -354,6 +397,15 @@ function ptFindLiveLtp(){
 function ptUpdateLotSizeHint(){
   const hint = $i('pt-lotsize-hint');
   if(!hint) return;
+  const qtyInput = $i('pt-qty');
+  const isEquity = $i('pt-instype').value === 'INDEX';
+  if(isEquity){
+    hint.style.display = 'none';
+    if(qtyInput) qtyInput.placeholder = 'Shares';
+    return;
+  }
+  hint.style.display = '';
+  if(qtyInput) qtyInput.placeholder = 'Lots';
   const symbol = $i('pt-symbol').value;
   const lot = ptGetLotSize(symbol);
   const lots = parseInt($i('pt-qty').value, 10);
@@ -446,7 +498,7 @@ function ptGatherOrderFromForm(){
     return { error: 'Expiry + strike required for CE/PE' };
   }
   if(!qty_lots || qty_lots <= 0){
-    return { error: 'Qty (lots) must be > 0' };
+    return { error: instrument_type === 'INDEX' ? 'Qty (shares) must be > 0' : 'Qty (lots) must be > 0' };
   }
   if(order_type === 'LIMIT'
      && (limit_price === null || isNaN(limit_price))){
@@ -611,9 +663,14 @@ function ptResolveStrategyExpiry(expiry){
   if(!expiry) return expiry;
   const norm = String(expiry).trim().toUpperCase();
   if(!AppState.wsState) return expiry;
-  const dates = (AppState.wsState.expiryDates && AppState.wsState.expiryDates.length)
-    ? AppState.wsState.expiryDates
-    : Object.keys(AppState.wsState.chains || {});
+  // Execution can only use expiries whose chains are actually loaded and
+  // priceable. expiryDates also contains distant calendar dates that the
+  // live payload does not carry, so using its last entry for FAR produced
+  // an order the server could never price.
+  const loadedDates = Object.keys(AppState.wsState.chains || {});
+  const dates = loadedDates.length ? loadedDates
+    : ((AppState.wsState.expiryDates && AppState.wsState.expiryDates.length)
+      ? AppState.wsState.expiryDates : []);
   if(!dates.length) return expiry;
   // renderExpiryOptions() builds the expiry <select> by iterating
   // expiryDates in the order the backend sends them — i.e. chronological,
@@ -660,22 +717,21 @@ function ptResolveStrategyExpiry(expiry){
 // never silently swallow the rest of a batch.
 function ptExecuteLeg(symbol, expiry, strike, instrument_type, side, lots, ltp){
   try {
-    if(!symbol){ ptToast('No active symbol — cannot execute leg', 'err'); return; }
-    // Strategy legs carry their own `ltp` (used to draw the payoff curve) —
-    // reuse it as the same MARKET-price guard the panel and quick popover
-    // use, rather than sending a leg the backend has nothing to price.
-    if((ltp === undefined || ltp === null || isNaN(ltp) || ltp <= 0)){
+    if(!symbol){ ptToast('No active symbol — cannot execute leg', 'err'); return false; }
+    const liveLtp = ptResolveLtp(symbol, instrument_type, expiry, Number(strike));
+    if(!(liveLtp > 0)){
       ptToast('No live price for this leg — order not sent', 'err');
-      return;
+      return false;
     }
     const payload = {
       symbol, instrument_type, expiry, strike, side,
       qty_lots: lots || 1, order_type: 'MARKET', limit_price: null,
     };
-    ptDispatchOrder(payload, null);
+    return ptDispatchOrder(payload, null) === true;
   } catch(e) {
     Logger.error('paper-trading', 'ptExecuteLeg failed', {symbol, expiry, strike, instrument_type, side, lots, ltp}, e);
     ptToast((side||'') + ' ' + (strike||'') + ' ' + (instrument_type||'') + ' — leg failed to send, see console', 'err');
+    return false;
   }
 }
 window.ptExecuteLeg = ptExecuteLeg;
@@ -701,6 +757,7 @@ function ptExecuteStrategy(){
   const expiry = s.expiry || _data.expiry || '';
 
   const legs = s.legs;
+  let sent = 0, skipped = 0;
   legs.forEach(l=>{
     const strike = (l.strike || atm) + offset;
     // Prefer the leg's own expiry (calendar spreads) over the blanket
@@ -708,9 +765,11 @@ function ptExecuteStrategy(){
     // then resolve NEAR/FAR labels to a real date (ptResolveStrategyExpiry)
     // so the order actually carries something the engine can price.
     const legExpiry = ptResolveStrategyExpiry(l.expiry || expiry);
-    ptExecuteLeg(symbol, legExpiry, strike, (l.type||'').toUpperCase(), l.action, l.lots || 1, parseFloat(l.ltp));
+    if(ptExecuteLeg(symbol, legExpiry, strike, (l.type||'').toUpperCase(), l.action, l.lots || 1, parseFloat(l.ltp))) sent++;
+    else skipped++;
   });
-  ptToast('Executing ' + legs.length + ' leg' + (legs.length===1?'':'s') + ' — ' + (s.name || 'Strategy'), 'ok');
+  if(sent) ptToast('Sent ' + sent + ' leg' + (sent===1?'':'s') + (skipped?' · '+skipped+' skipped':'') + ' — ' + (s.name || 'Strategy'), skipped?'warn':'ok');
+  else ptToast('Strategy not sent — no displayed leg has a live priceable contract', 'err');
 }
 window.ptExecuteStrategy = ptExecuteStrategy;
 
@@ -748,8 +807,8 @@ function ptExecuteDecisionStrategy(){
       return;
     }
     const legExpiry = ptResolveStrategyExpiry(l.expiry || auto.expiry || _data.expiry || '');
-    ptExecuteLeg(symbol, legExpiry, l.strike||0, (l.type||'').toUpperCase(), l.action, l.lots||1, ltp);
-    sent++;
+    if(ptExecuteLeg(symbol, legExpiry, l.strike||0, (l.type||'').toUpperCase(), l.action, l.lots||1, ltp)) sent++;
+    else skipped++;
   });
   if(sent) ptToast('Executing ' + sent + ' leg' + (sent===1?'':'s') + ' — ' + (auto.name || 'Strategy'), 'ok');
   else ptToast('No legs had a live price — nothing sent', 'err');

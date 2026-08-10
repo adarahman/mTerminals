@@ -71,7 +71,7 @@ class ChainView {
     this.velWin = 5;
     this.centerChainOnATM = true;
     this.grkView = 'delta';
-    this.chainRange = 10;
+    this.chainRange = 15;
     this.greeksVisible = false;
     this.pcrVisible = false;
     this.selStrike = null;

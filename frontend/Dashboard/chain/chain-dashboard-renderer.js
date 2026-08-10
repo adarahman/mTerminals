@@ -311,6 +311,18 @@ ChainView.prototype.renderDashboard = function(d) {
   let stratSimulatorHtml = '';
   {
     // Build dropdown options
+    if(app.strategy.selectionSymbol !== d.symbol){
+      app.strategy.selectionSymbol = d.symbol || null;
+      app.strategy.selectionTouched = false;
+    }
+    if(!app.strategy.selectionTouched){
+      const decisionStrategy = String((d.decision && (d.decision.suggestedStrategy
+        || (d.decision.autoStrategy && d.decision.autoStrategy.name))) || '').trim().toLowerCase();
+      const recommendedIdx = decisionStrategy
+        ? strats.findIndex(s => String(s.name || '').trim().toLowerCase() === decisionStrategy)
+        : -1;
+      if(recommendedIdx >= 0) _selStratIdx = recommendedIdx;
+    }
     if(_selStratIdx>=strats.length) _selStratIdx=0;
     const stratOpts = strats.map((s,i)=>`<option value="${i}"${i===_selStratIdx?' selected':''}>${s.name||('Strategy '+(i+1))}</option>`).join('');
 
@@ -366,7 +378,7 @@ ChainView.prototype.renderDashboard = function(d) {
 
       <!-- Dropdowns row -->
       <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <select id="strat-select" onchange="_selStratIdx=parseInt(this.value)||0;renderStratPayoff()" style="
+        <select id="strat-select" onchange="onStrategyPicked(this.value)" style="
           flex:1;padding:10px 14px;font-size:13px;font-weight:600;
           background:var(--bg2);color:var(--txt);
           border:1px solid var(--border);border-radius:8px;
@@ -820,4 +832,3 @@ ChainView.prototype.sizeAndScrollChain = function(prevScrollTop) {
     wrap.scrollTop=prevScrollTop;
   }
 };
-

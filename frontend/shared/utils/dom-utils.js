@@ -144,6 +144,7 @@ function patchOuterHtmlIfChanged(elId, buildHtml, opts){
   const el = document.getElementById(elId);
   if(!el) return;
   if(opts.guardKey && isCardClickPending(opts.guardKey)) return;
+  if(opts.shouldSkip && opts.shouldSkip(el)) return;
   const freshHtml = buildHtml();
   if(el.dataset.lastHtml === freshHtml) return;
   const preserved = opts.preserveState ? opts.preserveState(el) : undefined;

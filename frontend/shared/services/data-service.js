@@ -76,6 +76,8 @@ class DataService {
       lastTransportAt: prev.lastTransportAt || null,
       lastStatusAt: Date.now(),
       reason: reason || '',
+      pipelineDelayed: prev.pipelineDelayed || false,
+      pipelineReason: prev.pipelineReason || '',
     };
     this._updateFeedStatusDom();
     if (window.eventBus) window.eventBus.emit('feed:status', AppState.feedState);
@@ -85,6 +87,34 @@ class DataService {
     // A missing envelope is the legacy plain full-snapshot shape. Only the
     // versioned full/delta stream owns chain/Greeks/decision freshness.
     return !raw || !raw.type || raw.type === 'full' || raw.type === 'delta';
+  }
+
+  _applyPipelineStatus(status){
+    if(!status) return;
+    if(status.status === 'DELAYED'){
+      const prev = AppState.feedState || {};
+      const pipelineReason = status.reason || 'Analytics delayed; live prices continue';
+      AppState.feedState = {
+        ...prev,
+        pipelineDelayed: true,
+        pipelineReason,
+        // Pipeline health is supplementary. It must not overwrite the
+        // market transport state or its visible reason. The pipeline can
+        // alternate DELAYED/LIVE every pass, which must not make the Feed
+        // header flash or change size while WebSocket prices remain live.
+        reason: prev.reason === prev.pipelineReason ? '' : prev.reason,
+      };
+      this._updateFeedStatusDom();
+    } else if(status.status === 'LIVE'){
+      const prev = AppState.feedState || {};
+      AppState.feedState = {
+        ...prev,
+        pipelineDelayed: false,
+        pipelineReason: '',
+        reason: prev.reason === prev.pipelineReason ? '' : prev.reason,
+      };
+      this._updateFeedStatusDom();
+    }
   }
 
   _markTransportMessage(){
@@ -104,9 +134,11 @@ class DataService {
       lastTransportAt: prev.lastTransportAt || now,
       lastStatusAt: prev.status === 'LIVE' ? (prev.lastStatusAt || now) : now,
       reason: '',
+      pipelineDelayed: !!prev.pipelineDelayed,
+      pipelineReason: prev.pipelineReason || '',
     };
     this._updateFeedStatusDom();
-    if (window.eventBus && prev.status !== 'LIVE') {
+    if (window.eventBus && prev.status !== AppState.feedState.status) {
       window.eventBus.emit('feed:status', AppState.feedState);
     }
   }
@@ -134,7 +166,7 @@ class DataService {
     if (!fs.lastMessageAt) return;
     if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING' || fs.status === 'RECOVERING') return;
     const age = Date.now() - fs.lastMessageAt;
-    const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 12000;
+    const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 30000;
     if (age > staleAfter && fs.status !== 'STALE') {
       this._setFeedStatus('STALE', `No market snapshot for ${Math.floor(age/1000)}s`);
     } else if (fs.status === 'STALE') {
@@ -174,7 +206,8 @@ class DataService {
     if (el) {
       el.textContent = label;
       el.dataset.status = visualStatus.toLowerCase().replace('_','-');
-      el.title = (fs.reason || (fs.lastMessageAt ? `Last market snapshot ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt;
+      const pipelineDetail = fs.pipelineDelayed && fs.pipelineReason ? ` Analytics: ${fs.pipelineReason}.` : '';
+      el.title = (fs.reason || (fs.lastMessageAt ? `Last market snapshot ${new Date(fs.lastMessageAt).toLocaleTimeString()}` : status)) + missingTxt + pipelineDetail;
     }
     const reasonEl = $i('feed-status-reason');
     if (reasonEl) {
@@ -201,6 +234,10 @@ class DataService {
   // directly to its owner instead of scheduling the entire dashboard pass.
   if(messageType === 'portfolio' || messageType === 'orders' || messageType === 'funds'){
     if(window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
+    return;
+  }
+  if(messageType === 'pipelineStatus'){
+    this._applyPipelineStatus(AppState.wsState.pipelineStatus);
     return;
   }
   if(messageType === 'algoStatus'){

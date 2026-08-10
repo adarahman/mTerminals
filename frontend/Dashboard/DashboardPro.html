@@ -87,6 +87,18 @@
 
 <!-- Native OI Flow chart: shares the dashboard's canonical chain state;
      no duplicate standalone HTML application or second data connection. -->
+<div id="option-chain-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="option-chain-modal-close" class="oc-modal-back" onclick="closeOptionChainModal()" aria-label="Close Option Chain">←</button>
+        <span class="oc-modal-title">📊 Option Chain</span>
+      </div>
+    </div>
+    <div id="option-chain-modal-body" class="option-chain-modal-body"></div>
+  </div>
+</div>
+
 <div id="oi-flow-modal" class="oc-modal">
   <div class="oc-modal-panel">
     <div class="oc-modal-bar">

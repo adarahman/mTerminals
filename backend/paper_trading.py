@@ -49,6 +49,11 @@ OrderType = Literal["MARKET", "LIMIT"]
 OrderStatus = Literal["PENDING", "FILLED", "CANCELLED", "REJECTED"]
 InstrumentType = Literal["CE", "PE", "FUT", "EQ", "INDEX"]
 
+
+def _instrument_lot_size(symbol: str, instrument_type: str) -> int:
+    """Cash equity/index quantity is already units; derivatives use lots."""
+    return 1 if instrument_type in ("EQ", "INDEX") else get_lot_size(symbol)
+
 # Last-resort fallback ONLY — used if the live instrument master can't be
 # reached (network/API down) and this symbol has never been resolved
 # RECONCILED (this pass): this module used to carry its own independent
@@ -259,7 +264,7 @@ class PaperTradingEngine:
                                      "LIMIT order requires limit_price", client_order_id)
 
             ref_price = current_ltp if order_type == "MARKET" else limit_price
-            lot_size = get_lot_size(symbol)
+            lot_size = _instrument_lot_size(symbol, instrument_type)
 
             if enforce_risk_checks:
                 # 1) Price band / LPP stand-in — only meaningful for LIMIT
@@ -341,7 +346,7 @@ class PaperTradingEngine:
             "SELECT * FROM positions WHERE net_qty_lots != 0").fetchall()
         total = 0.0
         for row in rows:
-            lot_size = get_lot_size(row["symbol"])
+            lot_size = _instrument_lot_size(row["symbol"], row["instrument_type"])
             qty = abs(row["net_qty_lots"])
             if row["net_qty_lots"] > 0:
                 total += row["avg_price"] * qty * lot_size
@@ -460,7 +465,7 @@ class PaperTradingEngine:
             # SELL closing a long realizes (fill_price - avg_price) per lot.
             pnl_per_lot = (avg_price - order.fill_price) if order.side == "BUY" \
                 else (order.fill_price - avg_price)
-            lot_size = get_lot_size(order.symbol)
+            lot_size = _instrument_lot_size(order.symbol, order.instrument_type)
             realized += pnl_per_lot * closed_qty * lot_size
             if abs(signed_qty) > abs(net_qty):
                 # Flipped through zero — remainder opens a new position at fill price.
@@ -530,7 +535,7 @@ class PaperTradingEngine:
             # portfolio total_pnl) understated the real figure by whatever
             # the instrument's lot size is (e.g. 65x for NIFTY).
             d["unrealized_pnl"] = (
-                (ltp - row["avg_price"]) * row["net_qty_lots"] * get_lot_size(row["symbol"])
+                (ltp - row["avg_price"]) * row["net_qty_lots"] * _instrument_lot_size(row["symbol"], row["instrument_type"])
                 if ltp is not None else None
             )
             out.append(d)

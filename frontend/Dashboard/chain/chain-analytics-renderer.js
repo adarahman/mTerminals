@@ -1,5 +1,21 @@
 // Option-chain velocity, IV surface and secondary analytics rendering.
 
+const _chainLedgerScrollState = { top: 0, left: 0, activeUntil: 0 };
+
+function _bindChainLedgerScrollGuard(card) {
+  const scroll = card && card.querySelector('.oc-native-scroll');
+  if(!scroll || scroll.dataset.scrollGuardBound === '1') return scroll;
+  scroll.dataset.scrollGuardBound = '1';
+  scroll.addEventListener('scroll', () => {
+    _chainLedgerScrollState.top = scroll.scrollTop;
+    _chainLedgerScrollState.left = scroll.scrollLeft;
+    // Trackpad momentum produces several events after the fingers lift.
+    // Keep the live-tick renderer away until that gesture has settled.
+    _chainLedgerScrollState.activeUntil = Date.now() + 1200;
+  }, { passive: true });
+  return scroll;
+}
+
 ChainView.prototype.renderVelocity = function(win) {
   const el=$i('vel-content');if(!el||!_data)return;
   const vel=_data.oiVelocity;
@@ -105,6 +121,12 @@ ChainView.prototype._rerenderChainPanels = function() {
   // ── 1. Chain table body ───────────────────────────────────────────────────
   const chainEl = document.getElementById('chain-body');
   if(chainEl){
+    const chainWrap = $i('chain-scroll');
+    const previousChainScrollTop = chainWrap ? chainWrap.scrollTop : null;
+    const chainViewportKey = `${_data.symbol || ''}|${_data.expiry || ''}|${typeof _chainRange !== 'undefined' ? _chainRange : ''}`;
+    const chainViewportChanged = this._lastIncrementalChainViewportKey !== undefined
+      && this._lastIncrementalChainViewportKey !== chainViewportKey;
+    this._lastIncrementalChainViewportKey = chainViewportKey;
     let rows='';
     chain.forEach(r=>{
       const ia=r.atm||r.strike===atm; const ac=ia?' atm':''; const acs=ia?' atm-sc':'sc';
@@ -143,8 +165,12 @@ ChainView.prototype._rerenderChainPanels = function() {
     });
     chainEl.innerHTML = rows;
     if(_greeksVisible) document.querySelectorAll('[id^="grk-row-"]').forEach(el=>{el.style.display='';});
-    _centerChainOnATM=true; // expiry just changed — snap the viewport back to ATM ±5
-    requestAnimationFrame(()=>app.chain.sizeAndScrollChain(null));
+    // Live price/OI updates rebuild the tbody, but must not pull someone
+    // browsing distant strikes back to ATM. Recenter only when the actual
+    // symbol/expiry/range viewport changes; otherwise restore the exact
+    // scroll offset captured before this tick's DOM update.
+    if(chainViewportChanged) _centerChainOnATM=true;
+    requestAnimationFrame(()=>app.chain.sizeAndScrollChain(previousChainScrollTop));
   }
 
   // ── 2. DTE pill ──────────────────────────────────────────────────────────
@@ -282,8 +308,64 @@ ChainView.prototype._rerenderChainPanels = function() {
   // destructive rebuild while a click on this card is mid-gesture;
   // dataset.lastHtml stays stale so the very next tick retries once the
   // click has committed, same as refreshDecisionBoxGuarded.
-  patchOuterHtmlIfChanged('chain-summary-card', () => app.chain.buildChainSummaryHtml(_data), {
-    guardKey: 'chainSummary', bindGuard: true
+  const chainSummaryCard = document.getElementById('chain-summary-card');
+  const expandedChain = document.getElementById('option-chain-table');
+  if(chainSummaryCard && expandedChain && !expandedChain.hidden){
+    // Never replace the physical scroll container while it is expanded.
+    // A wheel/trackpad gesture targets that exact DOM node; outerHTML
+    // replacement detaches it mid-gesture and makes scrolling appear
+    // completely broken even when scrollTop is restored afterward.
+    const freshHtml = app.chain.buildChainSummaryHtml(_data);
+    const template = document.createElement('template');
+    template.innerHTML = freshHtml.trim();
+    const freshCard = template.content.firstElementChild;
+    const copyInner = (selector) => {
+      const current = chainSummaryCard.querySelector(selector);
+      const fresh = freshCard && freshCard.querySelector(selector);
+      if(current && fresh) current.innerHTML = fresh.innerHTML;
+    };
+    // Keep the summary figures current, but deliberately leave every
+    // expanded ledger row structurally untouched. Wheel/trackpad events
+    // target the row beneath the pointer, not only the scroll parent; even
+    // replacing tbody inside a stable container cancels that gesture.
+    // Collapsing/reopening rebuilds the ledger from the latest payload.
+    copyInner('.oi-snap-grid');
+    copyInner('.oi-snap-kpis');
+    const currentBadge = chainSummaryCard.querySelector('.oi-snap-badge');
+    const freshBadge = freshCard && freshCard.querySelector('.oi-snap-badge');
+    if(currentBadge && freshBadge) currentBadge.textContent = freshBadge.textContent;
+    chainSummaryCard.dataset.lastHtml = freshHtml;
+    _bindChainLedgerScrollGuard(expandedChain);
+  } else patchOuterHtmlIfChanged('chain-summary-card', () => app.chain.buildChainSummaryHtml(_data), {
+    guardKey: 'chainSummary',
+    bindGuard: true,
+    shouldSkip: (card) => {
+      _bindChainLedgerScrollGuard(card);
+      return Date.now() < _chainLedgerScrollState.activeUntil;
+    },
+    preserveState: (card) => {
+      const scroll = _bindChainLedgerScrollGuard(card);
+      if(scroll){
+        _chainLedgerScrollState.top = scroll.scrollTop;
+        _chainLedgerScrollState.left = scroll.scrollLeft;
+      }
+      return { top: _chainLedgerScrollState.top, left: _chainLedgerScrollState.left };
+    },
+    restoreState: (card, position) => {
+      if(!position) return;
+      const scroll = _bindChainLedgerScrollGuard(card);
+      if(scroll){
+        const restore = () => {
+          scroll.scrollTop = position.top;
+          scroll.scrollLeft = position.left;
+        };
+        restore();
+        // outerHTML replacement can finish layout after the synchronous
+        // assignment; repeat once on the next frame to make restoration
+        // deterministic across browsers.
+        requestAnimationFrame(restore);
+      }
+    }
   });
 
   // 4. OI Flow Snapshot card (compact — full butterfly table now lives in

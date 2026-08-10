@@ -34,7 +34,7 @@
   .top-bar{flex-wrap:wrap;}
   .top-bar-left{width:100%;}
   .top-bar-left .index-ticker{display:none;}
-  .expiry-strip{margin-left:auto;}
+  .expiry-strip{margin-left:auto;flex:0 1 500px;max-width:100%;}
 }
 
 /* was inline after: .index-ticker  —  @media (max-width:1100px) */

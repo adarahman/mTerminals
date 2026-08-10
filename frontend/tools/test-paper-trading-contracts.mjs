@@ -20,6 +20,22 @@ assert.doesNotMatch(orderEntry, /data-value="(?:SL|SL-M|TSL|GTT)"/,
   'UI must expose only paper order types implemented by the backend');
 assert.match(orderEntry, /Bulk live strategy blocked/,
   'multi-leg live strategies must fail closed until basket confirmation is atomic');
+assert.match(orderEntry, /function ptMonthlyFuturesExpiries/,
+  'futures orders must derive monthly expiries separately from weekly options');
+assert.match(orderEntry, /if\(instype === 'FUT'\) expiries = ptMonthlyFuturesExpiries/,
+  'FUT expiry selector must use only monthly futures dates');
+assert.match(orderEntry, /qtyInput\.placeholder = 'Shares'/,
+  'EQ quantity must be presented as shares rather than lots');
+assert.match(orderEntry, /hint\.style\.display = 'none'/,
+  'EQ selection must hide the derivative lot-size hint');
+assert.match(orderEntry, /LTP: Loading.*symbol/,
+  'changing the order symbol must visibly load its live feed');
+assert.match(orderEntry, /AppState\.wsState\.future/,
+  'FUT LTP must use the canonical futures price field');
+assert.match(orderEntry, /const liveLtp = ptResolveLtp\(symbol, instrument_type, expiry, Number\(strike\)\)/,
+  'strategy execution must reprice each displayed leg from the live chain');
+assert.match(orderEntry, /Strategy not sent — no displayed leg has a live priceable contract/,
+  'strategy execution must report complete failure instead of false success');
 assert.match(tracker, /if\(_ptLiveMode\).*Live square-off blocked/s,
   'paper positions must never generate real square-off orders');
 assert.match(tracker, /LIVE FUNDS · PAPER POSITIONS/,
@@ -29,4 +45,4 @@ assert.match(shared, /Estimated value:/,
 assert.match(shared, /totalUnits/,
   'live confirmation must show lot-adjusted total units');
 
-console.log('Paper trading contracts: 15/15 passed');
+console.log('Paper trading contracts: 23/23 passed');

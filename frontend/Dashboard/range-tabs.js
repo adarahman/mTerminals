@@ -22,7 +22,7 @@ const RANGE_TAB_OPTIONS = [
   { value: 15,   label: '\u00B115' },
   { value: 9999, label: 'All' },
 ];
-const RANGE_TAB_DEFAULT = 10;
+const RANGE_TAB_DEFAULT = 15;
 
 function buildRangeTabsHtml(options, defaultValue) {
   options = options || RANGE_TAB_OPTIONS;

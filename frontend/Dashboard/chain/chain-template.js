@@ -198,8 +198,37 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     if (!isNaN(spotNum)) {
       const hist = this._miniChartHistory;
       const last = hist[hist.length - 1];
-      if (!last || last.p !== spotNum) {
-        hist.push({ t: Date.now(), p: spotNum });
+      // Respect the interval selected in the full Price Chart. Previously
+      // every live websocket price became a brand-new mini-chart point,
+      // so a selected 5m candle marched horizontally every second. Keep
+      // one fixed timestamp per interval bucket and update that candle's
+      // H/L/C in place; only the first tick of the next bucket advances X.
+      const intervalMs = {
+        '1m': 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000,
+      }[chartPrefs.range] || 60 * 1000;
+      const bucketStart = Math.floor(Date.now() / intervalMs) * intervalMs;
+      if (last && last.t === bucketStart) {
+        const open = Number.isFinite(last.o) ? last.o : last.p;
+        const high = Number.isFinite(last.h) ? last.h : last.p;
+        const low = Number.isFinite(last.l) ? last.l : last.p;
+        last.o = open;
+        last.h = Math.max(high, spotNum);
+        last.l = Math.min(low, spotNum);
+        last.c = spotNum;
+        last.p = spotNum;
+      } else if (!last || last.t < bucketStart) {
+        hist.push({
+          t: bucketStart,
+          o: spotNum,
+          h: spotNum,
+          l: spotNum,
+          c: spotNum,
+          p: spotNum,
+        });
         if (hist.length > MINI_CHART_BUFFER_POINTS) hist.shift();
       }
     }
@@ -220,8 +249,9 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       this._miniChartHydrating = true;
       const symForFetch = d.symbol || 'NIFTY';
       const prefsForFetch = prefsSignature;
-      fetch(`${Config.api.history}?symbol=${encodeURIComponent(symForFetch)}&range=${encodeURIComponent(chartPrefs.range)}`)
-        .then(res => res.ok ? res.json() : [])
+      (window.fetchMarketHistory
+        ? window.fetchMarketHistory(symForFetch, chartPrefs.range)
+        : fetch(`${Config.api.history}?symbol=${encodeURIComponent(symForFetch)}&range=${encodeURIComponent(chartPrefs.range)}`).then(res => res.ok ? res.json() : []))
         .then(rows => {
           // Bail if the symbol moved on again while this was in flight, or
           // a live tick already beat the fetch back and started filling
@@ -659,11 +689,23 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const tableOpen = this.chainTableOpen === true;
   const greeksVisible = this.chainGreeksVisible === true;
   const greeksByStrike = new Map((d.greeks || []).map(g => [Number(g.strike), g]));
+  const structureOi = {};
+  chain.forEach(r => {
+    structureOi[Number(r.strike)] = {
+      ce: Number(r.ceOI) || 0,
+      pe: Number(r.peOI) || 0,
+      ceChg: Number(r.ceChgOI) || 0,
+      peChg: Number(r.peChgOI) || 0,
+    };
+  });
+  const structureByStrike = typeof marketStructureLabels === 'function'
+    ? marketStructureLabels(chain, activeAtm(d), structureOi, Number(d.maxPain))
+    : {};
 
   if(!chain.length){
     return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <button type="button" class="section-header nav-card-header" onclick="toggleOptionChainSnapshot(this)"
+    <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
       aria-expanded="${tableOpen}" aria-controls="option-chain-table">
       <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
       <span class="nav-card-header-arrow" aria-hidden="true">${tableOpen?'▾':'↗'}</span>
@@ -716,7 +758,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <button type="button" class="section-header nav-card-header" onclick="toggleOptionChainSnapshot(this)"
+    <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
       aria-expanded="${tableOpen}" aria-controls="option-chain-table">
       <span class="oi-snap-heading nav-card-header-label">
         <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--neg)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pos)"/></svg>
@@ -825,7 +867,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             </tr>
           </thead>
           <tbody>
-            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
+            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
               <td><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
               <td><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
               <td><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
@@ -836,7 +878,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
               <td><div class="oc-ledger-stack"><span class="pe ${r.peChgOI>=0?'up':'down'}">${signedFmt(r.peChgOI)}</span><span class="ce ${r.ceChgOI>=0?'up':'down'}">${signedFmt(r.ceChgOI)}</span></div></td>
               <td class="signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
               <td class="footprint"><strong>${r.footprintScore==null?'—':fmtN(r.footprintScore,0)}</strong></td>
-              <td class="structure">${isAtm?'ATM':d.maxPain===r.strike?'MAX PAIN':'—'}</td>
+              <td class="structure"${structureStyle} title="${escapeHtml(structureText)}">${escapeHtml(structureText)}</td>
             </tr><tr class="oc-ledger-greeks" ${greeksVisible?'':'hidden'}><td colspan="11">
               <div><b class="ce">CE</b> Δ ${fmtN(g.cDelta,3)} · Γ ${fmtN(g.cGamma,5)} · Θ ${fmtN(g.cTheta,2)} · Vega ${fmtN(g.cVega,2)}</div>
               <div><b class="pe">PE</b> Δ ${fmtN(g.pDelta,3)} · Γ ${fmtN(g.pGamma,5)} · Θ ${fmtN(g.pTheta,2)} · Vega ${fmtN(g.pVega,2)}</div>

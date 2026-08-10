@@ -83,6 +83,10 @@ _parser = argparse.ArgumentParser()
 _parser.add_argument("--symbol", default="NIFTY")
 _parser.add_argument("--expiry", default=None)
 _parser.add_argument("--poll-seconds", type=int, default=5)
+_parser.add_argument("--pipeline-timeout-seconds", type=float, default=8.0,
+                      help="Maximum time the live engine waits for one REST analytics pass. "
+                           "The blocking worker is allowed to finish safely in the background, "
+                           "while SmartAPI websocket ticks and the dashboard remain responsive.")
 _parser.add_argument("--min-tick-recompute-seconds", type=float, default=2.0,
                       help="Floor on how often SmartAPI tick activity can wake engine_loop "
                            "early. --poll-seconds becomes a ceiling (fires anyway if no ticks "
@@ -160,6 +164,7 @@ PRICE_SOURCE = "EQ"
 FUTURES_EXPIRY = "NEAR"
 EXPIRY       = ARGS.expiry
 POLL_SECONDS = ARGS.poll_seconds
+PIPELINE_TIMEOUT_SECONDS = max(1.0, ARGS.pipeline_timeout_seconds)
 MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
 WS_HOST      = ARGS.host
 WS_PORT      = ARGS.port
@@ -171,7 +176,7 @@ INDEX_QUOTE_SECONDS  = ARGS.index_quote_seconds
 FUNDS_POLL_SECONDS   = ARGS.funds_poll_seconds
 PORTFOLIO_POLL_SECONDS = ARGS.portfolio_poll_seconds
 USE_SMARTAPI         = not ARGS.no_smartapi
-STRIKES_EACH_SIDE    = ARGS.strikes_each_side if ARGS.strikes_each_side is not None else (10 if USE_SMARTAPI else 50)
+STRIKES_EACH_SIDE    = ARGS.strikes_each_side if ARGS.strikes_each_side is not None else (15 if USE_SMARTAPI else 50)
 option_chain_json.set_runtime_config(RuntimeConfig(
     strikes_each_side=STRIKES_EACH_SIDE,
     use_smartapi=USE_SMARTAPI,
@@ -218,6 +223,14 @@ _BASELINE_ID = None
 PROCESS_STARTED_AT = datetime.now().astimezone()
 _LAST_HEALTH_LOG_STATE = None
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
+_PIPELINE_TASK = None
+_PIPELINE_STATUS = {
+    "status": "STARTING",
+    "reason": "Analytics pipeline has not completed yet",
+    "startedAt": None,
+    "lastSuccessAt": None,
+    "elapsedSeconds": None,
+}
 METRICS = OperationalMetrics(started_at=PROCESS_STARTED_AT)
 _NODE_SESSION = None
 # Most recent real-account funds snapshot from _funds_poll_body() below —
@@ -491,6 +504,25 @@ _TICK_ACTIVITY_EVENT = asyncio.Event()
 _MARKET_STREAM_LOCK = asyncio.Lock()
 
 
+async def _run_pipeline_locked():
+    """Run exactly one blocking pipeline pass without permitting overlap."""
+    async with _PIPELINE_LOCK:
+        return await asyncio.to_thread(run_pipeline_once)
+
+
+async def _publish_pipeline_status(status, reason="", elapsed=None):
+    """Broadcast analytics availability only when its visible state changes."""
+    previous = (_PIPELINE_STATUS.get("status"), _PIPELINE_STATUS.get("reason"))
+    _PIPELINE_STATUS["status"] = status
+    _PIPELINE_STATUS["reason"] = reason
+    _PIPELINE_STATUS["elapsedSeconds"] = round(elapsed, 3) if elapsed is not None else None
+    if status == "LIVE":
+        _PIPELINE_STATUS["lastSuccessAt"] = datetime.now().astimezone().isoformat()
+    current = (status, reason)
+    if current != previous:
+        await broadcast({"type": "pipelineStatus", "payload": dict(_PIPELINE_STATUS)})
+
+
 def _json_default(obj):
     """orjson doesn't natively handle numpy scalars — coerce them to native Python types."""
     if isinstance(obj, np.generic):       # covers float64, int64, bool_, etc.
@@ -693,6 +725,12 @@ async def ws_handler(request):
         if INDEX_QUOTES:
             msg_str = orjson.dumps({"type": "indexQuotes", "payload": INDEX_QUOTES}, default=_json_default).decode()
             await ws.send_str(msg_str)
+        # A late-joining dashboard must see an already-delayed analytics
+        # pass immediately; status transitions are otherwise only broadcast
+        # when they change.
+        await ws.send_str(orjson.dumps({
+            "type": "pipelineStatus", "payload": _PIPELINE_STATUS,
+        }, default=_json_default).decode())
         # Real account funds (Live mode) — same "hand over what we already
         # have" treatment as INDEX_QUOTES above. Stays None/skipped for the
         # life of the process when LIVE_TRADING_ENABLED is false, since
@@ -1879,13 +1917,6 @@ async def _smartapi_sync_and_broadcast_locked(message):
             # lag behind SmartAPI's price moves by up to --poll-seconds.
             PT_ENGINE.check_pending_orders(current_prices)
             await _broadcast_portfolio(current_prices)
-            # TEMP DEBUG — remove once confirmed firing at the expected
-            # cadence. Only prints when there's at least one open position,
-            # so this doesn't spam an idle/no-position session.
-            open_count = sum(1 for p in PT_ENGINE.get_positions(current_prices) if p.get("net_qty_lots"))
-            if open_count:
-                print(f"[paper-trading] fast-path portfolio broadcast OK "
-                      f"({open_count} open position(s), {len(current_prices)} live prices in map)", flush=True)
         except Exception as e:
             # Same best-effort posture as the sync block above — a paper
             # trading hiccup must never take down the live market-data feed.
@@ -2625,6 +2656,7 @@ async def _post_to_node(payload: dict):
 
 async def engine_loop():
     global LAST_PAYLOAD, LAST_PAYLOAD_AT, _LAST_SENT, _EOD_DONE_DATE, _LAST_SESSION_DATE
+    global _PIPELINE_TASK
     while True:
         tick_start = time.monotonic()
 
@@ -2663,8 +2695,35 @@ async def engine_loop():
             flow_task = asyncio.create_task(asyncio.to_thread(record_today_flow))
             flow_task.add_done_callback(_flow_task_done)
 
-        async with _PIPELINE_LOCK:
-            payload = await asyncio.to_thread(run_pipeline_once)
+        if _PIPELINE_TASK is None:
+            _PIPELINE_STATUS["startedAt"] = datetime.now().astimezone().isoformat()
+            _PIPELINE_TASK = asyncio.create_task(_run_pipeline_locked())
+        try:
+            # shield() is important: a timeout must not cancel to_thread's
+            # worker, which cannot be stopped safely and may be updating the
+            # pipeline's module-level runtime configuration. We retain the
+            # task and collect its result on a later loop instead of starting
+            # an overlapping REST pass.
+            payload = await asyncio.wait_for(
+                asyncio.shield(_PIPELINE_TASK),
+                timeout=PIPELINE_TIMEOUT_SECONDS,
+            )
+            _PIPELINE_TASK = None
+            await _publish_pipeline_status("LIVE")
+        except asyncio.TimeoutError:
+            payload = None
+            elapsed = time.monotonic() - tick_start
+            await _publish_pipeline_status(
+                "DELAYED",
+                f"REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; live prices continue via WebSocket",
+                elapsed,
+            )
+            print(f"[pipeline] DELAYED after {elapsed:.2f}s — SmartAPI websocket overlay remains active", flush=True)
+        except Exception as e:
+            payload = None
+            _PIPELINE_TASK = None
+            await _publish_pipeline_status("DELAYED", f"Analytics pipeline failed: {e}")
+            print(f"[pipeline] FAILED: {e}", flush=True)
         pipeline_elapsed = time.monotonic() - tick_start
         METRICS.observe_pipeline(payload is not None, pipeline_elapsed)
 
@@ -2939,11 +2998,13 @@ _RANGE_TO_SMARTAPI = {
 # independently.
 _HISTORY_CACHE = {}      # (symbol, range) -> (fetched_at_monotonic, rows)
 _HISTORY_INFLIGHT = {}   # (symbol, range) -> asyncio.Future, resolves to rows
+_HISTORY_FAILURE_CACHE = {}  # (symbol, range) -> failed_at_monotonic
 # Deliberately short — well under any candle's own bucket width (the
 # smallest is ONE_MINUTE) — so this is purely about not re-fetching
 # identical bars redundantly, not about serving stale ones. A tick-level
 # refresh still comes from the live WS feed regardless of this cache.
 _HISTORY_CACHE_TTL_SECONDS = 20
+_HISTORY_FAILURE_TTL_SECONDS = 60
 
 
 async def _get_history_cached(req_symbol, range_key, cfg):
@@ -2959,6 +3020,10 @@ async def _get_history_cached(req_symbol, range_key, cfg):
     cached = _HISTORY_CACHE.get(key)
     if cached is not None and (now - cached[0]) < _HISTORY_CACHE_TTL_SECONDS:
         return cached[1]
+
+    failed_at = _HISTORY_FAILURE_CACHE.get(key)
+    if failed_at is not None and (now - failed_at) < _HISTORY_FAILURE_TTL_SECONDS:
+        return []
 
     inflight = _HISTORY_INFLIGHT.get(key)
     if inflight is not None:
@@ -2996,9 +3061,11 @@ async def _get_history_cached(req_symbol, range_key, cfg):
                 "v": c.get("volume"),
             })
         _HISTORY_CACHE[key] = (now, rows)
+        _HISTORY_FAILURE_CACHE.pop(key, None)
         fut.set_result(rows)
         return rows
     except Exception as e:
+        _HISTORY_FAILURE_CACHE[key] = time.monotonic()
         fut.set_exception(e)
         raise
     finally:
@@ -3192,6 +3259,10 @@ def _build_health_snapshot(now=None):
 
     degraded = feed_status in {"STARTING", "STALE"}
     reasons = [feed_reason] if degraded and feed_reason else []
+    pipeline_delayed = _PIPELINE_STATUS.get("status") == "DELAYED"
+    if pipeline_delayed:
+        degraded = True
+        reasons.append(_PIPELINE_STATUS.get("reason") or "Analytics pipeline is delayed")
     return {
         "status": "degraded" if degraded else "ok",
         "service": "mterminals",
@@ -3215,6 +3286,7 @@ def _build_health_snapshot(now=None):
             "smartapiEnabled": USE_SMARTAPI,
             "smartapiConnected": smartapi_connected,
         },
+        "analyticsPipeline": dict(_PIPELINE_STATUS),
     }
 
 

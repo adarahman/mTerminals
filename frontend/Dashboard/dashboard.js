@@ -118,6 +118,7 @@ window.switchNativeOiFlowChart = (...args) => app.oiFlow.switchNativeChart(...ar
 window.setNativeOiVelocity = (...args) => app.oiFlow.setNativeVelocity(...args);
 window.switchNativeOiFlowView = (...args) => app.oiFlow.switchNativeView(...args);
 window.renderExecutiveDashboard = (...args) => app.exec.renderExecutiveDashboard(...args);
+window.onStrategyPicked = (...args) => app.strategy.selectStrategy(...args);
 window.buildFiiDiiCard = (...args) => app.exec.buildFiiDiiCard(...args);
 window.buildFiiDiiSummaryCard = (...args) => app.exec.buildFiiDiiSummaryCard(...args);
 window.progress = (...args) => app.exec.progress(...args);
@@ -131,6 +132,8 @@ window.simRenderGEXChart = (...args) => app.simulator.simRenderGEXChart(...args)
 window.simRenderVolGrid = (...args) => app.simulator.simRenderVolGrid(...args);
 window.resetScenario = (...args) => app.simulator.resetScenario(...args);
 window.renderStrikeDetailReport = (...args) => app.strikeDetail.render(...args);
+window.openOptionChainModal = (...args) => app.modal.openOptionChainModal(...args);
+window.closeOptionChainModal = (...args) => app.modal.closeOptionChainModal(...args);
 window.openOIDashboardModal = (...args) => app.modal.openOIDashboardModal(...args);
 window.closeOIDashboardModal = (...args) => app.modal.closeOIDashboardModal(...args);
 window.openPriceChartModal = (...args) => app.modal.openPriceChartModal(...args);

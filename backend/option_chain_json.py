@@ -156,7 +156,7 @@ NO_VIRTUAL_OI  = _args.no_virtual_oi
 # read this module-level name at call time (not bake in a literal default)
 # or that override is a no-op — which was the bug: strikes stayed pinned at
 # 10 even under --no-smartapi, where 50 was intended.
-STRIKES_EACH_SIDE = 10
+STRIKES_EACH_SIDE = 15
 
 # Underlying price source fed into df["Spot"] (and downstream into every
 # engine.py bs_* Greeks call, wall selection, PCR, etc.):

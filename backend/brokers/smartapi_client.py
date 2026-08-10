@@ -73,8 +73,27 @@ TOTP_SECRET = settings.smartapi_totp_secret
 SCRIP_MASTER_URL = (
     "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 )
+# Legacy cache retained as a read fallback for existing installations and
+# test fixtures. The canonical cache is the same date-scoped file used by
+# smartapi_instruments.InstrumentResolver, so the two broker layers no
+# longer download the identical ~35 MB master independently at startup.
 SCRIP_MASTER_CACHE_PATH = os.path.join(CACHE_DIR, "_scrip_master_cache.json")
 SCRIP_MASTER_TTL_HOURS = 20  # refresh once a day; contracts don't change intraday
+
+
+def _daily_scrip_master_cache_path(now=None):
+    now = now or datetime.now()
+    return os.path.join(
+        settings.instrument_cache_dir,
+        f"instrument_master_{now.date().isoformat()}.json",
+    )
+
+
+def _same_local_day(path, now):
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path)).date() == now.date()
+    except OSError:
+        return False
 
 # INDEX_TOKENS (index -> underlying token/exchange mapping SmartAPI expects
 # for spot quotes) is built dynamically below by _build_index_tokens() from
@@ -484,22 +503,42 @@ def _load_scrip_master():
             _build_scrip_indexes(_scrip_master_cache.value)
         return _scrip_master_cache.value
 
-    if os.path.exists(SCRIP_MASTER_CACHE_PATH):
-        mtime = datetime.fromtimestamp(os.path.getmtime(SCRIP_MASTER_CACHE_PATH))
-        if now - mtime < timedelta(hours=SCRIP_MASTER_TTL_HOURS):
-            with open(SCRIP_MASTER_CACHE_PATH, "rb") as f:
+    daily_cache_path = _daily_scrip_master_cache_path(now)
+    cache_candidates = []
+    if os.path.exists(daily_cache_path):
+        # The filename itself is the freshness contract. Reuse today's file
+        # regardless of what time it was downloaded, including across many
+        # application restarts on the same trading day.
+        cache_candidates.append(daily_cache_path)
+    if (SCRIP_MASTER_CACHE_PATH != daily_cache_path
+            and os.path.exists(SCRIP_MASTER_CACHE_PATH)
+            and _same_local_day(SCRIP_MASTER_CACHE_PATH, now)):
+        cache_candidates.append(SCRIP_MASTER_CACHE_PATH)
+
+    for cache_path in cache_candidates:
+        try:
+            with open(cache_path, "rb") as f:
                 data = _json_loads_bytes(f.read())
             _scrip_master_cache.set(data, fetched_at=now)
             _build_scrip_indexes(data)
-            logger.info(f"[smartapi_client] ScripMaster loaded from local cache ({len(data)} rows)")
+            logger.info(
+                f"[smartapi_client] ScripMaster loaded from today's local cache "
+                f"({len(data)} rows): {cache_path}"
+            )
             return data
+        except (OSError, ValueError, TypeError) as e:
+            logger.warning(
+                f"[smartapi_client] Ignoring unreadable ScripMaster cache "
+                f"{cache_path} ({e})"
+            )
 
     logger.info("[smartapi_client] Downloading fresh ScripMaster (~few MB, one-time)...")
     try:
         resp = requests.get(SCRIP_MASTER_URL, timeout=(5, 20))  # (connect, read) timeouts
         resp.raise_for_status()
         data = resp.json()
-        _json_dump_file(SCRIP_MASTER_CACHE_PATH, data)
+        os.makedirs(os.path.dirname(daily_cache_path), exist_ok=True)
+        _json_dump_file(daily_cache_path, data)
         _scrip_master_cache.set(data, fetched_at=now)
         _build_scrip_indexes(data)
         logger.info(f"[smartapi_client] ScripMaster downloaded and cached ({len(data)} rows)")
@@ -507,12 +546,17 @@ def _load_scrip_master():
     except (requests.exceptions.RequestException, ValueError) as e:
         logger.warning(f"[smartapi_client] ScripMaster download failed ({e}); "
                         f"falling back to stale local cache if available")
-        if os.path.exists(SCRIP_MASTER_CACHE_PATH):
-            with open(SCRIP_MASTER_CACHE_PATH, "rb") as f:
+        fallback_path = next(
+            (path for path in (daily_cache_path, SCRIP_MASTER_CACHE_PATH)
+             if os.path.exists(path)),
+            None,
+        )
+        if fallback_path:
+            with open(fallback_path, "rb") as f:
                 data = _json_loads_bytes(f.read())
             _scrip_master_cache.set(data, fetched_at=now)
             _build_scrip_indexes(data)
-            mtime = datetime.fromtimestamp(os.path.getmtime(SCRIP_MASTER_CACHE_PATH))
+            mtime = datetime.fromtimestamp(os.path.getmtime(fallback_path))
             age_hours = (now - mtime).total_seconds() / 3600
             logger.warning(f"[smartapi_client] Using stale ScripMaster cache "
                             f"({len(data)} rows, {age_hours:.1f}h old)")

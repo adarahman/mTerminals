@@ -26,9 +26,10 @@ const Config = {
     // Delay before a dropped dashboard connection is retried.
     reconnectDelayMs: 3000,
     // Dashboard feed-health threshold. The engine normally emits at least
-    // once per 5s poll ceiling; 12s allows one slow cycle without declaring
-    // stale while still surfacing a genuinely frozen feed promptly.
-    staleAfterMs: 12000,
+    // SmartAPI contracts can legitimately remain unchanged for several
+    // seconds. Use 30s so sparse ticks do not make the badge oscillate,
+    // while a genuinely frozen stream is still surfaced promptly.
+    staleAfterMs: 30000,
     // ws_server_live.py's bridge_ws_handler — separate endpoint from /ws,
     // same origin/port. Used by fiidii-report.js's FiiDiiReportFeed
     // (connects only while the FII/DII modal is open).

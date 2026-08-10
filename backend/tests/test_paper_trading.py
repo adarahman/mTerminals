@@ -33,6 +33,17 @@ def test_market_buy_fills_immediately(engine):
     assert order.fill_delay_ms is not None
 
 
+def test_equity_quantity_is_shares_not_futures_lots(engine):
+    engine.place_order(
+        "NIFTY", "BUY", qty_lots=2, instrument_type="INDEX",
+        order_type="MARKET", current_ltp=100.0,
+        enforce_risk_checks=False,
+    )
+    key = _instrument_key("NIFTY", "", None, "INDEX")
+    positions = engine.get_positions({key: 110.0})
+    assert positions[0]["unrealized_pnl"] == pytest.approx((110.0 - 100.0) * 2)
+
+
 def test_client_order_id_makes_submission_idempotent(engine):
     kwargs = dict(
         symbol="NIFTY", side="BUY", qty_lots=1, instrument_type="CE",

@@ -98,12 +98,17 @@
 /* ── EXPIRY DROPDOWN STRIP ── */
 
 .expiry-strip{
-  display:flex;align-items:center;gap: var(--space-2);
+  display:grid;
+  grid-template-columns:140px 1px minmax(190px,1fr) 1px 96px;
+  align-items:center;gap:var(--space-2);
   background:var(--bg-2);
   border:1px solid var(--border);
   border-radius:20px;
   overflow:visible;
-  flex-shrink:0;
+  box-sizing:border-box;
+  flex:0 0 500px;
+  width:500px;
+  min-height:58px;
   padding:3px 7px 3px 3px;
 }
 
@@ -131,10 +136,13 @@
 }
 .feed-status-pill[data-status="live"]{color:var(--pos);border-color:color-mix(in srgb,var(--pos) 45%,var(--border));background:var(--pos-dim);}
 .feed-status-pill[data-status="stale"],
+.feed-status-pill[data-status="delayed"],
 .feed-status-pill[data-status="recovering"],
 .feed-status-pill[data-status="connecting"]{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:var(--warn-dim);}
 .feed-status-pill[data-status="disconnected"]{color:var(--neg);border-color:color-mix(in srgb,var(--neg) 45%,var(--border));background:var(--neg-dim);}
 .feed-status-reason{
+  width:120px;
+  min-height:12px;
   max-width:120px;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -142,7 +150,7 @@
   color:var(--txt3);
   font-size:10px;
 }
-.feed-status-reason[hidden]{display:none;}
+.feed-status-reason[hidden]{display:block !important;visibility:hidden;}
 
 .dte-val{color:var(--warn);}
 .expiry-value-row{display:flex;align-items:center;gap:5px;white-space:nowrap;}
