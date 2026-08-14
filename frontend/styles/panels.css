@@ -470,6 +470,14 @@
 }
 .legend-foot b{color:var(--text-secondary);font-family:var(--font-mono);}
 
+/* Scenario Analysis bar chart (scenario-analysis-view.js) — fixed-height
+   wrapper so the lazily-created Chart.js instance has a stable box to
+   measure against on first paint, same reasoning as
+   .greeks-moneyness-chart above but without the click-to-expand
+   affordance (no modal counterpart for this chart). */
+.scenario-pnl-chart-wrap{position:relative;width:100%;height:180px;min-height:180px;margin-bottom:10px;}
+.scenario-pnl-chart-wrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;}
+
 /* ── TIER-3 COLLAPSIBLES ── — was dOI · 5/15/30m, IV vs HV / Skew, and
    ATM Greeks (see chain-renderer.js's history comment where #sec-tier3
    used to be built). All three have since moved out or been removed —
@@ -931,6 +939,13 @@ details.card summary .card-head{margin:0;}
 .oi-snap-kpi-value{font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-primary);white-space:nowrap;}
 .oi-snap-kpi-value.ce{color:var(--neg);}
 .oi-snap-kpi-value.pe{color:var(--pos);}
+/* Max Pain distance-from-spot sub-label — stacks value + signed
+   points/% delta so the KPI still fits the existing label/value row
+   (space-between) without widening the 3-column grid. Neutral --warn
+   tone matches Range PCR above it: descriptive positioning, not a
+   directional bull/bear signal. */
+.oi-snap-kpi-value-stack{display:flex;flex-direction:column;align-items:flex-end;gap:1px;min-width:0;}
+.oi-snap-kpi-sub{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--warn);white-space:nowrap;cursor:help;}
 
 .oi-flow-card{
   background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);

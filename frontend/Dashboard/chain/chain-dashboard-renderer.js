@@ -803,6 +803,15 @@ ChainView.prototype.renderDashboard = function(d) {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if(window.updateGreeksMoneynessChart) window.updateGreeksMoneynessChart(d, true);
     if(window.resizeGreeksMoneynessChart) window.resizeGreeksMoneynessChart('greeksChart');
+    // Scenario P&L bar chart (scenario-analysis-view.js) — same
+    // full-rebuild hook as Greeks by Moneyness above, `force:true` since
+    // this is a fresh canvas from the full-page renderDashboard() pass.
+    if(window.updateScenarioPnlChart) window.updateScenarioPnlChart(d, true);
+    // Card is collapsed <details> by default, so also (re)bind the
+    // open-toggle resize listener — a fresh canvas from this full rebuild
+    // has no listener attached yet, and without it the chart stays stuck
+    // at whatever 0×0 box it first measured while the card was closed.
+    if(window.bindScenarioPnlChartToggle) window.bindScenarioPnlChartToggle();
   }));
 };
 

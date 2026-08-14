@@ -37,6 +37,141 @@ function _volIvRankHtml(d) {
     </div>`;
 }
 
+// ── ATM IV Term Structure ───────────────────────────────────────────────
+// Net-new: plots ATM IV across the expiries the backend actually has data
+// for — the primary expiry plus whatever extra_chains bundles came
+// through (currently NEAR + MONTHLY; see option_chain_json.py's `slots`
+// list and mTerminals_json.py's chains_by_expiry/__meta__ build). That's
+// the exact same "has data" set the expiry <select> already distinguishes
+// via its ● vs ○ bullets (renderExpiryOptions in chain-dense-renderer.js)
+// — this chart never invents a point for an ○ expiry the backend hasn't
+// actually fetched IV for.
+//
+// One line, x = DTE, y = ATM IV. A rising line into further expiries
+// (contango) vs falling (backwardation) is the whole point — it's a
+// calendar-spread read, not a bull/bear signal, so no pos/neg coloring.
+function _ivTermStructureData(d) {
+  const points = [];
+  const seen = new Set();
+  if (d.expiry && d.dte != null && d.atmIV != null) {
+    points.push({ expiry: d.expiry, dte: Number(d.dte), atmIV: Number(d.atmIV) });
+    seen.add(d.expiry);
+  }
+  const metaStore = d.chainMeta || {};
+  Object.keys(metaStore).forEach(exp => {
+    if (seen.has(exp)) return;
+    const meta = metaStore[exp];
+    if (!meta || meta.atmIV == null || meta.dte == null) return;
+    points.push({ expiry: exp, dte: Number(meta.dte), atmIV: Number(meta.atmIV) });
+    seen.add(exp);
+  });
+  points.sort((a, b) => a.dte - b.dte);
+  return points;
+}
+
+function _ivTermStructureHtml(d) {
+  const points = _ivTermStructureData(d);
+  // Fewer than 2 expiries with IV data (e.g. --no-extra-chains, or both
+  // extra bundles failed to fetch) means there's nothing to draw a line
+  // between — say so plainly instead of rendering an empty/1-dot canvas.
+  if (points.length < 2) {
+    return `<div class="dd-empty">Need at least two expiries with data to plot a term structure — only ${points.length} available right now.</div>`;
+  }
+  return `
+    <div class="iv-term-chart-wrap">
+      <canvas id="ivTermStructureChart" role="img" aria-label="Line chart of at-the-money implied volatility across available expiries, x-axis days to expiry, y-axis ATM IV percent."></canvas>
+    </div>
+    <div class="legend-foot" style="margin-top:6px;">ATM IV per expiry the backend currently has data for (primary + NEAR/MONTHLY) — rising into later expiries is contango, falling is backwardation.</div>`;
+}
+
+let _ivTermChart = null;
+let _ivTermChartSig = null;
+
+function _ensureIvTermChart(canvasId) {
+  const canvasEl = document.getElementById(canvasId || 'ivTermStructureChart');
+  if (!canvasEl) return null;
+  if (_ivTermChart && _ivTermChart.canvas === canvasEl) return _ivTermChart;
+  if (_ivTermChart) { try { _ivTermChart.destroy(); } catch (e) {} }
+
+  _ivTermChart = new Chart(canvasEl, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'ATM IV',
+        data: [],
+        borderColor: '#eda100',
+        backgroundColor: '#eda100',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        tension: 0.25,
+        fill: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items.length ? items[0].label : '',
+            label: (item) => `ATM IV: ${item.raw.toFixed(2)}%`
+          }
+        }
+      },
+      scales: {
+        y: {
+          ticks: { color: '#898781', callback: (v) => v + '%' },
+          grid: { color: '#e1e0d9' }
+        },
+        x: { ticks: { color: '#898781' }, grid: { display: false } }
+      }
+    }
+  });
+  return _ivTermChart;
+}
+
+// Call after the volatility-card DOM lands — same hook shape as
+// window.updateScenarioPnlChart in scenario-analysis-view.js. Skips the
+// redraw when the underlying expiry/IV set hasn't moved.
+window.updateIvTermChart = function(d, force) {
+  const points = _ivTermStructureData(d);
+  if (points.length < 2) return; // canvas doesn't exist in this case — see _ivTermStructureHtml
+  const chart = _ensureIvTermChart('ivTermStructureChart');
+  if (!chart) return;
+
+  const sig = points.map(p => `${p.expiry}:${p.dte}:${p.atmIV}`).join('|');
+  if (!force && sig === _ivTermChartSig) return;
+  _ivTermChartSig = sig;
+
+  chart.data.labels = points.map(p => [p.expiry, `${p.dte}d`]);
+  chart.data.datasets[0].data = points.map(p => p.atmIV);
+  chart.update('none');
+};
+
+// Volatility card is a collapsed-by-default <details> (same as Scenario
+// Analysis), so the canvas is measured at 0×0 the first time it draws
+// while display:none — bind a 'toggle' listener to force a resize+redraw
+// the moment the card actually opens. Must be (re)bound every time the
+// card's outerHTML is rebuilt, since the swap drops previously-bound
+// listeners — call this right after window.updateIvTermChart at both DOM-
+// landing hook points (see scenario-analysis-view.js's
+// bindScenarioPnlChartToggle for the identical pattern, including the
+// bug of forgetting to actually call it — don't repeat that here).
+window.bindIvTermChartToggle = function() {
+  const el = document.getElementById('volatility-card');
+  if (!el || el.dataset.ivTermToggleBound) return;
+  el.dataset.ivTermToggleBound = '1';
+  el.addEventListener('toggle', () => {
+    if (el.hasAttribute('open') && _ivTermChart) {
+      _ivTermChart.resize();
+      _ivTermChart.update('none');
+    }
+  });
+};
+
 // ── top-level wrapper ──
 // Collapsed by default, matching every other Tier-3 <details class="card">
 // in the Confirmation zone (Advanced Analytics, Strategy Payoff /

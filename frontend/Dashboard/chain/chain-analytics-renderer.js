@@ -447,6 +447,18 @@ ChainView.prototype._rerenderChainPanels = function() {
     preserveState: (el) => el.hasAttribute('open'),
     restoreState: (fresh, wasOpen) => { if(wasOpen) fresh.setAttribute('open',''); }
   });
+  // Scenario P&L bar chart — outerHTML swap above destroys the canvas
+  // whenever the card's HTML changed, so rebind/redraw the Chart.js
+  // instance same as updateGreeksMoneynessChart below. Safe to call even
+  // when the card didn't change this tick: the signature check inside
+  // updateScenarioPnlChart skips the redraw when the numbers are the same.
+  if (window.updateScenarioPnlChart) window.updateScenarioPnlChart(_data);
+  // Card is <details> collapsed-by-default (unlike Greeks by Moneyness,
+  // which is always visible), so also (re)bind the toggle listener that
+  // forces a resize + redraw once the person actually opens it — the
+  // outerHTML swap above just replaced the element, dropping any
+  // previously-bound listener. No-op if already bound this element.
+  if (window.bindScenarioPnlChartToggle) window.bindScenarioPnlChartToggle();
 
   // Advanced Analytics — fourth Tier-3-style collapsible, same open-state
   // preservation as its siblings above (it re-derives all remaining

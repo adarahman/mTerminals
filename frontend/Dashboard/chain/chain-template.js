@@ -756,6 +756,22 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
   const rngTag = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All':'±'+rng; })();
 
+  // Max Pain "distance from spot" — signed points + %, framed as which
+  // way the max-pain-toward-expiry pull is currently working. spot > max
+  // pain means the market would need to fall to reach it (pull down);
+  // spot < max pain means it'd need to rise (pull up). This is a
+  // descriptive positioning read, not a trade signal, hence the neutral
+  // "warn" tone (matching Range PCR above) rather than pos/neg coloring.
+  const spotForMaxPain = Number(d.spot) || 0;
+  const maxPainNum = d.maxPain != null ? Number(d.maxPain) : null;
+  let maxPainDeltaHtml = '';
+  if (maxPainNum != null && spotForMaxPain) {
+    const diff = spotForMaxPain - maxPainNum; // +ve: spot above max pain
+    const pct = (diff / spotForMaxPain) * 100;
+    const dir = diff > 0 ? 'pull down' : diff < 0 ? 'pull up' : 'at max pain';
+    maxPainDeltaHtml = `<small class="oi-snap-kpi-sub" title="Spot is ${fmtN(Math.abs(diff),0)} points (${fmtN(Math.abs(pct),2)}%) ${diff>0?'above':diff<0?'below':'at'} max pain — theory says price gravitates toward max pain by expiry, so the ${dir} pull is ${fmtN(Math.abs(pct),2)}% from here.">${diff>0?'+':diff<0?'\u2212':''}${fmtN(Math.abs(diff),0)} (${diff>0?'+':diff<0?'\u2212':''}${fmtN(Math.abs(pct),2)}%)</small>`;
+  }
+
   return `
   <div class="section-card sc-green" id="chain-summary-card">
     <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
@@ -827,7 +843,10 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
     <div class="oi-snap-kpis" aria-label="Option chain positioning metrics">
       <div class="oi-snap-kpi">
         <span class="oi-snap-kpi-label">Max Pain</span>
-        <strong class="oi-snap-kpi-value">${d.maxPain!=null?fmtI(d.maxPain):'—'}</strong>
+        <span class="oi-snap-kpi-value-stack">
+          <strong class="oi-snap-kpi-value">${d.maxPain!=null?fmtI(d.maxPain):'—'}</strong>
+          ${maxPainDeltaHtml}
+        </span>
       </div>
       <div class="oi-snap-kpi">
         <span class="oi-snap-kpi-label">CE Vol/OI</span>
