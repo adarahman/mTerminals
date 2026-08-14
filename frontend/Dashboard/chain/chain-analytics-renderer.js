@@ -447,6 +447,12 @@ ChainView.prototype._rerenderChainPanels = function() {
     preserveState: (el) => el.hasAttribute('open'),
     restoreState: (fresh, wasOpen) => { if(wasOpen) fresh.setAttribute('open',''); }
   });
+  // Scenario P&L bar chart — outerHTML swap above destroys the canvas
+  // whenever the card's HTML changed, so rebind/redraw the Chart.js
+  // instance same as updateGreeksMoneynessChart below. Safe to call even
+  // when the card didn't change this tick: the signature check inside
+  // updateScenarioPnlChart skips the redraw when the numbers are the same.
+  if (window.updateScenarioPnlChart) window.updateScenarioPnlChart(_data);
 
   // Advanced Analytics — fourth Tier-3-style collapsible, same open-state
   // preservation as its siblings above (it re-derives all remaining

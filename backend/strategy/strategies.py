@@ -302,7 +302,7 @@ _STRATEGY_MAX_SCORE = {
 
 
 def _score_strategies(strats: list[dict], spot: float, atm: float,
-                        pcr: float, iv_rank: float, dte: int,
+                        pcr: float, iv_rank: float | None, dte: int,
                         bias: str = "Mixed / Neutral",
                         trap_str: str = "BALANCED",
                         trade_grade: str = "A") -> list[dict]:
@@ -319,6 +319,12 @@ def _score_strategies(strats: list[dict], spot: float, atm: float,
     BEAR_TRAP, or against a "Strong Bullish"/"Strong Bearish" bias — which
     is exactly the kind of mismatch that produces confident-looking losers.
     """
+    # iv_rank is None until enough daily-close history has accumulated
+    # (see chain_metrics._compute_iv_rank_hv30's docstring) — guard every
+    # comparison below rather than defaulting to a value, since a made-up
+    # number here would silently bias strategy scoring.
+    iv_rank_known = iv_rank is not None
+
     results = []
     for s in strats:
         sc = 0
@@ -326,74 +332,74 @@ def _score_strategies(strats: list[dict], spot: float, atm: float,
         if code == "BCS":
             if spot >= atm: sc += 3
             if pcr < T.PCR_NEUTRAL_LO: sc += 2
-            if iv_rank < 50: sc += 2
+            if iv_rank_known and iv_rank < 50: sc += 2
             if dte > 7: sc += 1
             sc += 2
         elif code == "IC":
-            if iv_rank > 60: sc += 4
+            if iv_rank_known and iv_rank > 60: sc += 4
             if T.PCR_NEUTRAL_LO < pcr < T.PCR_BULL: sc += 3
             if dte > 10: sc += 2
             sc += 1
         elif code == "BPS":
             if spot < atm: sc += 3
             if pcr < T.PCR_BEAR: sc += 2
-            if iv_rank < 50: sc += 2
+            if iv_rank_known and iv_rank < 50: sc += 2
             if dte > 7: sc += 1
             sc += 1
         elif code == "SS":
-            if iv_rank > 70: sc += 5
+            if iv_rank_known and iv_rank > 70: sc += 5
             if T.PCR_NEUTRAL_LO < pcr < T.PCR_NEUTRAL_HI: sc += 3
             if dte > 15: sc += 2
         elif code == "CAL":
             if dte < 10: sc += 4
-            if iv_rank < 40: sc += 3
+            if iv_rank_known and iv_rank < 40: sc += 3
             sc += 1
         elif code == "RPS":
             if spot < atm: sc += 3
-            if iv_rank > 55: sc += 3
+            if iv_rank_known and iv_rank > 55: sc += 3
             if dte > 10: sc += 2
         elif code == "CC":
             if T.PCR_NEUTRAL_LO < pcr < T.PCR_NEUTRAL_HI: sc += 2  # roughly flat-to-mildly-bullish outlook (was a stray leading "-" before T.PCR_NEUTRAL_LO, which made the lower bound -0.9 and effectively always true)
-            if iv_rank > 45: sc += 3      # richer premium to sell against the holding
+            if iv_rank_known and iv_rank > 45: sc += 3      # richer premium to sell against the holding
             if dte > 7: sc += 1
             sc += 1
         elif code == "BFLY":
             if abs(spot - atm) < dte:     # spot already pinned near ATM
                 sc += 3
-            if iv_rank < 45: sc += 3
+            if iv_rank_known and iv_rank < 45: sc += 3
             if dte < 15: sc += 2
         elif code == "BUPS":
             if spot >= atm: sc += 3
-            if iv_rank > 45: sc += 3      # credit strategies want richer premium
+            if iv_rank_known and iv_rank > 45: sc += 3      # credit strategies want richer premium
             if pcr < 1.0: sc += 2
             if dte > 5: sc += 1
         elif code == "BECS":
             if spot < atm: sc += 3
-            if iv_rank > 45: sc += 3
+            if iv_rank_known and iv_rank > 45: sc += 3
             if pcr > 1.0: sc += 2
             if dte > 5: sc += 1
         elif code == "LS":
-            if iv_rank < 40: sc += 5      # buying vega — want it cheap
+            if iv_rank_known and iv_rank < 40: sc += 5      # buying vega — want it cheap
             if T.PCR_NEUTRAL_LO < pcr < T.PCR_NEUTRAL_HI: sc += 3
             if dte > 10: sc += 2
         elif code == "LSG":
-            if iv_rank < 40: sc += 4
+            if iv_rank_known and iv_rank < 40: sc += 4
             if T.PCR_NEUTRAL_LO < pcr < T.PCR_NEUTRAL_HI: sc += 2
             if dte > 10: sc += 2
             sc += 1                       # cheaper entry than a straddle
         elif code == "LC":
             if spot >= atm: sc += 3
             if pcr < T.PCR_NEUTRAL_LO: sc += 2
-            if iv_rank < 45: sc += 2      # cheaper premium to buy
+            if iv_rank_known and iv_rank < 45: sc += 2      # cheaper premium to buy
             if dte > 5: sc += 1
         elif code == "LP":
             if spot < atm: sc += 3
             if pcr > T.PCR_NEUTRAL_HI: sc += 2
-            if iv_rank < 45: sc += 2
+            if iv_rank_known and iv_rank < 45: sc += 2
             if dte > 5: sc += 1
         elif code == "PP":
             if spot >= atm: sc += 2       # already holding, protecting gains
-            if iv_rank < 50: sc += 2      # cheaper insurance
+            if iv_rank_known and iv_rank < 50: sc += 2      # cheaper insurance
             sc += 1
 
         direction = _STRATEGY_DIRECTION.get(code, "neutral")

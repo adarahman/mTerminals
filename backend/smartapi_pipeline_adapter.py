@@ -428,8 +428,22 @@ def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
     if not fut:
         return pd.DataFrame()
 
-    quotes = market_data.get_batch_quotes(exchange, [(fut["symbol"], fut["token"])], mode="FULL")
-    q = quotes.get(fut["symbol"])
+    # get_batch_quotes_by_token(), not get_batch_quotes(): the latter keys
+    # its result dict by Angel's own returned tradingSymbol display string,
+    # which isn't guaranteed to match fut["symbol"] (built from the scrip
+    # master row) for every contract — see get_batch_quotes_by_token()'s
+    # docstring, which documents this exact bug class already having bitten
+    # index quotes (NIFTY/BANKNIFTY/MIDCPNIFTY) once before. Dynamically
+    # resolved monthly futures contracts (NEAR/NEXT/FAR here) are exactly
+    # the "can't guarantee the match for every symbol in the batch" case
+    # that docstring calls out — the previous get_batch_quotes()-based
+    # lookup here would silently miss NEXT/FAR contracts whose Angel
+    # tradingSymbol format doesn't line up with fut["symbol"], quietly
+    # returning an empty df_fut and falling back to EQ spot (which reads as
+    # "still showing NEAR" since the basis between the two is usually
+    # small) rather than actually fetching NEXT/FAR's LTP.
+    quotes = market_data.get_batch_quotes_by_token(exchange, [(fut["symbol"], fut["token"])], mode="FULL")
+    q = quotes.get(str(fut["token"]))
     if not q:
         return pd.DataFrame()
 

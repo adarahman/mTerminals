@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPT_DIR / "backend"))
 
 from nse_eod_fetch import fetch_all_eod, is_trading_day
 from analytics.fii_dii_sentiment import get_report_for_trading_day
+from analytics.iv_spot_history import record_today_iv_spot
 from analytics.nse_fii_dii_flow_fetch import record_today_flow, get_flow_series
 from analytics.fii_dii_market_bias import get_market_bias_report
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
@@ -1860,7 +1861,15 @@ async def _smartapi_sync_and_broadcast_locked(message):
         # snapshots directly so a newly-connecting client's initial "full"
         # payload reflects the latest SmartAPI-streamed spot rather than
         # whatever run_pipeline_once() last polled.
-        if isinstance(payload, dict) and "spot" in payload:
+        #
+        # PRICE_SOURCE=="FUT" guard: this tick's "spot" always comes from the
+        # index/cash token (the futures token's LTP isn't wired into "spot"
+        # here — see the futVwap/futLtp placeholder note below, still a
+        # no-op). Without this guard, run_pipeline_once()'s futures-LTP spot
+        # (option_chain_json.py's PRICE_SOURCE override) would get stomped
+        # by the next sub-second equity tick, so a FUT selection only ever
+        # showed a brief glimpse before reverting to the live EQ price.
+        if isinstance(payload, dict) and "spot" in payload and PRICE_SOURCE != "FUT":
             feed_update_applied = True
             for snapshot in (LAST_PAYLOAD, _LAST_SENT):
                 if isinstance(snapshot, dict):
@@ -1869,12 +1878,26 @@ async def _smartapi_sync_and_broadcast_locked(message):
                         snapshot["spotChange"] = payload["spotChange"]
                     if "spotChgPct" in payload:
                         snapshot["spotChgPct"] = payload["spotChgPct"]
-
+        elif isinstance(payload, dict) and "spot" in payload and PRICE_SOURCE == "FUT":
+            # Same reasoning as the guard above, but this also has to keep
+            # the equity spot out of the message actually sent to clients —
+            # updating LAST_PAYLOAD/_LAST_SENT alone isn't enough, since
+            # broadcast(message) below still ships the ORIGINAL message.
+            # applyDelta() on the client merges "spot" unconditionally with
+            # no concept of price source, so an un-stripped delta would
+            # still visibly overwrite the futures price on screen even
+            # though the server's own snapshot was left correct. Same
+            # copy-not-mutate reasoning as the chain-mismatch strip above —
+            # TickAggregator may hold onto/reuse this dict.
             # Futures-derived VWAP, basis-adjusted into spot's price frame —
             # see the "future vwap differs from spot" fix. PLACEHOLDER field
             # names (futLtp/futVwap/futVolume) — rename once TickAggregator
             # actually emits these for a "FUT"-tagged tick; until then this
-            # branch is simply never true and is a no-op.
+            # branch is simply never true and is a no-op. Computed from the
+            # ORIGINAL payload (still has "spot") before stripping below —
+            # stripped_payload deliberately drops "spot" from what's sent to
+            # clients, so reading from it here would KeyError the day this
+            # branch actually starts firing.
             if "futLtp" in payload and "futVwap" in payload:
                 basis = payload["futLtp"] - payload["spot"]
                 spot_vwap = payload["futVwap"] - basis
@@ -1883,6 +1906,10 @@ async def _smartapi_sync_and_broadcast_locked(message):
                         snapshot["spotVwap"] = spot_vwap
                         if "futVolume" in payload:
                             snapshot["spotVolume"] = payload["futVolume"]
+
+            stripped_payload = {k: v for k, v in payload.items()
+                                 if k not in ("spot", "spotChange", "spotChgPct")}
+            message = {**message, "payload": stripped_payload}
     except Exception as e:
         # Sync is a best-effort consistency improvement, not required for
         # the tick to reach clients — never let a sync bug block broadcast.
@@ -2694,6 +2721,26 @@ async def engine_loop():
             # participant-OI EOD fetch's own success/failure reporting.
             flow_task = asyncio.create_task(asyncio.to_thread(record_today_flow))
             flow_task.add_done_callback(_flow_task_done)
+
+            # ATM IV + spot daily-close snapshot, feeding D-13 Volatility's
+            # IV Rank/HV30 (see analytics/iv_spot_history.py's docstring and
+            # PDS-09_Volatility.md's "Backend readiness" section — this is
+            # what makes those metrics real instead of a permanent stub).
+            # No network call of its own: reads the current tick's already-
+            # fetched atmIV/spot straight off LAST_PAYLOAD, right after
+            # EOD_TRIGGER_TIME (15:45, i.e. after the 15:30 cash close), so
+            # the recorded value approximates the day's close. Synchronous
+            # and cheap (local CSV read/write) — no to_thread/callback
+            # needed, unlike the two network-bound EOD tasks above.
+            if isinstance(LAST_PAYLOAD, dict):
+                try:
+                    record_today_iv_spot(
+                        SYMBOL,
+                        LAST_PAYLOAD.get("atmIV"),
+                        LAST_PAYLOAD.get("spot"),
+                    )
+                except Exception as e:
+                    print(f"[iv_spot_history] record_today_iv_spot failed: {e!r}", flush=True)
 
         if _PIPELINE_TASK is None:
             _PIPELINE_STATUS["startedAt"] = datetime.now().astimezone().isoformat()

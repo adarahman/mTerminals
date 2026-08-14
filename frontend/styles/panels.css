@@ -931,6 +931,11 @@ details.card summary .card-head{margin:0;}
 .oi-snap-kpi-value{font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-primary);white-space:nowrap;}
 .oi-snap-kpi-value.ce{color:var(--neg);}
 .oi-snap-kpi-value.pe{color:var(--pos);}
+.oi-snap-kpi-value-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:1px;min-width:0;}
+.oi-snap-kpi-sub{font-family:var(--font-mono);font-size:var(--fs-2xs);white-space:nowrap;opacity:.85;}
+.oi-snap-kpi-sub.bull{color:var(--pos);}
+.oi-snap-kpi-sub.bear{color:var(--neg);}
+.oi-snap-mp-context{margin-top:8px;padding:6px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-2xs);color:var(--text-secondary);line-height:1.4;}
 
 .oi-flow-card{
   background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);

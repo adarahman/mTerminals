@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from analytics.iv_spot_history import get_iv_spot_series
 from analytics.market_regime import classify_market_regime
 
 # Trap detector — moved to decision/signal_builder.py as the public
@@ -561,7 +562,13 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
 
     # ── strategies / scenario P&L / risk meters / smart money ──────────────
     # AFTER:
-    iv_rank, hv30 = _compute_iv_rank_hv30(df_full_history, base_iv, atm)
+    # df_full_history (the per-tick OI-history diff) is NOT what IV Rank/HV30
+    # need — see _compute_iv_rank_hv30's docstring and PDS-09_Volatility.md's
+    # "Backend readiness" section for why that path was always a no-op.
+    # get_iv_spot_series() reads the real persistent daily-close store
+    # instead (analytics/iv_spot_history.py, written once/day near market
+    # close from ws_server_live.py's existing EOD-trigger block).
+    iv_rank, hv30 = _compute_iv_rank_hv30(get_iv_spot_series(symbol), base_iv)
 
     # Trap detection now runs BEFORE scoring (previously it only ran at the
     # very end, inline in the return statement below, which meant the score

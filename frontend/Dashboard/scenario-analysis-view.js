@@ -25,17 +25,29 @@
 // per scenario, which the Institutional F&O Simulator's GEX view already
 // approximates for gamma exposure — this card answers a different
 // question: "what does this position return if held to expiry").
-function _scenPnlHtml(d) {
+//
+// Shared by both the table and the bar chart below, so the two never
+// drift out of sync with each other.
+const SCEN_PNL_MOVES = [-0.03, -0.02, -0.01, 0, 0.01, 0.02, 0.03];
+function _scenPnlData(d) {
   const spot = d.spot || 0;
   const atm = activeAtm(d);
   const straddle = (d.callPremium || 0) + (d.putPremium || 0);
-  if (!spot || !straddle) return `<div class="dd-empty">No premium data yet.</div>`;
-
-  const moves = [-0.03, -0.02, -0.01, 0, 0.01, 0.02, 0.03];
-  const rows = moves.map(m => {
+  if (!spot || !straddle) return null;
+  const scenarios = SCEN_PNL_MOVES.map(m => {
     const scenSpot = spot * (1 + m);
     const intrinsic = Math.max(scenSpot - atm, 0) + Math.max(atm - scenSpot, 0);
-    const pnl = intrinsic - straddle;
+    return { move: m, scenSpot, pnl: intrinsic - straddle };
+  });
+  return { spot, atm, straddle, scenarios };
+}
+
+function _scenPnlHtml(d) {
+  const data = _scenPnlData(d);
+  if (!data) return `<div class="dd-empty">No premium data yet.</div>`;
+  const { atm, straddle, scenarios } = data;
+
+  const rows = scenarios.map(({ move: m, scenSpot, pnl }) => {
     const isBase = m === 0;
     return `<tr>
       <td class="${isBase ? 'atm-sc' : 'sc'}">${m > 0 ? '+' : ''}${(m * 100).toFixed(0)}%</td>
@@ -44,12 +56,126 @@ function _scenPnlHtml(d) {
     </tr>`;
   }).join('');
 
+  // Bar chart sits above the table for a faster visual read (red/green
+  // by move); the table stays underneath for anyone who wants the exact
+  // per-scenario numbers. Canvas is recreated every time this card's
+  // outerHTML gets rebuilt (patchOuterHtmlIfChanged / full renderDashboard
+  // pass), so the Chart.js instance itself is created/rebound lazily —
+  // see _ensureScenarioPnlChart below, same pattern as ensureGreeksChart
+  // in chart-legend.js. window.updateScenarioPnlChart(d) must be called
+  // by whoever puts this HTML into the DOM (chain-dashboard-renderer.js /
+  // chain-analytics-renderer.js) since the canvas doesn't exist yet at
+  // the point this string is built.
   return `
+    <div class="scenario-pnl-chart-wrap">
+      <canvas id="scenarioPnlChart" role="img" aria-label="Bar chart of long ATM straddle profit and loss per option unit across spot moves from -3% to +3%, green bars for gains and red bars for losses."></canvas>
+    </div>
     <div class="legend-foot" style="margin-bottom:7px;">
       Assumptions: ATM ${fmtI(atm)} · entry premium ₹${fmtN(straddle,2)} per option unit · held to expiry · intrinsic payoff only · excludes lot multiplier, brokerage, taxes, fees and slippage.
     </div>
     <table class="t"><thead><tr><th>Spot Move</th><th>Scenario Spot</th><th>P&amp;L / unit (gross)</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+
+// ── Chart.js bar chart ──────────────────────────────────────────────────
+// Lazily created/rebound per canvas id, exactly like ensureGreeksChart in
+// chart-legend.js — necessary because #scenario-analysis-card's outerHTML
+// (and therefore its <canvas>) gets replaced on every tick the scenario
+// numbers change (patchOuterHtmlIfChanged in chain-analytics-renderer.js),
+// not updated in place.
+let _scenPnlChart = null;
+let _scenPnlChartSig = null;
+
+function _ensureScenarioPnlChart(canvasId) {
+  const canvasEl = document.getElementById(canvasId || 'scenarioPnlChart');
+  if (!canvasEl) return null;
+  if (_scenPnlChart && _scenPnlChart.canvas === canvasEl) return _scenPnlChart;
+  if (_scenPnlChart) { try { _scenPnlChart.destroy(); } catch (e) {} }
+
+  _scenPnlChart = new Chart(canvasEl, {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'P&L / unit (gross)',
+        data: [],
+        backgroundColor: [],
+        borderRadius: 3,
+        maxBarThickness: 40
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items.length ? `Spot move ${items[0].label}` : '',
+            label: (item) => {
+              const v = item.raw;
+              return `P&L: ${v >= 0 ? '+' : '\u2212'}\u20b9${Math.abs(v).toFixed(2)} / unit`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          ticks: { color: '#898781', callback: (v) => (v > 0 ? '+' : '') + v },
+          grid: { color: '#e1e0d9' }
+        },
+        x: { ticks: { color: '#898781' }, grid: { display: false } }
+      }
+    }
+  });
+  return _scenPnlChart;
+}
+
+// Call after the scenario-analysis-card DOM lands — see hook points in
+// ChainView.prototype.renderDashboard (full rebuild) and
+// _rerenderChainPanels (incremental patch) in chain-dashboard-renderer.js
+// / chain-analytics-renderer.js. Skips redundant Chart.js work when the
+// underlying scenario inputs haven't moved.
+window.updateScenarioPnlChart = function(d, force) {
+  const chart = _ensureScenarioPnlChart('scenarioPnlChart');
+  if (!chart) return;
+  const data = _scenPnlData(d);
+  if (!data) return;
+
+  const sig = `${data.spot}|${data.atm}|${data.straddle}`;
+  if (!force && sig === _scenPnlChartSig) return;
+  _scenPnlChartSig = sig;
+
+  const posColor = (getComputedStyle(document.documentElement).getPropertyValue('--pos') || '#20C997').trim();
+  const negColor = (getComputedStyle(document.documentElement).getPropertyValue('--neg') || '#FF6B6B').trim();
+
+  chart.data.labels = data.scenarios.map(({ move: m }) => (m > 0 ? '+' : '') + (m * 100).toFixed(0) + '%');
+  chart.data.datasets[0].data = data.scenarios.map(s => s.pnl);
+  chart.data.datasets[0].backgroundColor = data.scenarios.map(s => s.pnl >= 0 ? posColor : negColor);
+  chart.update('none'); // 'none' = no re-animation on every tick
+};
+
+// Scenario Analysis is a collapsed-by-default <details class="card">
+// (unlike the always-visible Greeks by Moneyness card), so the canvas
+// gets created while its parent is display:none and Chart.js measures a
+// 0×0 box on that first draw. A 'toggle' listener catches the moment the
+// card actually opens and forces a resize + redraw against real
+// dimensions — same fix shape as modal-manager.js's explicit
+// resizeGreeksMoneynessChart('greeksChart-modal') call on modal-open,
+// just triggered by <details> opening instead of a modal. Must be
+// (re)bound every time the card's outerHTML is rebuilt, since the swap
+// replaces the element and drops its listeners — call this right after
+// window.updateScenarioPnlChart at both DOM-landing hook points.
+window.bindScenarioPnlChartToggle = function() {
+  const el = document.getElementById('scenario-analysis-card');
+  if (!el || el.dataset.pnlToggleBound) return;
+  el.dataset.pnlToggleBound = '1';
+  el.addEventListener('toggle', () => {
+    if (el.hasAttribute('open') && _scenPnlChart) {
+      _scenPnlChart.resize();
+      _scenPnlChart.update('none');
+    }
+  });
+};
 
 // ── top-level wrapper ──
 // Collapsed by default, matching every other Tier-3 <details class="card">

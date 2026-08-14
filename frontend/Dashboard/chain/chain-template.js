@@ -756,6 +756,23 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
   const rngTag = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All':'±'+rng; })();
 
+  // Spot-vs-Max-Pain distance — signed points and %, same "+123"/"-123"
+  // convention as the R1/R2 dist() helper above. Positive means spot is
+  // trading above max pain (option writers' theoretical pin), negative
+  // means spot is below it. Framed as a pull toward max pain into expiry
+  // rather than just the bare max pain number, which by itself doesn't
+  // say whether that's near or far from where price actually is.
+  const spotForMp = Number(d.spot) || 0;
+  const maxPainNum = d.maxPain != null ? Number(d.maxPain) : null;
+  const mpDistPts = (spotForMp && maxPainNum != null) ? (spotForMp - maxPainNum) : null;
+  const mpDistPct = (mpDistPts != null && maxPainNum) ? (mpDistPts / maxPainNum) * 100 : null;
+  const mpDistSign = mpDistPts != null && mpDistPts >= 0 ? '+' : '';
+  const mpAboveBelow = mpDistPts != null ? (mpDistPts >= 0 ? 'above' : 'below') : '';
+  const mpDistCls = mpDistPts != null ? (mpDistPts >= 0 ? 'bear' : 'bull') : '';
+  const mpDistTxt = mpDistPts != null
+    ? `${mpDistSign}${fmtI(Math.round(mpDistPts))} (${mpDistSign}${fmtN(mpDistPct,2)}%)`
+    : '—';
+
   return `
   <div class="section-card sc-green" id="chain-summary-card">
     <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
@@ -827,7 +844,10 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
     <div class="oi-snap-kpis" aria-label="Option chain positioning metrics">
       <div class="oi-snap-kpi">
         <span class="oi-snap-kpi-label">Max Pain</span>
-        <strong class="oi-snap-kpi-value">${d.maxPain!=null?fmtI(d.maxPain):'—'}</strong>
+        <span class="oi-snap-kpi-value-wrap">
+          <strong class="oi-snap-kpi-value">${maxPainNum!=null?fmtI(maxPainNum):'—'}</strong>
+          ${mpDistPts!=null ? `<span class="oi-snap-kpi-sub ${mpDistCls}">${mpDistTxt} pts</span>` : ''}
+        </span>
       </div>
       <div class="oi-snap-kpi">
         <span class="oi-snap-kpi-label">CE Vol/OI</span>
@@ -838,6 +858,10 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
         <strong class="oi-snap-kpi-value pe">${fmtN(peVolOi,2)}x</strong>
       </div>
     </div>
+    ${mpDistPts!=null ? `
+    <div class="oi-snap-mp-context">
+      Spot is ${mpDistSign}${fmtI(Math.round(mpDistPts))} pts (${mpDistSign}${fmtN(mpDistPct,2)}%) ${mpAboveBelow} Max Pain — price tends to gravitate toward max pain into expiry.
+    </div>` : ''}
 
     <div class="oc-native-chain" id="option-chain-table" ${tableOpen?'':'hidden'}>
       <div class="oc-ledger-tools">

@@ -256,51 +256,62 @@ def _build_vol_oi_ratios(df: pd.DataFrame) -> dict:
 # ===========================================================================
 
 def _compute_iv_rank_hv30(
-    df_history: "pd.DataFrame | None",
+    iv_spot_series: dict | None,
     base_iv: float,
-    atm_strike: float,
-    iv_col: str = "CE_IV",
-    spot_col: str = "Spot",
-    strike_col: str = "StrikePrice",
     hv_window: int = 30,
     iv_rank_window: int = 252,
-) -> tuple[float, float]:
-    _iv_stub = 35.0
-    _hv_stub = base_iv * 0.85 * 100.0
+) -> tuple[float | None, float | None]:
+    """
+    IV Rank (0-100, current ATM IV's position within its historical
+    daily-close range) and HV30 (30-day realized volatility from daily
+    closes).
 
-    if df_history is None or df_history.empty:
-        return _iv_stub, _hv_stub
+    `iv_spot_series` is `analytics.iv_spot_history.get_iv_spot_series()`'s
+    return shape: {"dates": [...], "atm_iv": [...], "spot": [...]},
+    oldest->newest, one row per recorded trading day — a real persistent
+    store, not the per-tick single-snapshot diff this function used to
+    (silently, always) fail against. That old path — `df_history` rebuilt
+    fresh every tick from `oi_analysis.build_oi_history()`, which only
+    ever had 0-1 rows for the ATM strike — could never satisfy this
+    function's own `len(iv_series) >= 2` guard, so `iv_rank`/`hv30` fell
+    back to hardcoded stubs (35.0 / base_iv*85) on effectively every call.
+    See PDS-09_Volatility.md's "Backend readiness" section for the
+    full writeup.
 
-    iv_rank = _iv_stub
+    Returns (None, None) — or a partial (value, None) / (None, value) —
+    rather than a stub when there isn't yet enough history. Callers/UI
+    SHALL treat None as "Accumulating history", never render it as a
+    numeric 0 or a plausible-looking guess (PDS-09's Degradation rule).
+    """
+    if not iv_spot_series:
+        return None, None
+
+    atm_iv_now = base_iv * 100.0
+
+    iv_rank = None
     try:
-        if strike_col in df_history.columns and iv_col in df_history.columns:
-            atm_rows = df_history[df_history[strike_col] == atm_strike]
-            if not atm_rows.empty:
-                iv_series = (
-                    atm_rows[iv_col].dropna().astype(float).tail(iv_rank_window)
-                )
-                if iv_series.max() < 2.0:
-                    iv_series = iv_series * 100.0
-                if len(iv_series) >= 2:
-                    iv_lo  = iv_series.min()
-                    iv_hi  = iv_series.max()
-                    iv_now = iv_series.iloc[-1]
-                    if iv_hi > iv_lo:
-                        iv_rank = round((iv_now - iv_lo) / (iv_hi - iv_lo) * 100.0, 1)
+        iv_history = list(iv_spot_series.get("atm_iv") or [])[-iv_rank_window:]
+        # Today's live reading isn't recorded yet (that only happens once,
+        # near close) — fold it in so "today made a new high/low" shows up
+        # immediately instead of a day late.
+        iv_series = pd.Series(iv_history + [atm_iv_now], dtype=float)
+        if len(iv_series) >= 2:
+            iv_lo, iv_hi = iv_series.min(), iv_series.max()
+            if iv_hi > iv_lo:
+                iv_rank = round((atm_iv_now - iv_lo) / (iv_hi - iv_lo) * 100.0, 1)
     except Exception:
         pass
 
-    hv30 = _hv_stub
+    hv30 = None
     try:
-        if spot_col in df_history.columns:
-            spot_series = (
-                df_history[spot_col].dropna().astype(float)
-                .drop_duplicates().tail(hv_window + 1).reset_index(drop=True)
+        spot_series = pd.Series(
+            list(iv_spot_series.get("spot") or [])[-(hv_window + 1):], dtype=float
+        )
+        if len(spot_series) >= 5:
+            log_returns = spot_series.pct_change().dropna().apply(
+                lambda r: math.log(1.0 + r) if r > -1 else 0.0
             )
-            if len(spot_series) >= 5:
-                log_returns = spot_series.pct_change().dropna().apply(
-                    lambda r: math.log(1.0 + r) if r > -1 else 0.0
-                )
+            if len(log_returns) >= 2:
                 hv30 = round(float(log_returns.std(ddof=1)) * math.sqrt(252) * 100.0, 2)
     except Exception:
         pass

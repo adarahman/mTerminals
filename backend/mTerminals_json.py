@@ -629,7 +629,14 @@ def _build_strategies(ctx_dict, engine_result=None, chain_rows=None):
             raw = getattr(engine_result, attr, None)
             if isinstance(raw, list) and raw:
                 expiry_lbl = ctx_dict.get("expiry_label", str(ctx_dict.get("expiry", "")))
-                iv_rank_e  = _r(ctx_dict.get("iv_rank", 35.0), 1)
+                # ctx_dict["iv_rank"] is now a real key that can hold None
+                # (not enough daily-close history yet — see
+                # _compute_iv_rank_hv30's docstring) rather than being
+                # absent, so a plain .get(key, default) wouldn't catch it.
+                # Scoring needs *some* number; 35.0 preserves this
+                # function's prior behavior for the "unavailable" case.
+                _iv_rank_raw = ctx_dict.get("iv_rank")
+                iv_rank_e  = _r(35.0 if _iv_rank_raw is None else _iv_rank_raw, 1)
                 bias_e     = _safe_str(ctx_dict.get("bias", "Neutral")).lower()
                 for s in raw:
                     if not isinstance(s, dict):
@@ -677,7 +684,8 @@ def _build_strategies(ctx_dict, engine_result=None, chain_rows=None):
     # ── Fallback: build from ctx_dict with live LTPs ──────────────────
     if not strategies:
         bias     = _safe_str(ctx_dict.get("bias", "Neutral")).lower()
-        iv_rank  = _r(ctx_dict.get("iv_rank", 35.0), 1)
+        _iv_rank_raw = ctx_dict.get("iv_rank")
+        iv_rank  = _r(35.0 if _iv_rank_raw is None else _iv_rank_raw, 1)
         atm      = _to_int(ctx_dict.get("atm", 0))
         ce_prem  = _r(ctx_dict.get("ce_premium", 0.0))
         pe_prem  = _r(ctx_dict.get("pe_premium", 0.0))
@@ -766,9 +774,11 @@ def _build_strategies(ctx_dict, engine_result=None, chain_rows=None):
 
 
 def _build_risk(ctx_dict, engine_result=None):
-    iv_rank   = _r(ctx_dict.get("iv_rank", 35.0), 1)
+    _iv_rank_raw = ctx_dict.get("iv_rank")
+    _hv30_raw = ctx_dict.get("hv30")
+    iv_rank   = _r(35.0 if _iv_rank_raw is None else _iv_rank_raw, 1)
     atm_iv    = _r(ctx_dict.get("base_iv", DEFAULT_BASE_IV) * 100, 2)
-    hv30      = _r(ctx_dict.get("hv30", 15.0), 1)
+    hv30      = _r(15.0 if _hv30_raw is None else _hv30_raw, 1)
     iv_hv     = atm_iv - hv30
     iv_regime = "Rich" if iv_hv > 3 else ("Cheap" if iv_hv < -2 else "Fair")
     trade_grade = "—"
@@ -1429,8 +1439,8 @@ def export_dashboard_json(
         "atmCeIV":       atm_ce_iv,
         "atmPeIV":       atm_pe_iv,
         "atmSkew":       _r(ctx_dict.get("atm_skew", 0.0), 2),
-        "ivRank":        _r(ctx_dict.get("iv_rank",  35.0), 2),
-        "hv30":          _r(ctx_dict.get("hv30",     15.0), 1),
+        "ivRank":        _nullable_r(ctx_dict.get("iv_rank"), 2),
+        "hv30":          _nullable_r(ctx_dict.get("hv30"), 1),
         "indiaVix":      _r(ctx_dict.get("india_vix",14.0), 1),
         "indiaVixChgPct": _r(ctx_dict.get("india_vix_chg_pct", 0.0), 2),
         "vixRegime":     str(ctx_dict.get("vix_regime", "Normal")),

@@ -298,7 +298,14 @@
       <div class="tab-group" id="range-tabs-iv" data-range-tabs></div>
     </div>
     <div class="greeks-modal-body">
-      <div id="iv-surface-content"></div>
+      <!-- Same fix as #grkgex-content above: this was a bare div with no
+           scroll/flex treatment, so at ranges beyond ±5 the extra rows
+           (and the Skew/Max IV/Min IV footer baked into the same
+           innerHTML by buildIvSurfaceHtml) got clipped by
+           .oc-modal-panel's overflow:hidden with nothing to scroll —
+           .algn-body gives it flex:1 1 auto; min-height:0; overflow-y:auto
+           inside this flex-column parent. -->
+      <div id="iv-surface-content" class="algn-body"></div>
     </div>
   </div>
 </div>
