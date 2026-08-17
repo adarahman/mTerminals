@@ -57,15 +57,7 @@ if not _NO_SMARTAPI_REQUESTED:
             get_order_book as smartapi_get_order_book,
             get_positions as smartapi_get_positions,
             get_funds as smartapi_get_funds,
-            resolve_option_contract as _live_resolve_option_contract,
-        )
-    elif _broker_settings.execution_broker == "BREEZE":
-        from brokers.breeze_client import (
-            place_order as smartapi_place_order,
-            get_order_book as smartapi_get_order_book,
-            get_positions as smartapi_get_positions,
-            get_funds as smartapi_get_funds,
-            resolve_option_contract as _live_resolve_option_contract,
+            resolve_option_contract as _shoonya_resolve_option_contract,
         )
     elif _broker_settings.execution_broker == "SMARTAPI":
         from brokers.smartapi_client import (
@@ -74,10 +66,10 @@ if not _NO_SMARTAPI_REQUESTED:
             get_positions as smartapi_get_positions,
             get_funds as smartapi_get_funds,
         )
-        _live_resolve_option_contract = None
+        _shoonya_resolve_option_contract = None
     else:
         raise RuntimeError(
-            "EXECUTION_BROKER must be SMARTAPI, SHOONYA, or BREEZE, got "
+            "EXECUTION_BROKER must be SMARTAPI or SHOONYA, got "
             f"{_broker_settings.execution_broker!r}"
         )
     from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
@@ -98,7 +90,7 @@ else:
     smartapi_get_order_book = _smartapi_disabled
     smartapi_get_positions = _smartapi_disabled
     smartapi_get_funds = _smartapi_disabled
-    _live_resolve_option_contract = None
+    _shoonya_resolve_option_contract = None
     get_index_candles = _smartapi_disabled
     get_candle_data = _smartapi_disabled
     SmartTickStream = None
@@ -549,8 +541,8 @@ def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
     exchange = "BFO" if symbol in _BSE_SYMBOLS else "NFO"
 
     if instrument_type in ("CE", "PE"):
-        if _live_resolve_option_contract is not None:
-            return _live_resolve_option_contract(
+        if _shoonya_resolve_option_contract is not None:
+            return _shoonya_resolve_option_contract(
                 symbol, expiry, strike, instrument_type, exchange,
             )
         # expiry here is option_chain_json's format ("14-Jul-2026"); SmartAPI's
