@@ -50,6 +50,8 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
 };
 
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
+  const brokerName = (window.AppState && AppState.wsState && AppState.wsState.algoStatus
+    && AppState.wsState.algoStatus.broker) || 'Broker';
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
@@ -117,6 +119,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       <div class="expiry-pill feed-health-pill">
         <span class="expiry-pill-label">Feed</span>
         <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedReason}">${feedLabel}</span>
+        <span id="active-broker-label" class="active-broker-label" title="Active account and execution broker">${escapeHtml(brokerName)}</span>
         <span class="feed-status-reason" id="feed-status-reason"${feedReasonVisible?'':' hidden'}>${feedReasonVisible}</span>
       </div>
       <div class="expiry-divider"></div>
@@ -783,22 +786,23 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
   const rngTag = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All':'±'+rng; })();
-
-  // Max Pain "distance from spot" — signed points + %, framed as which
-  // way the max-pain-toward-expiry pull is currently working. spot > max
-  // pain means the market would need to fall to reach it (pull down);
-  // spot < max pain means it'd need to rise (pull up). This is a
-  // descriptive positioning read, not a trade signal, hence the neutral
-  // "warn" tone (matching Range PCR above) rather than pos/neg coloring.
-  const spotForMaxPain = Number(d.spot) || 0;
-  const maxPainNum = d.maxPain != null ? Number(d.maxPain) : null;
-  let maxPainDeltaHtml = '';
-  if (maxPainNum != null && spotForMaxPain) {
-    const diff = spotForMaxPain - maxPainNum; // +ve: spot above max pain
-    const pct = (diff / spotForMaxPain) * 100;
-    const dir = diff > 0 ? 'pull down' : diff < 0 ? 'pull up' : 'at max pain';
-    maxPainDeltaHtml = `<small class="oi-snap-kpi-sub" title="Spot is ${fmtN(Math.abs(diff),0)} points (${fmtN(Math.abs(pct),2)}%) ${diff>0?'above':diff<0?'below':'at'} max pain — theory says price gravitates toward max pain by expiry, so the ${dir} pull is ${fmtN(Math.abs(pct),2)}% from here.">${diff>0?'+':diff<0?'\u2212':''}${fmtN(Math.abs(diff),0)} (${diff>0?'+':diff<0?'\u2212':''}${fmtN(Math.abs(pct),2)}%)</small>`;
-  }
+  const visibleStrikes = new Set(chain.map(r => Number(r.strike)));
+  const netOiVelocityFor = (windowMin) => {
+    const block = (d.oiVelocity || []).find(b => Number(b.window) === windowMin);
+    if(!block || !Array.isArray(block.rows)) return null;
+    let ce = 0, pe = 0, hasValue = false;
+    block.rows.forEach((r) => {
+      if(!visibleStrikes.has(Number(r.strike))) return;
+      const ceV = Number(r.ceDOI), peV = Number(r.peDOI);
+      if(Number.isFinite(ceV)){ ce += ceV; hasValue = true; }
+      if(Number.isFinite(peV)){ pe += peV; hasValue = true; }
+    });
+    return hasValue ? pe - ce : null;
+  };
+  const oiChangePeriods = [5,15,30].map(windowMin => ({
+    label:`${windowMin}m`, value:netOiVelocityFor(windowMin),
+  }));
+  const fmtNetOiVelocity = (v) => v==null || !Number.isFinite(v) ? '—' : `${v>0?'+':''}${fmtK(v)}`;
 
   return `
   <div class="section-card sc-green" id="chain-summary-card">
@@ -824,18 +828,19 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           <div class="oi-snap-title">OI Summary</div>
         </div>
         <div class="oi-snap-primary">
-          <span>Net OI <small>PE−CE</small></span>
-          <strong style="color:${signColor(netOi)}">${signedFmt(netOi)}</strong>
+          <span><small>Net OI · PE−CE</small><strong style="color:${signColor(netOi)}">${signedFmt(netOi)}</strong></span>
+          <span class="oi-snap-primary-pcr"><small>Range PCR · ${rngTag}</small><strong>${fmtN(pcr,2)}</strong></span>
         </div>
-        <div class="oi-snap-context">Visible-range positioning</div>
         <div class="oi-snap-sides" aria-label="Call and put open interest totals">
           <span class="ce"><small>CE OI</small><strong>${fmtCrLK(totalCe)}</strong></span>
           <span class="pe"><small>PE OI</small><strong>${fmtCrLK(totalPe)}</strong></span>
         </div>
-        <div class="oi-snap-footer">
-          <span class="oi-snap-footer-label">Range PCR <span style="font-weight:400;text-transform:none;">(${rngTag})</span></span>
-          <span class="oi-snap-footer-val warn">${fmtN(pcr,2)}</span>
-          <span class="oi-snap-footer-tag">Put Call Ratio, ${rngLabel.toLowerCase()}</span>
+        <div class="oi-snap-inline-metrics" aria-label="Volume to open interest ratios">
+          <div class="oi-snap-inline-heading"><strong>Vol/OI</strong><small>Visible range</small></div>
+          <div class="oi-snap-inline-grid two">
+            <span><small>CE Vol/OI</small><strong class="ce">${fmtN(ceVolOi,2)}x</strong></span>
+            <span><small>PE Vol/OI</small><strong class="pe">${fmtN(peVolOi,2)}x</strong></span>
+          </div>
         </div>
       </div>
 
@@ -845,49 +850,27 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
           </div>
           <div class="oi-snap-title">Chg OI Summary</div>
+          <button type="button" class="oi-snap-chart-link" onclick="event.stopPropagation();openOIDashboardModal()" aria-label="Open OI Flow chart">OI Flow chart ↗</button>
         </div>
         <div class="oi-snap-primary">
-          <span>Full-day Net ΔOI <small>PE−CE</small></span>
-          <strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong>
+          <span><small>Full-day Net ΔOI · PE−CE</small><strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong></span>
+          <span class="oi-snap-primary-pcr"><small>Range PCR Δ</small><strong>${signedFmt(pcrShift)}</strong></span>
         </div>
-        <div class="oi-snap-context">Current-session OI change</div>
         <div class="oi-snap-sides" aria-label="Call and put change in open interest totals">
           <span class="ce"><small>CE ΔOI</small><strong>${signedFmt(totalCeChg)}</strong></span>
           <span class="pe"><small>PE ΔOI</small><strong>${signedFmt(totalPeChg)}</strong></span>
         </div>
-        <div class="oi-snap-footer">
-          <span class="oi-snap-footer-label">Range PCR Δ</span>
-          <span class="oi-snap-footer-val warn">${signedFmt(pcrShift)}</span>
-          <span class="oi-snap-footer-tag">Change in Range PCR</span>
+        <div class="oi-snap-inline-metrics" aria-label="Net OI flow and velocity">
+          <div class="oi-snap-inline-heading"><strong>OI Flow / Velocity</strong><small>PE−CE ΔOI</small></div>
+          <div class="oi-snap-inline-grid three">
+            ${oiChangePeriods.map(({label,value}) => `<span><small>${label}</small><strong style="color:${value==null?'var(--text-tertiary)':signColor(value)}">${fmtNetOiVelocity(value)}</strong></span>`).join('')}
+          </div>
         </div>
       </div>
 
     </div>
 
-    <div class="oi-snap-kpis" aria-label="Option chain positioning metrics">
-      <div class="oi-snap-kpi">
-        <span class="oi-snap-kpi-label">Max Pain</span>
-        <span class="oi-snap-kpi-value-stack">
-          <strong class="oi-snap-kpi-value">${d.maxPain!=null?fmtI(d.maxPain):'—'}</strong>
-          ${maxPainDeltaHtml}
-        </span>
-      </div>
-      <div class="oi-snap-kpi">
-        <span class="oi-snap-kpi-label">CE Vol/OI</span>
-        <strong class="oi-snap-kpi-value ce">${fmtN(ceVolOi,2)}x</strong>
-      </div>
-      <div class="oi-snap-kpi">
-        <span class="oi-snap-kpi-label">PE Vol/OI</span>
-        <strong class="oi-snap-kpi-value pe">${fmtN(peVolOi,2)}x</strong>
-      </div>
-    </div>
-
     <div class="oc-native-chain" id="option-chain-table" ${tableOpen?'':'hidden'}>
-      <div class="oc-ledger-tools">
-        <span>Live strike ledger</span>
-        <button type="button" onclick="event.stopPropagation();toggleOptionChainGreeks(this)"
-          aria-pressed="${greeksVisible}" class="${greeksVisible?'active':''}">▸ Greeks</button>
-      </div>
       <div class="oc-native-scroll">
         <table class="oc-ledger-table" aria-label="Option Chain ledger by strike">
           <colgroup>

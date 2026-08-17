@@ -63,6 +63,14 @@ else:
 
 @dataclass(frozen=True)
 class Settings:
+    # -- Live execution broker -------------------------------------------
+    # Market data remains on SmartAPI for now; this selector controls the
+    # account/order adapter only. Keeping the default preserves existing
+    # installations until Shoonya credentials are deliberately configured.
+    execution_broker: str = field(
+        default_factory=lambda: os.getenv("EXECUTION_BROKER", "SMARTAPI").strip().upper()
+    )
+
     # -- AngelOne SmartAPI credentials (brokers/smartapi_client.py) -----
     smartapi_key: Optional[str] = field(
         default_factory=lambda: os.getenv("SMARTAPI_KEY")
@@ -75,6 +83,29 @@ class Settings:
     )
     smartapi_totp_secret: Optional[str] = field(
         default_factory=lambda: os.getenv("SMARTAPI_TOTP_SECRET")
+    )
+
+    # -- Shoonya / Finvasia credentials (brokers/shoonya_client.py) ------
+    shoonya_user_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("SHOONYA_USER_ID")
+    )
+    shoonya_password: Optional[str] = field(
+        default_factory=lambda: os.getenv("SHOONYA_PASSWORD")
+    )
+    shoonya_totp_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("SHOONYA_TOTP_SECRET")
+    )
+    shoonya_vendor_code: Optional[str] = field(
+        default_factory=lambda: os.getenv("SHOONYA_VENDOR_CODE")
+    )
+    shoonya_api_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("SHOONYA_API_SECRET")
+    )
+    shoonya_imei: str = field(
+        default_factory=lambda: os.getenv("SHOONYA_IMEI", "mTerminals")
+    )
+    shoonya_product_type: str = field(
+        default_factory=lambda: os.getenv("SHOONYA_PRODUCT_TYPE", "M").strip().upper()
     )
 
     # -- Tunables ---------------------------------------------------------

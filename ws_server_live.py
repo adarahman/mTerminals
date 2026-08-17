@@ -29,7 +29,7 @@ from aiohttp import web
 # option_chain_json.py parses sys.argv at import time — hide our own argv
 # from it so it doesn't choke on ws_server_live's --symbol/--poll-seconds flags.
 _real_argv = sys.argv
-if "--no-smartapi" in _real_argv:
+if "--no-broker" in _real_argv or "--no-smartapi" in _real_argv:
     os.environ["MTERMINALS_NO_SMARTAPI"] = "1"
 sys.argv = [_real_argv[0]]
 import option_chain_json       # noqa: E402
@@ -43,19 +43,35 @@ from operational_metrics import OperationalMetrics  # noqa: E402
 logger = logging.getLogger("mterminals.server")
 
 from paper_trading import PaperTradingEngine, _instrument_key, LOT_SIZES as PT_LOT_SIZES  # noqa: E402
-_NO_SMARTAPI_REQUESTED = "--no-smartapi" in _real_argv
+_NO_SMARTAPI_REQUESTED = "--no-broker" in _real_argv or "--no-smartapi" in _real_argv
+from config import settings as _broker_settings
 
 def _smartapi_disabled(*_args, **_kwargs):
-    raise RuntimeError("SmartAPI is disabled by --no-smartapi")
+    raise RuntimeError("Broker services are disabled by --no-broker")
 
 if not _NO_SMARTAPI_REQUESTED:
     from brokers.market_data import market_data
-    from brokers.smartapi_client import (
-        place_order as smartapi_place_order,
-        get_order_book as smartapi_get_order_book,
-        get_positions as smartapi_get_positions,
-        get_funds as smartapi_get_funds,
-    )
+    if _broker_settings.execution_broker == "SHOONYA":
+        from brokers.shoonya_client import (
+            place_order as smartapi_place_order,
+            get_order_book as smartapi_get_order_book,
+            get_positions as smartapi_get_positions,
+            get_funds as smartapi_get_funds,
+            resolve_option_contract as _shoonya_resolve_option_contract,
+        )
+    elif _broker_settings.execution_broker == "SMARTAPI":
+        from brokers.smartapi_client import (
+            place_order as smartapi_place_order,
+            get_order_book as smartapi_get_order_book,
+            get_positions as smartapi_get_positions,
+            get_funds as smartapi_get_funds,
+        )
+        _shoonya_resolve_option_contract = None
+    else:
+        raise RuntimeError(
+            "EXECUTION_BROKER must be SMARTAPI or SHOONYA, got "
+            f"{_broker_settings.execution_broker!r}"
+        )
     from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
     from smartapi_feed_adapter import TickAggregator
     from brokers.smartapi_history import get_index_candles, get_candle_data
@@ -74,6 +90,7 @@ else:
     smartapi_get_order_book = _smartapi_disabled
     smartapi_get_positions = _smartapi_disabled
     smartapi_get_funds = _smartapi_disabled
+    _shoonya_resolve_option_contract = None
     get_index_candles = _smartapi_disabled
     get_candle_data = _smartapi_disabled
     SmartTickStream = None
@@ -81,6 +98,7 @@ else:
     EXCHANGE_TYPE = {}
 from risk.account_guard import (
     LiveAccountRiskGuard, pnl_from_positions, open_lots_from_positions,
+    projected_open_lots_from_positions,
 )
 from risk.position_reconciler import PositionReconciler
 from risk.live_order_store import LiveOrderStore
@@ -130,15 +148,16 @@ _parser.add_argument("--no-virtual-oi", action="store_true", help="Disable Virtu
 _parser.add_argument("--no-delta", action="store_true", help="Always broadcast full payloads instead of deltas")
 _parser.add_argument("--no-index-quotes", action="store_true",
                       help="Disable the NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX ticker-strip background fetch")
-_parser.add_argument("--no-smartapi", action="store_true",
-                      help="Disable authenticated AngelOne SmartAPI traffic, including login, "
+_parser.add_argument("--no-broker", action="store_true",
+                      help="Disable authenticated broker traffic, including login, account data, "
                            "REST quotes, futures and websocket overlay; use NSE/BSE public REST "
                            "polling only. The unauthenticated daily ScripMaster remains available "
                            "for instrument metadata and lot sizes.")
+_parser.add_argument("--no-smartapi", action="store_true", help=argparse.SUPPRESS)
 _parser.add_argument("--strikes-each-side", type=int, default=None,
                       help="Override how many strikes each side of ATM option_chain_json computes "
                            "Greeks/OI-velocity/signal analytics for (engine's n_strikes_each_side). "
-                           "Defaults to 50 under --no-smartapi (REST-only chains have no fast overlay "
+                           "Defaults to 50 under --no-broker (REST-only chains have no fast overlay "
                            "to compensate, so the analytics pane needs the wider engine-side window "
                            "up front) and 10 with SmartAPI enabled (matches start_smartapi_feed's own "
                            "strikes_around_atm default). Pass this explicitly to use the same value "
@@ -199,7 +218,7 @@ USE_INDEX_QUOTES     = not ARGS.no_index_quotes
 INDEX_QUOTE_SECONDS  = ARGS.index_quote_seconds
 FUNDS_POLL_SECONDS   = ARGS.funds_poll_seconds
 PORTFOLIO_POLL_SECONDS = ARGS.portfolio_poll_seconds
-USE_SMARTAPI         = not ARGS.no_smartapi
+USE_SMARTAPI         = not (ARGS.no_broker or ARGS.no_smartapi)
 STRIKES_EACH_SIDE    = ARGS.strikes_each_side if ARGS.strikes_each_side is not None else (15 if USE_SMARTAPI else 50)
 option_chain_json.set_runtime_config(RuntimeConfig(
     strikes_each_side=STRIKES_EACH_SIDE,
@@ -207,16 +226,16 @@ option_chain_json.set_runtime_config(RuntimeConfig(
 ))
 
 print(
-    f"[feed] chain source: {'SmartAPI REST' if USE_SMARTAPI else 'NSE/BSE public REST (--no-smartapi)'}, "
+    f"[feed] chain source: {'SmartAPI REST' if USE_SMARTAPI else 'NSE/BSE public REST (--no-broker)'}, "
     f"analytics recompute ceiling={POLL_SECONDS}s floor={MIN_TICK_RECOMPUTE_SECONDS}s "
-    f"+ {'SmartAPI websocket overlay ENABLED' if USE_SMARTAPI else 'SmartAPI overlay DISABLED (--no-smartapi)'} "
+    f"+ {'SmartAPI websocket overlay ENABLED' if USE_SMARTAPI else 'SmartAPI overlay DISABLED (--no-broker)'} "
     f"| index context via market_api.py (20s-cached)",
     flush=True,
 )
 print(
     f"[paper-trading] portfolio fast-path broadcast: "
     f"{'every SmartAPI tick (no throttle)' if PORTFOLIO_POLL_SECONDS <= 0 else f'throttled to >= {PORTFOLIO_POLL_SECONDS}s'}"
-    + ("" if USE_SMARTAPI else " (inactive — --no-smartapi, falls back to --poll-seconds cadence)"),
+    + ("" if USE_SMARTAPI else " (inactive — --no-broker, falls back to --poll-seconds cadence)"),
     flush=True,
 )
 
@@ -330,6 +349,8 @@ LIVE_MAX_LOTS_PER_ORDER = int(os.environ.get("LIVE_MAX_LOTS_PER_ORDER", "1"))
 LIVE_MAX_ORDERS_PER_MINUTE = int(os.environ.get("LIVE_MAX_ORDERS_PER_MINUTE", "5"))
 _live_order_timestamps = []  # sliding window for the per-minute cap, main-thread only
 _LIVE_ORDER_SUBMIT_LOCK = threading.Lock()
+_LIVE_ORDER_GATE = None
+_LIVE_ORDER_GATE_LOOP = None
 _LIVE_ORDER_RESULTS = {}
 _LIVE_ORDER_RESULTS_MAX = 500
 _LIVE_ORDER_STORE = LiveOrderStore(max_entries=_LIVE_ORDER_RESULTS_MAX)
@@ -346,6 +367,21 @@ else:
 
 def _live_trading_kill_switch_active():
     return os.path.exists(LIVE_TRADING_KILL_SWITCH_FILE)
+
+
+def _live_order_gate():
+    """One live-order critical section per event loop.
+
+    The gate covers the broker position read, projected-exposure check and
+    submission together. Tests create multiple short-lived event loops, so
+    the lock is recreated when the active loop changes.
+    """
+    global _LIVE_ORDER_GATE, _LIVE_ORDER_GATE_LOOP
+    loop = asyncio.get_running_loop()
+    if _LIVE_ORDER_GATE is None or _LIVE_ORDER_GATE_LOOP is not loop:
+        _LIVE_ORDER_GATE = asyncio.Lock()
+        _LIVE_ORDER_GATE_LOOP = loop
+    return _LIVE_ORDER_GATE
 
 
 # Account-level risk guard — daily loss limit, max open exposure, and a
@@ -406,10 +442,9 @@ LAST_LIVE_POSITIONS = None
 # ws://<host>:<port>/ws and drive it, including submitting orders
 # (cross-site WebSocket hijacking). Only a request whose Origin header
 # matches something in this allowlist is accepted. A request with NO
-# Origin header at all (a plain `websockets`/python client, curl, a
-# local script, etc. — something a browser never omits) is still
-# allowed, since this is a local single-user tool and browsers are the
-# only clients that can silently carry a third-party origin.
+# Origin header at all (a plain `websockets`/python client, curl, or local
+# script) is accepted only from a loopback peer. This prevents an
+# origin-less remote client from bypassing the browser-origin allowlist.
 _DEFAULT_ALLOWED_ORIGINS = {
     f"http://{WS_HOST}:{HTTP_PORT}",
     f"http://localhost:{HTTP_PORT}",
@@ -421,10 +456,24 @@ _EXTRA_ALLOWED_ORIGINS = {
 ALLOWED_ORIGINS = _DEFAULT_ALLOWED_ORIGINS | _EXTRA_ALLOWED_ORIGINS
 
 
+def _host_is_loopback(host: str) -> bool:
+    """Return whether a listener host is restricted to this machine."""
+    normalized = str(host or "").strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
 def _origin_allowed(request) -> bool:
     origin = request.headers.get("Origin")
     if origin is None:
-        return True
+        try:
+            return ipaddress.ip_address(request.remote).is_loopback
+        except (TypeError, ValueError):
+            return False
     # A dashboard opened directly from disk (file://...) is assigned the
     # opaque browser origin "null". Permit that development mode only when
     # the TCP peer itself is loopback. A remote machine sending Origin:null
@@ -492,6 +541,10 @@ def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
     exchange = "BFO" if symbol in _BSE_SYMBOLS else "NFO"
 
     if instrument_type in ("CE", "PE"):
+        if _shoonya_resolve_option_contract is not None:
+            return _shoonya_resolve_option_contract(
+                symbol, expiry, strike, instrument_type, exchange,
+            )
         # expiry here is option_chain_json's format ("14-Jul-2026"); SmartAPI's
         # ScripMaster uses "14JUL2026" (no separators) — convert before lookup.
         try:
@@ -932,7 +985,7 @@ async def _broadcast_portfolio(current_prices):
     await broadcast({"type": "orders", "payload": orders})
 
 
-async def _handle_place_order(payload):
+async def _handle_place_order(payload, _live_gate_acquired=False):
     """Handles an inbound {"type":"place_order", "payload":{...}} message
     from dashboard.js's sendWsMessage('place_order', ...) (see ptSubmitOrder
     / ptQuickSubmit).
@@ -1028,6 +1081,14 @@ async def _handle_place_order(payload):
 
     wants_live = bool(payload.get("live")) and bool(payload.get("confirmed"))
 
+    # Serialize the complete live pre-trade check and submission. Locking
+    # only smartapi_place_order leaves a TOCTOU window where two requests
+    # can both observe the same position book and independently clear the
+    # exposure cap before either order reaches the broker.
+    if wants_live and not _live_gate_acquired:
+        async with _live_order_gate():
+            return await _handle_place_order(payload, _live_gate_acquired=True)
+
     if wants_live:
         rejection_reason = None
         if (
@@ -1065,21 +1126,9 @@ async def _handle_place_order(payload):
             # before it can be traded live.
             rejection_reason = f"no verified lot size for {symbol} — refusing to guess on a live order"
         elif rejection_reason is None:
-            # Account-level checks — evaluated across the whole trading
-            # day, not just this order. See risk/account_guard.py.
             guard_tripped, guard_trip_reason = _ACCOUNT_GUARD.is_tripped()
             if guard_tripped:
                 rejection_reason = f"account risk guard tripped: {guard_trip_reason}"
-            else:
-                try:
-                    live_positions = await asyncio.to_thread(smartapi_get_positions)
-                    current_open_lots = open_lots_from_positions(live_positions, PT_LOT_SIZES)
-                except Exception as e:
-                    print(f"[account_guard] could not fetch position book for exposure check: {e}", flush=True)
-                    current_open_lots = None
-                allowed, exposure_reason = _ACCOUNT_GUARD.check_new_order(qty_lots, current_open_lots)
-                if not allowed:
-                    rejection_reason = exposure_reason
 
         if rejection_reason:
             print(f"[live-trading] REJECTED: {rejection_reason} — {symbol} {side} {qty_lots} lot(s)", flush=True)
@@ -1111,6 +1160,25 @@ async def _handle_place_order(payload):
         lot_size = PT_LOT_SIZES[symbol]
         quantity = qty_lots * lot_size
         transaction_type = "BUY" if (side or "").upper() == "BUY" else "SELL"
+
+        # Calculate exposure after applying this exact signed order. This
+        # permits risk-reducing closes while still failing closed on an
+        # incomplete position book. The surrounding live-order gate keeps
+        # this read/check atomic with the submission below.
+        try:
+            live_positions = await asyncio.to_thread(smartapi_get_positions)
+            projected_open_lots = projected_open_lots_from_positions(
+                live_positions, PT_LOT_SIZES, tradingsymbol,
+                transaction_type, quantity,
+            )
+        except Exception as e:
+            print(f"[account_guard] could not fetch position book for exposure check: {e}", flush=True)
+            projected_open_lots = None
+        allowed, exposure_reason = _ACCOUNT_GUARD.check_new_order(0, projected_open_lots)
+        if not allowed:
+            print(f"[live-trading] REJECTED: {exposure_reason} — {symbol} {side} {qty_lots} lot(s)", flush=True)
+            await _broadcast_portfolio(current_prices)
+            return {"status": "rejected", "reason": exposure_reason}
 
         try:
             order_id, duplicate = await asyncio.to_thread(
@@ -1247,6 +1315,11 @@ def _build_algo_status() -> dict:
     exec_status["history"] = _AUTO_EXECUTOR.get_history()[:30]
 
     return {
+        "broker": (
+            "Public Data" if _NO_SMARTAPI_REQUESTED
+            else "Shoonya" if _broker_settings.execution_broker == "SHOONYA"
+            else "Angel One"
+        ),
         "liveTradingEnabled": LIVE_TRADING_ENABLED,
         "killSwitchActive": _live_trading_kill_switch_active(),
         "maxLotsPerOrder": LIVE_MAX_LOTS_PER_ORDER,
@@ -3390,6 +3463,12 @@ async def metrics_handler(request):
 
 
 async def main():
+    if not _host_is_loopback(WS_HOST):
+        raise RuntimeError(
+            f"refusing unsafe non-loopback bind {WS_HOST!r}: the WebSocket "
+            "control channel has no remote-client authentication; use "
+            "--host localhost or a loopback address"
+        )
     # Must run before any task that can hit a broker API timeout
     # (start_smartapi_feed(), engine_loop(), ...) gets a chance to log
     # one -- see logging_config.py's RedactSensitiveHeaders for why:
@@ -3436,8 +3515,8 @@ async def main():
             "smartapi_startup",
         )
     else:
-        print("[smartapi] authenticated services disabled (--no-smartapi) — no AngelOne login, "
-              "quote/order REST call, or websocket connection; public daily ScripMaster allowed", flush=True)
+        print("[broker] authenticated services disabled (--no-broker) — no broker login, "
+              "account/order REST call, or websocket connection; public daily ScripMaster allowed", flush=True)
 
     try:
         _create_background_task(index_quote_loop(), "index_quote_loop")

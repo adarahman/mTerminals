@@ -26,6 +26,18 @@ SMARTAPI_PIN=your_pin
 SMARTAPI_TOTP_SECRET=your_totp_secret
 ```
 
+Shoonya can be selected for account state and live execution while SmartAPI
+continues to supply the dashboard market-data feed:
+
+```bash
+./scripts/setup_shoonya.sh
+cp .env.shoonya.example /tmp/shoonya-settings.example  # reference only
+```
+
+Copy the `SHOONYA_*` keys from `.env.shoonya.example` into `.env`, fill them
+locally, and set `EXECUTION_BROKER=SHOONYA`. Do not paste or commit credentials.
+Live execution remains subject to `LIVE_TRADING_ENABLED` and the kill switch.
+
 `.env` is gitignored — never commit real credentials. See `paths.py` for
 other path/cache configuration.
 

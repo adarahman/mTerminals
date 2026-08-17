@@ -253,6 +253,12 @@ function renderAlgoStatusPanel(wsState){
   const status = wsState.algoStatus;
   if(!status) return; // no algoStatus message received on this connection yet
 
+  const brokerLabel = $i('active-broker-label');
+  if(brokerLabel && status.broker){
+    brokerLabel.textContent = status.broker;
+    brokerLabel.title = `Active account and execution broker: ${status.broker}`;
+  }
+
   const killActive = !!status.killSwitchActive;
   const guardTripped = !!(status.accountGuard && status.accountGuard.tripped);
   const liveOn = !!status.liveTradingEnabled;

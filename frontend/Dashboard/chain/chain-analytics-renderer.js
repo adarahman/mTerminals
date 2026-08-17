@@ -16,6 +16,30 @@ function _bindChainLedgerScrollGuard(card) {
   return scroll;
 }
 
+function _patchExpandedLedgerRows(currentTable, freshTable) {
+  if(!currentTable || !freshTable) return;
+  const currentRows = Array.from(currentTable.querySelectorAll('tbody tr'));
+  const freshRows = Array.from(freshTable.querySelectorAll('tbody tr'));
+  if(currentRows.length !== freshRows.length) return;
+  currentRows.forEach((row, rowIndex) => {
+    const freshRow = freshRows[rowIndex];
+    // Preserve each physical row/cell so the modal's scroll target remains
+    // stable; update only the live contents and presentation attributes.
+    row.className = freshRow.className;
+    row.hidden = freshRow.hidden;
+    Array.from(row.cells).forEach((cell, cellIndex) => {
+      const freshCell = freshRow.cells[cellIndex];
+      if(!freshCell) return;
+      if(cell.innerHTML !== freshCell.innerHTML) cell.innerHTML = freshCell.innerHTML;
+      cell.className = freshCell.className;
+      const style = freshCell.getAttribute('style');
+      if(style == null) cell.removeAttribute('style'); else cell.setAttribute('style', style);
+      const title = freshCell.getAttribute('title');
+      if(title == null) cell.removeAttribute('title'); else cell.setAttribute('title', title);
+    });
+  });
+}
+
 ChainView.prototype.renderVelocity = function(win) {
   const el=$i('vel-content');if(!el||!_data)return;
   const vel=_data.oiVelocity;
@@ -332,18 +356,22 @@ ChainView.prototype._rerenderChainPanels = function() {
       const fresh = freshCard && freshCard.querySelector(selector);
       if(current && fresh) current.innerHTML = fresh.innerHTML;
     };
-    // Keep the summary figures current, but deliberately leave every
-    // expanded ledger row structurally untouched. Wheel/trackpad events
-    // target the row beneath the pointer, not only the scroll parent; even
-    // replacing tbody inside a stable container cancels that gesture.
-    // Collapsing/reopening rebuilds the ledger from the latest payload.
+    // Keep the summary and expanded ledger current. During trackpad/wheel
+    // momentum, leave every physical row and its contents untouched; once
+    // the gesture settles, patch values inside the already-mounted rows.
+    // This preserves scrolling without freezing market ticks until close.
     copyInner('.oi-snap-grid');
-    copyInner('.oi-snap-kpis');
+    _bindChainLedgerScrollGuard(expandedChain);
+    if(Date.now() >= _chainLedgerScrollState.activeUntil){
+      _patchExpandedLedgerRows(
+        expandedChain,
+        freshCard && freshCard.querySelector('#option-chain-table'),
+      );
+    }
     const currentBadge = chainSummaryCard.querySelector('.oi-snap-badge');
     const freshBadge = freshCard && freshCard.querySelector('.oi-snap-badge');
     if(currentBadge && freshBadge) currentBadge.textContent = freshBadge.textContent;
     chainSummaryCard.dataset.lastHtml = freshHtml;
-    _bindChainLedgerScrollGuard(expandedChain);
   } else patchOuterHtmlIfChanged('chain-summary-card', () => app.chain.buildChainSummaryHtml(_data), {
     guardKey: 'chainSummary',
     bindGuard: true,

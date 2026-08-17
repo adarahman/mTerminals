@@ -1,17 +1,20 @@
-"""Regression coverage for the strict --no-smartapi process boundary."""
+"""Regression coverage for the strict broker-free process boundary."""
 
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_no_smartapi_does_not_import_broker_client_or_adapter():
+@pytest.mark.parametrize("flag", ["--no-broker", "--no-smartapi"])
+def test_broker_free_mode_does_not_import_broker_client_or_adapter(flag):
     probe = (
         'import sys; '
-        'sys.argv=["ws_server_live.py","--no-smartapi"]; '
+        f'sys.argv=["ws_server_live.py","{flag}"]; '
         'import ws_server_live as server; '
         'assert server.USE_SMARTAPI is False; '
         'assert "brokers.smartapi_client" not in sys.modules; '

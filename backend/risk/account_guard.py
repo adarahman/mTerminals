@@ -308,3 +308,54 @@ def open_lots_from_positions(positions: list[dict], lot_size_lookup: dict[str, i
             return None
         total_lots += abs(qty) // lot_size
     return total_lots
+
+
+def projected_open_lots_from_positions(
+    positions: list[dict],
+    lot_size_lookup: dict[str, int],
+    target_tradingsymbol: str,
+    side: str,
+    order_quantity: int,
+) -> float | None:
+    """Return gross open lots after applying a proposed signed order.
+
+    Positions are netted by exact trading symbol before the proposed order
+    is applied. A SELL against a long (or BUY against a short) therefore
+    reduces exposure, while an order in another contract adds exposure.
+    Unknown position data returns ``None`` so callers can fail closed.
+    """
+    target = str(target_tradingsymbol or "").upper()
+    normalized_side = str(side or "").upper()
+    if not target or normalized_side not in ("BUY", "SELL") or order_quantity <= 0:
+        return None
+    signed_order_qty = order_quantity if normalized_side == "BUY" else -order_quantity
+
+    net_by_instrument: dict[str, int] = {}
+    for position in positions or []:
+        qty = None
+        for key in ("netqty", "quantity", "netQty"):
+            if key in position and position[key] not in (None, ""):
+                try:
+                    qty = int(float(position[key]))
+                    break
+                except (TypeError, ValueError):
+                    continue
+        tradingsymbol = str(position.get("tradingsymbol") or "").upper()
+        if qty is None or not tradingsymbol:
+            return None
+        net_by_instrument[tradingsymbol] = net_by_instrument.get(tradingsymbol, 0) + qty
+
+    net_by_instrument[target] = net_by_instrument.get(target, 0) + signed_order_qty
+    lot_sizes = sorted(lot_size_lookup.items(), key=lambda item: len(item[0]), reverse=True)
+    total_lots = 0.0
+    for tradingsymbol, net_qty in net_by_instrument.items():
+        if net_qty == 0:
+            continue
+        lot_size = next(
+            (size for symbol, size in lot_sizes if tradingsymbol.startswith(symbol.upper())),
+            None,
+        )
+        if not lot_size:
+            return None
+        total_lots += abs(net_qty) / lot_size
+    return total_lots

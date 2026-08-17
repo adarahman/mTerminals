@@ -18,7 +18,7 @@ const checks = [
   ['expanded ledger defers replacement during active scrolling', renderer.includes('_chainLedgerScrollState.activeUntil') && renderer.includes('shouldSkip: (card)')],
   ['expanded ledger restores again after browser layout', renderer.includes('requestAnimationFrame(restore)')],
   ['expanded ledger keeps its physical scroll container across ticks', renderer.includes('Never replace the physical scroll container')],
-  ['expanded ledger rows remain mounted throughout browsing', renderer.includes('leave every') && !renderer.includes("copyInner('.oc-ledger-table tbody')")],
+  ['expanded ledger rows stay mounted while idle values tick', renderer.includes('_patchExpandedLedgerRows') && renderer.includes('cell.innerHTML = freshCell.innerHTML') && !renderer.includes("copyInner('.oc-ledger-table tbody')")],
   ['expanded ledger uses normal page scrolling', styles.includes('.oc-native-scroll{') && styles.includes('overflow-y:visible') && styles.includes('max-height:none')],
   ['modal ledger fits screen without horizontal scrolling', styles.includes('table-layout:fixed') && styles.includes('.option-chain-modal-body .oc-native-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}') && !styles.includes('min-width:1320px')],
   ['option chain uses the shared full-screen modal', modalManager.includes('openOptionChainModal()') && modalManager.includes("this._openModal(modal, () => this.closeOptionChainModal())")],

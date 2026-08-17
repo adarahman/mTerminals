@@ -5,6 +5,7 @@ import process from 'node:process';
 const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const flow = read('Dashboard/oi-flow-view.js');
+const chainTemplate = read('Dashboard/chain/chain-template.js');
 const strike = read('Dashboard/strike-detail-report-view.js');
 const exec = read('Dashboard/exec-view.js');
 const backend = read('../backend/mTerminals_json.py');
@@ -12,7 +13,7 @@ const capital = read('../backend/oi/capital_metrics.py');
 const panelsCss = read('styles/panels.css');
 
 const checks = [
-  ['OI Flow header opens the native chart', flow.includes('onclick="openOIDashboardModal()"') && flow.includes('aria-label="Open OI Flow chart"')],
+  ['Chg OI Summary opens the native OI Flow chart', chainTemplate.includes('onclick="event.stopPropagation();openOIDashboardModal()"') && chainTemplate.includes('aria-label="Open OI Flow chart"')],
   ['flow is explicitly day-session scope', flow.includes('Day-session ΔOI × LTP · visible range')],
   ['flow and concentration remain separate', flow.includes('capital-flow-section') && exec.includes('Capital Concentration')],
   ['Stage-1 foundation is visible', ['Premium locked','Premium turnover','Gross strike notional'].every((x) => flow.includes(x))],

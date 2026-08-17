@@ -12,6 +12,7 @@ specifically exercising resolution itself. See conftest.py's
 without a network call.
 """
 import asyncio
+import time
 
 import pytest
 
@@ -349,6 +350,74 @@ def test_buy_and_sell_sides_map_to_correct_transaction_type(resolvable):
     placed.clear()
     _run(m._handle_place_order(_order_payload(side="sell", client_order_id="liveorder00000002")))
     assert placed["args"][3] == "SELL"
+
+
+def test_closing_order_checks_projected_reduced_exposure(resolvable, monkeypatch):
+    m, placed = resolvable
+    lot_size = m.PT_LOT_SIZES["NIFTY"]
+    monkeypatch.setattr(m, "smartapi_get_positions", lambda: [{
+        "netqty": str(lot_size),
+        "tradingsymbol": "NIFTY31JUL25000CE",
+        "pnl": "0",
+    }])
+    seen = {}
+    guard = _FakeGuard()
+    monkeypatch.setattr(
+        guard, "check_new_order",
+        lambda qty, projected: (seen.setdefault("projected", projected), (True, None))[1],
+    )
+    monkeypatch.setattr(m, "_ACCOUNT_GUARD", guard)
+
+    result = _run(m._handle_place_order(_order_payload(side="SELL")))
+
+    assert result["status"] == "placed"
+    assert seen["projected"] == 0
+    assert "args" in placed
+
+
+def test_concurrent_orders_cannot_race_exposure_cap(resolvable, monkeypatch):
+    m, _ = resolvable
+    lot_size = m.PT_LOT_SIZES["NIFTY"]
+    positions = []
+    broker_calls = []
+
+    def _positions():
+        # Ensure the first pre-trade read yields long enough that an
+        # unguarded second coroutine would observe the same empty book.
+        if not positions:
+            time.sleep(0.05)
+        return [dict(row) for row in positions]
+
+    def _place(*args, **kwargs):
+        broker_calls.append(args)
+        positions[:] = [{
+            "netqty": str(lot_size),
+            "tradingsymbol": "NIFTY31JUL25000CE",
+            "pnl": "0",
+        }]
+        return f"ORDER{len(broker_calls)}"
+
+    guard = _FakeGuard()
+    monkeypatch.setattr(
+        guard, "check_new_order",
+        lambda qty, projected: (
+            (projected is not None and projected <= 1),
+            None if projected is not None and projected <= 1 else "would exceed max open exposure",
+        ),
+    )
+    monkeypatch.setattr(m, "_ACCOUNT_GUARD", guard)
+    monkeypatch.setattr(m, "smartapi_get_positions", _positions)
+    monkeypatch.setattr(m, "smartapi_place_order", _place)
+
+    async def _concurrent():
+        return await asyncio.gather(
+            m._handle_place_order(_order_payload(side="BUY", client_order_id="liveorder00000011")),
+            m._handle_place_order(_order_payload(side="BUY", client_order_id="liveorder00000012")),
+        )
+
+    results = _run(_concurrent())
+    assert len(broker_calls) == 1
+    assert sorted(result["status"] for result in results) == ["placed", "rejected"]
 
 
 # ── Paper trading path (live=False or confirmed=False) ──────────────────

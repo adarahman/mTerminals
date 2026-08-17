@@ -29,3 +29,7 @@ xlwings>=0.30
 # AngelOne SmartAPI Python SDK — imported as `from SmartApi import
 # SmartConnect` in brokers/smartapi_client.py.
 smartapi-python>=1.4
+
+# Shoonya execution is optional. Its official SDK is installed separately
+# from https://github.com/Shoonya-Dev/ShoonyaApi-py because it is not
+# published as a conventional versioned PyPI package.

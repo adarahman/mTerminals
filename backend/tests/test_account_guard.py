@@ -144,3 +144,27 @@ def test_open_lots_from_positions_unresolvable_symbol_returns_none():
     lot_sizes = {"NIFTY": 65}
     positions = [{"netqty": "10", "tradingsymbol": "SOMEUNKNOWN24OCT1CE"}]
     assert account_guard.open_lots_from_positions(positions, lot_sizes) is None
+
+
+def test_projected_exposure_allows_sell_to_close_existing_long():
+    positions = [{"netqty": "65", "tradingsymbol": "NIFTY31JUL25000CE"}]
+    projected = account_guard.projected_open_lots_from_positions(
+        positions, {"NIFTY": 65}, "NIFTY31JUL25000CE", "SELL", 65,
+    )
+    assert projected == 0
+
+
+def test_projected_exposure_allows_buy_to_cover_existing_short():
+    positions = [{"netqty": "-130", "tradingsymbol": "NIFTY31JUL25000CE"}]
+    projected = account_guard.projected_open_lots_from_positions(
+        positions, {"NIFTY": 65}, "NIFTY31JUL25000CE", "BUY", 65,
+    )
+    assert projected == 1
+
+
+def test_projected_exposure_adds_order_in_different_contract():
+    positions = [{"netqty": "65", "tradingsymbol": "NIFTY31JUL25000CE"}]
+    projected = account_guard.projected_open_lots_from_positions(
+        positions, {"NIFTY": 65}, "NIFTY31JUL25100CE", "BUY", 65,
+    )
+    assert projected == 2

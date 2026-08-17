@@ -18,7 +18,7 @@ const checks = [
   ['dashboard renders a visible feed reason', template.includes('id="feed-status-reason"')],
   ['feed reason updates without a full render', dataService.includes("$i('feed-status-reason')") && dataService.includes('reasonEl.textContent = reasonText')],
   ['feed reason uses truncation-safe styling', styles.includes('.feed-status-reason') && styles.includes('text-overflow:ellipsis')],
-  ['feed capsule has stable fixed tracks', styles.includes('grid-template-columns:140px 1px minmax(190px,1fr) 1px 96px') && styles.includes('flex:0 0 500px')],
+  ['feed capsule has stable fixed tracks', styles.includes('grid-template-columns:78px 1px 160px 1px minmax(150px,1fr) 1px 62px') && styles.includes('flex:0 0 500px')],
   ['hidden feed reason keeps its reserved space', styles.includes('.feed-status-reason[hidden]{display:block !important;visibility:hidden;}') && styles.includes('min-height:58px')],
 ];
 

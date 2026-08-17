@@ -235,10 +235,6 @@ class OiFlowView {
   if(!chain || !chain.length){
     return `
   <div class="oic-card" id="oi-flow-summary-card">
-    <button type="button" class="section-header nav-card-header oi-flow-chart-header" onclick="openOIDashboardModal()" aria-label="Open OI Flow chart">
-      <span class="section-title nav-card-header-label"><span class="section-icon">🌊</span>OI Flow</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
-    </button>
     <div class="oic-empty">Awaiting chain data…</div>
   </div>`;
   }
@@ -293,39 +289,6 @@ class OiFlowView {
     : netCapitalFlow<0 ? 'Call-side flow leads · Bearish tilt'
     : 'Call and put flow balanced';
 
-  // Net OI Flow belongs to D-07. Preserve the original multi-window
-  // 5m/15m/30m read without duplicating it inside D-04 or the dedicated
-  // D-05 strike ledger. Net is PE velocity minus CE velocity across the
-  // same currently visible strike range used by this Dashboard card.
-  const visibleStrikes = new Set(chain.map(r => Number(r.strike)));
-  const netOiVelocityFor = (windowMin) => {
-    const block = (oiVelocity || []).find(b => Number(b.window) === windowMin);
-    if(!block || !Array.isArray(block.rows)) return null;
-    let ce = 0, pe = 0, hasValue = false;
-    block.rows.forEach((r) => {
-      if(!visibleStrikes.has(Number(r.strike))) return;
-      const ceV = Number(r.ceDOI);
-      const peV = Number(r.peDOI);
-      if(Number.isFinite(ceV)){ ce += ceV; hasValue = true; }
-      if(Number.isFinite(peV)){ pe += peV; hasValue = true; }
-    });
-    return hasValue ? pe - ce : null;
-  };
-  const netOiVel = [5,15,30].map(windowMin => ({
-    windowMin,
-    value: netOiVelocityFor(windowMin)
-  }));
-  const fullDayNetOiChange = chain.reduce((sum, r) => sum + (Number(r.peChgOI)||0) - (Number(r.ceChgOI)||0), 0);
-  const oiChangePeriods = [{label:'Full day', value:fullDayNetOiChange}, ...netOiVel.map(({windowMin,value}) => ({label:`${windowMin}m`,value}))];
-  const fmtNetOiVelocity = (v) => (v==null || !Number.isFinite(v))
-    ? '—'
-    : `${v>0?'+':''}${fmtK(v)}`;
-  const latestVelocity = netOiVel.find(({value}) => value!=null && Number.isFinite(value))?.value;
-  const velocityRead = latestVelocity==null ? 'Intraday confirmation is not available yet.'
-    : latestVelocity>0 ? 'Recent PE−CE velocity leans bullish and confirms put-side participation.'
-    : latestVelocity<0 ? 'Recent PE−CE velocity leans bearish and confirms call-side participation.'
-    : 'Recent CE and PE velocity is balanced; there is no intraday confirmation.';
-
   // Total PE/CE OI + PCR across the visible chain is intentionally NOT
   // recomputed here — it's the exact same aggregate the Option Chain
   // Snapshot card's "OI SUMMARY" block already shows (same getFilteredChain()
@@ -367,24 +330,6 @@ class OiFlowView {
   // Detection)" so the tile's icon+label were pure duplication anyway.
   return `
   <div class="oic-card" id="oi-flow-summary-card">
-    <button type="button" class="section-header nav-card-header oi-flow-chart-header" onclick="openOIDashboardModal()" aria-label="Open OI Flow chart">
-      <span class="section-title nav-card-header-label"><span class="section-icon">🌊</span>OI Snapshot · Change &amp; Capital Flow</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
-    </button>
-    <div class="oi-net-velocity-section" aria-label="Net OI change by period">
-      <div class="oi-flow-section-heading">
-        <span class="oi-flow-step">1 · Net OI change by period</span>
-        <small>Every value is PE−CE ΔOI · same visible strike range</small>
-      </div>
-      <div class="oi-net-velocity-strip">
-        ${oiChangePeriods.map(({label,value}) => `
-          <div class="oi-net-velocity-item">
-            <span>${label}</span>
-            <strong style="color:${value==null?'var(--text-tertiary)':signColor(value)};">${fmtNetOiVelocity(value)}</strong>
-          </div>`).join('')}
-      </div>
-      <p class="oi-flow-velocity-read"><strong>Full day</strong> is the current-session OI change; 5m, 15m and 30m are the same OI-change measure over shorter windows. ${velocityRead}</p>
-    </div>
     <div class="capital-flow-section oi-flow-frame" aria-label="Capital Flow">
       <div class="oi-flow-frame-heading">
         <div>
@@ -396,7 +341,7 @@ class OiFlowView {
 
       <section class="oi-flow-verdict ${sessionTone}" aria-label="Session flow verdict">
         <div>
-          <span class="oi-flow-step">2 · Capital-weighted session verdict</span>
+          <span class="oi-flow-step">Capital-weighted session verdict</span>
           <strong>${sessionTitle}</strong>
           <p>${netFlowRead}</p>
         </div>
@@ -408,7 +353,7 @@ class OiFlowView {
 
       <section aria-labelledby="oi-flow-compare-title">
         <div class="oi-flow-section-heading">
-          <span class="oi-flow-step" id="oi-flow-compare-title">3 · Compare both sides</span>
+          <span class="oi-flow-step" id="oi-flow-compare-title">Compare both sides</span>
           <small>Positive = premium-weighted OI added; negative = unwound</small>
         </div>
         <div class="oi-flow-side-grid">
@@ -433,7 +378,7 @@ class OiFlowView {
 
       <section aria-labelledby="oi-flow-context-title">
         <div class="oi-flow-section-heading">
-          <span class="oi-flow-step" id="oi-flow-context-title">4 · Capital context</span>
+          <span class="oi-flow-step" id="oi-flow-context-title">Capital context</span>
           <small>Scale and concentration, not directional signals</small>
         </div>
         <div class="capital-foundation-strip" aria-label="Stage 1 capital metrics">

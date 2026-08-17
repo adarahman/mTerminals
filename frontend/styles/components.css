@@ -641,7 +641,12 @@ a.nav-card-header{
    shared .nav-card-header rules above — this block only supplies the
    layout + button reset. */
 button.section-header.nav-card-header{
-  width:100%;
+  /* The header bleeds 18px through both card gutters. `width:100%` only
+     measured the card's content box, so after the negative margins its
+     lower divider stopped one gutter short on the right. Size the border
+     box across both gutters so the top accent and bottom divider terminate
+     on the same vertical edges. */
+  width:calc(100% + 36px);box-sizing:border-box;
   color:inherit; cursor:pointer;
   border:none; background-color:transparent; font:inherit; text-align:left;
   margin:-16px -18px var(--space-5) -18px;
