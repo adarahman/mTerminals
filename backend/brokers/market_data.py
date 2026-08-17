@@ -15,22 +15,23 @@ is for real; design it from real call sites the same way this one was.
 
 SmartApiMarketData wraps brokers.smartapi_client's existing module-level
 functions with zero logic changes — pure delegation, nothing here talks
-to SmartAPI directly. To add a second provider, write another class
-satisfying MarketData and swap the `market_data` instance below.
+to SmartAPI directly. BreezeMarketData (brokers/breeze_market_data.py) is
+the second implementation of this Protocol — selected via
+MARKET_DATA_PROVIDER, independently of EXECUTION_BROKER (see
+config.py's comment on why those two selectors are separate).
 """
 
 from typing import Protocol, Optional
 
-from brokers.smartapi_client import (
-    list_expiries as _list_expiries,
-    get_atm_chain as _get_atm_chain,
-    find_option_token as _find_option_token,
-    get_batch_quotes as _get_batch_quotes,
-    get_batch_quotes_by_token as _get_batch_quotes_by_token,
-    get_spot_quote as _get_spot_quote,
-    get_fno_underlyings as _get_fno_underlyings,
-    INDEX_TOKENS as _INDEX_TOKENS,
-)
+# Deliberately NOT imported at module level: brokers.smartapi_client
+# imports the SmartApi SDK itself at its own module top level, which
+# would force smartapi-python to be installed even for a Breeze-only
+# deployment (MARKET_DATA_PROVIDER=BREEZE) that never touches this
+# class. SmartApiMarketData's methods below import it lazily, on first
+# real use, instead.
+def _smartapi():
+    from brokers import smartapi_client
+    return smartapi_client
 
 
 class MarketData(Protocol):
@@ -80,28 +81,45 @@ class SmartApiMarketData:
     singleton below with zero functional difference."""
 
     def list_expiries(self, underlying, exchange="NFO"):
-        return _list_expiries(underlying, exchange=exchange)
+        return _smartapi().list_expiries(underlying, exchange=exchange)
 
     def get_atm_chain(self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
-        return _get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm, exchange=exchange)
+        return _smartapi().get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm, exchange=exchange)
 
     def find_option_token(self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
-        return _find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange)
+        return _smartapi().find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange)
 
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
-        return _get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+        return _smartapi().get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
 
     def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
-        return _get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
+        return _smartapi().get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
 
     def get_spot_quote(self, underlying):
-        return _get_spot_quote(underlying)
+        return _smartapi().get_spot_quote(underlying)
 
     def get_fno_underlyings(self, force_refresh=False):
-        return _get_fno_underlyings(force_refresh=force_refresh)
+        return _smartapi().get_fno_underlyings(force_refresh=force_refresh)
 
     def index_tokens(self):
-        return _INDEX_TOKENS
+        return _smartapi().INDEX_TOKENS
 
 
-market_data: MarketData = SmartApiMarketData()
+def _build_market_data() -> MarketData:
+    try:  # ws_server_live adds backend/ to sys.path; package-level tests do not.
+        from config import settings
+    except ModuleNotFoundError:  # pragma: no cover - depends on launch style
+        from backend.config import settings
+
+    provider = settings.market_data_provider
+    if provider == "BREEZE":
+        from brokers.breeze_market_data import BreezeMarketData
+        return BreezeMarketData()
+    if provider == "SMARTAPI":
+        return SmartApiMarketData()
+    raise RuntimeError(
+        f"MARKET_DATA_PROVIDER must be SMARTAPI or BREEZE, got {provider!r}"
+    )
+
+
+market_data: MarketData = _build_market_data()

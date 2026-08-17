@@ -64,11 +64,22 @@ else:
 @dataclass(frozen=True)
 class Settings:
     # -- Live execution broker -------------------------------------------
-    # Market data remains on SmartAPI for now; this selector controls the
-    # account/order adapter only. Keeping the default preserves existing
-    # installations until Shoonya credentials are deliberately configured.
+    # Selects the account/order adapter only. Keeping the default preserves
+    # existing installations until Shoonya/Breeze credentials are
+    # deliberately configured. One of SMARTAPI, SHOONYA, BREEZE.
     execution_broker: str = field(
         default_factory=lambda: os.getenv("EXECUTION_BROKER", "SMARTAPI").strip().upper()
+    )
+
+    # -- Market data provider ----------------------------------------------
+    # Independent of execution_broker: you can execute on BREEZE while
+    # still streaming ticks from SmartAPI (or vice versa), since brokers/
+    # market_data.py's MarketData Protocol is a separate seam from the
+    # order-execution one below. Defaults to SMARTAPI (the existing,
+    # battle-tested feed) so this stays a no-op until deliberately
+    # switched. One of SMARTAPI, BREEZE.
+    market_data_provider: str = field(
+        default_factory=lambda: os.getenv("MARKET_DATA_PROVIDER", "SMARTAPI").strip().upper()
     )
 
     # -- AngelOne SmartAPI credentials (brokers/smartapi_client.py) -----
@@ -106,6 +117,31 @@ class Settings:
     )
     shoonya_product_type: str = field(
         default_factory=lambda: os.getenv("SHOONYA_PRODUCT_TYPE", "M").strip().upper()
+    )
+
+    # -- ICICI Breeze credentials (brokers/breeze_client.py,
+    # brokers/breeze_market_data.py) ---------------------------------------
+    # Unlike SmartAPI/Shoonya, Breeze has no TOTP-based auto-login path:
+    # api_session is a short-lived token (expires daily) obtained by
+    # visiting https://api.icicidirect.com/apiuser/login?api_key=<key> in a
+    # browser and copying the `apisession` value out of the redirect URL by
+    # hand. There is no way to script this step away — BREEZE_API_SESSION
+    # must be refreshed once a day before market open, or every call using
+    # brokers/breeze_client.py's session will fail with an auth error.
+    breeze_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("BREEZE_API_KEY")
+    )
+    breeze_api_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("BREEZE_API_SECRET")
+    )
+    breeze_api_session: Optional[str] = field(
+        default_factory=lambda: os.getenv("BREEZE_API_SESSION")
+    )
+    # Product code Breeze orders are placed with for F&O: "options" or
+    # "futures". Cash-market ("cash") isn't handled here — this dashboard
+    # only ever resolves option/future contracts.
+    breeze_product_type: str = field(
+        default_factory=lambda: os.getenv("BREEZE_PRODUCT_TYPE", "options").strip().lower()
     )
 
     # -- Tunables ---------------------------------------------------------
