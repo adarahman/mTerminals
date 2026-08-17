@@ -81,7 +81,16 @@
         <span class="oc-modal-title">📈 Price Chart</span>
       </div>
     </div>
-    <div id="price-chart-modal-host" class="price-chart-modal-body"></div>
+    <div class="price-chart-focus-grid">
+      <div id="price-chart-modal-host" class="price-chart-modal-body"></div>
+      <aside class="price-chart-context" aria-label="Live chart context">
+        <div class="focus-context-heading">
+          <span>Live Context</span>
+          <small>Same instrument · same tick</small>
+        </div>
+        <div id="price-chart-context-grid" class="focus-context-grid"></div>
+      </aside>
+    </div>
   </div>
 </div>
 
@@ -93,6 +102,10 @@
       <div class="oc-modal-id">
         <button id="option-chain-modal-close" class="oc-modal-back" onclick="closeOptionChainModal()" aria-label="Close Option Chain">←</button>
         <span class="oc-modal-title">📊 Option Chain</span>
+      </div>
+      <div class="option-chain-modal-range" aria-label="Option chain ATM strike range">
+        <span>ATM Range</span>
+        <div class="tab-group" id="range-tabs-chain" data-range-tabs></div>
       </div>
     </div>
     <div id="option-chain-modal-body" class="option-chain-modal-body"></div>
@@ -355,8 +368,22 @@
         <span class="oc-modal-title">🎯 Strategy Payoff</span>
       </div>
     </div>
-    <div class="chart-modal-body">
-      <canvas id="strat-payoff-canvas-modal" role="img" aria-label="Expanded strategy profit and loss payoff in Indian rupees by underlying price" style="width:100%;display:block;" height="480" data-h="480">Strategy payoff values are available in the strategy summary.</canvas>
+    <div id="strategy-focus-host" class="strategy-focus-body"></div>
+  </div>
+</div>
+
+<!-- Strategy Payoff chart-only focus view. The card header opens the full
+     strategy workspace above; clicking the curve opens only this chart. -->
+<div id="strat-payoff-chart-modal" class="oc-modal" onclick="if(event.target===this) closeStratPayoffChartModal()">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button id="strat-payoff-chart-modal-close" class="oc-modal-back" onclick="closeStratPayoffChartModal()" title="Back to dashboard">←</button>
+        <span class="oc-modal-title">🎯 Strategy Payoff Curve</span>
+      </div>
+    </div>
+    <div class="chart-modal-body" style="position:relative;overflow:hidden;">
+      <canvas id="strat-payoff-canvas-modal" role="img" aria-label="Expanded strategy profit and loss payoff in Indian rupees by underlying price" style="width:100%;height:100%;display:block;" height="520" data-h="520">Strategy payoff values are available in the strategy summary.</canvas>
     </div>
   </div>
 </div>
@@ -381,6 +408,21 @@
       <canvas id="sim-gex-canvas-modal" role="img" aria-label="Expanded scenario-adjusted net gamma exposure by strike" height="480" data-h="480" style="width:100%;display:block;">Scenario gamma values are available in the surrounding scenario analysis.</canvas>
       <div class="sim-annot" id="sim-annot-modal"></div>
     </div>
+  </div>
+</div>
+
+<!-- Full Institutional F&O Simulator workspace. The live #sec-simulator
+     subtree is moved here on header click (not cloned), so sliders, selects,
+     canvas state and every live update remain canonical. -->
+<div id="simulator-focus-modal" class="oc-modal">
+  <div class="oc-modal-panel">
+    <div class="oc-modal-bar">
+      <div class="oc-modal-id">
+        <button class="oc-modal-back" onclick="closeSimulatorFocusModal()" aria-label="Close Institutional F&O Simulator">←</button>
+        <span class="oc-modal-title">🧪 Scenario — Institutional F&amp;O Simulator</span>
+      </div>
+    </div>
+    <div id="simulator-focus-host" class="simulator-focus-body"></div>
   </div>
 </div>
 
@@ -497,26 +539,12 @@
      top-bar's dedicated Expiry pill on every render instead of rebuilding it — so its
      option list and current selection survive live ticks). -->
 <div class="sec-nav" id="sec-nav-bar">
-  <details class="rail-context-menu" id="rail-context-menu" open onToggle="if(this.open){document.getElementById('rail-tools-menu')?.removeAttribute('open')}">
-    <summary class="rail-group-toggle" id="rail-context-toggle">Context</summary>
-    <div class="rail-context-list">
-      <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
-      <button class="sec-btn" onclick="secJump('zone-structure')"><span>⌗</span>Position</button>
-      <button class="sec-btn" onclick="secJump('zone-capital-flow')"><span>₹</span>Flow</button>
-      <button class="sec-btn" onclick="secJump('zone-institutional')"><span>🏦</span>Funds</button>
-      <button class="sec-btn" onclick="secJump('zone-confirmation')"><span>✓</span>Validate</button>
-    </div>
-  </details>
-  <details class="rail-tools-menu" id="rail-tools-menu" onToggle="if(this.open){document.getElementById('rail-context-menu')?.removeAttribute('open')}">
+  <button type="button" class="rail-collapse-btn" id="rail-collapse-btn" onclick="toggleNavigationRail(this)" aria-expanded="true" aria-label="Collapse dashboard navigation" title="Collapse navigation">‹</button>
+  <details class="rail-tools-menu" id="rail-tools-menu" open>
     <summary class="rail-group-toggle" id="rail-tools-toggle">Tools</summary>
     <div class="rail-tools-list">
-  <!-- Range & velocity toggle — relocated here from its old floating
-       .ctrl-sidebar-toggle position (top of screen, barely visible/tappable
-       there). Reuses the sec-btn styling so it sits inline with the other
-       nav buttons instead of needing its own CSS. Still calls the same
-       toggleControlSidebar(), which just toggles the 'open' class on
-       #ctrl-sidebar — the panel markup/logic underneath is untouched. -->
-  <button class="sec-btn" id="ctrl-sidebar-toggle-btn" onclick="toggleControlSidebar()" title="Range & velocity controls"><span>🎛️</span>Range Vel</button>
+  <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
+  <button class="sec-btn" onclick="secJump('zone-structure')"><span>⌗</span>Position</button>
   <button class="sec-btn" id="oi-flow-open-btn" onclick="openOIDashboardModal()" title="Open OI Flow chart"><span>🌊</span>OI Flow</button>
   <!-- Algo status and Paper trading toggles — relocated here (2026-08-02)
        from their old floating fixed positions (bottom-left/bottom-right
@@ -557,30 +585,6 @@
       onchange="onExpiryChange(this.value)"
       title="Select expiry — ● = live chain data available"
   ></select>
-</div>
-
-<!-- ── CONTROL SIDEBAR (ATM range + velocity window, works from any section) ──
-     The old .ctrl-sidebar-toggle button that lived here has been removed —
-     it's now the "Range/Vel" button in the left #sec-nav-bar rail above,
-     since this floating button (pinned near the top of the screen) had
-     almost no visible/tappable height there. #ctrl-sidebar is still the
-     element whose 'open' class gets toggled — only the trigger moved. -->
-<div class="ctrl-sidebar" id="ctrl-sidebar">
-  <div class="ctrl-sidebar-panel">
-    <div class="ctrl-sidebar-group">
-      <div class="ctrl-sidebar-group-label">Vel Window</div>
-      <div class="tab-group" id="vel-tabs-side">
-        <button type="button" class="tab-btn active-vel" onclick="switchVelTab(5,this)">5m</button>
-        <button type="button" class="tab-btn" onclick="switchVelTab(15,this)">15m</button>
-        <button type="button" class="tab-btn" onclick="switchVelTab(30,this)">30m</button>
-      </div>
-    </div>
-    <div class="ctrl-sidebar-divider"></div>
-    <div class="ctrl-sidebar-group">
-      <div class="ctrl-sidebar-group-label">ATM Range</div>
-      <div class="tab-group" id="range-tabs-side" data-range-tabs></div>
-    </div>
-  </div>
 </div>
 
 <!-- ── LOADER ── -->

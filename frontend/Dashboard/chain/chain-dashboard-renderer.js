@@ -35,8 +35,12 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
       badgeEl.textContent = `${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%`;
       badgeEl.title = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points`;
     }
+    const futureEl = document.getElementById('topbar-future');
+    if(futureEl) futureEl.textContent = Number(d.future)>0?fmtI(d.future):'—';
+    const basisEl = document.getElementById('topbar-basis');
+    if(basisEl) basisEl.textContent = `Basis ${Number(d.basis)>=0?'+':''}${fmtN(Number(d.basis)||0,1)}`;
     const futuresExpiryEl = document.getElementById('futuresExpirySelect');
-    if (futuresExpiryEl) futuresExpiryEl.hidden = d.priceSource !== 'FUT';
+    if(futuresExpiryEl && d.futuresExpiry) futuresExpiryEl.value = d.futuresExpiry;
     const tickerEl = document.getElementById('index-ticker-bar');
     if (tickerEl && window.patchIndexTicker) patchIndexTicker(d);
     const dteEl = document.getElementById('dte-display');
@@ -63,6 +67,10 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
   // updates) instead of rebuilding every tick and racing to patch `open`
   // back on afterward.
   this.refreshDecisionBoxGuarded(d);
+  const chartWorkspace = document.getElementById('price-chart-modal');
+  if(chartWorkspace && chartWorkspace.classList.contains('open') && app.modal){
+    app.modal.renderPriceChartContext(d);
+  }
 };
 
 // Extracted from patchTopBarAndDecision so any other caller (e.g.
@@ -191,6 +199,20 @@ ChainView.prototype.renderDashboard = function(d) {
   // ── DECISION ENGINE PANEL ──
   h+=this.renderDecisionBoxHtml(d);
 
+  // The decision stays visible as the dashboard's stable anchor. Everything
+  // below it is grouped into one workspace at a time so analysis no longer
+  // becomes one very long stack of equally-weighted cards.
+  const activeWorkspace = app.ui.dashboardWorkspace || 'positioning';
+  const workspaceTab = (id, icon, label) => `<button type="button" class="dashboard-workspace-tab${activeWorkspace===id?' active':''}" data-workspace-tab="${id}" role="tab" aria-controls="workspace-${id}" aria-selected="${activeWorkspace===id?'true':'false'}" tabindex="${activeWorkspace===id?'0':'-1'}" onclick="switchDashboardWorkspace('${id}',this)"><span aria-hidden="true">${icon}</span>${label}</button>`;
+  h += `<nav class="dashboard-workspace-tabs" role="tablist" aria-label="Dashboard analysis workspace">
+    ${workspaceTab('positioning','⌗','Positioning')}
+    ${workspaceTab('flow','₹','Flow')}
+    ${workspaceTab('institutional','🏦','Institutional')}
+    ${workspaceTab('validation','✓','Strategy &amp; Risk')}
+  </nav>`;
+
+  h += `<section id="workspace-positioning" class="dashboard-workspace" data-dashboard-workspace="positioning"${activeWorkspace==='positioning'?'':' hidden'}>`;
+
   // NOTE: Conviction Multiplier Gauge moved into Advanced Analytics
   // (advanced-analytics-view.js) — it's a derived confirm/conflict check
   // built entirely from data already shown elsewhere (FII/DII, gamma
@@ -212,7 +234,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Divider styling (was inline `style=`, repeated identically at all
   // four zone boundaries) moved to .zone-divider/.zone-divider--* in
   // layout.css as of step 5 — see that block for the weight rationale.
-  h += '<div id="zone-structure" class="zone-divider zone-divider--primary">Positioning Evidence</div>';
+  h += '<div id="zone-structure" class="zone-divider zone-divider--primary"><span class="zone-divider-title">Positioning Evidence</span><span class="zone-divider-subtitle">Price, OI and dealer exposure</span></div>';
 
   // Built here and mounted later beside Institutional Activity Crux.
   const greeksMoneynessHtml = this.buildGreeksMoneynessHtml(d);
@@ -222,6 +244,19 @@ ChainView.prototype.renderDashboard = function(d) {
   // without immediately rebuilding this entire section on its first tick.
   const executiveDashboardHtml = renderExecutiveDashboard(d);
   h += executiveDashboardHtml;
+
+  // The chain summary is the gateway to the primary trading workspace, so
+  // it owns a full row instead of competing for a third of the context grid.
+  h += app.chain.buildChainSummaryHtml(d);
+
+  // OI Flow is the time dimension of the snapshot above, not a separate
+  // analytical destination. Keep its period changes and capital reading
+  // immediately beside positioning.
+  const velBlock=(d.oiVelocity||[]).find(b=>b.window===_velWin)||(d.oiVelocity||[])[0];
+  const velByStrike={};
+  if(velBlock&&velBlock.rows)velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
+  const velMax=Math.max(...chain.map(r=>{const vr=velByStrike[r.strike]||{};return Math.max(Math.abs(vr.ceDOI||0),Math.abs(vr.peDOI||0));}),1);
+  h += buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity);
 
   // ── OPTIONS CHAIN ──
   // The dense Option Chain table itself lives as a static block outside
@@ -238,10 +273,6 @@ ChainView.prototype.renderDashboard = function(d) {
   // box. velByStrike/velMax below are needed by the Capital Flow zone's
   // OI Flow panel further down this function.
   h += '<div id="chain-anchor"></div>';
-  const velBlock=(d.oiVelocity||[]).find(b=>b.window===_velWin)||(d.oiVelocity||[])[0];
-  const velByStrike={};
-  if(velBlock&&velBlock.rows)velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
-  const velMax=Math.max(...chain.map(r=>{const vr=velByStrike[r.strike]||{};return Math.max(Math.abs(vr.ceDOI||0),Math.abs(vr.peDOI||0));}),1);
 
   // NOTE: the old always-visible #sec-iv "IV Surface" alerts section, and
   // the Tier-3 "IV vs HV / Skew" collapsible it later merged into, are
@@ -368,13 +399,19 @@ ChainView.prototype.renderDashboard = function(d) {
         base: d.atmIV || simCtx.baseIv || 15, fmt: v => fmtN(v, 1) },
     ];
 
-  stratSimulatorHtml+=`<div style="display:grid;grid-template-columns:${strats.length?'1fr 1fr':'1fr'};gap:16px;margin-bottom:18px;align-items:stretch;">
+  stratSimulatorHtml+=`<div class="strategy-simulator-grid" style="display:grid;grid-template-columns:${strats.length?'1fr 1fr':'1fr'};gap:16px;margin-bottom:18px;align-items:stretch;">
 
     ${strats.length ? `
     <!-- LEFT: Strategy Payoff -->
     <div id="sec-strats" class="section-card sc-amber" style="min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;">
 
-      <div class="section-header"><span class="section-title"><span class="section-icon">🎯</span>Strategy Payoff</span></div>
+      <div class="section-header strat-focus-header" role="button" tabindex="0"
+           aria-label="Open Strategy Payoff full view"
+           onclick="if(!event.target.closest('button,select,input'))openStratPayoffModal()"
+           onkeydown="if((event.key==='Enter'||event.key===' ')&&!event.target.closest('button,select,input')){event.preventDefault();openStratPayoffModal();}">
+        <span class="section-title"><span class="section-icon">🎯</span>Strategy Payoff</span>
+        <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+      </div>
 
       <!-- Dropdowns row -->
       <div style="display:flex;gap:8px;margin-bottom:10px;">
@@ -405,7 +442,7 @@ ChainView.prototype.renderDashboard = function(d) {
            (openStratPayoffModal(), see ModalManager). The modal's own
            canvas (#strat-payoff-canvas-modal) is redrawn by the same
            renderStratPayoff() pass as this one, so it's never stale. -->
-      <div class="chart-expand-wrap" role="button" tabindex="0" aria-label="Expand Strategy Payoff chart" onclick="openStratPayoffModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStratPayoffModal();}" title="Click to expand" style="cursor:zoom-in;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 14px 10px;position:relative;">
+      <div class="chart-expand-wrap" role="button" tabindex="0" aria-label="Expand Strategy Payoff chart" onclick="openStratPayoffChartModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStratPayoffChartModal();}" title="Click to expand chart" style="cursor:zoom-in;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 14px 10px;position:relative;">
         <span class="chart-expand-icon" title="Expand">⤢</span>
         <canvas id="strat-payoff-canvas" role="img" aria-label="Strategy profit and loss payoff in Indian rupees by underlying price" style="width:100%;display:block;" height="280">Strategy payoff values are available in the strategy summary.</canvas>
       </div>
@@ -424,9 +461,15 @@ ChainView.prototype.renderDashboard = function(d) {
          chart to its left. -->
     <div id="sec-simulator" class="sim-wrap sim-amber" style="min-width:0;min-height:0;display:flex;flex-direction:column;">
 
-      <div class="sim-header">
+      <div class="sim-header sim-focus-header" role="button" tabindex="0"
+           aria-label="Open Scenario — Institutional F&O Simulator full view"
+           onclick="if(!event.target.closest('button,select,input'))openSimulatorFocusModal()"
+           onkeydown="if((event.key==='Enter'||event.key===' ')&&!event.target.closest('button,select,input')){event.preventDefault();openSimulatorFocusModal();}">
         <div class="sim-title">Scenario — Institutional F&amp;O Simulator</div>
-        <button type="button" class="btn btn-sm" onclick="event.stopPropagation();resetScenario()" aria-label="Reset scenario inputs to current live references" title="Reset scenario inputs only; live data is not reloaded">Reset to Live</button>
+        <span class="sim-header-actions">
+          <button type="button" class="btn btn-sm" onclick="event.stopPropagation();resetScenario()" aria-label="Reset scenario inputs to current live references" title="Reset scenario inputs only; live data is not reloaded">Reset to Live</button>
+          <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
+        </span>
       </div>
       <div class="sim-body" style="padding:10px 14px;">
 
@@ -494,19 +537,17 @@ ChainView.prototype.renderDashboard = function(d) {
   }
   }
 
+  h += '</section>';
+
   // ── ZONE: CAPITAL FLOW ──
   // Left owns capital/OI flow. Right stacks participant cash flow with
   // Vol/OI Velocity and its derived block-print summary. Keeping #sdt-panel
   // separate preserves its interactive subtree across live refreshes.
-  h += `<div id="oi-flow-section">
+  h += `<section id="workspace-flow" class="dashboard-workspace" data-dashboard-workspace="flow"${activeWorkspace==='flow'?'':' hidden'}><div id="oi-flow-section">
 
-  <div id="zone-capital-flow" class="zone-divider zone-divider--primary">Market &amp; Capital Flow</div>
-  <div class="capital-flow-grid">
-    <div class="capital-flow-column capital-flow-column--primary">
-      ${buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity)}
-    </div>
-
-    <div class="capital-flow-column capital-flow-column--secondary">
+  <div id="zone-capital-flow" class="zone-divider zone-divider--primary"><span class="zone-divider-title">Participation Evidence</span><span class="zone-divider-subtitle">Institutional activity and unusual block participation</span></div>
+  <div class="capital-flow-story">
+    <div class="capital-flow-support-grid" aria-label="Supporting flow evidence">
       ${buildFiiDiiSummaryCard(d)}
       <div id="sdt-panel" class="section-card sc-neutral velocity-summary-card">
         <button class="section-header nav-card-header" onclick="openVolOiVelocityModal()"
@@ -544,7 +585,7 @@ ChainView.prototype.renderDashboard = function(d) {
     </div>
   </div>
 
-  </div>`;
+  </div></section>`;
 
   // ── ZONE: INSTITUTIONAL (IA redesign step 1) ──
   // Who is moving the market, and where. Market Regime & Smart Money /
@@ -561,7 +602,8 @@ ChainView.prototype.renderDashboard = function(d) {
   // Advanced Analytics for now; it's a derived input to that card's
   // verdict, not a standalone ranking, so it doesn't map to Probability
   // the way the ranking itself did.
-  h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary">Institutional Activity</div>';
+  h += `<section id="workspace-institutional" class="dashboard-workspace" data-dashboard-workspace="institutional"${activeWorkspace==='institutional'?'':' hidden'}>`;
+  h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary"><span class="zone-divider-title">Institutional Activity</span><span class="zone-divider-subtitle">Large positioning and participant confirmation</span></div>';
   h += `<div class="institutional-crux-grid">
     ${greeksMoneynessHtml}
     ${app.exec.buildInstitutionalActivitySummaryCard(d)}
@@ -573,6 +615,7 @@ ChainView.prototype.renderDashboard = function(d) {
     </summary>
     <div class="detail-body">${app.exec.renderInstitutionalGrid(d)}</div>
   </details>`;
+  h += '</section>';
 
   // ── ZONE: CONFIRMATION ──
   // Supporting evidence that validates or challenges the Decision
@@ -596,7 +639,8 @@ ChainView.prototype.renderDashboard = function(d) {
   // strategy payoff / GEX-scenario exposure) — built earlier
   // (stratSimulatorHtml, needs strats/spot/greeksData in scope) but
   // appended here so build order matches display order.
-  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary">Validation &amp; Advanced Analysis</div>';
+  h += `<section id="workspace-validation" class="dashboard-workspace" data-dashboard-workspace="validation"${activeWorkspace==='validation'?'':' hidden'}>`;
+  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary"><span class="zone-divider-title">Strategy, Risk &amp; Validation</span><span class="zone-divider-subtitle">Volatility, probability and scenario tools</span></div>';
   h += this.buildVolatilityHtml(d);
   h += this.buildProbabilityHtml(d);
   h += this.buildScenarioAnalysisHtml(d);
@@ -619,6 +663,7 @@ ChainView.prototype.renderDashboard = function(d) {
     </div>
   </details>`;
   }
+  h += '</section>';
 
 
   // Risk Dashboard (Trade grade / IV regime / Trap warning / key levels)
@@ -700,7 +745,14 @@ ChainView.prototype.renderDashboard = function(d) {
   // the strategy list actually changed).
   if(_oldStratsSection){
     const fresh = document.getElementById('sec-strats');
-    if(fresh && fresh.parentNode) fresh.parentNode.replaceChild(_oldStratsSection, fresh);
+    const focusHost = document.getElementById('strategy-focus-host');
+    const focusOpen = document.getElementById('strat-payoff-modal')?.classList.contains('open');
+    if(focusOpen && focusHost){
+      if(fresh) fresh.remove();
+      focusHost.appendChild(_oldStratsSection);
+    }else if(fresh && fresh.parentNode){
+      fresh.parentNode.replaceChild(_oldStratsSection, fresh);
+    }
   }
   if(_oldGreeksMoneySect){
     const fresh = document.getElementById('sec-greeks-moneyness');
@@ -708,7 +760,14 @@ ChainView.prototype.renderDashboard = function(d) {
   }
   if(_oldSimSection){
     const fresh = document.getElementById('sec-simulator');
-    if(fresh && fresh.parentNode) fresh.parentNode.replaceChild(_oldSimSection, fresh);
+    const focusHost = document.getElementById('simulator-focus-host');
+    const focusOpen = document.getElementById('simulator-focus-modal')?.classList.contains('open');
+    if(focusOpen && focusHost){
+      if(fresh) fresh.remove();
+      focusHost.appendChild(_oldSimSection);
+    }else if(fresh && fresh.parentNode){
+      fresh.parentNode.replaceChild(_oldSimSection, fresh);
+    }
   }
   if(_oldSimDetailSection){
     const fresh = document.getElementById('sdt-panel');

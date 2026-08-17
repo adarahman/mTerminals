@@ -108,22 +108,8 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            F&O contracts, grouped Indices/Stocks) plus whatever custom
            symbol is currently active if it isn't already in that list. -->
       <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY', d.fnoSymbols)}</select>
-      <!-- Manual EQ/FUT price-source selector — see setPriceSource() in
-           chain-helpers.js. d.priceSource comes straight off the backend
-           payload (mTerminals_json.py's export_dashboard_json()); default
-           "EQ" if the field hasn't arrived yet on a very first render. -->
-      <select id="priceSourceSelect" class="price-source-select" title="Spot price source (EQ goes stale ~3:15-3:30; switch to FUT to keep evaluating)" onchange="onPriceSourcePicked(this.value)">
-        <option value="EQ"${(d.priceSource||'EQ')==='EQ'?' selected':''}>EQ</option>
-        <option value="FUT"${d.priceSource==='FUT'?' selected':''}>FUT</option>
-      </select>
-      <!-- Only matters once priceSource=FUT is picked above, but shown
-           always for a stable layout rather than popping in/out. -->
-      <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Which monthly futures contract to use as FUT source" onchange="onFuturesExpiryPicked(this.value)"${d.priceSource==='FUT'?'':' hidden'}>
-        <option value="NEAR"${(d.futuresExpiry||'NEAR')==='NEAR'?' selected':''}>NEAR</option>
-        <option value="NEXT"${d.futuresExpiry==='NEXT'?' selected':''}>NEXT</option>
-        <option value="FAR"${d.futuresExpiry==='FAR'?' selected':''}>FAR</option>
-      </select>
-      <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}${d.priceSource==='FUT'?` <small class="price-source-tag">(FUT ${d.futuresExpiry||'NEAR'})</small>`:''}</span>
+      <span class="price-source-tag" title="EQ is the fixed option-pricing and decision reference">EQ</span>
+      <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
       ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}" title="${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>`:''}
       ${renderIndexTicker(d)}
     </div>
@@ -132,6 +118,19 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
         <span class="expiry-pill-label">Feed</span>
         <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedReason}">${feedLabel}</span>
         <span class="feed-status-reason" id="feed-status-reason"${feedReasonVisible?'':' hidden'}>${feedReasonVisible}</span>
+      </div>
+      <div class="expiry-divider"></div>
+      <div class="expiry-pill futures-reference" title="Futures are confirmation only and do not change Greeks or confidence">
+        <span class="expiry-pill-label">Futures reference</span>
+        <span class="futures-reference-row">
+          <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Futures reference contract" onchange="onFuturesExpiryPicked(this.value)">
+            <option value="NEAR"${(d.futuresExpiry||'NEAR')==='NEAR'?' selected':''}>NEAR</option>
+            <option value="NEXT"${d.futuresExpiry==='NEXT'?' selected':''}>NEXT</option>
+            <option value="FAR"${d.futuresExpiry==='FAR'?' selected':''}>FAR</option>
+          </select>
+          <span id="topbar-future" class="futures-reference-value">${Number(d.future)>0?fmtI(d.future):'—'}</span>
+        </span>
+        <small id="topbar-basis">Basis ${Number(d.basis)>=0?'+':''}${fmtN(Number(d.basis)||0,1)}</small>
       </div>
       <div class="expiry-divider"></div>
       <!-- Expiry is its own dedicated pill, separate from DTE, and sits
@@ -415,6 +414,39 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const sevDot = s => s === 'warn' ? '\u26A0' : s === 'ok' ? '\u2713' : '\u00B7';
     const sevClr = s => s === 'warn' ? 'var(--neg)' : s === 'ok' ? 'var(--pos)' : 'var(--text-tertiary)';
 
+    // Strike-level signals are observations, not 32 independent decision
+    // votes. Collapse repeated CE/PE structures into directional families
+    // so agreement is visible before the raw audit trail.
+    const classifyActiveSignal = (signal) => {
+      const text = String(signal && signal.text || '').toLowerCase();
+      if(/\b(ce|call)\b.*\b(writing|short build)/.test(text)) return {key:'ce-writing', label:'CE writing', direction:'bearish'};
+      if(/\b(pe|put)\b.*\bunwind/.test(text)) return {key:'pe-unwinding', label:'PE unwinding', direction:'bearish'};
+      if(/\b(pe|put)\b.*\b(writing|short build)/.test(text)) return {key:'pe-writing', label:'PE writing', direction:'bullish'};
+      if(/\b(ce|call)\b.*\bunwind/.test(text)) return {key:'ce-unwinding', label:'CE unwinding', direction:'bullish'};
+      if(/\b(ce|call)\b.*\b(buying|long build)/.test(text)) return {key:'ce-buying', label:'CE buying', direction:'bullish'};
+      if(/\b(pe|put)\b.*\b(buying|long build)/.test(text)) return {key:'pe-buying', label:'PE buying', direction:'bearish'};
+      return {key:'other', label:'Other evidence', direction:'neutral'};
+    };
+    const signalFamilies = new Map();
+    sigs.forEach(signal => {
+      const family = classifyActiveSignal(signal);
+      const current = signalFamilies.get(family.key) || {...family, count:0};
+      current.count += 1;
+      signalFamilies.set(family.key, current);
+    });
+    const directionalFamilies = [...signalFamilies.values()].filter(f => f.direction !== 'neutral');
+    const bullishSignalCount = directionalFamilies.filter(f => f.direction === 'bullish').reduce((sum,f) => sum+f.count,0);
+    const bearishSignalCount = directionalFamilies.filter(f => f.direction === 'bearish').reduce((sum,f) => sum+f.count,0);
+    const directionalSignalCount = bullishSignalCount + bearishSignalCount;
+    const dominantSignalDirection = bearishSignalCount > bullishSignalCount ? 'Bearish' : bullishSignalCount > bearishSignalCount ? 'Bullish' : 'Mixed';
+    const dominantSignalCount = Math.max(bullishSignalCount, bearishSignalCount);
+    const activeSignalAgreement = directionalSignalCount ? Math.round(dominantSignalCount / directionalSignalCount * 100) : 0;
+    const activeSignalRead = directionalSignalCount === 0
+      ? 'No directional CE/PE structure is available.'
+      : dominantSignalDirection === 'Mixed'
+        ? 'Bullish and bearish option structures are balanced; wait for separation.'
+        : `${dominantSignalDirection} structure · ${activeSignalAgreement}% agreement across classified strike observations.`;
+
     // ATM IV — the one number in decision.verdicts that isn't already
     // shown elsewhere on this card (PCR/VIX/Max Pain are in the Tier-1
     // strip above; CE Wall/PE Wall are just R1/S1 restated in the S&R
@@ -625,16 +657,27 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
            than leaving the shorter side looking sparse. -->
       <div class="dd-grid">
         <div class="dd-col">
-          <div class="dd-col-title">Active Signals · ${sigs.length} · ${escapeHtml(signalFreshness)}</div>
+          <div class="dd-col-title">Active Signals · ${sigs.length} observations · ${escapeHtml(signalFreshness)}</div>
           <div style="font-size:9px;color:var(--text-tertiary);margin:-2px 0 6px;">Observed ${escapeHtml(signalObservedLabel)}</div>
-          <div class="dd-sig-list">
-            ${sigs.length ? sigs.map(s=>`
+          ${sigs.length ? `
+          <div class="signal-cluster-summary ${dominantSignalDirection.toLowerCase()}">
+            <div><span>Dominant read</span><strong>${activeSignalRead}</strong></div>
+            <div class="signal-direction-counts"><span class="bullish">Bullish ${bullishSignalCount}</span><span class="bearish">Bearish ${bearishSignalCount}</span></div>
+          </div>
+          <div class="signal-family-grid" aria-label="Grouped active signal families">
+            ${[...signalFamilies.values()].sort((a,b)=>b.count-a.count).map(f=>`<div class="signal-family ${f.direction}"><span>${escapeHtml(f.label)}</span><strong>${f.count}</strong></div>`).join('')}
+          </div>
+          <details class="signal-observation-details">
+            <summary>View ${sigs.length} strike-level observations</summary>
+            <div class="dd-sig-list">
+            ${sigs.map(s=>`
               <div class="dd-sig" data-signal-id="${escapeHtml(s.id || s.text)}">
                 <span style="color:${sevClr(s.severity)};font-weight:700;flex-shrink:0;">${sevDot(s.severity)}</span>
                 <span style="color:${s.severity==='warn'||s.severity==='ok'?'var(--text-primary)':'var(--text-tertiary)'};">${escapeHtml(s.text)}</span>
                 <span style="margin-left:auto;font-size:8px;font-weight:800;color:${sevClr(s.severity)};">${s.severity==='warn'?'WARNING':s.severity==='ok'?'CONFIRM':'INFO'}</span>
-              </div>`).join('') : '<div class="dd-empty">No active signals.</div>'}
-          </div>
+              </div>`).join('')}
+            </div>
+          </details>` : '<div class="dd-empty">No active signals.</div>'}
         </div>
 
         <div class="dd-col">
@@ -719,20 +762,6 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   // signColor()'s default neutral is already --text-primary, matching the
   // reference mockup's "0 stays bold/white, not greyed out" behavior.
 
-  // Decorative trend line for the two top stat cards. There's no
-  // continuous net-OI time-series in the payload to plot a real
-  // sparkline against — this only encodes direction (up/down) via the
-  // sign of the figure it sits beside, not actual magnitude-over-time.
-  // Swap `pts` for a real series (e.g. a rolling net-OI history array)
-  // if/when one gets added to the payload.
-  const buildSparkline = (colorVar, up) => {
-    const pts = up ? "2,32 20,29 38,24 56,27 74,15 96,5" : "2,5 20,13 38,10 56,22 74,19 96,32";
-    const [lx, ly] = pts.split(' ').pop().split(',');
-    return `<svg width="98" height="38" viewBox="0 0 98 38" class="oi-snap-spark">
-      <polyline points="${pts}" fill="none" stroke="${colorVar}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="${lx}" cy="${ly}" r="3.5" fill="${colorVar}"/>
-    </svg>`;
-  };
   // ── Positioning summary ─────────────────────────────────────────
   // D-04 owns aggregate positioning only. Intraday OI/capital FLOW has
   // moved to D-07 so this card answers one question: where is positioning
@@ -741,12 +770,11 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   const totalCeChg = chain.reduce((s,r)=>s+(r.ceChgOI||0),0);
   const totalPeChg = chain.reduce((s,r)=>s+(r.peChgOI||0),0);
+  const netOi = totalPe-totalCe;
+  const netChgOi = totalPeChg-totalCeChg;
   const prevCe = totalCe-totalCeChg, prevPe = totalPe-totalPeChg;
   const prevPcr = prevPe/(prevCe||1);
   const pcrShift = pcr-prevPcr;
-
-  const netOi = totalPe-totalCe;
-  const netChgOi = totalPeChg-totalCeChg;
 
   const totalCeVol = chain.reduce((sum,r)=>sum+(r.ceVol||0),0);
   const totalPeVol = chain.reduce((sum,r)=>sum+(r.peVol||0),0);
@@ -795,13 +823,11 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           </div>
           <div class="oi-snap-title">OI Summary</div>
         </div>
-        <div class="oi-snap-body">
-          <div>
-            <div class="oi-snap-label">Net OI</div>
-            <div class="oi-snap-value ${netOi>=0?'pos':'neg'}">${signedFmt(netOi)}</div>
-          </div>
-          ${buildSparkline('var(--pos)', netOi>=0)}
+        <div class="oi-snap-primary">
+          <span>Net OI <small>PE−CE</small></span>
+          <strong style="color:${signColor(netOi)}">${signedFmt(netOi)}</strong>
         </div>
+        <div class="oi-snap-context">Visible-range positioning</div>
         <div class="oi-snap-sides" aria-label="Call and put open interest totals">
           <span class="ce"><small>CE OI</small><strong>${fmtCrLK(totalCe)}</strong></span>
           <span class="pe"><small>PE OI</small><strong>${fmtCrLK(totalPe)}</strong></span>
@@ -820,13 +846,11 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           </div>
           <div class="oi-snap-title">Chg OI Summary</div>
         </div>
-        <div class="oi-snap-body">
-          <div>
-            <div class="oi-snap-label">Net OI Δ</div>
-            <div class="oi-snap-value ${netChgOi>=0?'pos':'neg'}">${signedFmt(netChgOi)}</div>
-          </div>
-          ${buildSparkline('var(--info)', netChgOi>=0)}
+        <div class="oi-snap-primary">
+          <span>Full-day Net ΔOI <small>PE−CE</small></span>
+          <strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong>
         </div>
+        <div class="oi-snap-context">Current-session OI change</div>
         <div class="oi-snap-sides" aria-label="Call and put change in open interest totals">
           <span class="ce"><small>CE ΔOI</small><strong>${signedFmt(totalCeChg)}</strong></span>
           <span class="pe"><small>PE ΔOI</small><strong>${signedFmt(totalPeChg)}</strong></span>
@@ -1025,8 +1049,8 @@ ChainView.prototype.buildIvSurfaceHtml = function(d, chain, atm) {
   });
   const minIV = Math.min(...ivRows.map(r => Math.min(r.ceIV||0, r.peIV||0)));
 
-  return `<div style="display:flex;flex-direction:column;">${headerHtml}<div style="display:flex;flex-direction:column;gap:2px;">${rowsHtml}</div></div>
-    <div style="font-size:0.8125rem;color:var(--text-tertiary);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap;">
+  return `<div class="iv-surface-plot">${headerHtml}<div class="iv-surface-rows">${rowsHtml}</div></div>
+    <div class="iv-surface-footer">
       <span>Skew <strong style="color:var(--warn);">${fmtN(d.atmSkew,2)}%</strong> at ATM</span>
       <span>Max IV <strong style="color:var(--neg);">${fmtN(maxIV,2)}%</strong></span>
       <span>Min IV <strong style="color:var(--pos);">${fmtN(minIV,2)}%</strong></span>

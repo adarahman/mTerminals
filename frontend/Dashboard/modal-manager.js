@@ -61,9 +61,13 @@ class ModalManager {
 
   this._activeModal = modal;
   this._activeCloseFn = typeof closeFn === 'function' ? closeFn : null;
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
+  // These analytical surfaces are full-page focus workspaces, not popup
+  // dialogs. Keep the existing ids/open functions for compatibility while
+  // exposing the correct navigation semantics to assistive technology.
+  modal.setAttribute('role', 'region');
+  modal.setAttribute('aria-modal', 'false');
   modal.classList.add('open');
+  document.body.classList.add('focus-workspace-open');
   if(window.eventBus) window.eventBus.emit('modal:open', { id: modal.id || null });
 
   const oldKeyHandler = this._modalKeyHandlers.get(modal);
@@ -129,6 +133,9 @@ class ModalManager {
   _closeModal(modal){
   if(!modal) return;
   modal.classList.remove('open');
+  if(!document.querySelector('.oc-modal.open')){
+    document.body.classList.remove('focus-workspace-open');
+  }
   if(window.eventBus) window.eventBus.emit('modal:close', { id: modal.id || null });
 
   const keyHandler = this._modalKeyHandlers.get(modal);
@@ -205,7 +212,54 @@ class ModalManager {
   this._openModal(modal,()=>this.closePriceChartModal());
   priceChart.ensureMounted();
   priceChart.hydrateRange(priceChart.settings.range);
+  this.renderPriceChartContext(typeof _data !== 'undefined' ? _data : null);
   requestAnimationFrame(()=>priceChart.render(true));
+}
+
+  renderPriceChartContext(d){
+  const host=document.getElementById('price-chart-context-grid');
+  if(!host||!d)return;
+  const dec=d.decision||{};
+  const esc=v=>String(v==null?'—':v).replace(/[&<>"']/g,c=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+  const num=(v,digits=2)=>Number.isFinite(Number(v))
+    ? Number(v).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
+  const signed=v=>Number.isFinite(Number(v))
+    ? `${Number(v)>=0?'+':''}${num(v,2)}` : '—';
+  const bias=String(dec.bias||'WAIT').toUpperCase();
+  const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';
+  host.innerHTML=`
+    <section class="focus-context-card focus-context-primary">
+      <span class="focus-context-label">Instrument</span>
+      <strong>${esc(d.symbol)} <em>EQ</em></strong>
+      <div class="focus-context-price">₹${num(d.spot,2)}</div>
+      <small class="${Number(d.spotChgPct)>=0?'positive':'negative'}">${signed(d.spotChange)} · ${signed(d.spotChgPct)}%</small>
+    </section>
+    <section class="focus-context-card">
+      <span class="focus-context-label">Futures reference</span>
+      <strong>${esc(d.futuresExpiry||'NEAR')} · ₹${num(d.future,2)}</strong>
+      <div class="focus-context-row"><span>Basis</span><b>${signed(d.basis)}</b></div>
+      <small>${esc(d.futSignal||'Awaiting positioning')}</small>
+    </section>
+    <section class="focus-context-card">
+      <span class="focus-context-label">Option positioning</span>
+      <div class="focus-context-row"><span>Net OI PCR</span><b>${num(d.totalPCR,2)}</b></div>
+      <div class="focus-context-row"><span>OI-change PCR</span><b>${num(d.oiChgPCR,2)}</b></div>
+      <div class="focus-context-row"><span>Max pain</span><b>₹${num(d.maxPain,0)}</b></div>
+    </section>
+    <section class="focus-context-card">
+      <span class="focus-context-label">Volatility</span>
+      <div class="focus-context-row"><span>India VIX</span><b>${num(d.indiaVix,2)}</b></div>
+      <div class="focus-context-row"><span>IV Rank</span><b>${num(d.ivRank,0)}</b></div>
+      <small>Option expiry ${esc(d.expiry)} · ${num(d.dte,0)}d</small>
+    </section>
+    <section class="focus-context-card focus-context-decision ${tone}">
+      <span class="focus-context-label">Decision engine</span>
+      <strong>${esc(dec.bias||'WAIT')} · ${num(dec.confidence,0)}%</strong>
+      <div>${esc(dec.action||'No directional action')}</div>
+      <small>${esc(dec.suggestedStrategy||dec.strategyCaution||'Awaiting confirmation')}</small>
+    </section>`;
 }
 
   closePriceChartModal(){
@@ -323,7 +377,12 @@ class ModalManager {
   // for _drawPayoffOnCanvas to find.
   openStratPayoffModal(){
   var modal = document.getElementById('strat-payoff-modal');
-  if(!modal) return;
+  var host = document.getElementById('strategy-focus-host');
+  var section = document.getElementById('sec-strats');
+  if(!modal || !host || !section) return;
+  host.appendChild(section);
+  var canvas = section.querySelector('#strat-payoff-canvas');
+  if(canvas) canvas.setAttribute('data-h','500');
   this._openModal(modal, () => this.closeStratPayoffModal());
   document.addEventListener('keydown', _stratPayoffEscHandler);
   if(window.renderStratPayoff) renderStratPayoff();
@@ -332,12 +391,39 @@ class ModalManager {
   closeStratPayoffModal(){
   var modal = document.getElementById('strat-payoff-modal');
   if(!modal) return;
+  var section = document.getElementById('sec-strats');
+  var grid = document.querySelector('#strategy-simulator-card .strategy-simulator-grid');
+  if(section && grid){
+    var canvas = section.querySelector('#strat-payoff-canvas');
+    if(canvas) canvas.removeAttribute('data-h');
+    grid.insertBefore(section, grid.firstElementChild);
+  }
   this._closeModal(modal);
   document.removeEventListener('keydown', _stratPayoffEscHandler);
+  if(window.renderStratPayoff) requestAnimationFrame(() => renderStratPayoff());
 }
 
   _stratPayoffEscHandler(e){
   if(e.key === 'Escape') closeStratPayoffModal();
+}
+
+  openStratPayoffChartModal(){
+  var modal = document.getElementById('strat-payoff-chart-modal');
+  if(!modal) return;
+  this._openModal(modal, () => this.closeStratPayoffChartModal());
+  document.addEventListener('keydown', _stratPayoffChartEscHandler);
+  if(window.renderStratPayoff) requestAnimationFrame(() => renderStratPayoff());
+}
+
+  closeStratPayoffChartModal(){
+  var modal = document.getElementById('strat-payoff-chart-modal');
+  if(!modal) return;
+  this._closeModal(modal);
+  document.removeEventListener('keydown', _stratPayoffChartEscHandler);
+}
+
+  _stratPayoffChartEscHandler(e){
+  if(e.key === 'Escape') closeStratPayoffChartModal();
 }
 
   // ── SIMULATOR GEX CHART EXPAND MODAL ──
@@ -365,6 +451,34 @@ class ModalManager {
 
   _simGexEscHandler(e){
   if(e.key === 'Escape') closeSimGexModal();
+}
+
+  // ── FULL INSTITUTIONAL F&O SIMULATOR WORKSPACE ──
+  // Move the canonical live subtree instead of cloning it. This preserves
+  // slider state and prevents duplicate element ids from splitting updates.
+  openSimulatorFocusModal(){
+  var modal=document.getElementById('simulator-focus-modal');
+  var host=document.getElementById('simulator-focus-host');
+  var section=document.getElementById('sec-simulator');
+  if(!modal||!host||!section)return;
+  host.appendChild(section);
+  var canvas=section.querySelector('#sim-gex-canvas');
+  if(canvas)canvas.setAttribute('data-h','320');
+  this._openModal(modal,()=>this.closeSimulatorFocusModal());
+  if(window.simUpdate)requestAnimationFrame(()=>simUpdate());
+}
+
+  closeSimulatorFocusModal(){
+  var modal=document.getElementById('simulator-focus-modal');
+  var section=document.getElementById('sec-simulator');
+  var grid=document.querySelector('#strategy-simulator-card .strategy-simulator-grid');
+  if(section&&grid){
+    var canvas=section.querySelector('#sim-gex-canvas');
+    if(canvas)canvas.setAttribute('data-h','180');
+    grid.appendChild(section);
+  }
+  if(modal)this._closeModal(modal);
+  if(window.simUpdate)requestAnimationFrame(()=>simUpdate());
 }
 
   // ── VOL/OI VELOCITY CHART EXPAND MODAL ──

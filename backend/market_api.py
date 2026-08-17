@@ -18,7 +18,7 @@ Sections
 # ── 1. Imports ────────────────────────────────────────────────────────────────
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import quote
 import time
 import logging
@@ -420,10 +420,12 @@ def get_unified_market_data(df_idx: pd.DataFrame | None = None):
               f"DEFAULT_INDICES still contains those exact index names.")
 
     return vix_value, vix_pchange, ticker_payload
-# BSE scrip codes for the two BSE F&O indices we track on the ticker strip.
-_BSE_INDEX_SCRIP_CD = {"SENSEX": "1", "BANKEX": "2"}
+# BSE's own derivative-underlying identifiers (ddlUnderlyingAsset, ProductType
+# IO). These are not positional dropdown numbers and are not AngelOne's spot
+# tokens: BANKEX is 12 (not 2), while SENSEX50 is exposed by BSE as SX50/47.
+BSE_INDEX_SCRIP_CODES = {"SENSEX": "1", "BANKEX": "12", "SENSEX50": "47"}
 def fetch_bse_index_quote(symbol: str) -> dict | None:
-    """Return a ticker-strip entry for a BSE index (SENSEX/BANKEX), in the
+    """Return a ticker-strip entry for a BSE F&O index, in the
     same {"Symbol", "Last Price", "% Change"} shape get_unified_market_data()
     produces for NSE indices — so both can be merged into one ticker_list
     and renderIndexTicker() on the frontend doesn't need to know which
@@ -433,7 +435,8 @@ def fetch_bse_index_quote(symbol: str) -> dict | None:
     quote widgets read), which gives LTP + previous close directly instead
     of us having to approximate % change from the futures NetChange.
     """
-    scrip_cd = _BSE_INDEX_SCRIP_CD.get(symbol.upper())
+    symbol = symbol.upper()
+    scrip_cd = BSE_INDEX_SCRIP_CODES.get(symbol)
     if not scrip_cd:
         return None
 
@@ -548,6 +551,52 @@ def fetch_nifty_futures(index: str = "nse50_fut") -> pd.DataFrame:
         })
 
     return pd.DataFrame(rows)
+
+
+_PUBLIC_FUTURES_INDEX_KEYS = {
+    "NIFTY": "nse50_fut",
+    "BANKNIFTY": "nifty_bank_fut",
+    "FINNIFTY": "nifty_finservice_fut",
+    "MIDCPNIFTY": "nifty_mid_select_fut",
+    "NIFTYNXT50": "nifty_next50_fut",
+}
+
+
+def fetch_public_futures(symbol: str, which: str = "NEAR") -> pd.DataFrame:
+    """Fetch one NEAR/NEXT/FAR futures contract without broker login.
+
+    NSE index and stock contracts come from its public derivatives market
+    watch endpoint; SENSEX/BANKEX use BSE's public derivatives endpoint.
+    The returned schema matches the subset option_chain_json consumes.
+    """
+    symbol = (symbol or "").strip().upper()
+    which = (which or "NEAR").strip().upper()
+    slot = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
+
+    if symbol in BSE_INDEX_SCRIP_CODES:
+        frame = fetch_bse_futures(scrip_cd=BSE_INDEX_SCRIP_CODES[symbol])
+        if frame is None:
+            return pd.DataFrame()
+    else:
+        frame = fetch_nifty_futures(_PUBLIC_FUTURES_INDEX_KEYS.get(symbol, "stock_fut"))
+        if frame is None or frame.empty:
+            return pd.DataFrame()
+        if symbol not in _PUBLIC_FUTURES_INDEX_KEYS and "Underlying" in frame.columns:
+            frame = frame[frame["Underlying"].astype(str).str.upper() == symbol]
+
+    if frame.empty or "Expiry" not in frame.columns:
+        return pd.DataFrame()
+    parsed = pd.to_datetime(frame["Expiry"], errors="coerce", dayfirst=True)
+    valid = frame.loc[parsed.notna()].copy()
+    if valid.empty:
+        return pd.DataFrame()
+    valid["_expiry_sort"] = parsed[parsed.notna()].dt.normalize().values
+    future_dates = sorted(d for d in valid["_expiry_sort"].unique() if pd.Timestamp(d).date() >= date.today())
+    if not future_dates:
+        return pd.DataFrame()
+    chosen = future_dates[min(slot, len(future_dates) - 1)]
+    selected = valid[valid["_expiry_sort"] == chosen].drop(columns=["_expiry_sort"])
+    return selected.head(1).reset_index(drop=True)
 
 
 def fetch_contract_info(symbol: str) -> dict:
@@ -835,7 +884,7 @@ def bse_request(url: str, params: dict | None = None):
 def fetch_bse_json_options(expiry_str: str = "02 Jul 2026",
                             scrip_cd: str  = "1") -> tuple[pd.DataFrame | None, float]:
     """
-    Fetch BSE option chain (SENSEX scrip_cd='1', BANKEX scrip_cd='2').
+    Fetch a BSE index option chain (SENSEX=1, BANKEX=12, SENSEX50=47).
     Returns (DataFrame, spot_price).  DataFrame columns mirror NSE naming.
     """
     logger.info(f"[*] BSE options — Expiry: {expiry_str}  scrip_cd: {scrip_cd}")
@@ -964,7 +1013,7 @@ def generate_bse_futures_expiry(reference_date=None, holidays: set | None = None
 def fetch_bse_futures(expiry_str: str = None,
                        scrip_cd: str  = "1") -> pd.DataFrame | None:
     """
-    Fetch BSE Index Futures (SENSEX scrip_cd='1', BANKEX scrip_cd='2').
+    Fetch BSE index futures (SENSEX=1, BANKEX=12, SENSEX50=47).
     Returns DataFrame or None.
 
     expiry_str defaults to the current/next BSE monthly expiry (last

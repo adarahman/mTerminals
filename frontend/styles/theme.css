@@ -91,7 +91,7 @@
      sizes recorded in that same note, clustered into 4 tiers instead of
      the 2 originally sketched there, since the actual usage split that
      way:
-       --fs-xl  covers  .oi-snap-value/.oi-flow-val (19.2px),
+       --fs-xl  covers  .oi-flow-val (19.2px),
                         .exec-badge/.dec-badge (19.55px)
        --fs-2xl covers  .oic-atm-figs .fig (22px), .verdict-icon (23px)
        --fs-3xl covers  .load-btn i (27.6px),
@@ -334,7 +334,7 @@
        --fs-2xs: 0.6/0.65/0.6531/0.625rem (dd-trap .lbl, .micro .k,
                  .dd-col-title, .metric-cell .k/.d, .arp-vratio-side)
        --fs-xs:  0.6875/0.7rem, 11px (verdict-fut, .chev, dd-trap .txt,
-                 mg-bar-text, oi-snap-label, oi-flow-win, etc.)
+                 mg-bar-text, oi-flow-win, etc.)
        --fs-sm:  0.75/0.775/0.78/0.7188/0.7906/0.8125rem, 11.5px
                  (.verdict-label, tie rounded up — matches
                  navigation.css's 11.5px precedent), 12px/13px (.section-
@@ -350,7 +350,7 @@
                  with their container size than base would)
      Oversized outliers, no current token fit within ~1px at the time —
      status as of 2026-08-05:
-       panels.css hero numbers — NOT raw: .oi-snap-value/.oi-flow-val,
+       panels.css hero numbers — NOT raw: .oi-flow-val,
          .exec-badge/.dec-badge, .oic-atm-figs .fig, .verdict-icon,
          .load-btn i, .verdict-conf-big/.verdict-grade-big,
          .verdict-call, .exec-score-num already call var(--fs-xl/2xl/

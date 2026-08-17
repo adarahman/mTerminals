@@ -2,8 +2,9 @@
 // range-tabs.js
 // The ATM range tab-group (±3 / ±5 / ±10 / ±15 / All, each calling
 // switchChainRange(n,this)) used to be hand-copied into three places in
-// dashboard-v26.html — the sidebar (#range-tabs-side), the Greeks/GEX
-// modal (#range-tabs-grk), and the IV Surface modal (#range-tabs-iv).
+// dashboard-v26.html — the Option Chain modal (#range-tabs-chain), the
+// Greeks/GEX modal (#range-tabs-grk), and the IV Surface modal
+// (#range-tabs-iv).
 // switchChainRange() already treats every element whose id starts with
 // "range-tabs-" as one synced group (see chain-view.js), so the only
 // thing actually duplicated was the markup itself. This file is the one

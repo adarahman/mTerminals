@@ -466,7 +466,9 @@ def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
 #   token=99926017, tradingsymbol="India VIX", exch_seg=NSE
 _VIX_TRADINGSYMBOL = "India VIX"
 _VIX_TOKEN = "99926017"
-_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
+_NSE_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
+_BSE_TICKER_SYMBOLS = ["SENSEX", "BANKEX", "SENSEX50"]
+_TICKER_SYMBOLS = _NSE_TICKER_SYMBOLS + _BSE_TICKER_SYMBOLS
 
 # Cache for the batched fetch each tick — populated once by
 # fetch_all_pills_and_vix_batched(), then read by the three thin wrapper
@@ -486,18 +488,22 @@ def fetch_all_pills_and_vix_batched():
 
     nse_pairs = [
         (sym, index_tokens[sym]["token"])
-        for sym in _TICKER_SYMBOLS
+        for sym in _NSE_TICKER_SYMBOLS
         if sym in index_tokens
     ]
     nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
 
     nse_quotes = market_data.get_batch_quotes("NSE", nse_pairs, mode="FULL")
 
-    sensex_info = index_tokens.get("SENSEX")
+    bse_pairs = [
+        (sym, index_tokens[sym]["token"])
+        for sym in _BSE_TICKER_SYMBOLS
+        if sym in index_tokens
+    ]
     bse_quotes = {}
-    if sensex_info:
+    if bse_pairs:
         bse_quotes = market_data.get_batch_quotes(
-            "BSE", [("SENSEX", sensex_info["token"])], mode="FULL"
+            "BSE", bse_pairs, mode="FULL"
         )
 
     _BATCH_CACHE.refill(nse_quotes, bse_quotes)

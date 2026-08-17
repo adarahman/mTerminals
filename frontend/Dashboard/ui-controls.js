@@ -101,9 +101,64 @@ class UiControls {
       el.style.top  = top + 'px';
     }
   }
-}
+  }
+
+  toggleNavigationRail(button){
+  const collapsed = document.body.classList.toggle('rail-collapsed');
+  const control = button || document.getElementById('rail-collapse-btn');
+  if(control){
+    control.textContent = collapsed ? '›' : '‹';
+    control.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    control.setAttribute('aria-label', collapsed ? 'Expand dashboard navigation' : 'Collapse dashboard navigation');
+    control.title = collapsed ? 'Expand navigation' : 'Collapse navigation';
+  }
+  requestAnimationFrame(()=>{
+    updateStickyOffsets();
+    if(window.resizeGreeksMoneynessChart) resizeGreeksMoneynessChart('greeksChart');
+  });
+  }
+
+  switchDashboardWorkspace(name, invoker){
+  const allowed = new Set(['positioning','flow','institutional','validation']);
+  const next = allowed.has(name) ? name : 'positioning';
+  this.dashboardWorkspace = next;
+
+  document.querySelectorAll('[data-dashboard-workspace]').forEach(section=>{
+    section.hidden = section.dataset.dashboardWorkspace !== next;
+  });
+  document.querySelectorAll('[data-workspace-tab]').forEach(button=>{
+    const active = button.dataset.workspaceTab === next;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+    button.tabIndex = active ? 0 : -1;
+  });
+  const railTarget = {
+    positioning:'zone-structure',
+    flow:'zone-capital-flow',
+    institutional:'zone-institutional',
+    validation:'zone-confirmation'
+  }[next];
+  document.querySelectorAll('#sec-nav-bar .sec-btn').forEach(button=>{
+    const fn = button.getAttribute('onclick') || '';
+    button.classList.toggle('active', fn.includes(`secJump('${railTarget}')`));
+  });
+
+  if(invoker) invoker.focus({preventScroll:true});
+  requestAnimationFrame(()=>{
+    updateStickyOffsets();
+    if(next==='positioning' && window.resizeGreeksMoneynessChart) resizeGreeksMoneynessChart('greeksChart');
+    if(next==='validation' && window.updateScenarioPnlChart) updateScenarioPnlChart(_data, true);
+  });
+  }
 
   secJump(id){
+  const workspaceByTarget = {
+    'zone-structure':'positioning',
+    'zone-capital-flow':'flow',
+    'zone-institutional':'institutional',
+    'zone-confirmation':'validation'
+  };
+  if(workspaceByTarget[id]) this.switchDashboardWorkspace(workspaceByTarget[id]);
   let el=document.getElementById(id)
     || document.getElementById(id.replace(/-static$/,''))
     || document.getElementById(id+'-static');

@@ -107,6 +107,9 @@ class InstrumentResolver:
         self._chain_index: dict = {}
         # underlying (upper) -> lot size, sourced from FUTSTK/FUTIDX only
         self._lot_size_map: dict = {}
+        # Public F&O symbol universe, split by the master's actual FUT type.
+        self._fno_indices: set = set()
+        self._fno_stocks: set = set()
 
     def _today_cache_path(self) -> Path:
         return self.cache_dir / CACHE_FILE_TEMPLATE.format(date=date.today().isoformat())
@@ -171,6 +174,8 @@ class InstrumentResolver:
         self._option_index.clear()
         self._chain_index.clear()
         self._lot_size_map.clear()
+        self._fno_indices.clear()
+        self._fno_stocks.clear()
 
         for inst in self._instruments:
             itype = inst.get("instrumenttype") or ""
@@ -185,14 +190,18 @@ class InstrumentResolver:
                 itype in _FNO_FUT_TYPES
                 and exch in _FNO_EXCHANGES
                 and name
-                and name not in self._lot_size_map
                 and not _TEST_SYMBOL_RE.search(name)
             ):
+                if itype == "FUTIDX":
+                    self._fno_indices.add(name)
+                else:
+                    self._fno_stocks.add(name)
+
                 try:
                     lot = int(float(inst.get("lotsize") or 0))
                 except (TypeError, ValueError):
                     lot = 0
-                if lot > 0:
+                if lot > 0 and name not in self._lot_size_map:
                     self._lot_size_map[name] = lot
 
             if itype not in ("OPTIDX", "OPTSTK"):
@@ -277,6 +286,13 @@ class InstrumentResolver:
         """Full underlying -> lot size map (copy) for /api/lot-sizes etc."""
         return dict(self._lot_size_map)
 
+    def get_fno_underlyings(self) -> dict:
+        """Live public FUTIDX/FUTSTK universe for the symbol picker."""
+        return {
+            "indices": sorted(self._fno_indices),
+            "stocks": sorted(self._fno_stocks),
+        }
+
     def build_ws_subscription_list(self, underlying: str, expiry: str) -> list:
         """
         Builds the token list block for AngelOneTicker.subscribe_tokens(),
@@ -324,6 +340,14 @@ def get_all_lot_sizes(refresh: bool = False) -> dict:
     if refresh or _default_resolver is None:
         _default_resolver = InstrumentResolver().load(force_refresh=refresh)
     return _default_resolver.get_all_lot_sizes()
+
+
+def get_fno_underlyings(refresh: bool = False) -> dict:
+    """All live F&O underlyings from the public daily ScripMaster."""
+    global _default_resolver
+    if refresh or _default_resolver is None:
+        _default_resolver = InstrumentResolver().load(force_refresh=refresh)
+    return _default_resolver.get_fno_underlyings()
 
 
 if __name__ == "__main__":

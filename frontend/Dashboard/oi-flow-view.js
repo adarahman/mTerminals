@@ -287,6 +287,11 @@ class OiFlowView {
     : netCapitalFlow>0 ? 'Put-side flow leads call-side flow; a bullish positioning tilt, not proof of fresh buying.'
     : netCapitalFlow<0 ? 'Call-side flow leads put-side flow; a bearish positioning tilt, not proof of fresh writing.'
     : 'Call- and put-side day-session flow are balanced.';
+  const sessionTone = netCapitalFlow==null ? 'neutral' : netCapitalFlow>0 ? 'bullish' : netCapitalFlow<0 ? 'bearish' : 'neutral';
+  const sessionTitle = netCapitalFlow==null ? 'Session flow unavailable'
+    : netCapitalFlow>0 ? 'Put-side flow leads · Bullish tilt'
+    : netCapitalFlow<0 ? 'Call-side flow leads · Bearish tilt'
+    : 'Call and put flow balanced';
 
   // Net OI Flow belongs to D-07. Preserve the original multi-window
   // 5m/15m/30m read without duplicating it inside D-04 or the dedicated
@@ -310,9 +315,16 @@ class OiFlowView {
     windowMin,
     value: netOiVelocityFor(windowMin)
   }));
+  const fullDayNetOiChange = chain.reduce((sum, r) => sum + (Number(r.peChgOI)||0) - (Number(r.ceChgOI)||0), 0);
+  const oiChangePeriods = [{label:'Full day', value:fullDayNetOiChange}, ...netOiVel.map(({windowMin,value}) => ({label:`${windowMin}m`,value}))];
   const fmtNetOiVelocity = (v) => (v==null || !Number.isFinite(v))
     ? '—'
     : `${v>0?'+':''}${fmtK(v)}`;
+  const latestVelocity = netOiVel.find(({value}) => value!=null && Number.isFinite(value))?.value;
+  const velocityRead = latestVelocity==null ? 'Intraday confirmation is not available yet.'
+    : latestVelocity>0 ? 'Recent PE−CE velocity leans bullish and confirms put-side participation.'
+    : latestVelocity<0 ? 'Recent PE−CE velocity leans bearish and confirms call-side participation.'
+    : 'Recent CE and PE velocity is balanced; there is no intraday confirmation.';
 
   // Total PE/CE OI + PCR across the visible chain is intentionally NOT
   // recomputed here — it's the exact same aggregate the Option Chain
@@ -356,52 +368,86 @@ class OiFlowView {
   return `
   <div class="oic-card" id="oi-flow-summary-card">
     <button type="button" class="section-header nav-card-header oi-flow-chart-header" onclick="openOIDashboardModal()" aria-label="Open OI Flow chart">
-      <span class="section-title nav-card-header-label"><span class="section-icon">🌊</span>OI Flow</span>
+      <span class="section-title nav-card-header-label"><span class="section-icon">🌊</span>OI Snapshot · Change &amp; Capital Flow</span>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
     </button>
-    <div class="capital-flow-section" aria-label="Capital Flow">
-      <div class="capital-flow-heading">
-        <span class="capital-flow-heading-icon" aria-hidden="true">₹</span>
-        <span class="capital-flow-heading-title">Capital Flow</span>
-        <span class="capital-flow-heading-note">Day-session ΔOI × LTP · visible range</span>
-      </div>
-      <div class="capital-flow-strip" aria-label="Capital flow summary">
-        <div class="capital-flow-item">
-          <span class="capital-flow-label">CE Flow</span>
-          ${topCeFlow ? `<button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${topCeFlow.strike})">${fmtI(topCeFlow.strike)}</button>` : ''}
-          <strong style="color:var(--ce);">${fmtCapital(totalCeFlow)}</strong>
-        </div>
-        <div class="capital-flow-item">
-          <span class="capital-flow-label">PE Flow</span>
-          ${topPeFlow ? `<button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${topPeFlow.strike})">${fmtI(topPeFlow.strike)}</button>` : ''}
-          <strong style="color:var(--pe);">${fmtCapital(totalPeFlow)}</strong>
-        </div>
-        <div class="capital-flow-item capital-flow-net">
-          <span class="capital-flow-label">Net PE−CE</span>
-          <strong style="color:${signColor(netCapitalFlow)};">${fmtCapital(netCapitalFlow)}</strong>
-        </div>
-      </div>
-      <div class="capital-flow-read" role="note"><strong>Read:</strong> CE ${flowAction(totalCeFlow)}; PE ${flowAction(totalPeFlow)}. ${netFlowRead}</div>
-      <div class="capital-foundation-strip" aria-label="Stage 1 capital metrics">
-        ${capitalMetric('Premium locked',totalPremiumLocked,'positioned premium')}
-        ${capitalMetric('Premium turnover',totalPremiumTurnover,'session activity')}
-        ${capitalMetric('Gross strike notional',totalNotionalExposure,'exposure scale, not cash deployed')}
-      </div>
-      ${topCapital ? `<div class="capital-concentration-note"><strong>Concentration:</strong> <button class="strike-link" onclick="event.stopPropagation();openOptionChainAtStrike(${topCapital.strike})">${fmtI(topCapital.strike)}</button> holds ${fmtN(topCapitalPct,1)}% of visible premium locked.</div>` : ''}
-      <div class="capital-unit-note">Units: ₹ underlying quantity terms. OI is already lot-scaled; turnover alone converts raw volume contracts using lot size. Capital Flow is day-session ΔOI × LTP; 5m/15m/30m below is separate intraday velocity.</div>
-    </div>
-    <div class="oi-net-velocity-section" aria-label="Net OI Flow by velocity window">
-      <div class="oi-net-velocity-heading">
-        <span class="oi-net-velocity-title">Net OI Flow</span>
-        <span class="oi-net-velocity-note">PE−CE ΔOI velocity · visible range</span>
+    <div class="oi-net-velocity-section" aria-label="Net OI change by period">
+      <div class="oi-flow-section-heading">
+        <span class="oi-flow-step">1 · Net OI change by period</span>
+        <small>Every value is PE−CE ΔOI · same visible strike range</small>
       </div>
       <div class="oi-net-velocity-strip">
-        ${netOiVel.map(({windowMin,value}) => `
+        ${oiChangePeriods.map(({label,value}) => `
           <div class="oi-net-velocity-item">
-            <span>${windowMin}m</span>
+            <span>${label}</span>
             <strong style="color:${value==null?'var(--text-tertiary)':signColor(value)};">${fmtNetOiVelocity(value)}</strong>
           </div>`).join('')}
       </div>
+      <p class="oi-flow-velocity-read"><strong>Full day</strong> is the current-session OI change; 5m, 15m and 30m are the same OI-change measure over shorter windows. ${velocityRead}</p>
+    </div>
+    <div class="capital-flow-section oi-flow-frame" aria-label="Capital Flow">
+      <div class="oi-flow-frame-heading">
+        <div>
+          <span class="oi-flow-eyebrow">Capital Flow</span>
+          <h3>Where is options capital moving?</h3>
+        </div>
+        <span class="oi-flow-scope">Day-session ΔOI × LTP · visible range</span>
+      </div>
+
+      <section class="oi-flow-verdict ${sessionTone}" aria-label="Session flow verdict">
+        <div>
+          <span class="oi-flow-step">2 · Capital-weighted session verdict</span>
+          <strong>${sessionTitle}</strong>
+          <p>${netFlowRead}</p>
+        </div>
+        <div class="oi-flow-net-value">
+          <span>Net PE−CE</span>
+          <strong>${fmtCapital(netCapitalFlow)}</strong>
+        </div>
+      </section>
+
+      <section aria-labelledby="oi-flow-compare-title">
+        <div class="oi-flow-section-heading">
+          <span class="oi-flow-step" id="oi-flow-compare-title">3 · Compare both sides</span>
+          <small>Positive = premium-weighted OI added; negative = unwound</small>
+        </div>
+        <div class="oi-flow-side-grid">
+          <article class="oi-flow-side-card ce">
+            <div class="oi-flow-side-head"><span>CE</span><strong>Call-side flow</strong></div>
+            <div class="oi-flow-side-value">${fmtCapital(totalCeFlow)}</div>
+            <dl>
+              <div><dt>Session state</dt><dd>${flowAction(totalCeFlow)}</dd></div>
+              <div><dt>Leading strike</dt><dd>${topCeFlow ? `<button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${topCeFlow.strike})">${fmtI(topCeFlow.strike)}</button>` : '—'}</dd></div>
+            </dl>
+          </article>
+          <article class="oi-flow-side-card pe">
+            <div class="oi-flow-side-head"><span>PE</span><strong>Put-side flow</strong></div>
+            <div class="oi-flow-side-value">${fmtCapital(totalPeFlow)}</div>
+            <dl>
+              <div><dt>Session state</dt><dd>${flowAction(totalPeFlow)}</dd></div>
+              <div><dt>Leading strike</dt><dd>${topPeFlow ? `<button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${topPeFlow.strike})">${fmtI(topPeFlow.strike)}</button>` : '—'}</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section aria-labelledby="oi-flow-context-title">
+        <div class="oi-flow-section-heading">
+          <span class="oi-flow-step" id="oi-flow-context-title">4 · Capital context</span>
+          <small>Scale and concentration, not directional signals</small>
+        </div>
+        <div class="capital-foundation-strip" aria-label="Stage 1 capital metrics">
+        ${capitalMetric('Premium locked',totalPremiumLocked,'positioned premium')}
+        ${capitalMetric('Premium turnover',totalPremiumTurnover,'session activity')}
+        ${capitalMetric('Gross strike notional',totalNotionalExposure,'exposure scale, not cash deployed')}
+        </div>
+        ${topCapital ? `<div class="capital-concentration-note"><strong>Concentration:</strong> <button class="strike-link" onclick="event.stopPropagation();openOptionChainAtStrike(${topCapital.strike})">${fmtI(topCapital.strike)}</button> holds ${fmtN(topCapitalPct,1)}% of visible premium locked.</div>` : ''}
+      </section>
+
+      <details class="oi-flow-method">
+        <summary>How to read these values</summary>
+        <div class="capital-unit-note">Units: ₹ underlying quantity terms. OI is already lot-scaled; turnover alone converts raw volume contracts using lot size. Capital Flow is day-session ΔOI × LTP; 5m/15m/30m below is separate intraday velocity.</div>
+      </details>
     </div>
   </div>`;
 }

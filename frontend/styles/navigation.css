@@ -99,7 +99,7 @@
 
 .expiry-strip{
   display:grid;
-  grid-template-columns:140px 1px minmax(190px,1fr) 1px 96px;
+  grid-template-columns:78px 1px 160px 1px minmax(150px,1fr) 1px 62px;
   align-items:center;gap:var(--space-2);
   background:var(--bg-2);
   border:1px solid var(--border);
@@ -253,6 +253,11 @@
 }
 
 .price-source-tag{font-size:var(--fs-xs);font-weight:700;color:var(--text-tertiary);vertical-align:middle;}
+.futures-reference{white-space:nowrap;}
+.futures-reference-row{display:flex;align-items:center;justify-content:center;gap:5px;}
+.futures-reference .price-source-select{padding-top:2px;padding-bottom:2px;}
+.futures-reference-value{font-family:var(--font-mono);font-size:var(--fs-sm);font-weight:700;color:var(--info);font-variant-numeric:tabular-nums;}
+.futures-reference small{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:650;color:var(--text-tertiary);font-variant-numeric:tabular-nums;}
 
 /* 1.8687rem (29.9px) -> --fs-3xl (28px): closer than --fs-4xl (34.4px)
    by 1.9px vs 4.5px. */
@@ -317,6 +322,52 @@
 
 .pcr-toggle.on{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
 
+/* ── DASHBOARD WORKSPACE TABS ──
+   The decision remains the stable page anchor; these tabs switch the
+   analytical workspace below it so the dashboard is no longer a long,
+   undifferentiated stack. */
+.dashboard-workspace-tabs{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+  position:sticky;
+  top:var(--panel-top,72px);
+  z-index:calc(var(--z-sticky) - 1);
+  margin:10px 0 14px;
+  padding:6px;
+  border:1px solid var(--border);
+  border-radius:var(--radius-md);
+  background:rgba(22,24,29,.96);
+  box-shadow:0 5px 18px rgba(0,0,0,.24);
+  backdrop-filter:blur(12px);
+}
+
+.dashboard-workspace-tab{
+  min-height:40px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  border:1px solid transparent;
+  border-radius:var(--radius-sm);
+  background:transparent;
+  color:var(--text-tertiary);
+  font-family:var(--font-display);
+  font-size:var(--fs-sm);
+  font-weight:700;
+  cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,color .15s ease;
+}
+.dashboard-workspace-tab:hover{color:var(--text-primary);background:var(--bg-2);}
+.dashboard-workspace-tab:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;}
+.dashboard-workspace-tab.active{
+  color:var(--info);
+  border-color:color-mix(in srgb,var(--info) 40%,var(--border));
+  background:var(--info-dim);
+}
+
+.dashboard-workspace[hidden]{display:none!important;}
+
 /* ── VERTICAL SECTION NAV (left rail) ──
    Was a horizontal pill row above .top-bar; now a fixed vertical stripe
    docked to the left edge of the viewport so it's reachable from any
@@ -333,13 +384,29 @@
   align-items:stretch;
   position:fixed;
   left:10px;top:10px;bottom:10px;
-  width:72px;
+  width:86px;
   z-index:var(--z-sticky);
   box-shadow:0 4px 20px rgba(0,0,0,0.40);
   overflow-y:auto;
   backdrop-filter:blur(12px);
   background:rgba(22,24,29,0.93);
 }
+
+.rail-collapse-btn{
+  min-height:28px;
+  border:1px solid var(--border);
+  border-radius:7px;
+  background:var(--bg-2);
+  color:var(--text-tertiary);
+  font-size:20px;
+  line-height:1;
+  cursor:pointer;
+}
+.rail-collapse-btn:hover,.rail-collapse-btn:focus-visible{color:var(--info);border-color:var(--info);outline:none;}
+
+body.rail-collapsed .sec-nav{width:46px;padding:10px 7px;bottom:auto;}
+body.rail-collapsed .sec-nav details{display:none;}
+body.rail-collapsed .db{padding-left:72px;}
 
 .sec-nav-label{
   font-family:var(--font-display);
@@ -354,7 +421,6 @@
 }
 
 .rail-context-menu,.rail-tools-menu{width:100%;}
-.rail-tools-menu{margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--border);}
 .rail-group-toggle{
   list-style:none;padding:9px 5px;border:1.5px solid var(--border);border-radius:8px;
   background:var(--bg-2);color:var(--text-secondary);cursor:pointer;
@@ -372,7 +438,7 @@
   border-radius:10px;border:1.5px solid var(--border);
   background:var(--bg-2);color:var(--text-secondary);
   cursor:pointer;transition:all 0.25s ease;
-  white-space:normal;word-break:break-word;
+  white-space:normal;word-break:normal;overflow-wrap:normal;
   position:relative;
   box-shadow:0 1px 3px rgba(0,0,0,0.04);
   letter-spacing:0.2px;
@@ -383,11 +449,10 @@
 
 .sec-btn span{font-size:var(--fs-lg);line-height:1;}
 
-/* "Range Vel" is a two-word label crammed into the same 72px rail width
-   as one-word buttons like "Chain" — inheriting .sec-btn's word-break:
-   break-word let the browser split it mid-word (e.g. "Ra/nge/Vel"),
-   which read as near-vertical stacked letters. Force wraps to only ever
-   happen at the space between "Range" and "Vel" instead. */
+/* Keep rail labels intact. Multi-word labels can still wrap at spaces,
+   but words such as Decision/Position/Portfolio must never split into
+   near-vertical fragments. The slightly wider desktop rail above gives
+   those labels enough room without stealing meaningful dashboard space. */
 
 #ctrl-sidebar-toggle-btn{
   word-break:normal;

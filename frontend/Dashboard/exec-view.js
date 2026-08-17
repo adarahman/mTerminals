@@ -20,7 +20,7 @@ class ExecView {
 
   return `
 <div id="exec-section-wrap">
-<div class="exec-grid">
+<div class="exec-grid exec-grid--context">
 
   <!-- ── CARD 1: MARKET CONTEXT & RANGE ── -->
   <!-- Only context not already owned by the hero/top bar lives here. -->
@@ -44,10 +44,8 @@ class ExecView {
   </div>
 
   <!-- ── CARD 2: GREEKS / NET GEX ── -->
-  <!-- Moved here from row2 (chain-renderer.js's Tier-2 row) so it sits
-       immediately left of the Option Chain Snapshot card in the same row,
-       per the updated layout. activeAtm()/getFilteredChain() are the same
-       global helpers chain-renderer.js uses ahead of this same call. -->
+  <!-- Compact dealer-exposure context beside Market Context. The Option
+       Chain Snapshot now owns the full row below this context grid. -->
   ${(() => {
     const gAtm = activeAtm(d);
     // getVisibleRangeGreeks (metrics.js, IA redesign step 6) — same
@@ -57,13 +55,6 @@ class ExecView {
     const gGreeks = getVisibleRangeGreeks(d);
     return app.chain.buildGreeksAlertsHtml(gGreeks, gAtm, d);
   })()}
-
-  <!-- ── CARD 3: OPTION CHAIN SNAPSHOT ── -->
-  <!-- Top Movers (Drivers/Draggers) moved out of this slot — pending its
-       own standalone surface if it is reintroduced in a future PDS revision.
-       app.chain is the live ChainView instance (see dashboard.js), so this
-       reuses the exact same builder/markup as the row2 Snapshot card. -->
-  ${app.chain.buildChainSummaryHtml(d)}
 
   <!-- Cards 4-6 (Market Regime & Smart Money / Institutional Footprint
        Score / Capital Concentration) moved out of this grid — IA redesign

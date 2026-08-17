@@ -116,7 +116,7 @@ class ChainView {
   _chainRange = range;
   this.centerChainOnATM = true;
 
-  ['range-tabs-chain','range-tabs-side','range-tabs-grk','range-tabs-iv'].forEach(gid => {
+  ['range-tabs-chain','range-tabs-grk','range-tabs-iv'].forEach(gid => {
     const g = document.getElementById(gid);
     if(!g) return;
     g.querySelectorAll('.tab-btn').forEach(b => {
@@ -138,6 +138,24 @@ class ChainView {
   }
 
   if(_data) _rerenderChainPanels();
+
+  // The ledger is physically mounted inside its modal while open, so the
+  // dashboard card refresh above intentionally leaves that scroll subtree
+  // untouched. A range click inside the modal must replace only the ledger
+  // with a freshly filtered one—not close the modal or navigate to the card.
+  const modal = document.getElementById('option-chain-modal');
+  const host = document.getElementById('option-chain-modal-body');
+  const currentTable = document.getElementById('option-chain-table');
+  if(modal && modal.classList.contains('open') && host && currentTable && _data){
+    const template = document.createElement('template');
+    template.innerHTML = this.buildChainSummaryHtml(_data).trim();
+    const freshTable = template.content.querySelector('#option-chain-table');
+    if(freshTable){
+      freshTable.hidden = false;
+      currentTable.replaceWith(freshTable);
+      requestAnimationFrame(() => this.sizeAndScrollChain(null));
+    }
+  }
 
   if (window.eventBus) window.eventBus.emit('range:change', { range });
 }

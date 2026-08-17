@@ -8,12 +8,13 @@
 // Empty/error results are also cooled down so an upstream SmartAPI timeout
 // cannot make every live render retry the same rate-limited endpoint.
 const _marketHistoryRequests = new Map();
-window.fetchMarketHistory = function(symbol, range, force = false){
-  const key = String(symbol).toUpperCase() + '|' + range;
+window.fetchMarketHistory = function(symbol, range, force = false, instrument = 'EQ', expiry = ''){
+  const key = [String(symbol).toUpperCase(), instrument, expiry, range].join('|');
   const now = Date.now();
   const cached = _marketHistoryRequests.get(key);
   if(!force && cached && now - cached.startedAt < 60000) return cached.promise;
-  const promise = fetch(`${Config.api.history}?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`)
+  const params = new URLSearchParams({symbol, range, instrument, expiry});
+  const promise = fetch(`${Config.api.history}?${params.toString()}`)
     .then(res => res.ok ? res.json() : [])
     .then(rows => Array.isArray(rows) ? rows : [])
     .catch(() => []);
@@ -43,7 +44,10 @@ class HistoryLoader {
     this.chartData.setHydrating(range, sym, true);
     
     try {
-      const rows = await window.fetchMarketHistory(sym, range, force);
+      // The main chart is the cash/index analytical reference. Including
+      // identity explicitly prevents future FUT views from sharing these
+      // bars unless they also provide their exact contract expiry.
+      const rows = await window.fetchMarketHistory(sym, range, force, 'EQ', '');
       if (!Array.isArray(rows)) return;
       
       const bars = rows

@@ -14,28 +14,17 @@ from oi.oi_analysis import (
     build_oi_history, compute_dte,
     read_last_json_snapshot, append_json_history,
 )
-from smartapi_pipeline_adapter import (
-    fetch_option_chain_wide,
-    fetch_futures_wide,
-    fetch_all_pills_and_vix_batched,
-    fetch_vix_smartapi,
-    get_available_expiries,
-    fetch_ticker_payload_smartapi,
-    fetch_sensex_ticker_smartapi,
-)
-# No manual session object needed here — smartapi_pipeline_adapter.py's
-# functions call through to mTerminals.smartapi_client's module-level
-# `_session` singleton (SmartApiSession), which handles login/token-refresh
-# itself. Imported package-qualified (mTerminals.smartapi_client) to match
-# ws_server_live.py's own import style exactly — a flat `import
-# smartapi_client` here would create a SECOND, distinct module object (and
-# therefore a second _session singleton) even though it's the same file on
-# disk, causing two independent logins to race each other on startup.
+# Authenticated SmartAPI adapters are imported lazily only when
+# USE_SMARTAPI is true. The separate unauthenticated daily instrument
+# master remains available through brokers.smartapi_instruments for lot
+# sizes/reference metadata without initializing a login session.
 
 from market_api import (
     fetch_all_indices,
     fetch_option_chain, parse_option_chain_response,
     fetch_bse_json_options,
+    get_unified_market_data, fetch_bse_index_quote, fetch_public_futures,
+    BSE_INDEX_SCRIP_CODES,
 )
 from expiry_manager import (
     make_expiry_manager,
@@ -263,7 +252,10 @@ def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
     zeroed rather than guessed; anything downstream reading those fields
     for SENSEX/BANKEX under --no-smartapi will see 0, not real data.
     """
-    scrip_cd = "2" if symbol.upper() == "BANKEX" else "1"  # 1=SENSEX, 2=BANKEX
+    scrip_cd = BSE_INDEX_SCRIP_CODES.get(symbol.upper())
+    if not scrip_cd:
+        logger.error("No public BSE derivative code for %s", symbol)
+        return pd.DataFrame()
     expiry_bse = expiry_dash.replace("-", " ")  # "02-Jul-2026" -> "02 Jul 2026"
     df, spot = fetch_bse_json_options(expiry_bse, scrip_cd=scrip_cd)
     if df is None or df.empty:
@@ -280,6 +272,8 @@ def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
 
 
 def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
+    if USE_SMARTAPI:
+        from smartapi_pipeline_adapter import fetch_option_chain_wide, get_available_expiries
     if exchange == "BSE":
         # Was fetch_bse_json_options() — BSE's own JSON option-chain HTTP
         # endpoint. fetch_option_chain_wide() is exchange-parametrized
@@ -419,6 +413,14 @@ def main():
     # use_virtual_oi through to export_dashboard_json() below instead.
 
     try:
+        if USE_SMARTAPI:
+            from smartapi_pipeline_adapter import (
+                fetch_futures_wide,
+                fetch_all_pills_and_vix_batched,
+                fetch_vix_smartapi,
+                fetch_ticker_payload_smartapi,
+                fetch_sensex_ticker_smartapi,
+            )
         # ── Fetch chain + futures + all-indices + VIX + ticker pills concurrently ──
         # These five NSE/BSE calls are independent of each other (futures/
         # indices/VIX/ticker-pills don't need the option-chain result), so
@@ -437,10 +439,10 @@ def main():
                 # fetch_futures_wide()'s docstring for why reusing the
                 # options chain's own expiry here was wrong; `which`
                 # (FUTURES_EXPIRY) picks the monthly contract instead.
-                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, None, exchange="BFO", which=FUTURES_EXPIRY)
+                fut_fut = ex.submit(fetch_futures_wide, SYMBOL, None, exchange="BFO", which=FUTURES_EXPIRY) if USE_SMARTAPI else ex.submit(fetch_public_futures, SYMBOL, FUTURES_EXPIRY)
             else:
                 fut_chain = ex.submit(_fetch_and_parse, SYMBOL, EXPIRY, "NSE", STRICT_EXPIRY)
-                fut_fut   = ex.submit(fetch_futures_wide, SYMBOL, None, which=FUTURES_EXPIRY)
+                fut_fut = ex.submit(fetch_futures_wide, SYMBOL, None, which=FUTURES_EXPIRY) if USE_SMARTAPI else ex.submit(fetch_public_futures, SYMBOL, FUTURES_EXPIRY)
             # df_idx now TTL-cached (see _fetch_all_indices_cached above) —
             # still submitted through the pool each tick, but only actually
             # hits NSE once every DF_IDX_TTL_SECONDS; other ticks get the
@@ -452,19 +454,19 @@ def main():
             # chain/futures/idx fetches above instead of adding wall-clock
             # time; .result() below blocks only this thread until it's
             # ready, then the three wrapper calls just read the cache.
-            fut_batch = ex.submit(fetch_all_pills_and_vix_batched)
-            fut_batch.result()
-            # Ticker pills (NIFTY/BANKNIFTY/MIDCPNIFTY/FINNIFTY) — now pure
-            # SmartAPI REST via fetch_ticker_payload_smartapi(), independent
-            # of df_idx entirely. Unconditional every tick, same reasoning
-            # as before: pills must stay populated even while the active
-            # symbol is SENSEX/BANKEX.
-            fut_ticker = ex.submit(fetch_ticker_payload_smartapi)
-            fut_unified = ex.submit(fetch_vix_smartapi)
-            # SENSEX pill — also SmartAPI now (INDEX_TOKENS), replacing the
-            # old BSE getScripHeaderData round-trip. Still unconditional so
-            # it stays live while viewing NSE symbols.
-            fut_sensex = ex.submit(fetch_sensex_ticker_smartapi)
+            fut_batch = ex.submit(fetch_all_pills_and_vix_batched) if USE_SMARTAPI else None
+            if fut_batch is not None:
+                fut_batch.result()
+            # In broker mode, ticker/VIX/SENSEX use SmartAPI. Under
+            # --no-smartapi these futures stay absent and the public
+            # NSE/BSE fallback below derives the same display payload.
+            fut_ticker = ex.submit(fetch_ticker_payload_smartapi) if USE_SMARTAPI else None
+            fut_unified = ex.submit(fetch_vix_smartapi) if USE_SMARTAPI else None
+            fut_sensex = ex.submit(fetch_sensex_ticker_smartapi) if USE_SMARTAPI else None
+            fut_public_bse_quotes = (
+                {sym: ex.submit(fetch_bse_index_quote, sym) for sym in BSE_INDEX_SCRIP_CODES}
+                if not USE_SMARTAPI else {}
+            )
 
             if EXCHANGE == "BSE":
                 df, spot, expiry_dates = fut_chain.result()
@@ -474,40 +476,33 @@ def main():
             df_fut  = fut_fut.result()
             df_idx  = fut_idx.result()
 
-            # PRICE_SOURCE override — see PRICE_SOURCE's own docstring above
-            # for why. Only swaps in when df_fut actually has a usable LTP;
-            # if the futures fetch itself failed/returned empty (network
-            # blip, contract not resolved, etc.) this silently keeps EQ
-            # rather than falling through to spot=0, which would trip the
-            # "Invalid Spot Price" abort below.
-            #
-            # Logged unconditionally whenever PRICE_SOURCE=="FUT" (not just
-            # on success) — this used to be a silent no-op on failure,
-            # which made "selected FUT but spot didn't move" indistinguishable
-            # from "the switch never even reached this code" from the logs
-            # alone. Now every tick says explicitly which branch it took.
-            if PRICE_SOURCE == "FUT":
-                if df_fut is None or df_fut.empty:
-                    logger.warning(f"[PRICE_SOURCE=FUT] df_fut empty for {SYMBOL} — "
-                                    f"futures contract resolution or quote fetch failed; keeping EQ spot={spot}")
-                else:
-                    fut_ltp = df_fut["LTP"].iloc[0] if "LTP" in df_fut.columns else 0.0
-                    if fut_ltp and fut_ltp > 0:
-                        logger.info(f"[PRICE_SOURCE=FUT] {SYMBOL} spot {spot} -> {fut_ltp} "
-                                    f"(contract={df_fut['Contract'].iloc[0] if 'Contract' in df_fut.columns else '?'})")
-                        spot = fut_ltp
-                        df["Spot"] = spot
-                    else:
-                        logger.warning(f"[PRICE_SOURCE=FUT] df_fut present for {SYMBOL} but LTP is "
-                                        f"{fut_ltp!r} (missing/zero) — keeping EQ spot={spot}")
+            # EQ remains the canonical option-pricing and decision reference.
+            # Futures are passed separately into build_engine_result() for
+            # basis/regime confirmation and never replace df["Spot"].
 
-            _live_vix, _live_vix_chg_pct = fut_unified.result()
+            if USE_SMARTAPI:
+                _live_vix, _live_vix_chg_pct = fut_unified.result()
+                sensex_quote = fut_sensex.result()
+                ticker_payload = fut_ticker.result()
+            else:
+                # Strict broker-free path: derive NSE ticker pills from the
+                # already-fetched index frame and obtain VIX from NSE. BSE's
+                # public endpoint supplies SENSEX without an AngelOne login.
+                _live_vix, _live_vix_chg_pct, ticker_payload = get_unified_market_data(df_idx)
+                bse_quotes = [future.result() for future in fut_public_bse_quotes.values()]
+                bse_quotes = [quote for quote in bse_quotes if quote]
+                sensex_quote = next(
+                    (quote for quote in bse_quotes if quote.get("Symbol") == "SENSEX"),
+                    None,
+                )
             _live_vix = _live_vix or 0.0
-            sensex_quote = fut_sensex.result()
-            ticker_payload = fut_ticker.result()
             all_indices = list(ticker_payload)
             if sensex_quote:
                 all_indices.append(sensex_quote)
+            if not USE_SMARTAPI:
+                all_indices.extend(
+                    quote for quote in bse_quotes if quote.get("Symbol") != "SENSEX"
+                )
 
             # Merge in real Volume/Value from df_idx (already fetched above
             # via fut_idx — no new network call). get_unified_market_data()'s
@@ -629,11 +624,14 @@ def main():
         # cause as the ticker-pill issue, just for the primary header value.
         # Patch it here from the BSE quote already fetched above (sensex_quote)
         # instead of touching engine.py's NSE-oriented lookup.
-        if SYMBOL == "SENSEX" and sensex_quote:
-            if sensex_quote.get("Change") is not None:
-                ctx_dict["spot_change"] = sensex_quote["Change"]
-            if sensex_quote.get("% Change") is not None:
-                ctx_dict["spot_chg_pct"] = sensex_quote["% Change"]
+        active_bse_quote = next(
+            (quote for quote in all_indices if quote.get("Symbol") == SYMBOL), None
+        ) if SYMBOL in _BSE_SYMBOLS else None
+        if active_bse_quote:
+            if active_bse_quote.get("Change") is not None:
+                ctx_dict["spot_change"] = active_bse_quote["Change"]
+            if active_bse_quote.get("% Change") is not None:
+                ctx_dict["spot_chg_pct"] = active_bse_quote["% Change"]
 
         export_dashboard_json(
             df_clean=df_clean, master=engine_result.master, ctx_dict=ctx_dict,

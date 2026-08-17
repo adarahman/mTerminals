@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -28,6 +29,8 @@ from aiohttp import web
 # option_chain_json.py parses sys.argv at import time — hide our own argv
 # from it so it doesn't choke on ws_server_live's --symbol/--poll-seconds flags.
 _real_argv = sys.argv
+if "--no-smartapi" in _real_argv:
+    os.environ["MTERMINALS_NO_SMARTAPI"] = "1"
 sys.argv = [_real_argv[0]]
 import option_chain_json       # noqa: E402
 import mTerminals_json         # noqa: E402
@@ -40,20 +43,42 @@ from operational_metrics import OperationalMetrics  # noqa: E402
 logger = logging.getLogger("mterminals.server")
 
 from paper_trading import PaperTradingEngine, _instrument_key, LOT_SIZES as PT_LOT_SIZES  # noqa: E402
-from brokers.market_data import market_data
-from brokers.smartapi_client import (
-    # place_order is the real live-order path, called from
-    # _handle_place_order below when LIVE_TRADING_ENABLED and a client
-    # explicitly confirms. get_positions backs account_guard's pre-trade
-    # exposure check and post-fill daily P&L tracking (see below).
-    place_order as smartapi_place_order,
-    get_order_book as smartapi_get_order_book,
-    get_positions as smartapi_get_positions,
-    get_funds as smartapi_get_funds,
-)
-from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
-from smartapi_feed_adapter import TickAggregator
-from brokers.smartapi_history import get_index_candles, get_candle_data
+_NO_SMARTAPI_REQUESTED = "--no-smartapi" in _real_argv
+
+def _smartapi_disabled(*_args, **_kwargs):
+    raise RuntimeError("SmartAPI is disabled by --no-smartapi")
+
+if not _NO_SMARTAPI_REQUESTED:
+    from brokers.market_data import market_data
+    from brokers.smartapi_client import (
+        place_order as smartapi_place_order,
+        get_order_book as smartapi_get_order_book,
+        get_positions as smartapi_get_positions,
+        get_funds as smartapi_get_funds,
+    )
+    from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
+    from smartapi_feed_adapter import TickAggregator
+    from brokers.smartapi_history import get_index_candles, get_candle_data
+else:
+    # Do not even import the broker modules: importing them initializes the
+    # SDK and instrument master. Any accidentally reached broker-only path
+    # fails closed instead of silently logging in.
+    class _DisabledMarketData:
+        index_tokens = staticmethod(lambda: {})
+        list_expiries = staticmethod(_smartapi_disabled)
+        get_atm_chain = staticmethod(_smartapi_disabled)
+        find_option_token = staticmethod(_smartapi_disabled)
+        get_batch_quotes_by_token = staticmethod(_smartapi_disabled)
+    market_data = _DisabledMarketData()
+    smartapi_place_order = _smartapi_disabled
+    smartapi_get_order_book = _smartapi_disabled
+    smartapi_get_positions = _smartapi_disabled
+    smartapi_get_funds = _smartapi_disabled
+    get_index_candles = _smartapi_disabled
+    get_candle_data = _smartapi_disabled
+    SmartTickStream = None
+    TickAggregator = None
+    EXCHANGE_TYPE = {}
 from risk.account_guard import (
     LiveAccountRiskGuard, pnl_from_positions, open_lots_from_positions,
 )
@@ -106,11 +131,10 @@ _parser.add_argument("--no-delta", action="store_true", help="Always broadcast f
 _parser.add_argument("--no-index-quotes", action="store_true",
                       help="Disable the NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX ticker-strip background fetch")
 _parser.add_argument("--no-smartapi", action="store_true",
-                      help="Disable the AngelOne SmartAPI websocket overlay entirely — run on "
-                           "market_api.py's NSE/BSE REST polling (option_chain_json's --poll-seconds "
-                           "cadence) only. SmartAPI is never the source of the chain's strikes/OI "
-                           "structure (that always comes from market_api.py); this flag only turns "
-                           "off the faster LTP/OI overlay ticks on top of it.")
+                      help="Disable authenticated AngelOne SmartAPI traffic, including login, "
+                           "REST quotes, futures and websocket overlay; use NSE/BSE public REST "
+                           "polling only. The unauthenticated daily ScripMaster remains available "
+                           "for instrument metadata and lot sizes.")
 _parser.add_argument("--strikes-each-side", type=int, default=None,
                       help="Override how many strikes each side of ATM option_chain_json computes "
                            "Greeks/OI-velocity/signal analytics for (engine's n_strikes_each_side). "
@@ -183,11 +207,10 @@ option_chain_json.set_runtime_config(RuntimeConfig(
 ))
 
 print(
-    f"[feed] chain source: SmartAPI REST (via option_chain_json.py/smartapi_pipeline_adapter.py), "
+    f"[feed] chain source: {'SmartAPI REST' if USE_SMARTAPI else 'NSE/BSE public REST (--no-smartapi)'}, "
     f"analytics recompute ceiling={POLL_SECONDS}s floor={MIN_TICK_RECOMPUTE_SECONDS}s "
     f"+ {'SmartAPI websocket overlay ENABLED' if USE_SMARTAPI else 'SmartAPI overlay DISABLED (--no-smartapi)'} "
-    f"| market_api.py now used only for fetch_all_indices() (ffmc/Top Drivers-Draggers, "
-    f"20s-cached — see DF_IDX_TTL_SECONDS in option_chain_json.py)",
+    f"| index context via market_api.py (20s-cached)",
     flush=True,
 )
 print(
@@ -402,6 +425,15 @@ def _origin_allowed(request) -> bool:
     origin = request.headers.get("Origin")
     if origin is None:
         return True
+    # A dashboard opened directly from disk (file://...) is assigned the
+    # opaque browser origin "null". Permit that development mode only when
+    # the TCP peer itself is loopback. A remote machine sending Origin:null
+    # remains rejected, preserving the cross-site WebSocket guard.
+    if origin == "null":
+        try:
+            return ipaddress.ip_address(request.remote).is_loopback
+        except (TypeError, ValueError):
+            return False
     return origin in ALLOWED_ORIGINS
 
 
@@ -643,6 +675,7 @@ def _flow_task_done(task: asyncio.Task):
 
 
 async def ws_handler(request):
+    global PRICE_SOURCE, FUTURES_EXPIRY, _LAST_SENT
     if not _origin_allowed(request):
         print(f"[ws] REJECTED — disallowed Origin: {request.headers.get('Origin')!r}", flush=True)
         return web.Response(status=403, text="Origin not allowed")
@@ -683,31 +716,29 @@ async def ws_handler(request):
     if requested_symbol or requested_expiry:
         switch_symbol(requested_symbol or SYMBOL, requested_expiry)
 
-    # Manual price-source selector — see PRICE_SOURCE's declaration above.
-    # Deliberately NOT bundled into switch_symbol(): switching symbol
-    # should not silently reset your price-source choice back to EQ, and
-    # unlike symbol/expiry this doesn't need LAST_PAYLOAD cleared or the
-    # engine-loop wake event poked — it takes effect on the pipeline's next
-    # regularly-scheduled tick, same as any other RuntimeConfig field.
+    # Legacy priceSource URLs no longer alter analytics. EQ is the fixed
+    # option-pricing and decision reference; FUT is displayed separately.
     requested_price_source = request.query.get("priceSource")
     if requested_price_source:
         src = requested_price_source.strip().upper()
-        if src in ("EQ", "FUT"):
-            global PRICE_SOURCE
-            if src != PRICE_SOURCE:
-                print(f"[ws] price source switch requested: {PRICE_SOURCE} -> {src}", flush=True)
-                PRICE_SOURCE = src
-        else:
+        if src not in ("EQ", "FUT"):
             print(f"[ws] ignoring invalid ?priceSource={requested_price_source!r} (must be EQ or FUT)", flush=True)
-        requested_futures_expiry = request.query.get("futuresExpiry")
+    PRICE_SOURCE = "EQ"
 
-        if requested_futures_expiry:
-            fexp = requested_futures_expiry.strip().upper()
-            if fexp in ("NEAR", "NEXT", "FAR"):
-                global FUTURES_EXPIRY
-                if fexp != FUTURES_EXPIRY:
-                    print(f"[ws] futures expiry switch requested: {FUTURES_EXPIRY} -> {fexp}", flush=True)
-                    FUTURES_EXPIRY = fexp
+    requested_futures_expiry = request.query.get("futuresExpiry")
+    futures_reference_switched = False
+    if requested_futures_expiry:
+        fexp = requested_futures_expiry.strip().upper()
+        if fexp in ("NEAR", "NEXT", "FAR"):
+            if fexp != FUTURES_EXPIRY:
+                print(f"[ws] futures expiry switch requested: {FUTURES_EXPIRY} -> {fexp}", flush=True)
+                FUTURES_EXPIRY = fexp
+                futures_reference_switched = True
+                # Do not diff the newly-selected contract against a cached
+                # payload from the previous contract. The next pipeline pass
+                # becomes a full authoritative snapshot for every client.
+                _LAST_SENT = None
+                _SYMBOL_SWITCH_EVENT.set()
         else:
             print(f"[ws] ignoring invalid ?futuresExpiry={requested_futures_expiry!r} (must be NEAR, NEXT, or FAR)", flush=True)
     try:
@@ -717,7 +748,7 @@ async def ws_handler(request):
         # skipped on purpose — better to wait for the next tick's real data
         # on the new symbol than hand back a snapshot of the old one.)
         async with _MARKET_STREAM_LOCK:
-            if LAST_PAYLOAD is not None:
+            if LAST_PAYLOAD is not None and not futures_reference_switched:
                 msg_str = orjson.dumps({
                     "type": "full", "payload": LAST_PAYLOAD, "version": _BASELINE_ID,
                 }, default=_json_default).decode()
@@ -1347,8 +1378,11 @@ def _fetch_bridge_futures_sync():
     the WebSocket TickAggregator's futLtp/futVwap placeholder fields, which
     are never actually emitted (see the no-op branch in _on_smartapi_message)."""
     try:
-        from smartapi_pipeline_adapter import fetch_futures_wide
-        df = fetch_futures_wide(SYMBOL)
+        if USE_SMARTAPI:
+            from smartapi_pipeline_adapter import fetch_futures_wide
+            df = fetch_futures_wide(SYMBOL)
+        else:
+            df = market_api.fetch_public_futures(SYMBOL, FUTURES_EXPIRY)
     except Exception as e:
         print(f"[bridge] fetch_futures_wide FAILED: {e}", flush=True)
         return None
@@ -2715,10 +2749,13 @@ async def engine_loop():
             elapsed = time.monotonic() - tick_start
             await _publish_pipeline_status(
                 "DELAYED",
-                f"REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; live prices continue via WebSocket",
+                (f"REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; live prices continue via WebSocket"
+                 if USE_SMARTAPI else
+                 f"Public REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; SmartAPI remains disabled"),
                 elapsed,
             )
-            print(f"[pipeline] DELAYED after {elapsed:.2f}s — SmartAPI websocket overlay remains active", flush=True)
+            overlay_state = "SmartAPI websocket overlay remains active" if USE_SMARTAPI else "public REST polling will retry; SmartAPI remains disabled"
+            print(f"[pipeline] DELAYED after {elapsed:.2f}s — {overlay_state}", flush=True)
         except Exception as e:
             payload = None
             _PIPELINE_TASK = None
@@ -3186,6 +3223,30 @@ async def history_handler(request):
     # client didn't specify one, preserving old behavior for old callers.
     req_symbol = (request.query.get("symbol") or SYMBOL).strip().upper()
 
+    instrument = (request.query.get("instrument") or "EQ").strip().upper()
+    expiry = (request.query.get("expiry") or "").strip().upper()
+
+    if _NO_SMARTAPI_REQUESTED:
+        # Public first-load bootstrap is cash/index only. In particular, do
+        # not disguise EQ candles as NEAR/NEXT/FAR futures history.
+        from brokers.public_history import fetch_public_history
+        public_interval = {
+            "ONE_MINUTE": "1m", "FIVE_MINUTE": "5m",
+            "FIFTEEN_MINUTE": "15m", "ONE_HOUR": "60m", "ONE_DAY": "1d",
+        }[cfg["interval"]]
+        rows = await asyncio.to_thread(
+            fetch_public_history,
+            req_symbol,
+            public_interval,
+            cfg["days"],
+            instrument=instrument,
+            expiry=expiry,
+        )
+        response = web.json_response(rows)
+        response.headers["X-MTerminals-History-Source"] = "public-cache"
+        response.headers["X-MTerminals-Instrument"] = instrument
+        return response
+
     if req_symbol not in market_data.index_tokens():
         print(f"[http] /api/history: no INDEX_TOKENS entry for {req_symbol}, returning empty", flush=True)
         return web.json_response([])
@@ -3375,8 +3436,8 @@ async def main():
             "smartapi_startup",
         )
     else:
-        print("[smartapi] skipped at startup (--no-smartapi) — chain served from "
-              "market_api.py REST polling only, no AngelOne websocket connection made", flush=True)
+        print("[smartapi] authenticated services disabled (--no-smartapi) — no AngelOne login, "
+              "quote/order REST call, or websocket connection; public daily ScripMaster allowed", flush=True)
 
     try:
         _create_background_task(index_quote_loop(), "index_quote_loop")

@@ -47,7 +47,7 @@ html{font-size:16px;}
 
 body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primary);font-size:1.0062rem;line-height:1.5;}
 
-.db{padding:16px 24px 28px 90px;max-width:none;margin:0 auto;}
+.db{padding:16px 24px 28px 104px;max-width:none;margin:0 auto;}
 
 /* NOTE: the old "METRICS GRID" block (.metrics-grid / .metric-card /
    .metric-label / .metric-val / .metric-sub) lived here and is gone —
@@ -62,6 +62,8 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   align-items:stretch;
   margin-bottom:18px;
 }
+
+.exec-grid--context{grid-template-columns:repeat(2,minmax(0,1fr));}
 
 .institutional-crux-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px;align-items:stretch;}
 .greeks-moneyness-card{min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;}
@@ -81,7 +83,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 
 .dd-col{min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.02);}
 
-.levels-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-bottom:18px;}
+.levels-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px;align-items:stretch;}
 
 /* ── #sec-tier2 ROW ──
    Originally a 3-col row (Chain Snapshot / Greeks Alerts / FII-DII
@@ -105,9 +107,15 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
 .capital-flow-column--primary>#oi-flow-summary-card{height:100%;}
 .velocity-summary-card{min-height:112px;}
 
+.capital-flow-story{display:grid;gap:16px;margin-bottom:18px;}
+.capital-flow-support-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;}
+.capital-flow-support-grid>*{min-width:0;height:100%;}
+
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;}
 
-.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:18px;align-items:start;}
+.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:18px;align-items:stretch;}
+
+.exec-grid>*,.capital-flow-grid>*,.institutional-crux-grid>*,.two-col>*,.three-col>*{min-width:0;}
 
 /* OI Flow (4 data cols) + merged Greeks/GEX (6 data cols: Strike, IV%,
    CE, PE, Net GEX, Regime) — the merged card gets extra width instead of
@@ -207,6 +215,10 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
    Base .zone-divider carries the shared type treatment; the border-top
    is what actually draws the horizontal rule from the §2.4 diagram. */
 .zone-divider{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  flex-wrap:wrap;
   font-size:11px;
   font-weight:700;
   letter-spacing:0.06em;
@@ -214,6 +226,17 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-primar
   margin:4px 0 10px;
   padding-top:14px;
   border-top:1px solid var(--border);
+  color:var(--text-tertiary);
+}
+
+.zone-divider-title{white-space:nowrap;}
+
+.zone-divider-subtitle{
+  font-family:var(--font-sans);
+  font-size:var(--fs-xs);
+  font-weight:500;
+  letter-spacing:0;
+  text-transform:none;
   color:var(--text-tertiary);
 }
 

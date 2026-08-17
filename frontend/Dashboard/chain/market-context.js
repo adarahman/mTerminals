@@ -201,30 +201,6 @@ function switchActiveIndex(sym) {
 }
 window.switchActiveIndex = switchActiveIndex;
 
-// Manual price-source selector — "EQ" (cash-market spot, default) or
-// "FUT" (near-month futures LTP). See ws_server_live.py's PRICE_SOURCE
-// for why: EQ goes stale in the last ~15min before close (3:15-3:30),
-// leaving nothing for the decision engine to evaluate; FUT keeps ticking
-// through 3:30. Mirrors switchActiveIndex()'s pattern exactly, except it
-// preserves whatever symbol param is already on the URL instead of
-// dropping it — a price-source switch shouldn't also reset your symbol.
-function setPriceSource(source) {
-  if (source !== 'EQ' && source !== 'FUT') return;
-  const [base, query] = (_wsUrl || '').split('?');
-  const params = new URLSearchParams(query || '');
-  params.set('priceSource', source);
-  connectWebSocket(`${base}?${params.toString()}`);
-  if (window.eventBus) window.eventBus.emit('priceSource:change', { source });
-}
-window.setPriceSource = setPriceSource;
-
-// Called by a top-bar <select onchange> next to the symbol picker, same
-// wiring as onSymbolPicked() above.
-function onPriceSourcePicked(val){
-  setPriceSource(val);
-}
-window.onPriceSourcePicked = onPriceSourcePicked;
-
 window.renderIndexTicker = renderIndexTicker;
 window.patchIndexTicker = patchIndexTicker;
 
@@ -250,14 +226,13 @@ window.patchIndexTicker = patchIndexTicker;
 // quotes, etc.) — that 0x80-0x9F range is exactly where ₹/—/× land, so a
 // plain "codepoint & 0xFF" byte reconstruction silently mangles them. This
 // table maps those codepoints back to their original byte value.
-// Manual futures-expiry selector — "NEAR"/"NEXT"/"FAR", only meaningful
-// once priceSource=FUT is picked. Mirrors setPriceSource() exactly:
-// preserves whatever other params (symbol, priceSource) are already on
-// the URL instead of dropping them.
+// Futures-reference selector. It changes only the displayed/confirming
+// contract and never the EQ analytical reference.
 function setFuturesExpiry(exp) {
   if (exp !== 'NEAR' && exp !== 'NEXT' && exp !== 'FAR') return;
   const [base, query] = (_wsUrl || '').split('?');
   const params = new URLSearchParams(query || '');
+  params.delete('priceSource');
   params.set('futuresExpiry', exp);
   connectWebSocket(`${base}?${params.toString()}`);
   if (window.eventBus) window.eventBus.emit('futuresExpiry:change', { exp });
@@ -447,4 +422,3 @@ function applyExpirySelection(d, selectedExpiry){
   if(meta.oiVelocity  != null) d.oiVelocity  = meta.oiVelocity;
   if(!d.atm) d.atm = activeAtm(d);
 }
-

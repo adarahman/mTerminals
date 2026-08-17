@@ -70,9 +70,17 @@ ChainView.prototype.renderVelocity = function(win) {
 ChainView.prototype.renderIvSurfaceModal = function() {
   const el = $i('iv-surface-content');
   if(!el || !_data) return;
+  const currentRows = el.querySelector('.iv-surface-rows');
+  const scrollTop = currentRows ? currentRows.scrollTop : 0;
+  const scrollLeft = currentRows ? currentRows.scrollLeft : 0;
   const chain = getFilteredChain(_data);
   const atm = activeAtm(_data);
   el.innerHTML = this.buildIvSurfaceHtml(_data, chain, atm);
+  const refreshedRows = el.querySelector('.iv-surface-rows');
+  if(refreshedRows){
+    refreshedRows.scrollTop = scrollTop;
+    refreshedRows.scrollLeft = scrollLeft;
+  }
 };
 
   ChainView.prototype.onExpiryChange = function(selectedExpiry) {

@@ -374,8 +374,10 @@
 
 .oc-modal{
   align-items:stretch;
-  padding:2vh 2vw;
+  padding:0;
+  background:var(--bg-0);
 }
+body.focus-workspace-open{overflow:hidden;}
 .u-modal-overlay{
   align-items:center;
 }

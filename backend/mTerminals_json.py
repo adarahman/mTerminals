@@ -842,10 +842,13 @@ from oi.footprint_score import (
     compute_footprint_score, rank_footprint_strikes, compute_capital_concentration,
 )
 
-try:
-    from brokers.market_data import market_data
-except ImportError:
+if os.environ.get("MTERMINALS_NO_SMARTAPI") == "1":
     market_data = None
+else:
+    try:
+        from brokers.market_data import market_data
+    except ImportError:
+        market_data = None
 
 # Minimal hardcoded fallback (mirrors the old COMMON_SYMBOLS in
 # dashboard.js) — only used if the ScripMaster-backed lookup below fails
@@ -900,6 +903,18 @@ def _get_fno_symbols():
     just the known indices if that lookup isn't available for any
     reason, so the dropdown never ends up empty."""
     if market_data is None:
+        try:
+            # --no-smartapi disables authenticated broker services, not the
+            # public daily ScripMaster. Keep the complete dropdown available
+            # without constructing or logging in a SmartAPI session.
+            from brokers.smartapi_instruments import get_fno_underlyings
+            symbols = get_fno_underlyings()
+            if symbols.get("indices") or symbols.get("stocks"):
+                return symbols
+        except Exception as e:
+            logger.warning(
+                f"[_get_fno_symbols] Public ScripMaster universe lookup failed: {e}"
+            )
         return _FNO_SYMBOLS_FALLBACK
     try:
         return market_data.get_fno_underlyings()
@@ -1362,11 +1377,9 @@ def export_dashboard_json(
         "spotChange":    _r(ctx_dict.get("spot_change",  0), 2),
         "spotChgPct":    _r(ctx_dict.get("spot_chg_pct", 0), 2),
         "spotBias":      str(ctx_dict.get("bias",        "Neutral")),
-        # "EQ" or "FUT" — see option_chain_json.PRICE_SOURCE's docstring.
-        # Surfaced so the frontend can label the price e.g. "Spot (FUT)"
-        # rather than silently showing a futures-derived number as if it
-        # were the untouched cash-market spot.
-        "priceSource":   str(price_source),
+        # EQ is always the analytical source. Futures remain a separate
+        # quote and confirmation input.
+        "priceSource":   "EQ",
         # Near-month futures expiry used when price_source="FUT" (empty
         # string when EQ or unset) — same reasoning as priceSource above:
         # the frontend needs this to label which contract the FUT price
@@ -1377,14 +1390,8 @@ def export_dashboard_json(
         "dte":           _to_int(dte),
         "atm":           atm_strike,
 
-        "future":        _r(ctx_dict.get("future_price",
-                            ctx_dict.get("future",
-                            spot * (1 + 0.065 * _to_int(dte) / 365) if spot > 0 and _to_int(dte) > 0
-                            else spot)), 2),
-        "basis":         _r(ctx_dict.get("future_price",
-                            ctx_dict.get("future",
-                            spot * (1 + 0.065 * _to_int(dte) / 365) if spot > 0 and _to_int(dte) > 0
-                            else spot)) - spot, 2),
+        "future":        _r(spot + _r(ctx_dict.get("basis", 0), 2), 2),
+        "basis":         _r(ctx_dict.get("basis", 0), 2),
 
         "maxPain":       _to_int(ctx_dict.get("max_pain",      0)),
         "maxPainDist":   _r(ctx_dict.get("max_pain_dist",      0), 2),

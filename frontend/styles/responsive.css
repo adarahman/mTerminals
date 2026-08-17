@@ -14,7 +14,9 @@
    becomes a single-column stack while preserving DOM/source order. */
 @media (max-width:1279px){
   .exec-grid,
+  .exec-grid--context,
   .capital-flow-grid,
+  .capital-flow-support-grid,
   .institutional-crux-grid,
   .row2,
   .row3,
@@ -28,6 +30,8 @@
 /* was inline after: .db  —  @media (max-width:900px) */
 @media (max-width:900px){
   .db{padding-left: var(--space-6);} /* vertical rail collapses/overlays on narrow screens, see .sec-nav */
+  .zone-divider{align-items:flex-start;gap:2px;}
+  .zone-divider-title,.zone-divider-subtitle{width:100%;}
   .decision-flow{grid-template-columns:1fr;}
   .decision-flow-block{grid-column:auto;border-left:0;border-top:1px solid var(--border-2);padding:14px 0 0;margin-top:2px;}
   .decision-flow-block:first-child{border-top:0;padding-top:0;}
@@ -35,6 +39,7 @@
   .top-bar-left{width:100%;}
   .top-bar-left .index-ticker{display:none;}
   .expiry-strip{margin-left:auto;flex:0 1 500px;max-width:100%;}
+  .dashboard-workspace-tabs{grid-template-columns:repeat(2,minmax(0,1fr));position:static;}
 }
 
 /* was inline after: .index-ticker  —  @media (max-width:1100px) */
@@ -45,6 +50,7 @@
 @media (max-width:1100px){
   .index-ticker{max-width:260px;}
   .index-ticker .idx-pill-val{display:none;}
+  .index-ticker .idx-pill-vix .idx-pill-val{display:inline-block;}
 }
 
 /* was inline after: .exec-grid  —  @media (max-width:900px) */
@@ -70,8 +76,11 @@
     display:flex;flex-direction:row;flex-wrap:wrap;width:auto;height:auto;
     margin-bottom: var(--space-2);
   }
+  .rail-collapse-btn{display:none;}
+  body.rail-collapsed .sec-nav{width:auto;padding:14px 10px;bottom:auto;}
+  body.rail-collapsed .sec-nav details{display:block;}
+  body.rail-collapsed .db{padding-left:var(--space-6);}
   .rail-context-menu,.rail-tools-menu{min-width:100%;}
-  .rail-tools-menu{padding-top:var(--space-2);}
   .rail-context-list,.rail-tools-list{grid-template-columns:repeat(3,minmax(0,1fr));}
 }
 
@@ -103,25 +112,10 @@
 }
 
 
-/* .oc-modal (Greeks/GEX, FII-DII, IV Surface, OI Dashboard, Strike Detail
-   Report, ...) — only above the same 900px breakpoint where .sec-nav is
-   still position:fixed at the left edge (below it, .sec-nav goes sticky/
-   horizontal at the top of the page instead, so there's no fixed-left
-   rail to clear here). Overrides padding-left specifically (not `left`,
-   which was tried first — that stacked with .oc-modal's own base
-   `padding:2vh 2vw` from panels.css, pushing the panel out to roughly
-   90px + 2vw instead of 90px, ballooning the reserved strip to ~1.8x the
-   rail's actual footprint). padding-left alone replaces just that one
-   side of the shorthand, so the panel's content starts right at 90px —
-   matching .db's own padding-left (layout.css), the app's existing
-   convention for how much room the rail needs — leaving only the rail
-   itself (plus a few px breathing room) in that strip instead of a
-   visibly oversized gutter. z-index alone (navigation.css/.sec-nav)
-   already keeps the rail clickable even without this, but that left it
-   visually floating on top of the modal's own content; this makes the
-   layout actually account for the rail instead. */
+/* Full-page analytical focus workspaces intentionally cover the jump rail;
+   their own back button restores the dashboard and navigation. */
 @media (min-width:901px){
-  .oc-modal{padding-left:90px;}
+  .oc-modal,body.rail-collapsed .oc-modal{padding-left:0;}
 }
 
 /* PDS-00: honor the operating-system motion preference across every
