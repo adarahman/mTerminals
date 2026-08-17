@@ -85,6 +85,102 @@ class Settings:
         default_factory=lambda: os.getenv("SMARTAPI_TOTP_SECRET")
     )
 
+    # -- Upstox credentials (brokers/upstox_client.py) -------------------
+    # Upstox's access_token has no unattended refresh path (see
+    # upstox_client.py's module docstring — OAuth2 authorization-code
+    # only, token expires 3:30 AM IST the next day). upstox_access_token
+    # is read here purely so the rest of the app has one place to look;
+    # it still has to be re-pasted daily the same way it always did when
+    # upstox_client.py read UPSTOX_ACCESS_TOKEN directly. upstox_client.py
+    # itself intentionally stays config.py-independent (see its
+    # docstring) so it keeps working as a standalone smoke-testable
+    # module — these fields exist for the adapters that wrap it
+    # (brokers/upstox_execution_adapter.py, market_data.py's
+    # UpstoxMarketData) to hand a token in explicitly rather than relying
+    # on upstox_client's own os.getenv() defaults.
+    upstox_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("UPSTOX_API_KEY")
+    )
+    upstox_api_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("UPSTOX_API_SECRET")
+    )
+    upstox_redirect_uri: Optional[str] = field(
+        default_factory=lambda: os.getenv("UPSTOX_REDIRECT_URI")
+    )
+    upstox_access_token: Optional[str] = field(
+        default_factory=lambda: os.getenv("UPSTOX_ACCESS_TOKEN")
+    )
+
+    # -- Kite Connect / Zerodha credentials (brokers/kite_client.py) ----
+    # Same token-lifecycle shape as Upstox above: kite_access_token has no
+    # unattended refresh path (kite_client.py's module docstring — OAuth2
+    # browser-redirect + request_token exchange only, no TOTP login), so
+    # it has to be re-pasted daily the same way it always did when
+    # kite_client.py read KITE_ACCESS_TOKEN directly. kite_client.py
+    # itself intentionally stays config.py-independent (same reasoning as
+    # upstox_client.py) so it keeps working as a standalone
+    # smoke-testable module — these fields exist for
+    # brokers/kite_execution_adapter.py to hand a token in explicitly
+    # rather than relying on kite_client's own os.getenv() defaults.
+    kite_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("KITE_API_KEY")
+    )
+    kite_api_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("KITE_API_SECRET")
+    )
+    kite_access_token: Optional[str] = field(
+        default_factory=lambda: os.getenv("KITE_ACCESS_TOKEN")
+    )
+
+    # -- Market-data provider selector -------------------------------------
+    # Independent of execution_broker: which feed backs brokers/market_data.py's
+    # `market_data` singleton (list_expiries/get_atm_chain/find_option_token/
+    # index quotes/etc). Defaults to SMARTAPI to preserve existing behavior.
+    # NOTE before flipping this to UPSTOX: ws_server_live.py's
+    # fetch_index_quotes_smartapi_sync() calls market_data.get_batch_quotes_by_token()
+    # and feeds the raw row straight into _map_smartapi_quote(), which parses
+    # AngelOne's own field names (ltp, netChange, ...). UpstoxMarketData's
+    # get_batch_quotes_by_token() returns Upstox-shaped rows instead, so that
+    # one call site needs an Upstox-aware mapper before this switch is safe to
+    # flip in production — see the note on UpstoxMarketData in market_data.py.
+    market_data_provider: str = field(
+        default_factory=lambda: os.getenv("MARKET_DATA_PROVIDER", "SMARTAPI").strip().upper()
+    )
+
+    # Optional automatic failover provider for market_data.py's singleton.
+    # Independent of market_data_provider (the PRIMARY) — when set, and
+    # different from the primary, market_data.py wraps the primary in a
+    # FallbackMarketData that switches to this provider only while the
+    # primary is actually failing (raising or returning empty), with a
+    # cooldown before it tries the primary again. Empty/unset (the
+    # default) preserves the old single-provider behavior exactly.
+    # NOTE: get_batch_quotes/get_batch_quotes_by_token never fail over,
+    # regardless of this setting — see FallbackMarketData's docstring in
+    # market_data.py for why (raw provider-specific quote field shapes).
+    market_data_fallback_provider: Optional[str] = field(
+        default_factory=lambda: (os.getenv("MARKET_DATA_FALLBACK_PROVIDER") or "").strip().upper() or None
+    )
+
+    # -- Live tick-streaming feed provider ---------------------------------
+    # Independent of BOTH execution_broker (order routing) and
+    # market_data_provider (REST chain-building polling): selects which
+    # broker's WEBSOCKET tick feed ws_server_live.py's start_smartapi_feed()/
+    # start_upstox_feed()/start_shoonya_feed() dispatch (see that file's
+    # USE_SMARTAPI/LIVE_FEED_PROVIDER block) uses to overlay fast
+    # leg-level ticks onto the slower NSE/BSE-polled chain. Defaults to
+    # SMARTAPI to preserve existing behavior. Set to UPSTOX only once
+    # UPSTOX_ACCESS_TOKEN is populated (see upstox_client.py's docstring —
+    # no unattended daily refresh) AND `pip install upstox-python-sdk` has
+    # been run (see upstox_ws_client.py's module docstring for why that's
+    # a separate, optional dependency rather than a hard one). Set to
+    # SHOONYA once the SHOONYA_* settings below are populated — no extra
+    # pip install needed: shoonya_ws_client.py's websocket path ships
+    # inside the same ShoonyaApi-py checkout brokers/shoonya_client.py
+    # already depends on (see setup_shoonya.sh).
+    live_feed_provider: str = field(
+        default_factory=lambda: os.getenv("LIVE_FEED_PROVIDER", "SMARTAPI").strip().upper()
+    )
+
     # -- Shoonya / Finvasia credentials (brokers/shoonya_client.py) ------
     shoonya_user_id: Optional[str] = field(
         default_factory=lambda: os.getenv("SHOONYA_USER_ID")

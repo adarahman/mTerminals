@@ -46,6 +46,15 @@ from paper_trading import PaperTradingEngine, _instrument_key, LOT_SIZES as PT_L
 _NO_SMARTAPI_REQUESTED = "--no-broker" in _real_argv or "--no-smartapi" in _real_argv
 from config import settings as _broker_settings
 
+# Which broker's WEBSOCKET tick feed overlays fast leg-level ticks onto the
+# slower NSE/BSE-polled chain — independent of execution_broker (orders) and
+# market_data_provider (REST chain building). See config.py's
+# live_feed_provider docstring and start_smartapi_feed()/start_upstox_feed()
+# below. UpstoxTickStream itself is imported lazily inside start_upstox_feed()
+# (not here) so a SmartAPI-only deployment never needs upstox-python-sdk
+# installed just to boot.
+LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
+
 def _smartapi_disabled(*_args, **_kwargs):
     raise RuntimeError("Broker services are disabled by --no-broker")
 
@@ -67,10 +76,34 @@ if not _NO_SMARTAPI_REQUESTED:
             get_funds as smartapi_get_funds,
         )
         _shoonya_resolve_option_contract = None
+    elif _broker_settings.execution_broker == "UPSTOX":
+        from brokers.upstox_execution_adapter import (
+            place_order as smartapi_place_order,
+            get_order_book as smartapi_get_order_book,
+            get_positions as smartapi_get_positions,
+            get_funds as smartapi_get_funds,
+        )
+        # Upstox identifies contracts purely by instrument_key (see
+        # upstox_execution_adapter.place_order's docstring) — there's no
+        # tradingsymbol-based lookup to offer here, same reason this is
+        # None on the plain SMARTAPI branch above.
+        _shoonya_resolve_option_contract = None
+    elif _broker_settings.execution_broker == "KITE":
+        from brokers.kite_execution_adapter import (
+            place_order as smartapi_place_order,
+            get_order_book as smartapi_get_order_book,
+            get_positions as smartapi_get_positions,
+            get_funds as smartapi_get_funds,
+        )
+        # Kite identifies contracts via exchange + tradingsymbol, resolved
+        # through market_data.find_option_token() same as the plain
+        # SMARTAPI branch — no Kite-specific tsym lookup needed here (see
+        # kite_execution_adapter.place_order's docstring).
+        _shoonya_resolve_option_contract = None
     else:
         raise RuntimeError(
-            "EXECUTION_BROKER must be SMARTAPI or SHOONYA, got "
-            f"{_broker_settings.execution_broker!r}"
+            "EXECUTION_BROKER must be SMARTAPI, SHOONYA, UPSTOX, or KITE, "
+            f"got {_broker_settings.execution_broker!r}"
         )
     from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
     from smartapi_feed_adapter import TickAggregator
@@ -1318,6 +1351,8 @@ def _build_algo_status() -> dict:
         "broker": (
             "Public Data" if _NO_SMARTAPI_REQUESTED
             else "Shoonya" if _broker_settings.execution_broker == "SHOONYA"
+            else "Upstox" if _broker_settings.execution_broker == "UPSTOX"
+            else "Zerodha" if _broker_settings.execution_broker == "KITE"
             else "Angel One"
         ),
         "liveTradingEnabled": LIVE_TRADING_ENABLED,
@@ -1877,7 +1912,12 @@ def switch_symbol(new_symbol, new_expiry=None):
     _LAST_SENT = None
     _SYMBOL_SWITCH_EVENT.set()
     if USE_SMARTAPI:
-        restart_smartapi_feed(new_symbol, new_expiry)
+        if LIVE_FEED_PROVIDER == "UPSTOX":
+            restart_upstox_feed(new_symbol, new_expiry)
+        elif LIVE_FEED_PROVIDER == "SHOONYA":
+            restart_shoonya_feed(new_symbol, new_expiry)
+        else:
+            restart_smartapi_feed(new_symbol, new_expiry)
 
 
 def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
@@ -1909,14 +1949,41 @@ def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
 async def _smartapi_sync_and_broadcast(message):
     """Serialize SmartAPI mutations with engine full/delta computation."""
     async with _MARKET_STREAM_LOCK:
-        await _smartapi_sync_and_broadcast_locked(message)
+        await _live_feed_sync_and_broadcast_locked(message, _smartapi_feed_matches_displayed_expiry)
 
 
-async def _smartapi_sync_and_broadcast_locked(message):
-    """Wraps broadcast() for the SmartAPI feed specifically: before sending
-    a tick delta to clients, also merges it into LAST_PAYLOAD/_LAST_SENT's
-    matching chain rows (IF the feed's expiry matches what's currently
-    displayed — see _smartapi_feed_matches_displayed_expiry). Without this,
+async def _upstox_sync_and_broadcast(message):
+    """Upstox analog of _smartapi_sync_and_broadcast() — same shared
+    merge logic, gated on the Upstox feed's own expiry tracker instead
+    (see _upstox_feed_matches_displayed_expiry). SmartAPI and Upstox
+    feeds are mutually exclusive in practice (LIVE_FEED_PROVIDER picks
+    one), so there's no risk of the two racing to merge into
+    LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
+    serializes either way."""
+    async with _MARKET_STREAM_LOCK:
+        await _live_feed_sync_and_broadcast_locked(message, _upstox_feed_matches_displayed_expiry)
+
+
+async def _shoonya_sync_and_broadcast(message):
+    """Shoonya analog of _smartapi_sync_and_broadcast() — same shared
+    merge logic, gated on the Shoonya feed's own expiry tracker instead
+    (see _shoonya_feed_matches_displayed_expiry). SmartAPI/Upstox/Shoonya
+    feeds are mutually exclusive in practice (LIVE_FEED_PROVIDER picks
+    one), so there's no risk of them racing to merge into
+    LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
+    serializes either way."""
+    async with _MARKET_STREAM_LOCK:
+        await _live_feed_sync_and_broadcast_locked(message, _shoonya_feed_matches_displayed_expiry)
+
+
+async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
+    """Wraps broadcast() for a live tick-streaming feed (SmartAPI, Upstox,
+    or Shoonya — matches_expiry_fn is the caller's own feed-specific gate,
+    see _smartapi_sync_and_broadcast/_upstox_sync_and_broadcast/
+    _shoonya_sync_and_broadcast above):
+    before sending a tick delta to clients, also merges it into
+    LAST_PAYLOAD/_LAST_SENT's matching chain rows (IF the feed's expiry
+    matches what's currently displayed — see matches_expiry_fn). Without this,
     TickAggregator's updates were invisible to LAST_PAYLOAD/_LAST_SENT
     entirely: a newly-connecting client's initial "full" snapshot (built
     from LAST_PAYLOAD) would miss whatever SmartAPI had already pushed to
@@ -1946,7 +2013,7 @@ async def _smartapi_sync_and_broadcast_locked(message):
         if isinstance(chain_delta, dict) and chain_delta.get("_keyed"):
             changed_rows = chain_delta.get("changed") or []
             current_expiry = (LAST_PAYLOAD or {}).get("expiry")
-            if changed_rows and _smartapi_feed_matches_displayed_expiry(current_expiry):
+            if changed_rows and matches_expiry_fn(current_expiry):
                 feed_update_applied = True
                 if isinstance(LAST_PAYLOAD, dict):
                     _apply_smartapi_rows_to_chain_list(LAST_PAYLOAD.get("chain"), changed_rows)
@@ -1993,7 +2060,7 @@ async def _smartapi_sync_and_broadcast_locked(message):
     except Exception as e:
         # Sync is a best-effort consistency improvement, not required for
         # the tick to reach clients — never let a sync bug block broadcast.
-        print(f"[smartapi] state sync failed (broadcasting anyway): {e}", flush=True)
+        print(f"[live-feed] state sync failed (broadcasting anyway): {e}", flush=True)
 
     if feed_update_applied and LAST_PAYLOAD is not None:
         LAST_PAYLOAD_AT = datetime.now().astimezone()
@@ -2061,11 +2128,14 @@ _smartapi_switch_lock = threading.RLock()
 
 def _parse_any_expiry(expiry_str):
     """Normalizes an expiry string to a date for comparison, accepting
-    either SmartAPI's format ('31JUL2026', no separators — used by
-    list_expiries()/_smartapi_current_expiry) or option_chain_json's format
+    SmartAPI's format ('31JUL2026', no separators — used by
+    list_expiries()/_smartapi_current_expiry), option_chain_json's format
     ('31-Jul-2026', dash-separated — used by the global EXPIRY/payload
-    ["expiry"]). Returns None if it matches neither."""
-    for fmt in ("%d%b%Y", "%d-%b-%Y", "%d-%B-%Y"):
+    ["expiry"]), or Upstox's native ISO format ('2026-07-31' — used by
+    brokers/upstox_client.py's list_expiries()/_upstox_current_expiry, see
+    _resolve_upstox_chain_tokens() below). Returns None if it matches none
+    of these."""
+    for fmt in ("%d%b%Y", "%d-%b-%Y", "%d-%B-%Y", "%Y-%m-%d"):
         try:
             return datetime.strptime(expiry_str, fmt).date()
         except (ValueError, TypeError):
@@ -2197,6 +2267,385 @@ def _resolve_futures_token(target_symbol, exchange):
     already treats a None token as "skip", so this is safe to leave as a
     no-op stub."""
     return None, None
+
+
+# ── Upstox live feed (parallel to the SmartAPI block above) ───────────────
+# Selected instead of the SmartAPI block via LIVE_FEED_PROVIDER=="UPSTOX"
+# (see switch_symbol() and main() below) — mutually exclusive with it, not
+# layered on top of it. Upstox has no separate NFO/BFO-vs-cash-exchange
+# subscribe split the way SmartAPI's EXCHANGE_TYPE needs (see
+# upstox_ws_client.py's module docstring): every leg, the index, and (if
+# ever wired) futures all live in ONE instrument_key namespace, subscribed
+# through a single call — so the state below is a strict subset of the
+# SmartAPI block's (_upstox_exchange/_upstox_index_exchange have no
+# equivalent here, there's nothing to track per-exchange).
+
+_upstox_stream = None
+_upstox_aggregator = None
+_upstox_loop = None             # captured once at startup, reused for symbol switches
+_upstox_keys = None             # instrument_key list currently subscribed, for unsubscribe
+_upstox_current_expiry = None   # ISO 'YYYY-MM-DD' expiry the Upstox feed is streaming
+
+# Same reentrant-serialization purpose as _smartapi_switch_lock above — see
+# that lock's docstring for the exact race it closes (a backgrounded
+# startup call racing a switch's fallback call into the same start_*_feed()).
+_upstox_switch_lock = threading.RLock()
+
+
+def _upstox_feed_matches_displayed_expiry(payload_expiry_str):
+    """Upstox analog of _smartapi_feed_matches_displayed_expiry() above —
+    same purpose (don't merge a stale-expiry tick delta into the
+    currently-displayed chain), gated on _upstox_current_expiry instead.
+    _parse_any_expiry() accepts Upstox's ISO expiry format alongside
+    SmartAPI's (see its docstring)."""
+    if not _upstox_current_expiry or not payload_expiry_str:
+        return False
+    a = _parse_any_expiry(_upstox_current_expiry)
+    b = _parse_any_expiry(payload_expiry_str)
+    return a is not None and a == b
+
+
+def _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
+    """Upstox analog of _resolve_chain_tokens() above — same purpose
+    (build the instrument-key set the live tick feed should subscribe to
+    for target_symbol) — but talks to brokers/upstox_client.py directly
+    rather than through the `market_data` singleton. The singleton's
+    UpstoxMarketData adapter is a REST-polling concern independently
+    selected by MARKET_DATA_PROVIDER, and (per its own KNOWN GAP
+    docstring in market_data.py) doesn't guarantee every call site gets
+    broker-agnostic row shapes — going straight to brokers/upstox_client.py
+    here matches what _resolve_chain_tokens() effectively already assumes
+    for SmartAPI (it's only ever exercised with market_data pointed at
+    SmartAPI in practice).
+
+    Returns (token_meta, expiry_iso, index_key) or None. `index_key` is
+    returned separately (not just inferred from token_meta) purely for
+    the caller's logging, same reason _resolve_chain_tokens() returns
+    index_token/index_exchange_type as extra values.
+
+    NOTE: no futures-VWAP leg here, matching _resolve_futures_token()
+    above being a documented no-op stub on the SmartAPI side today too —
+    nothing working yet to mirror."""
+    from brokers.upstox_client import list_expiries as _up_list_expiries
+    from brokers.upstox_client import get_atm_chain as _up_get_atm_chain
+    from brokers.upstox_client import INDEX_KEYS as _UP_INDEX_KEYS
+
+    exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
+
+    expiries = _up_list_expiries(target_symbol, exchange=exchange)
+    if not expiries:
+        print(f"[upstox] No expiries found for {target_symbol}, skipping feed", flush=True)
+        return None
+
+    if expiry:
+        target_date = _parse_any_expiry(expiry)
+        resolved_expiry = next((e for e in expiries if _parse_any_expiry(e) == target_date), None)
+        if resolved_expiry is None:
+            print(f"[upstox] Requested expiry '{expiry}' not available for "
+                  f"{target_symbol} (have: {expiries}) — falling back to nearest", flush=True)
+            resolved_expiry = expiries[0]
+    else:
+        resolved_expiry = expiries[0]
+
+    chain = _up_get_atm_chain(target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange)
+    if not chain:
+        print(f"[upstox] Could not build ATM chain for {target_symbol}, skipping feed", flush=True)
+        return None
+
+    token_meta = {
+        row["instrument_key"]: {"strike": row["strike"], "option_type": row["type"]}
+        for row in chain["rows"]
+        if row.get("instrument_key")
+    }
+
+    index_key = _UP_INDEX_KEYS.get(target_symbol)
+    if index_key is None:
+        print(f"[upstox] No INDEX_KEYS entry for {target_symbol} — "
+              f"spot will only update via the slower REST poll, not Upstox", flush=True)
+    else:
+        # Tagged "INDEX" — same convention TickAggregator.on_tick() already
+        # understands for SmartAPI's index token (see _resolve_chain_tokens()).
+        token_meta[index_key] = {"strike": None, "option_type": "INDEX"}
+
+    return token_meta, resolved_expiry, index_key
+
+
+def start_upstox_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
+    """Upstox analog of start_smartapi_feed() below — same lifecycle and
+    locking discipline (see that function's docstring for the exact race
+    _upstox_switch_lock closes). Imports UpstoxTickStream lazily, here and
+    only here, so booting with LIVE_FEED_PROVIDER left at its SMARTAPI
+    default never requires upstox-python-sdk to be installed."""
+    global _upstox_stream, _upstox_aggregator, _upstox_loop
+    global _upstox_keys, _upstox_current_expiry
+
+    from brokers.upstox_ws_client import UpstoxTickStream
+
+    with _upstox_switch_lock:
+        if _upstox_stream is not None:
+            target_symbol = (underlying or SYMBOL).upper()
+            print(f"[upstox] Feed already running, switching to {target_symbol} instead of starting a new one", flush=True)
+            _switch_upstox_symbol_blocking(target_symbol, strikes_around_atm, expiry)
+            return
+
+        _upstox_loop = loop
+        target_symbol = (underlying or SYMBOL).upper()
+
+        resolved = _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry)
+        if resolved is None:
+            return
+        token_meta, resolved_expiry, index_key = resolved
+
+        _upstox_aggregator = TickAggregator(
+            token_meta, loop, _upstox_sync_and_broadcast,
+            tick_event=_TICK_ACTIVITY_EVENT,
+        )
+        _upstox_aggregator.start()
+
+        _upstox_stream = UpstoxTickStream(on_tick=_upstox_aggregator.on_tick, mode="full")
+        _upstox_stream.connect()
+        threading.Thread(target=_upstox_stream.run_forever_with_reconnect, daemon=True).start()
+        time.sleep(2)  # let the WS connection establish before subscribing
+
+        keys = list(token_meta.keys())
+        _upstox_stream.subscribe(keys)
+        _upstox_keys = keys
+        _upstox_current_expiry = resolved_expiry
+
+        option_count = len(keys) - (1 if index_key else 0)
+        print(f"[upstox] Streaming {option_count} {target_symbol} option legs"
+              f"{' + spot' if index_key else ''} (expiry {resolved_expiry})", flush=True)
+
+
+def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
+    """Upstox analog of _switch_smartapi_symbol_blocking() below — reuses
+    the existing WS connection, no socket close/reopen. Guarded by
+    _upstox_switch_lock so two rapid switches can't interleave their
+    unsubscribe/subscribe calls (same reasoning as the SmartAPI version)."""
+    global _upstox_keys, _upstox_current_expiry
+
+    with _upstox_switch_lock:
+        if _upstox_stream is None or _upstox_aggregator is None:
+            if _upstox_loop is not None:
+                start_upstox_feed(_upstox_loop, new_symbol, strikes_around_atm, expiry)
+            return
+
+        resolved = _resolve_upstox_chain_tokens(new_symbol.upper(), strikes_around_atm, expiry)
+        if resolved is None:
+            return
+        new_token_meta, new_expiry, new_index_key = resolved
+        new_keys = list(new_token_meta.keys())
+
+        if _upstox_keys:
+            try:
+                _upstox_stream.unsubscribe(_upstox_keys)
+            except Exception as e:
+                print(f"[upstox] Unsubscribe failed (continuing anyway): {e}", flush=True)
+
+        _upstox_aggregator.update_token_meta(new_token_meta)
+        _upstox_stream.subscribe(new_keys)
+
+        _upstox_keys = new_keys
+        _upstox_current_expiry = new_expiry
+        option_count = len(new_keys) - (1 if new_index_key else 0)
+        print(f"[upstox] Switched stream to {option_count} {new_symbol.upper()} option legs"
+              f"{' + spot' if new_index_key else ''} (expiry {new_expiry})", flush=True)
+
+
+def restart_upstox_feed(new_symbol, new_expiry=None):
+    """Upstox analog of restart_smartapi_feed() below — same fire-and-
+    forget threading discipline. Call this from switch_symbol()."""
+    threading.Thread(
+        target=_switch_upstox_symbol_blocking,
+        args=(new_symbol, 10, new_expiry),
+        daemon=True,
+    ).start()
+
+
+# ── Shoonya live feed (parallel to the SmartAPI/Upstox blocks above) ──────
+# Selected instead of either via LIVE_FEED_PROVIDER=="SHOONYA" — mutually
+# exclusive with both, not layered on top. Shoonya's Noren feed identifies
+# instruments as flat "EXCH|TOKEN" strings (see shoonya_ws_client.py's
+# module docstring) rather than SmartAPI's per-exchangeType subscribe lists
+# or Upstox's single instrument_key namespace, so the state below tracks a
+# plain set of subscribed strings — no separate exchange-type bucketing
+# needed the way the SmartAPI block requires.
+
+_shoonya_stream = None
+_shoonya_aggregator = None
+_shoonya_loop = None             # captured once at startup, reused for symbol switches
+_shoonya_instruments = None      # 'EXCH|TOKEN' strings currently subscribed, for unsubscribe
+_shoonya_current_expiry = None   # expiry (Shoonya's 'DD-Mon-YYYY' format) the feed is streaming
+
+# Same reentrant-serialization purpose as _smartapi_switch_lock/
+# _upstox_switch_lock above.
+_shoonya_switch_lock = threading.RLock()
+
+
+def _shoonya_feed_matches_displayed_expiry(payload_expiry_str):
+    """Shoonya analog of _smartapi_feed_matches_displayed_expiry() /
+    _upstox_feed_matches_displayed_expiry() above — same purpose, gated
+    on _shoonya_current_expiry instead. _parse_any_expiry() accepts
+    Shoonya's 'DD-Mon-YYYY' format alongside SmartAPI's/Upstox's (see
+    that helper's docstring)."""
+    if not _shoonya_current_expiry or not payload_expiry_str:
+        return False
+    a = _parse_any_expiry(_shoonya_current_expiry)
+    b = _parse_any_expiry(payload_expiry_str)
+    return a is not None and a == b
+
+
+def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
+    """Shoonya analog of _resolve_chain_tokens()/_resolve_upstox_chain_tokens()
+    above — builds the 'EXCH|TOKEN' subscribe-string set the live tick feed
+    should use for target_symbol. Talks to brokers/shoonya_market_data.py
+    directly (not through the `market_data` singleton) for the same reason
+    _resolve_upstox_chain_tokens() does: MARKET_DATA_PROVIDER independently
+    selects which REST adapter backs the singleton, and this feed should
+    work correctly even when the singleton is pointed elsewhere.
+
+    Returns (instrument_meta, expiry_ddmmmyyyy, index_instrument) or None.
+    `instrument_meta` is keyed by 'EXCH|TOKEN' string (matching what
+    ShoonyaTickStream.subscribe() expects and what its ticks report back
+    as `token` after stripping the exchange prefix — see
+    _shoonya_sync_and_broadcast() below for the strip)."""
+    from brokers.shoonya_market_data import list_expiries as _sh_list_expiries
+    from brokers.shoonya_market_data import get_atm_chain as _sh_get_atm_chain
+    from brokers.shoonya_market_data import index_tokens as _sh_index_tokens
+
+    exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
+
+    expiries = _sh_list_expiries(target_symbol, exchange=exchange)
+    if not expiries:
+        print(f"[shoonya] No expiries found for {target_symbol}, skipping feed", flush=True)
+        return None
+
+    if expiry:
+        target_date = _parse_any_expiry(expiry)
+        resolved_expiry = next((e for e in expiries if _parse_any_expiry(e) == target_date), None)
+        if resolved_expiry is None:
+            print(f"[shoonya] Requested expiry '{expiry}' not available for "
+                  f"{target_symbol} (have: {expiries}) — falling back to nearest", flush=True)
+            resolved_expiry = expiries[0]
+    else:
+        resolved_expiry = expiries[0]
+
+    chain = _sh_get_atm_chain(target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange)
+    if not chain:
+        print(f"[shoonya] Could not build ATM chain for {target_symbol}, skipping feed", flush=True)
+        return None
+
+    instrument_meta = {
+        f"{exchange}|{row['token']}": {"strike": row["strike"], "option_type": row["type"]}
+        for row in chain["rows"]
+    }
+
+    # Underlying's own index instrument, so spot streams at tick rate
+    # instead of only updating via the slower REST poll — same reasoning
+    # _resolve_chain_tokens()'s INDEX_TOKENS lookup gives for SmartAPI.
+    index_info = _sh_index_tokens().get(target_symbol)
+    index_instrument = None
+    if index_info is None or not index_info.get("token"):
+        print(f"[shoonya] No index token resolved for {target_symbol} — "
+              f"spot will only update via the slower REST poll, not Shoonya", flush=True)
+    else:
+        index_instrument = f"{index_info['exchange']}|{index_info['token']}"
+        # Tagged "INDEX" — same convention TickAggregator.on_tick() already
+        # understands for SmartAPI's/Upstox's index token.
+        instrument_meta[index_instrument] = {"strike": None, "option_type": "INDEX"}
+
+    return instrument_meta, resolved_expiry, index_instrument
+
+
+def start_shoonya_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
+    """Shoonya analog of start_smartapi_feed()/start_upstox_feed() below —
+    same lifecycle and locking discipline (see start_smartapi_feed()'s
+    docstring for the exact race _shoonya_switch_lock closes)."""
+    global _shoonya_stream, _shoonya_aggregator, _shoonya_loop
+    global _shoonya_instruments, _shoonya_current_expiry
+
+    from brokers.shoonya_ws_client import ShoonyaTickStream
+
+    with _shoonya_switch_lock:
+        if _shoonya_stream is not None:
+            target_symbol = (underlying or SYMBOL).upper()
+            print(f"[shoonya] Feed already running, switching to {target_symbol} instead of starting a new one", flush=True)
+            _switch_shoonya_symbol_blocking(target_symbol, strikes_around_atm, expiry)
+            return
+
+        _shoonya_loop = loop
+        target_symbol = (underlying or SYMBOL).upper()
+
+        resolved = _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry)
+        if resolved is None:
+            return
+        instrument_meta, resolved_expiry, index_instrument = resolved
+
+        _shoonya_aggregator = TickAggregator(
+            instrument_meta, loop, _shoonya_sync_and_broadcast,
+            tick_event=_TICK_ACTIVITY_EVENT,
+        )
+        _shoonya_aggregator.start()
+
+        _shoonya_stream = ShoonyaTickStream(on_tick=_shoonya_aggregator.on_tick)
+        _shoonya_stream.connect()
+        threading.Thread(target=_shoonya_stream.run_forever_with_reconnect, daemon=True).start()
+        time.sleep(2)  # let the WS connection establish before subscribing
+
+        instruments = list(instrument_meta.keys())
+        _shoonya_stream.subscribe(instruments)
+        _shoonya_instruments = instruments
+        _shoonya_current_expiry = resolved_expiry
+
+        option_count = len(instruments) - (1 if index_instrument else 0)
+        print(f"[shoonya] Streaming {option_count} {target_symbol} option legs"
+              f"{' + spot' if index_instrument else ''} (expiry {resolved_expiry})", flush=True)
+
+
+def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
+    """Shoonya analog of _switch_smartapi_symbol_blocking()/
+    _switch_upstox_symbol_blocking() above — reuses the existing WS
+    connection, no socket close/reopen. Guarded by _shoonya_switch_lock so
+    two rapid switches can't interleave their unsubscribe/subscribe calls."""
+    global _shoonya_instruments, _shoonya_current_expiry
+
+    with _shoonya_switch_lock:
+        if _shoonya_stream is None or _shoonya_aggregator is None:
+            if _shoonya_loop is not None:
+                start_shoonya_feed(_shoonya_loop, new_symbol, strikes_around_atm, expiry)
+            return
+
+        resolved = _resolve_shoonya_chain_tokens(new_symbol.upper(), strikes_around_atm, expiry)
+        if resolved is None:
+            return
+        new_instrument_meta, new_expiry, new_index_instrument = resolved
+        new_instruments = list(new_instrument_meta.keys())
+
+        if _shoonya_instruments:
+            try:
+                _shoonya_stream.unsubscribe(_shoonya_instruments)
+            except Exception as e:
+                print(f"[shoonya] Unsubscribe failed (continuing anyway): {e}", flush=True)
+
+        _shoonya_aggregator.update_token_meta(new_instrument_meta)
+        _shoonya_stream.subscribe(new_instruments)
+
+        _shoonya_instruments = new_instruments
+        _shoonya_current_expiry = new_expiry
+        option_count = len(new_instruments) - (1 if new_index_instrument else 0)
+        print(f"[shoonya] Switched stream to {option_count} {new_symbol.upper()} option legs"
+              f"{' + spot' if new_index_instrument else ''} (expiry {new_expiry})", flush=True)
+
+
+def restart_shoonya_feed(new_symbol, new_expiry=None):
+    """Shoonya analog of restart_smartapi_feed()/restart_upstox_feed()
+    above — same fire-and-forget threading discipline. Call this from
+    switch_symbol()."""
+    threading.Thread(
+        target=_switch_shoonya_symbol_blocking,
+        args=(new_symbol, 10, new_expiry),
+        daemon=True,
+    ).start()
 
 
 def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
@@ -3387,7 +3836,15 @@ def _build_health_snapshot(now=None):
         feed_reason = f"Market session is {session.lower().replace('_', ' ')}"
 
     smartapi_connected = False
-    if USE_SMARTAPI and _smartapi_stream is not None:
+    upstox_connected = False
+    shoonya_connected = False
+    if USE_SMARTAPI and LIVE_FEED_PROVIDER == "UPSTOX" and _upstox_stream is not None:
+        connected_event = getattr(_upstox_stream, "_connected", None)
+        upstox_connected = bool(connected_event and connected_event.is_set())
+    elif USE_SMARTAPI and LIVE_FEED_PROVIDER == "SHOONYA" and _shoonya_stream is not None:
+        connected_event = getattr(_shoonya_stream, "_connected", None)
+        shoonya_connected = bool(connected_event and connected_event.is_set())
+    elif USE_SMARTAPI and _smartapi_stream is not None:
         connected_event = getattr(_smartapi_stream, "_connected", None)
         smartapi_connected = bool(connected_event and connected_event.is_set())
 
@@ -3419,6 +3876,9 @@ def _build_health_snapshot(now=None):
             "staleAfterSeconds": stale_after,
             "smartapiEnabled": USE_SMARTAPI,
             "smartapiConnected": smartapi_connected,
+            "liveFeedProvider": LIVE_FEED_PROVIDER if USE_SMARTAPI else None,
+            "upstoxConnected": upstox_connected,
+            "shoonyaConnected": shoonya_connected,
         },
         "analyticsPipeline": dict(_PIPELINE_STATUS),
     }
@@ -3510,10 +3970,21 @@ async def main():
     # compute_diff() in engine_loop(): anything blocking goes through a
     # thread, never runs inline on the loop.
     if USE_SMARTAPI:
-        _create_background_task(
-            asyncio.to_thread(start_smartapi_feed, loop),
-            "smartapi_startup",
-        )
+        if LIVE_FEED_PROVIDER == "UPSTOX":
+            _create_background_task(
+                asyncio.to_thread(start_upstox_feed, loop),
+                "upstox_startup",
+            )
+        elif LIVE_FEED_PROVIDER == "SHOONYA":
+            _create_background_task(
+                asyncio.to_thread(start_shoonya_feed, loop),
+                "shoonya_startup",
+            )
+        else:
+            _create_background_task(
+                asyncio.to_thread(start_smartapi_feed, loop),
+                "smartapi_startup",
+            )
     else:
         print("[broker] authenticated services disabled (--no-broker) — no broker login, "
               "account/order REST call, or websocket connection; public daily ScripMaster allowed", flush=True)
