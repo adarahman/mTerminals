@@ -30,10 +30,90 @@ Sections
 # ── 1. Imports & shared constants ──────────────────────────────────────
 import os
 import threading
+import time
 from datetime import datetime
 from typing import Optional
 
 from kiteconnect import KiteConnect
+
+# Rate limiting configuration for Kite Connect API calls
+# Kite Connect has documented rate limits of ~3-10 requests per second depending on endpoint
+_KITE_RATE_LIMIT_MIN_INTERVAL = {
+    "quote": 0.15,           # ~6-7 calls per second for quotes
+    "orders": 0.25,          # ~4 calls per second for orders
+    "positions": 0.30,       # ~3 calls per second for positions
+    "holdings": 0.50,        # ~2 calls per second for holdings
+    "margins": 0.50,         # ~2 calls per second for margins
+    "instruments": 2.0,      # ~0.5 calls per second for instruments (expensive call)
+}
+_KITE_RATE_LIMIT_DEFAULT_INTERVAL = 0.12  # ~8 calls per second default
+_KITE_RATE_LIMIT_BACKOFF_S = 1.5
+_KITE_RATE_LIMIT_MAX_RETRIES = 3
+_kite_rate_limit_lock = threading.Lock()
+_kite_rate_limit_last_ts: dict[str, float] = {}
+_kite_rate_limit_global_last = 0.0
+
+
+def _is_rate_limited(err) -> bool:
+    """Check if an error indicates rate limiting."""
+    text = str(err).lower()
+    return (
+        "rate limit" in text
+        or "too many requests" in text
+        or "access denied" in text
+        or "exceed" in text
+        or "429" in text  # HTTP 429 Too Many Requests
+    )
+
+
+def _kite_rate_limit_wait(fn_name: str) -> None:
+    """Sleep just enough to respect per-endpoint + global spacing for Kite."""
+    global _kite_rate_limit_global_last
+    min_gap = _KITE_RATE_LIMIT_MIN_INTERVAL.get(fn_name, _KITE_RATE_LIMIT_DEFAULT_INTERVAL)
+    with _kite_rate_limit_lock:
+        now = time.monotonic()
+        last_fn = _kite_rate_limit_last_ts.get(fn_name, 0.0)
+        wait_fn = min_gap - (now - last_fn)
+        wait_global = _KITE_RATE_LIMIT_DEFAULT_INTERVAL - (now - _kite_rate_limit_global_last)
+        wait = max(0.0, wait_fn, wait_global)
+        if wait > 0:
+            time.sleep(wait)
+            now = time.monotonic()
+        _kite_rate_limit_last_ts[fn_name] = now
+        _kite_rate_limit_global_last = now
+
+
+def _kite_call_with_retry(fn_name, api_method, *args, **kwargs):
+    """Execute a Kite API call with rate limiting and retry logic."""
+    _kite_rate_limit_wait(fn_name)
+    delay = _KITE_RATE_LIMIT_BACKOFF_S
+    last_exc = None
+    
+    for attempt in range(1, _KITE_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            result = api_method(*args, **kwargs)
+            return result
+        except Exception as e:
+            last_exc = e
+            if _is_rate_limited(e):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"[kite_client] {fn_name} rate-limited ({e}); "
+                    f"backing off {delay}s (attempt {attempt}/{_KITE_RATE_LIMIT_MAX_RETRIES})"
+                )
+                if attempt < _KITE_RATE_LIMIT_MAX_RETRIES:
+                    time.sleep(delay)
+                    delay *= 2
+                    _kite_rate_limit_wait(fn_name)
+                    continue
+            # Non-rate-limit errors, raise immediately
+            raise KiteError(f"Kite {fn_name} failed: {e}") from e
+    
+    # Should not reach here, but just in case
+    if last_exc:
+        raise KiteError(f"Kite {fn_name} failed after retries: {last_exc}")
+    raise KiteError(f"Kite {fn_name} failed with unknown error")
 
 try:
     import orjson as _orjson
@@ -144,7 +224,7 @@ def _load_instruments(exchange: str = "NFO", force_refresh: bool = False) -> lis
         return _instrument_cache["rows"]
 
     kite = _session.ensure_session()
-    rows = kite.instruments(exchange)
+    rows = _kite_call_with_retry("instruments", kite.instruments, exchange)
     _instrument_cache["date"] = today
     _instrument_cache["rows"] = rows
     _instrument_cache["by_symbol"] = {r["tradingsymbol"]: r for r in rows}
@@ -235,7 +315,7 @@ def get_quotes(exchange_tradingsymbol_pairs: list) -> dict:
     if not exchange_tradingsymbol_pairs:
         return {}
     kite = _session.ensure_session()
-    return kite.quote(exchange_tradingsymbol_pairs)
+    return _kite_call_with_retry("quote", kite.quote, exchange_tradingsymbol_pairs)
 
 
 def get_spot_quote(underlying: str) -> Optional[dict]:
@@ -244,7 +324,8 @@ def get_spot_quote(underlying: str) -> Optional[dict]:
     index_key = f"NSE:{underlying.upper()}"
     kite = _session.ensure_session()
     try:
-        data = kite.quote([index_key]).get(index_key)
+        quotes = _kite_call_with_retry("quote", kite.quote, [index_key])
+        data = quotes.get(index_key)
     except Exception as exc:
         raise KiteError(f"Kite get_spot_quote failed: {exc}") from exc
     if not data:
@@ -289,7 +370,7 @@ def place_order(tradingsymbol, symboltoken, exchange, transaction_type,
     order_type_map = {"MARKET": kite.ORDER_TYPE_MARKET, "LIMIT": kite.ORDER_TYPE_LIMIT}
 
     try:
-        order_id = kite.place_order(
+        order_id = _kite_call_with_retry("place_order", kite.place_order,
             tradingsymbol=tradingsymbol,
             exchange=exchange,
             transaction_type=(kite.TRANSACTION_TYPE_BUY if transaction_type.upper() == "BUY"
@@ -309,7 +390,7 @@ def place_order(tradingsymbol, symboltoken, exchange, transaction_type,
 def get_order_book():
     kite = _session.ensure_session()
     try:
-        return kite.orders()
+        return _kite_call_with_retry("orders", kite.orders)
     except Exception as exc:
         raise KiteError(f"Kite get_order_book failed: {exc}") from exc
 
@@ -317,7 +398,7 @@ def get_order_book():
 def get_positions():
     kite = _session.ensure_session()
     try:
-        data = kite.positions()
+        data = _kite_call_with_retry("positions", kite.positions)
     except Exception as exc:
         raise KiteError(f"Kite get_positions failed: {exc}") from exc
     return data.get("net", [])
@@ -326,7 +407,7 @@ def get_positions():
 def get_funds():
     kite = _session.ensure_session()
     try:
-        margins = kite.margins()
+        margins = _kite_call_with_retry("margins", kite.margins)
     except Exception as exc:
         raise KiteError(f"Kite get_funds failed: {exc}") from exc
     equity = margins.get("equity", {}) if isinstance(margins, dict) else {}

@@ -300,7 +300,15 @@ def open_lots_from_positions(positions: list[dict], lot_size_lookup: dict[str, i
             return None
         symbol = (p.get("symbolname") or p.get("tradingsymbol") or "").upper()
         lot_size = None
-        for sym_key, size in lot_size_lookup.items():
+        # BUGFIX: iterating lot_size_lookup in whatever order it happens to
+        # have (dict insertion order) meant a shorter key that's a prefix of
+        # a longer one — e.g. "SENSEX" is a prefix of "SENSEX50" — could
+        # match first and return the WRONG symbol's lot size, silently
+        # corrupting this guard's exposure math. Sorting by key length
+        # (longest/most-specific first) guarantees "SENSEX50..." matches
+        # "SENSEX50" before it can ever match the shorter "SENSEX". Same
+        # fix already applied below in projected_open_lots_from_positions().
+        for sym_key, size in sorted(lot_size_lookup.items(), key=lambda item: len(item[0]), reverse=True):
             if symbol.startswith(sym_key):
                 lot_size = size
                 break

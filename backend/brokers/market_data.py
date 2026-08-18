@@ -22,20 +22,9 @@ satisfying MarketData and swap the `market_data` instance below.
 import logging
 import time
 from datetime import datetime
-from typing import Protocol, Optional
+from typing import Optional, Protocol
 
 logger = logging.getLogger(__name__)
-
-from brokers.smartapi_client import (
-    list_expiries as _list_expiries,
-    get_atm_chain as _get_atm_chain,
-    find_option_token as _find_option_token,
-    get_batch_quotes as _get_batch_quotes,
-    get_batch_quotes_by_token as _get_batch_quotes_by_token,
-    get_spot_quote as _get_spot_quote,
-    get_fno_underlyings as _get_fno_underlyings,
-    INDEX_TOKENS as _INDEX_TOKENS,
-)
 
 from config import settings as _md_settings
 
@@ -45,23 +34,36 @@ class MarketData(Protocol):
         """Sorted expiry strings (SmartAPI format, e.g. '31JUL2026') for underlying."""
         ...
 
-    def get_atm_chain(self, underlying: str, expiry_ddmmmyyyy: str,
-                       strikes_around_atm: int = 10, exchange: str = "NFO") -> Optional[dict]:
+    def get_atm_chain(
+        self,
+        underlying: str,
+        expiry_ddmmmyyyy: str,
+        strikes_around_atm: int = 10,
+        exchange: str = "NFO",
+    ) -> Optional[dict]:
         """{'underlying', 'spot', 'atm_strike', 'expiry', 'rows': [...]} or None."""
         ...
 
-    def find_option_token(self, underlying: str, expiry_ddmmmyyyy: str,
-                           strike, opt_type: str, exchange: str = "NFO") -> Optional[dict]:
+    def find_option_token(
+        self,
+        underlying: str,
+        expiry_ddmmmyyyy: str,
+        strike,
+        opt_type: str,
+        exchange: str = "NFO",
+    ) -> Optional[dict]:
         """{'tradingsymbol', 'token'} for one contract, or None if unresolved."""
         ...
 
-    def get_batch_quotes(self, exchange: str, symbol_token_pairs: list,
-                          mode: str = "FULL") -> dict:
+    def get_batch_quotes(
+        self, exchange: str, symbol_token_pairs: list, mode: str = "FULL"
+    ) -> dict:
         """Up to 50 (tradingsymbol, token) pairs -> dict keyed by tradingsymbol."""
         ...
 
-    def get_batch_quotes_by_token(self, exchange: str, symbol_token_pairs: list,
-                                   mode: str = "FULL") -> dict:
+    def get_batch_quotes_by_token(
+        self, exchange: str, symbol_token_pairs: list, mode: str = "FULL"
+    ) -> dict:
         """Same request as get_batch_quotes(), but dict keyed by str(symbolToken)
         instead of Angel's tradingsymbol display name — use when the caller
         needs to re-key back to its own symbol names, not Angel's."""
@@ -87,27 +89,53 @@ class SmartApiMarketData:
     singleton below with zero functional difference."""
 
     def list_expiries(self, underlying, exchange="NFO"):
+        from brokers.smartapi_client import list_expiries as _list_expiries
+
         return _list_expiries(underlying, exchange=exchange)
 
-    def get_atm_chain(self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
-        return _get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm, exchange=exchange)
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
+        from brokers.smartapi_client import get_atm_chain as _get_atm_chain
 
-    def find_option_token(self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
-        return _find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange)
+        return _get_atm_chain(
+            underlying, expiry_ddmmmyyyy, strikes_around_atm, exchange=exchange
+        )
+
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        from brokers.smartapi_client import find_option_token as _find_option_token
+
+        return _find_option_token(
+            underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange
+        )
 
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
+        from brokers.smartapi_client import get_batch_quotes as _get_batch_quotes
+
         return _get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
 
     def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        from brokers.smartapi_client import (
+            get_batch_quotes_by_token as _get_batch_quotes_by_token,
+        )
+
         return _get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
 
     def get_spot_quote(self, underlying):
+        from brokers.smartapi_client import get_spot_quote as _get_spot_quote
+
         return _get_spot_quote(underlying)
 
     def get_fno_underlyings(self, force_refresh=False):
+        from brokers.smartapi_client import get_fno_underlyings as _get_fno_underlyings
+
         return _get_fno_underlyings(force_refresh=force_refresh)
 
     def index_tokens(self):
+        from brokers.smartapi_client import INDEX_TOKENS as _INDEX_TOKENS
+
         return _INDEX_TOKENS
 
 
@@ -149,11 +177,17 @@ class UpstoxMarketData:
 
     @staticmethod
     def _to_iso(expiry_ddmmmyyyy: Optional[str]) -> Optional[str]:
-        """'31JUL2026' -> '2026-07-31'. None/empty passes through — some
-        call sites resolve "current"/None expiry further downstream."""
+        """'31JUL2026' or '31-Jul-2026' -> '2026-07-31'. None/empty passes
+        through — some call sites resolve "current"/None expiry further
+        downstream."""
         if not expiry_ddmmmyyyy:
             return expiry_ddmmmyyyy
-        return datetime.strptime(expiry_ddmmmyyyy, "%d%b%Y").strftime("%Y-%m-%d")
+        for fmt in ("%d%b%Y", "%d-%b-%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(expiry_ddmmmyyyy, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        raise ValueError(f"Unsupported expiry format: {expiry_ddmmmyyyy!r}")
 
     @staticmethod
     def _to_ddmmmyyyy(expiry_iso: Optional[str]) -> Optional[str]:
@@ -161,31 +195,58 @@ class UpstoxMarketData:
         ScripMaster convention, e.g. '31JUL2026' not '31Jul2026')."""
         if not expiry_iso:
             return expiry_iso
-        return datetime.strptime(expiry_iso, "%Y-%m-%d").strftime("%d%b%Y").upper()
+        for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d%b%Y"):
+            try:
+                return datetime.strptime(expiry_iso, fmt).strftime("%d%b%Y").upper()
+            except ValueError:
+                continue
+        raise ValueError(f"Unsupported expiry format: {expiry_iso!r}")
 
     def list_expiries(self, underlying, exchange="NFO"):
         from brokers.upstox_client import list_expiries as _up_list_expiries
-        return [self._to_ddmmmyyyy(e) for e in _up_list_expiries(underlying, exchange=exchange)]
 
-    def get_atm_chain(self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
+        return [
+            self._to_ddmmmyyyy(e)
+            for e in _up_list_expiries(underlying, exchange=exchange)
+        ]
+
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
         from brokers.upstox_client import get_atm_chain as _up_get_atm_chain
+
         chain = _up_get_atm_chain(
-            underlying, self._to_iso(expiry_ddmmmyyyy), strikes_around_atm, exchange=exchange
+            underlying,
+            self._to_iso(expiry_ddmmmyyyy),
+            strikes_around_atm,
+            exchange=exchange,
         )
         if chain is None:
             return None
         chain = dict(chain)
-        chain["expiry"] = expiry_ddmmmyyyy  # hand back what the caller passed in, not the ISO form
+        chain["expiry"] = (
+            expiry_ddmmmyyyy  # hand back what the caller passed in, not the ISO form
+        )
         return chain
 
-    def find_option_token(self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
         from brokers.upstox_client import find_option_token as _up_find_option_token
+
         hit = _up_find_option_token(
-            underlying, self._to_iso(expiry_ddmmmyyyy), strike, opt_type, exchange=exchange
+            underlying,
+            self._to_iso(expiry_ddmmmyyyy),
+            strike,
+            opt_type,
+            exchange=exchange,
         )
         if hit is None:
             return None
-        return {"tradingsymbol": hit.get("trading_symbol"), "token": hit.get("instrument_key")}
+        return {
+            "tradingsymbol": hit.get("trading_symbol"),
+            "token": hit.get("instrument_key"),
+        }
 
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
         # exchange is unused: Upstox's instrument_key already encodes segment
@@ -193,6 +254,7 @@ class UpstoxMarketData:
         # request parameter alongside bare numeric tokens.
         del exchange
         from brokers.upstox_client import get_quotes as _up_get_quotes
+
         if not symbol_token_pairs:
             return {}
         instrument_keys = [token for _, token in symbol_token_pairs]
@@ -209,6 +271,7 @@ class UpstoxMarketData:
         # call site that assumes SmartAPI's raw quote field names.
         del exchange
         from brokers.upstox_client import get_quotes as _up_get_quotes
+
         if not symbol_token_pairs:
             return {}
         instrument_keys = [token for _, token in symbol_token_pairs]
@@ -222,11 +285,24 @@ class UpstoxMarketData:
 
     def get_spot_quote(self, underlying):
         from brokers.upstox_client import get_spot_quote as _up_get_spot_quote
-        return _up_get_spot_quote(underlying)
+
+        quote = _up_get_spot_quote(underlying)
+        if not quote:
+            return None
+        return {
+            "ltp": quote.get("last_price"),
+            "open": quote.get("open"),
+            "high": quote.get("high"),
+            "low": quote.get("low"),
+            "close": quote.get("close"),
+        }
 
     def get_fno_underlyings(self, force_refresh=False):
-        from brokers.upstox_client import _load_instrument_dump, INDEX_KEYS
-        rows = _load_instrument_dump("NSE", force_refresh=force_refresh)
+        from brokers.upstox_client import INDEX_KEYS, _load_instrument_dump
+
+        rows = []
+        rows.extend(_load_instrument_dump("NSE", force_refresh=force_refresh))
+        rows.extend(_load_instrument_dump("BSE", force_refresh=force_refresh))
         names = {
             (row.get("name") or "").strip().upper()
             for row in rows
@@ -240,6 +316,7 @@ class UpstoxMarketData:
 
     def index_tokens(self):
         from brokers.upstox_client import INDEX_KEYS
+
         return {
             symbol: {"token": key, "exchange": key.split("_", 1)[0]}
             for symbol, key in INDEX_KEYS.items()
@@ -290,43 +367,73 @@ class ShoonyaMarketData:
 
     def list_expiries(self, underlying, exchange="NFO"):
         from brokers.shoonya_market_data import list_expiries as _sh_list_expiries
-        return [self._to_ddmmmyyyy(e) for e in _sh_list_expiries(underlying, exchange=exchange)]
 
-    def get_atm_chain(self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
+        return [
+            self._to_ddmmmyyyy(e)
+            for e in _sh_list_expiries(underlying, exchange=exchange)
+        ]
+
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
         from brokers.shoonya_market_data import get_atm_chain as _sh_get_atm_chain
+
         chain = _sh_get_atm_chain(
-            underlying, self._to_shoonya(expiry_ddmmmyyyy), strikes_around_atm, exchange=exchange
+            underlying,
+            self._to_shoonya(expiry_ddmmmyyyy),
+            strikes_around_atm,
+            exchange=exchange,
         )
         if chain is None:
             return None
         chain = dict(chain)
-        chain["expiry"] = expiry_ddmmmyyyy  # hand back what the caller passed in, not the Shoonya-format one
+        chain["expiry"] = (
+            expiry_ddmmmyyyy  # hand back what the caller passed in, not the Shoonya-format one
+        )
         return chain
 
-    def find_option_token(self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
-        from brokers.shoonya_market_data import find_option_token as _sh_find_option_token
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        from brokers.shoonya_market_data import (
+            find_option_token as _sh_find_option_token,
+        )
+
         return _sh_find_option_token(
-            underlying, self._to_shoonya(expiry_ddmmmyyyy), strike, opt_type, exchange=exchange
+            underlying,
+            self._to_shoonya(expiry_ddmmmyyyy),
+            strike,
+            opt_type,
+            exchange=exchange,
         )
 
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
         from brokers.shoonya_market_data import get_batch_quotes as _sh_get_batch_quotes
+
         return _sh_get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
 
     def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
-        from brokers.shoonya_market_data import get_batch_quotes_by_token as _sh_get_batch_quotes_by_token
+        from brokers.shoonya_market_data import (
+            get_batch_quotes_by_token as _sh_get_batch_quotes_by_token,
+        )
+
         return _sh_get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
 
     def get_spot_quote(self, underlying):
         from brokers.shoonya_market_data import get_spot_quote as _sh_get_spot_quote
+
         return _sh_get_spot_quote(underlying)
 
     def get_fno_underlyings(self, force_refresh=False):
-        from brokers.shoonya_market_data import get_fno_underlyings as _sh_get_fno_underlyings
+        from brokers.shoonya_market_data import (
+            get_fno_underlyings as _sh_get_fno_underlyings,
+        )
+
         return _sh_get_fno_underlyings(force_refresh=force_refresh)
 
     def index_tokens(self):
         from brokers.shoonya_market_data import index_tokens as _sh_index_tokens
+
         return _sh_index_tokens()
 
 
@@ -335,15 +442,29 @@ class FallbackMarketData:
     secondary provider — used for MARKET_DATA_FALLBACK_PROVIDER (e.g.
     primary=SmartAPI, fallback=Shoonya when SmartAPI's feed is down).
 
-    Circuit-breaker shaped, not retry-every-call: once the primary raises
-    or returns an empty/falsy result for ANY wrapped method, the primary
-    is marked down for `cooldown_s` and every wrapped method routes
-    straight to the fallback until the cooldown expires — a single shared
-    flag, not per-method, since a dead SmartAPI session fails the same
-    way across list_expiries/get_atm_chain/etc. and there's no value in
-    re-discovering that on every individual call. Without this, a fully
-    down primary would pay its own failure latency (or ScripMaster
-    reload / login-retry cost) on every tick before falling back.
+    Circuit-breaker shaped, not retry-every-call: once the primary is
+    considered down, it's marked down for `cooldown_s` and every wrapped
+    method routes straight to the fallback until the cooldown expires —
+    a single shared flag, not per-method, since a dead SmartAPI session
+    fails the same way across list_expiries/get_atm_chain/etc. and
+    there's no value in re-discovering that on every individual call.
+    Without this, a fully down primary would pay its own failure latency
+    (or ScripMaster reload / login-retry cost) on every tick before
+    falling back.
+
+    "Down" is judged differently depending on how the primary failed. A
+    raised exception trips the breaker immediately — it's an unambiguous
+    signal (auth failure, network error, dead session). An empty/falsy
+    RESULT does not trip it immediately: that can just mean one symbol
+    genuinely had no data this tick while the primary is otherwise fine,
+    and tripping a shared 30s-wide breaker on a single blip needlessly
+    blacks out every other wrapped method too — worse still if the
+    fallback is unhealthy (e.g. Shoonya session dead), turning one
+    harmless empty result into a real outage. Empty results only trip the
+    breaker after `_EMPTY_TRIP_THRESHOLD` consecutive empties for that
+    method; each individual empty call still answers from the fallback
+    (so the caller isn't left hanging), it just doesn't lock out the
+    primary while doing so.
 
     DELIBERATELY DOES NOT WRAP get_batch_quotes / get_batch_quotes_by_token.
     Those two are the ones ShoonyaMarketData's and UpstoxMarketData's own
@@ -365,9 +486,25 @@ class FallbackMarketData:
     # documented shape at each adapter's own boundary (see UpstoxMarketData's
     # and ShoonyaMarketData's _to_iso/_to_shoonya-style conversions above).
     _FAILOVER_METHODS = (
-        "list_expiries", "get_atm_chain", "find_option_token",
-        "get_spot_quote", "get_fno_underlyings",
+        "list_expiries",
+        "get_atm_chain",
+        "find_option_token",
+        "get_spot_quote",
+        "get_fno_underlyings",
     )
+
+    # An exception is an unambiguous signal the primary itself is broken
+    # (auth failure, network error, dead session) — trip the breaker on the
+    # first one. An empty/falsy RESULT is not the same signal: it can also
+    # mean "this one symbol genuinely has no data right now" (e.g. a spot
+    # quote momentarily missing from a batch) while the primary is
+    # otherwise completely healthy. Tripping the shared breaker on a
+    # single empty result blacks out every failover-wrapped method for
+    # `cooldown_s`, including ones that would have succeeded — and if the
+    # fallback happens to be down too (e.g. Shoonya session dead), that
+    # turns one harmless blip into a full outage. Require a few
+    # consecutive empties (per method) before treating "empty" as "down".
+    _EMPTY_TRIP_THRESHOLD = 3
 
     def __init__(self, primary, fallback, primary_name, fallback_name, cooldown_s=30):
         self._primary = primary
@@ -376,6 +513,7 @@ class FallbackMarketData:
         self._fallback_name = fallback_name
         self._cooldown_s = cooldown_s
         self._primary_down_until = 0.0  # 0 = not down; else a time.monotonic() deadline
+        self._consecutive_empty: dict[str, int] = {}
 
     def _primary_is_down(self):
         return self._primary_down_until and time.monotonic() < self._primary_down_until
@@ -394,21 +532,53 @@ class FallbackMarketData:
             try:
                 result = getattr(self._primary, method_name)(*args, **kwargs)
             except Exception as exc:
+                self._consecutive_empty[method_name] = 0
                 self._mark_primary_down(method_name, f"raised ({exc})")
             else:
                 if result:
+                    self._consecutive_empty[method_name] = 0
                     return result
-                self._mark_primary_down(method_name, "returned empty")
+                streak = self._consecutive_empty.get(method_name, 0) + 1
+                self._consecutive_empty[method_name] = streak
+                if streak >= self._EMPTY_TRIP_THRESHOLD:
+                    self._mark_primary_down(
+                        method_name,
+                        f"returned empty {streak}x in a row",
+                    )
+                else:
+                    logger.info(
+                        f"[market_data] {self._primary_name}.{method_name} returned "
+                        f"empty ({streak}/{self._EMPTY_TRIP_THRESHOLD}) — retrying "
+                        f"primary directly, not failing over yet"
+                    )
+                    return getattr(self._fallback, method_name)(*args, **kwargs)
         return getattr(self._fallback, method_name)(*args, **kwargs)
 
     def list_expiries(self, underlying, exchange="NFO"):
         return self._call("list_expiries", underlying, exchange=exchange)
 
-    def get_atm_chain(self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
-        return self._call("get_atm_chain", underlying, expiry_ddmmmyyyy, strikes_around_atm, exchange=exchange)
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
+        return self._call(
+            "get_atm_chain",
+            underlying,
+            expiry_ddmmmyyyy,
+            strikes_around_atm,
+            exchange=exchange,
+        )
 
-    def find_option_token(self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
-        return self._call("find_option_token", underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange)
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        return self._call(
+            "find_option_token",
+            underlying,
+            expiry_ddmmmyyyy,
+            strike,
+            opt_type,
+            exchange=exchange,
+        )
 
     def get_spot_quote(self, underlying):
         return self._call("get_spot_quote", underlying)
@@ -421,7 +591,9 @@ class FallbackMarketData:
         return self._primary.get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
 
     def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
-        return self._primary.get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
+        return self._primary.get_batch_quotes_by_token(
+            exchange, symbol_token_pairs, mode=mode
+        )
 
     def index_tokens(self):
         # Pure in-memory lookup dict, not a live call — always the primary's.
@@ -439,14 +611,20 @@ _PROVIDERS = {
     "SHOONYA": ShoonyaMarketData,
 }
 
-_primary_name = _md_settings.market_data_provider if _md_settings.market_data_provider in _PROVIDERS else "SMARTAPI"
+_primary_name = (
+    _md_settings.market_data_provider
+    if _md_settings.market_data_provider in _PROVIDERS
+    else "SMARTAPI"
+)
 _primary_instance = _PROVIDERS[_primary_name]()
 
 _fallback_name = _md_settings.market_data_fallback_provider
 if _fallback_name and _fallback_name in _PROVIDERS and _fallback_name != _primary_name:
     market_data: MarketData = FallbackMarketData(
-        _primary_instance, _PROVIDERS[_fallback_name](),
-        primary_name=_primary_name, fallback_name=_fallback_name,
+        _primary_instance,
+        _PROVIDERS[_fallback_name](),
+        primary_name=_primary_name,
+        fallback_name=_fallback_name,
     )
 else:
     market_data: MarketData = _primary_instance

@@ -86,7 +86,12 @@ class ReconciliationResult:
 # ── reconciler so they can be unit-tested against fixture payloads) ─────
 
 def _resolve_lot_size(symbol: str, lot_size_lookup: dict[str, int]) -> int | None:
-    for sym_key, size in lot_size_lookup.items():
+    # BUGFIX: matching in dict-iteration order let a shorter key that's a
+    # prefix of a longer one (e.g. "SENSEX" vs "SENSEX50") win first and
+    # return the WRONG symbol's lot size — see account_guard.py's
+    # open_lots_from_positions()/projected_open_lots_from_positions() for
+    # the same fix. Longest/most-specific key first avoids the collision.
+    for sym_key, size in sorted(lot_size_lookup.items(), key=lambda item: len(item[0]), reverse=True):
         if symbol.startswith(sym_key):
             return size
     return None

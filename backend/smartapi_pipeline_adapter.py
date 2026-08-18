@@ -1,50 +1,51 @@
 """
-smartapi_pipeline_adapter.py
-=============================
-Reshapes smartapi_client.py's actual data (get_batch_quotes, get_index_quote,
-_load_scrip_master, STRIKE_INTERVALS) into the exact wide DataFrame schemas
-market_api.py's parse_option_chain_response() / fetch_nifty_futures() produce
-— so engine.py, option_chain_json.py, and mTerminals_json.py need zero
-downstream changes.
+Broker pipeline adapter
+=======================
+Reshapes the REST quote client and instrument master into the exact wide
+DataFrame schemas market_api.py's parse_option_chain_response() /
+fetch_nifty_futures() produce — so engine.py, option_chain_json.py, and
+mTerminals_json.py need zero downstream changes.
 
 This does NOT reimplement session/auth/token-resolution — all of that stays
-in smartapi_client.py via its module-level `_session` singleton. This file
-only reshapes and fills two gaps smartapi_client.py's existing helpers don't
-cover:
+in the broker REST client via its module-level session singleton. This file
+only reshapes and fills two gaps the client's existing helpers don't cover:
   1. get_atm_chain() drops bid/ask depth + total buy/sell qty from the raw
      FULL-mode quote — needed by mTerminals_json.py's _build_bid_ask_map().
      This adapter pulls straight from get_batch_quotes() instead, keeping
      the raw quote dict, so depth survives.
-  2. No FUTIDX (futures) token resolution or VIX token exist in
-     smartapi_client.py at all — added here.
+  2. No FUTIDX (futures) token resolution or VIX token exist in the base
+     REST client helpers at all — added here.
 
-Lives in mTerminals/ alongside smartapi_client.py, engine.py, etc.
+Lives in mTerminals/ alongside the rest of the backend pipeline.
 """
 
 import logging
-from datetime import date, datetime
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime
 
 import pandas as pd
 
-from concurrent.futures import ThreadPoolExecutor
-
-from storage.caches import TickScopedDict
-
 from brokers.market_data import market_data
+
+try:
+    from config import settings as _md_settings
+except ModuleNotFoundError:  # pragma: no cover - depends on launch style
+    from backend.config import settings as _md_settings
 from brokers.smartapi_client import (
+    STRIKE_INTERVALS,
+    _get_strike_interval,
     # NOTE: _load_scrip_master/_round_to_strike/_get_strike_interval are
     # SmartAPI-private (underscore) internals, reached into directly here
     # rather than through MarketData — that's a separate leaky-abstraction
     # issue (they're generic option math, not really broker-specific) and
     # is out of scope for this pass.
     _load_scrip_master,
-    STRIKE_INTERVALS,
     _round_to_strike,
-    _get_strike_interval,
     safe_float,
 )
 from oi.pricing import solve_iv  # your existing Newton-Raphson IV solver
+from storage.caches import TickScopedDict
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,14 @@ ANNUAL_RISK_FREE_RATE_DEFAULT = 0.07
 
 # Emergency fallback only if the instrument-master resolver is unavailable.
 _LOT_SIZES_FALLBACK = {
-    "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
-    "SENSEX": 20, "BANKEX": 30, "SENSEX50": 75, "PNB": 8000,
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "FINNIFTY": 60,
+    "MIDCPNIFTY": 120,
+    "SENSEX": 20,
+    "BANKEX": 30,
+    "SENSEX50": 75,
+    "PNB": 8000,
 }
 
 
@@ -62,13 +69,16 @@ def _lot_size(underlying: str) -> int:
     sym = (underlying or "").upper()
     try:
         from brokers.smartapi_instruments import get_lot_size
+
         return get_lot_size(sym)
     except Exception:
         try:
             from lot_sizes import LOT_SIZES
+
             return LOT_SIZES.get(sym, 65)
         except Exception:
             return _LOT_SIZES_FALLBACK.get(sym, 65)
+
 
 # ── Expiry format bridge ──────────────────────────────────────────────────
 # Rest of the pipeline (option_chain_json.py, engine.py) uses 'DD-Mon-YYYY'
@@ -76,6 +86,7 @@ def _lot_size(underlying: str) -> int:
 # e.g. '31JUL2026'. Every function below takes/returns the pipeline's
 # dash format and converts at the boundary — callers never see SmartAPI's
 # format.
+
 
 def _to_smartapi_expiry(dash_expiry: str) -> str:
     return datetime.strptime(dash_expiry, "%d-%b-%Y").strftime("%d%b%Y").upper()
@@ -90,14 +101,20 @@ def get_available_expiries(underlying: str, exchange: str = "NFO") -> list[str]:
     free — needed by NEAR/MONTHLY calendar-spread slot resolution."""
     data = _load_scrip_master()
     smart_expiries = sorted(
-        {row["expiry"] for row in data
-         if row.get("exch_seg") == exchange and row.get("name") == underlying.upper()
-         and row.get("instrumenttype") in ("OPTIDX", "OPTSTK") and row.get("expiry")},
+        {
+            row["expiry"]
+            for row in data
+            if row.get("exch_seg") == exchange
+            and row.get("name") == underlying.upper()
+            and row.get("instrumenttype") in ("OPTIDX", "OPTSTK")
+            and row.get("expiry")
+        },
         key=lambda d: datetime.strptime(d, "%d%b%Y"),
     )
     today = date.today()
     return [
-        _from_smartapi_expiry(e) for e in smart_expiries
+        _from_smartapi_expiry(e)
+        for e in smart_expiries
         if datetime.strptime(e, "%d%b%Y").date() >= today
     ]
 
@@ -173,13 +190,16 @@ def _seed_day_anchor_from_nse(underlying: str, expiry_dash: str) -> None:
         # this network call lazy/on-demand rather than an eager top-level
         # import cost paid by every caller of this module.
         from market_api import fetch_option_chain, parse_option_chain_response
+
         payload = fetch_option_chain(underlying, expiry_dash)
         df_nse = parse_option_chain_response(payload, expiry_dash)
     except Exception as e:
-        logger.warning(f"NSE seed fetch failed for "
-              f"{underlying} {expiry_dash} ({e}); ChgOI will anchor on "
-              f"first SmartAPI tick instead until a seed attempt succeeds "
-              f"(retrying every {_SEED_RETRY_COOLDOWN_SEC}s).")
+        logger.warning(
+            f"NSE seed fetch failed for "
+            f"{underlying} {expiry_dash} ({e}); ChgOI will anchor on "
+            f"first SmartAPI tick instead until a seed attempt succeeds "
+            f"(retrying every {_SEED_RETRY_COOLDOWN_SEC}s)."
+        )
         return
 
     seeded = 0
@@ -189,7 +209,10 @@ def _seed_day_anchor_from_nse(underlying: str, expiry_dash: str) -> None:
         strike_val = row.get("StrikePrice")
         if strike_val is None:
             continue
-        for side, oi_col, chg_col in (("CE", "CE_OI", "CE_ChgOI"), ("PE", "PE_OI", "PE_ChgOI")):
+        for side, oi_col, chg_col in (
+            ("CE", "CE_OI", "CE_ChgOI"),
+            ("PE", "PE_OI", "PE_ChgOI"),
+        ):
             nse_oi, nse_chg = row.get(oi_col), row.get(chg_col)
             if nse_oi is None or nse_chg is None:
                 if side == "CE":
@@ -197,22 +220,33 @@ def _seed_day_anchor_from_nse(underlying: str, expiry_dash: str) -> None:
                 else:
                     pe_skipped += 1
                 continue
-            anchor_oi = float(nse_oi) - float(nse_chg)  # NSE's own previous-close OI, in lots
-            _day_open_oi[(underlying, expiry_dash, strike_val, side)] = (today, anchor_oi)
+            anchor_oi = float(nse_oi) - float(
+                nse_chg
+            )  # NSE's own previous-close OI, in lots
+            _day_open_oi[(underlying, expiry_dash, strike_val, side)] = (
+                today,
+                anchor_oi,
+            )
             seeded += 1
 
     total_skipped = ce_skipped + pe_skipped
     _seed_state[seed_key] = {"complete": total_skipped == 0, "last_attempt": now}
     skew_note = ""
     if ce_skipped != pe_skipped:
-        skew_note = (f" — CE/PE SKEW: {ce_skipped} CE vs {pe_skipped} PE strikes "
-                     f"unseeded, will read anchor-on-first-tick until retried")
-    logger.info(f"Seeded ChgOI anchor for "
-          f"{underlying} {expiry_dash} from NSE: {seeded} strike/side entries "
-          f"({ce_skipped} CE / {pe_skipped} PE skipped){skew_note}")
+        skew_note = (
+            f" — CE/PE SKEW: {ce_skipped} CE vs {pe_skipped} PE strikes "
+            f"unseeded, will read anchor-on-first-tick until retried"
+        )
+    logger.info(
+        f"Seeded ChgOI anchor for "
+        f"{underlying} {expiry_dash} from NSE: {seeded} strike/side entries "
+        f"({ce_skipped} CE / {pe_skipped} PE skipped){skew_note}"
+    )
 
 
-def _chg_oi(underlying: str, expiry_dash: str, strike: float, side: str, current_oi) -> float:
+def _chg_oi(
+    underlying: str, expiry_dash: str, strike: float, side: str, current_oi
+) -> float:
     key = (underlying, expiry_dash, strike, side)
     cur = float(current_oi or 0.0)
     today = date.today()
@@ -243,15 +277,102 @@ def _chg_oi(underlying: str, expiry_dash: str, strike: float, side: str, current
 
 # ── Option chain (wide format) ───────────────────────────────────────────
 
-def fetch_option_chain_wide(underlying: str, expiry_dash: str,
-                             strikes_around_atm: int = 10, exchange: str = "NFO",
-                             r: float = ANNUAL_RISK_FREE_RATE_DEFAULT) -> pd.DataFrame:
+
+def fetch_option_chain_wide(
+    underlying: str,
+    expiry_dash: str,
+    strikes_around_atm: int = 10,
+    exchange: str = "NFO",
+    r: float = ANNUAL_RISK_FREE_RATE_DEFAULT,
+) -> pd.DataFrame:
     """Direct replacement for
     market_api.parse_option_chain_response(fetch_option_chain(symbol, expiry), expiry).
     Same output columns; source is smartapi_client.py's get_batch_quotes()
     (kept separate from get_atm_chain() specifically to retain depth/qty
     fields get_atm_chain() drops)."""
     expiry_smart = _to_smartapi_expiry(expiry_dash)
+
+    if _md_settings.market_data_provider in ("UPSTOX", "SHOONYA"):
+        chain = market_data.get_atm_chain(
+            underlying,
+            expiry_dash,
+            strikes_around_atm=strikes_around_atm,
+            exchange=exchange,
+        )
+        if not chain:
+            logger.warning(
+                f"no {_md_settings.market_data_provider.title()} option chain for {underlying} {expiry_dash}"
+            )
+            return pd.DataFrame()
+        spot = float(chain.get("spot") or 0.0)
+        rows = chain.get("rows") or []
+        if not rows:
+            return pd.DataFrame()
+
+        try:
+            expiry_dt = datetime.strptime(expiry_dash, "%d-%b-%Y").date()
+        except (TypeError, ValueError):
+            try:
+                expiry_dt = datetime.strptime(expiry_smart, "%d%b%Y").date()
+            except (TypeError, ValueError):
+                expiry_dt = date.today()
+        dte_years = max((expiry_dt - date.today()).days, 1) / 365.0
+
+        by_strike: dict[float, dict] = {}
+        for row in rows:
+            try:
+                strike_val = float(row.get("strike"))
+            except (TypeError, ValueError):
+                continue
+            side = row.get("type")
+            if side not in ("CE", "PE"):
+                continue
+            rec = by_strike.setdefault(
+                strike_val,
+                {
+                    "StrikePrice": strike_val,
+                    "Expiry": expiry_dash,
+                    "Spot": spot,
+                    "Symbol": underlying,
+                },
+            )
+            ltp = safe_float(row.get("ltp"))
+            oi_now = safe_float(row.get("oi"))
+            rec[f"{side}_OI"] = oi_now
+            rec[f"{side}_ChgOI"] = 0.0
+            rec[f"{side}_PctChgOI"] = 0.0
+            rec[f"{side}_Volume"] = row.get("volume")
+            rec[f"{side}_IV"] = (
+                round(
+                    solve_iv(
+                        ltp,
+                        spot,
+                        strike_val,
+                        dte_years,
+                        r,
+                        opt_type="C" if side == "CE" else "P",
+                    )
+                    * 100.0,
+                    2,
+                )
+                if spot and ltp
+                else 0.0
+            )
+            rec[f"{side}_LTP"] = ltp
+            rec[f"{side}_Change"] = None
+            rec[f"{side}_pChange"] = None
+            rec[f"{side}_BidQty"] = None
+            rec[f"{side}_BidPrice"] = None
+            rec[f"{side}_AskQty"] = None
+            rec[f"{side}_AskPrice"] = None
+            rec[f"{side}_BuyQty"] = None
+            rec[f"{side}_SellQty"] = None
+
+        return (
+            pd.DataFrame(list(by_strike.values()))
+            .sort_values("StrikePrice")
+            .reset_index(drop=True)
+        )
 
     quote = market_data.get_spot_quote(underlying)
     if not quote:
@@ -261,32 +382,46 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
 
     atm = _round_to_strike(spot, underlying)
     interval = _get_strike_interval(underlying)
-    strikes = {atm + (i * interval) for i in range(-strikes_around_atm, strikes_around_atm + 1)}
+    strikes = {
+        atm + (i * interval) for i in range(-strikes_around_atm, strikes_around_atm + 1)
+    }
 
     data = _load_scrip_master()
     strike_lookup = {}
     for row in data:
-        if not (row.get("exch_seg") == exchange
-                and row.get("name") == underlying.upper()
-                and row.get("expiry") == expiry_smart):
+        if not (
+            row.get("exch_seg") == exchange
+            and row.get("name") == underlying.upper()
+            and row.get("expiry") == expiry_smart
+        ):
             continue
         try:
             strike_val = int(round(float(row["strike"]) / 100))
         except (KeyError, ValueError, TypeError):
             continue
         symbol = row.get("symbol", "")
-        opt_type = "CE" if symbol.endswith("CE") else "PE" if symbol.endswith("PE") else None
+        opt_type = (
+            "CE" if symbol.endswith("CE") else "PE" if symbol.endswith("PE") else None
+        )
         if opt_type and strike_val in strikes:
-            strike_lookup[(strike_val, opt_type)] = {"token": row["token"], "tradingsymbol": symbol}
+            strike_lookup[(strike_val, opt_type)] = {
+                "token": row["token"],
+                "tradingsymbol": symbol,
+            }
 
     if not strike_lookup:
         logger.warning(f"no contracts resolved for {underlying} {expiry_dash}")
         return pd.DataFrame()
 
     pairs = [(info["tradingsymbol"], info["token"]) for info in strike_lookup.values()]
-    quotes = market_data.get_batch_quotes(exchange, pairs, mode="FULL")  # raw dicts, depth included
+    quotes = market_data.get_batch_quotes(
+        exchange, pairs, mode="FULL"
+    )  # raw dicts, depth included
 
-    dte_years = max((datetime.strptime(expiry_smart, "%d%b%Y").date() - date.today()).days, 1) / 365.0
+    dte_years = (
+        max((datetime.strptime(expiry_smart, "%d%b%Y").date() - date.today()).days, 1)
+        / 365.0
+    )
 
     by_strike: dict[float, dict] = {}
     for (strike_val, side), info in strike_lookup.items():
@@ -294,9 +429,15 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
         if not q:
             continue
 
-        rec = by_strike.setdefault(strike_val, {
-            "StrikePrice": strike_val, "Expiry": expiry_dash, "Spot": spot, "Symbol": underlying,
-        })
+        rec = by_strike.setdefault(
+            strike_val,
+            {
+                "StrikePrice": strike_val,
+                "Expiry": expiry_dash,
+                "Spot": spot,
+                "Symbol": underlying,
+            },
+        )
 
         # ── ROOT CAUSE FIX ──
         # SmartAPI's opnInterest is reported in actual quantity (shares),
@@ -320,13 +461,25 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
         buy0 = (depth.get("buy") or [{}])[0]
         sell0 = (depth.get("sell") or [{}])[0]
 
-        iv = (solve_iv(ltp, spot, strike_val, dte_years, r,
-                        opt_type="C" if side == "CE" else "P") * 100.0
-              if spot and ltp else 0.0)
+        iv = (
+            solve_iv(
+                ltp,
+                spot,
+                strike_val,
+                dte_years,
+                r,
+                opt_type="C" if side == "CE" else "P",
+            )
+            * 100.0
+            if spot and ltp
+            else 0.0
+        )
 
         rec[f"{side}_OI"] = oi_now
         rec[f"{side}_ChgOI"] = chg_oi
-        rec[f"{side}_PctChgOI"] = round((chg_oi / prev_oi) * 100.0, 2) if prev_oi > 0 else 0.0
+        rec[f"{side}_PctChgOI"] = (
+            round((chg_oi / prev_oi) * 100.0, 2) if prev_oi > 0 else 0.0
+        )
         rec[f"{side}_Volume"] = q.get("tradeVolume")
         rec[f"{side}_IV"] = round(iv, 2)
         rec[f"{side}_LTP"] = ltp
@@ -339,7 +492,11 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
         rec[f"{side}_BuyQty"] = q.get("totBuyQuan")
         rec[f"{side}_SellQty"] = q.get("totSellQuan")
 
-    return pd.DataFrame(list(by_strike.values())).sort_values("StrikePrice").reset_index(drop=True)
+    return (
+        pd.DataFrame(list(by_strike.values()))
+        .sort_values("StrikePrice")
+        .reset_index(drop=True)
+    )
 
 
 # ── Futures ───────────────────────────────────────────────────────────────
@@ -347,8 +504,13 @@ def fetch_option_chain_wide(underlying: str, expiry_dash: str,
 # but has no FUTIDX path. Minimal addition here rather than touching that
 # file — same _load_scrip_master() cache, no new network dependency.
 
-def _get_futures_contract(underlying: str, expiry_dash: str | None = None,
-                           exchange: str = "NFO", which: str = "NEAR") -> dict | None:
+
+def _get_futures_contract(
+    underlying: str,
+    expiry_dash: str | None = None,
+    exchange: str = "NFO",
+    which: str = "NEAR",
+) -> dict | None:
     """which is only consulted when expiry_dash is None (i.e. "give me
     a monthly slot by relative position" instead of "give me this exact
     date") — NEAR/NEXT/FAR map to the 1st/2nd/3rd soonest listed FUTIDX
@@ -388,10 +550,13 @@ def _get_futures_contract(underlying: str, expiry_dash: str | None = None,
             return None
 
     data = _load_scrip_master()
-    cands = [row for row in data
-             if row.get("exch_seg") == exchange
-             and row.get("name") == underlying.upper()
-             and row.get("instrumenttype") in _FNO_FUT_TYPES]
+    cands = [
+        row
+        for row in data
+        if row.get("exch_seg") == exchange
+        and row.get("name") == underlying.upper()
+        and row.get("instrumenttype") in _FNO_FUT_TYPES
+    ]
     cands = [(row, _parse_expiry(row)) for row in cands]
     cands = [(row, exp) for row, exp in cands if exp is not None]
     if not cands:
@@ -410,8 +575,12 @@ def _get_futures_contract(underlying: str, expiry_dash: str | None = None,
     return live[idx][0]
 
 
-def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
-                        exchange: str = "NFO", which: str = "NEAR") -> pd.DataFrame:
+def fetch_futures_wide(
+    underlying: str,
+    expiry_dash: str | None = None,
+    exchange: str = "NFO",
+    which: str = "NEAR",
+) -> pd.DataFrame:
     """Replacement for market_api.fetch_nifty_futures().
 
     IMPORTANT: expiry_dash means "this exact futures expiry date" — do
@@ -424,40 +593,152 @@ def fetch_futures_wide(underlying: str, expiry_dash: str | None = None,
     None and use `which` (NEAR/NEXT/FAR) to pick a monthly slot by
     relative position instead — see option_chain_json.py's FUTURES_EXPIRY.
     """
-    fut = _get_futures_contract(underlying, expiry_dash, exchange, which=which)
-    if not fut:
-        return pd.DataFrame()
+    provider = _md_settings.market_data_provider
 
-    quotes = market_data.get_batch_quotes(exchange, [(fut["symbol"], fut["token"])], mode="FULL")
-    q = quotes.get(fut["symbol"])
-    if not q:
-        return pd.DataFrame()
+    if provider == "UPSTOX":
+        from brokers.upstox_client import _load_instrument_dump
 
-    spot_quote = market_data.get_spot_quote(underlying)
-    spot = spot_quote["ltp"] if spot_quote else 0.0
-    ltp = safe_float(q.get("ltp"))
+        scope = "BSE" if exchange.upper() in ("BFO", "BSE") else "NSE"
+        data = _load_instrument_dump(scope)
+        underlying_u = underlying.upper()
 
-    return pd.DataFrame([{
-        "Contract": fut["symbol"],
-        "Underlying": underlying,
-        "Expiry": _from_smartapi_expiry(fut["expiry"]),
-        "LTP": ltp,
-        "Change": q.get("netChange"),
-        "PctChange": q.get("percentChange"),
-        "Open": q.get("open"),
-        "High": q.get("high"),
-        "Low": q.get("low"),
-        "PrevClose": q.get("close"),
-        "Volume": q.get("tradeVolume"),
-        # SmartAPI's quote has no turnover field (unlike NSE's totalTurnover)
-        # — left None rather than a fabricated estimate; if a per-contract
-        # VWAP downstream needs this, compute it from historical candles
-        # (smartapi_history.py's get_candle_data) instead of guessing here.
-        "Turnover": None,
-        "OI": q.get("opnInterest"),
-        "Spot": spot,
-        "Basis": round(ltp - spot, 2) if spot else None,
-    }])
+        def _parse_expiry(row):
+            raw = row.get("expiry")
+            if raw in (None, "", 0):
+                return None
+            if isinstance(raw, (int, float)):
+                try:
+                    return datetime.utcfromtimestamp(raw / 1000)
+                except (OverflowError, OSError, ValueError):
+                    return None
+            try:
+                return datetime.strptime(str(raw), "%Y-%m-%d")
+            except ValueError:
+                try:
+                    return datetime.strptime(str(raw), "%d-%b-%Y")
+                except ValueError:
+                    try:
+                        return datetime.strptime(str(raw), "%d%b%Y")
+                    except ValueError:
+                        return None
+
+        cands = [
+            row
+            for row in data
+            if row.get("instrument_type") == "FUT"
+            and (row.get("name") or "").upper() == underlying_u
+        ]
+        cands = [(row, _parse_expiry(row)) for row in cands]
+        cands = [(row, exp) for row, exp in cands if exp is not None]
+        if not cands:
+            return pd.DataFrame()
+        cands.sort(key=lambda pair: pair[1])
+
+        if expiry_dash:
+            try:
+                target = datetime.strptime(expiry_dash, "%d-%b-%Y")
+            except ValueError:
+                try:
+                    target = datetime.strptime(expiry_dash, "%d%b%Y")
+                except ValueError:
+                    try:
+                        target = datetime.strptime(expiry_dash, "%Y-%m-%d")
+                    except ValueError:
+                        return pd.DataFrame()
+            matches = [row for row, exp in cands if exp.date() == target.date()]
+            if not matches:
+                return pd.DataFrame()
+            fut = matches[0]
+        else:
+            today = datetime.combine(date.today(), datetime.min.time())
+            live = [(row, exp) for row, exp in cands if exp >= today] or cands
+            idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
+            idx = min(idx, len(live) - 1)
+            fut = live[idx][0]
+
+        quotes = market_data.get_batch_quotes(
+            exchange,
+            [(fut.get("trading_symbol"), fut.get("instrument_key"))],
+            mode="FULL",
+        )
+        q = quotes.get(fut.get("trading_symbol")) if quotes else None
+        if not q:
+            return pd.DataFrame()
+
+        spot_quote = market_data.get_spot_quote(underlying)
+        spot = spot_quote["ltp"] if spot_quote else 0.0
+        ltp = safe_float(q.get("last_price"))
+        prev_close = safe_float(q.get("close"))
+        change = q.get("net_change")
+        pct = q.get("percent_change")
+        if pct is None and prev_close:
+            pct = round(((ltp - prev_close) / prev_close) * 100.0, 2)
+
+        exp_raw = fut.get("expiry")
+        if isinstance(exp_raw, (int, float)):
+            exp_str = datetime.utcfromtimestamp(exp_raw / 1000).strftime("%d-%b-%Y")
+        else:
+            exp_str = str(exp_raw)
+
+        return pd.DataFrame(
+            [
+                {
+                    "Contract": fut.get("trading_symbol"),
+                    "Underlying": underlying,
+                    "Expiry": exp_str,
+                    "LTP": ltp,
+                    "Change": change,
+                    "PctChange": pct,
+                    "Open": q.get("open"),
+                    "High": q.get("high"),
+                    "Low": q.get("low"),
+                    "PrevClose": prev_close,
+                    "Volume": q.get("volume"),
+                    "Turnover": None,
+                    "OI": q.get("oi"),
+                    "Spot": spot,
+                    "Basis": round(ltp - spot, 2) if spot else None,
+                }
+            ]
+        )
+
+    if provider == "SHOONYA":
+        from market_api import fetch_public_futures
+
+        return fetch_public_futures(underlying, which=which)
+
+    from brokers.smartapi_instruments import _FNO_FUT_TYPES
+
+    def _parse_expiry(row):
+        try:
+            return datetime.strptime(row["expiry"], "%d%b%Y")
+        except (KeyError, ValueError, TypeError):
+            return None
+
+    data = _load_scrip_master()
+    cands = [
+        row
+        for row in data
+        if row.get("exch_seg") == exchange
+        and row.get("name") == underlying.upper()
+        and row.get("instrumenttype") in _FNO_FUT_TYPES
+    ]
+    cands = [(row, _parse_expiry(row)) for row in cands]
+    cands = [(row, exp) for row, exp in cands if exp is not None]
+    if not cands:
+        return None
+    cands.sort(key=lambda pair: pair[1])
+    if expiry_dash:
+        target = _to_smartapi_expiry(expiry_dash)
+        matches = [row for row, _exp in cands if row["expiry"] == target]
+        if not matches:
+            return None
+        return matches[0]
+    today = datetime.combine(date.today(), datetime.min.time())
+    live = [(row, exp) for row, exp in cands if exp >= today] or cands
+    idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
+    idx = min(idx, len(live) - 1)
+    return live[idx][0]
 
 
 # ── VIX ──────────────────────────────────────────────────────────────────
@@ -483,7 +764,19 @@ def fetch_all_pills_and_vix_batched():
     MIDCPNIFTY/FINNIFTY/India VIX on NSE in one call, SENSEX on BSE in a
     second call. Was costing ~6s/tick in pure rate-limit wait; now ~0.7s.
     Populates _BATCH_CACHE; call this ONCE per tick before the three
-    wrapper functions below."""
+    wrapper functions below.
+
+    Uses get_batch_quotes_by_token() (keyed by token, re-mapped here to
+    each symbol's own short code) rather than get_batch_quotes() (keyed
+    by Angel's own tradingSymbol display string). get_batch_quotes()'s
+    own docstring documents why: for NIFTY/BANKNIFTY/MIDCPNIFTY, Angel's
+    returned tradingSymbol does not match the plain short code sent on
+    the request, so re-keying results by the short code silently drops
+    those rows — this function used to do exactly that, which is why
+    _BATCH_CACHE (and everything reading it: fetch_ticker_payload_smartapi,
+    fetch_vix_smartapi) never actually had a NIFTY entry even though the
+    request itself succeeded and Angel returned NIFTY's row under a
+    different tradingSymbol string."""
     index_tokens = market_data.index_tokens()
 
     nse_pairs = [
@@ -491,9 +784,34 @@ def fetch_all_pills_and_vix_batched():
         for sym in _NSE_TICKER_SYMBOLS
         if sym in index_tokens
     ]
-    nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
+    vix_token = index_tokens.get("INDIAVIX", {}).get("token", _VIX_TOKEN)
+    nse_pairs.append((_VIX_TRADINGSYMBOL, vix_token))
 
-    nse_quotes = market_data.get_batch_quotes("NSE", nse_pairs, mode="FULL")
+    def _normalize_batch_quote(row: dict | None) -> dict | None:
+        if not row:
+            return None
+        if "ltp" in row or "close" in row:
+            return row
+        if "last_price" in row:
+            return {
+                "ltp": safe_float(row.get("last_price")),
+                "close": safe_float(row.get("close")),
+                "open": safe_float(row.get("open")),
+                "high": safe_float(row.get("high")),
+                "low": safe_float(row.get("low")),
+                "volume": safe_float(row.get("volume")),
+                "oi": safe_float(row.get("oi")),
+                "net_change": safe_float(row.get("net_change")),
+                "pct_change": safe_float(row.get("pct_change")),
+            }
+        return row
+
+    nse_by_token = market_data.get_batch_quotes_by_token("NSE", nse_pairs, mode="FULL")
+    nse_quotes = {
+        sym: _normalize_batch_quote(nse_by_token[str(token)])
+        for sym, token in nse_pairs
+        if str(token) in nse_by_token
+    }
 
     bse_pairs = [
         (sym, index_tokens[sym]["token"])
@@ -502,9 +820,14 @@ def fetch_all_pills_and_vix_batched():
     ]
     bse_quotes = {}
     if bse_pairs:
-        bse_quotes = market_data.get_batch_quotes(
+        bse_by_token = market_data.get_batch_quotes_by_token(
             "BSE", bse_pairs, mode="FULL"
         )
+        bse_quotes = {
+            sym: _normalize_batch_quote(bse_by_token[str(token)])
+            for sym, token in bse_pairs
+            if str(token) in bse_by_token
+        }
 
     _BATCH_CACHE.refill(nse_quotes, bse_quotes)
 
@@ -529,12 +852,12 @@ def _index_quote_to_ticker_entry(symbol: str, quote: dict | None) -> dict | None
     change = round(ltp - close, 2) if (ltp is not None and close) else 0.0
     pct = round((change / close) * 100.0, 2) if close else 0.0
     return {
-        "Symbol":        symbol,
+        "Symbol": symbol,
         "BackendSymbol": symbol,
-        "Last Price":    ltp,
-        "% Change":      pct,
-        "Change":        change,
-        "Prev Close":    close,
+        "Last Price": ltp,
+        "% Change": pct,
+        "Change": change,
+        "Prev Close": close,
     }
 
 
@@ -545,10 +868,17 @@ def fetch_ticker_payload_smartapi(symbols=None) -> list:
     payload = []
     for sym in symbols:
         d = _BATCH_CACHE.get(sym)
-        entry = _index_quote_to_ticker_entry(sym, {
-            "ltp": safe_float(d.get("ltp")),
-            "close": safe_float(d.get("close")),
-        }) if d else None
+        entry = (
+            _index_quote_to_ticker_entry(
+                sym,
+                {
+                    "ltp": safe_float(d.get("ltp")),
+                    "close": safe_float(d.get("close")),
+                },
+            )
+            if d
+            else None
+        )
         if entry:
             payload.append(entry)
     return payload
@@ -556,8 +886,12 @@ def fetch_ticker_payload_smartapi(symbols=None) -> list:
 
 def fetch_sensex_ticker_smartapi():
     d = _BATCH_CACHE.get("SENSEX")
-    quote = {
-        "ltp": safe_float(d.get("ltp")),
-        "close": safe_float(d.get("close")),
-    } if d else None
+    quote = (
+        {
+            "ltp": safe_float(d.get("ltp")),
+            "close": safe_float(d.get("close")),
+        }
+        if d
+        else None
+    )
     return _index_quote_to_ticker_entry("SENSEX", quote)

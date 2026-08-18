@@ -8,23 +8,23 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta
+from datetime import time as dtime
 from pathlib import Path
-from datetime import datetime, timedelta, time as dtime
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "backend"))
 
-from nse_eod_fetch import fetch_all_eod, is_trading_day
-from analytics.fii_dii_sentiment import get_report_for_trading_day
-from analytics.nse_fii_dii_flow_fetch import record_today_flow, get_flow_series
-from analytics.fii_dii_market_bias import get_market_bias_report
-from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
-
+import aiohttp
 import numpy as np
 import orjson
-import aiohttp
 import websockets
 from aiohttp import web
+from analytics.fii_dii_market_bias import get_market_bias_report
+from analytics.fii_dii_sentiment import get_report_for_trading_day
+from analytics.nse_fii_dii_flow_fetch import get_flow_series, record_today_flow
+from nse_eod_fetch import fetch_all_eod, is_trading_day
+from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
 
 # option_chain_json.py parses sys.argv at import time — hide our own argv
 # from it so it doesn't choke on ws_server_live's --symbol/--poll-seconds flags.
@@ -32,57 +32,84 @@ _real_argv = sys.argv
 if "--no-broker" in _real_argv or "--no-smartapi" in _real_argv:
     os.environ["MTERMINALS_NO_SMARTAPI"] = "1"
 sys.argv = [_real_argv[0]]
-import option_chain_json       # noqa: E402
-import mTerminals_json         # noqa: E402
-import market_api              # noqa: E402  (lightweight ticker-strip quotes; no argv parsing, doesn't need hiding)
-sys.argv = _real_argv          # restore for our own argparse below
+import market_api  # noqa: E402  (lightweight ticker-strip quotes; no argv parsing, doesn't need hiding)
+import mTerminals_json  # noqa: E402
+import option_chain_json  # noqa: E402
 
-from pipeline_config import RuntimeConfig  # noqa: E402
+sys.argv = _real_argv  # restore for our own argparse below
+
 from operational_metrics import OperationalMetrics  # noqa: E402
+from pipeline_config import RuntimeConfig  # noqa: E402
 
 logger = logging.getLogger("mterminals.server")
 
-from paper_trading import PaperTradingEngine, _instrument_key, LOT_SIZES as PT_LOT_SIZES  # noqa: E402
+from paper_trading import LOT_SIZES as PT_LOT_SIZES
+from paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
+
 _NO_SMARTAPI_REQUESTED = "--no-broker" in _real_argv or "--no-smartapi" in _real_argv
 from config import settings as _broker_settings
 
 # Which broker's WEBSOCKET tick feed overlays fast leg-level ticks onto the
 # slower NSE/BSE-polled chain — independent of execution_broker (orders) and
 # market_data_provider (REST chain building). See config.py's
-# live_feed_provider docstring and start_smartapi_feed()/start_upstox_feed()
-# below. UpstoxTickStream itself is imported lazily inside start_upstox_feed()
-# (not here) so a SmartAPI-only deployment never needs upstox-python-sdk
-# installed just to boot.
+# live_feed_provider docstring and start_*_feed() below. The feed client
+# itself is imported lazily inside start_upstox_feed() so deployments that
+# don't use Upstox never need upstox-python-sdk installed just to boot.
 LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
+
 
 def _smartapi_disabled(*_args, **_kwargs):
     raise RuntimeError("Broker services are disabled by --no-broker")
 
+
 if not _NO_SMARTAPI_REQUESTED:
     from brokers.market_data import market_data
+
     if _broker_settings.execution_broker == "SHOONYA":
         from brokers.shoonya_client import (
-            place_order as smartapi_place_order,
-            get_order_book as smartapi_get_order_book,
-            get_positions as smartapi_get_positions,
             get_funds as smartapi_get_funds,
+        )
+        from brokers.shoonya_client import (
+            get_order_book as smartapi_get_order_book,
+        )
+        from brokers.shoonya_client import (
+            get_positions as smartapi_get_positions,
+        )
+        from brokers.shoonya_client import (
+            place_order as smartapi_place_order,
+        )
+        from brokers.shoonya_client import (
             resolve_option_contract as _shoonya_resolve_option_contract,
         )
     elif _broker_settings.execution_broker == "SMARTAPI":
         from brokers.smartapi_client import (
-            place_order as smartapi_place_order,
-            get_order_book as smartapi_get_order_book,
-            get_positions as smartapi_get_positions,
             get_funds as smartapi_get_funds,
         )
+        from brokers.smartapi_client import (
+            get_order_book as smartapi_get_order_book,
+        )
+        from brokers.smartapi_client import (
+            get_positions as smartapi_get_positions,
+        )
+        from brokers.smartapi_client import (
+            place_order as smartapi_place_order,
+        )
+
         _shoonya_resolve_option_contract = None
     elif _broker_settings.execution_broker == "UPSTOX":
         from brokers.upstox_execution_adapter import (
-            place_order as smartapi_place_order,
-            get_order_book as smartapi_get_order_book,
-            get_positions as smartapi_get_positions,
             get_funds as smartapi_get_funds,
         )
+        from brokers.upstox_execution_adapter import (
+            get_order_book as smartapi_get_order_book,
+        )
+        from brokers.upstox_execution_adapter import (
+            get_positions as smartapi_get_positions,
+        )
+        from brokers.upstox_execution_adapter import (
+            place_order as smartapi_place_order,
+        )
+
         # Upstox identifies contracts purely by instrument_key (see
         # upstox_execution_adapter.place_order's docstring) — there's no
         # tradingsymbol-based lookup to offer here, same reason this is
@@ -90,11 +117,18 @@ if not _NO_SMARTAPI_REQUESTED:
         _shoonya_resolve_option_contract = None
     elif _broker_settings.execution_broker == "KITE":
         from brokers.kite_execution_adapter import (
-            place_order as smartapi_place_order,
-            get_order_book as smartapi_get_order_book,
-            get_positions as smartapi_get_positions,
             get_funds as smartapi_get_funds,
         )
+        from brokers.kite_execution_adapter import (
+            get_order_book as smartapi_get_order_book,
+        )
+        from brokers.kite_execution_adapter import (
+            get_positions as smartapi_get_positions,
+        )
+        from brokers.kite_execution_adapter import (
+            place_order as smartapi_place_order,
+        )
+
         # Kite identifies contracts via exchange + tradingsymbol, resolved
         # through market_data.find_option_token() same as the plain
         # SMARTAPI branch — no Kite-specific tsym lookup needed here (see
@@ -105,9 +139,9 @@ if not _NO_SMARTAPI_REQUESTED:
             "EXECUTION_BROKER must be SMARTAPI, SHOONYA, UPSTOX, or KITE, "
             f"got {_broker_settings.execution_broker!r}"
         )
-    from brokers.smartapi_ws_client import SmartTickStream, EXCHANGE_TYPE
+    from brokers.smartapi_history import get_candle_data, get_index_candles
+    from brokers.smartapi_ws_client import EXCHANGE_TYPE, SmartTickStream
     from smartapi_feed_adapter import TickAggregator
-    from brokers.smartapi_history import get_index_candles, get_candle_data
 else:
     # Do not even import the broker modules: importing them initializes the
     # SDK and instrument master. Any accidentally reached broker-only path
@@ -117,7 +151,10 @@ else:
         list_expiries = staticmethod(_smartapi_disabled)
         get_atm_chain = staticmethod(_smartapi_disabled)
         find_option_token = staticmethod(_smartapi_disabled)
+        get_batch_quotes = staticmethod(_smartapi_disabled)
         get_batch_quotes_by_token = staticmethod(_smartapi_disabled)
+        get_spot_quote = staticmethod(_smartapi_disabled)
+
     market_data = _DisabledMarketData()
     smartapi_place_order = _smartapi_disabled
     smartapi_get_order_book = _smartapi_disabled
@@ -129,17 +166,20 @@ else:
     SmartTickStream = None
     TickAggregator = None
     EXCHANGE_TYPE = {}
+from backtest.replay import run_backtest
+from decision.auto_executor import AutoExecutor
 from risk.account_guard import (
-    LiveAccountRiskGuard, pnl_from_positions, open_lots_from_positions,
+    LiveAccountRiskGuard,
+    open_lots_from_positions,
+    pnl_from_positions,
     projected_open_lots_from_positions,
 )
-from risk.position_reconciler import PositionReconciler
 from risk.live_order_store import LiveOrderStore
-from decision.auto_executor import AutoExecutor
-from backtest.replay import run_backtest
+from risk.position_reconciler import PositionReconciler
 
 _REAL_EXPORT = mTerminals_json.export_dashboard_json
 _CAPTURED = {}
+
 
 def _capturing_export(*args, **kwargs):
     kwargs["out_path"] = "mTerminals.json"
@@ -153,78 +193,130 @@ def _capturing_export(*args, **kwargs):
     _CAPTURED["payload"] = result
     return result
 
+
 mTerminals_json.export_dashboard_json = _capturing_export
 
 _parser = argparse.ArgumentParser()
 _parser.add_argument("--symbol", default="NIFTY")
 _parser.add_argument("--expiry", default=None)
-_parser.add_argument("--poll-seconds", type=int, default=5)
-_parser.add_argument("--pipeline-timeout-seconds", type=float, default=8.0,
-                      help="Maximum time the live engine waits for one REST analytics pass. "
-                           "The blocking worker is allowed to finish safely in the background, "
-                           "while SmartAPI websocket ticks and the dashboard remain responsive.")
-_parser.add_argument("--min-tick-recompute-seconds", type=float, default=2.0,
-                      help="Floor on how often SmartAPI tick activity can wake engine_loop "
-                           "early. --poll-seconds becomes a ceiling (fires anyway if no ticks "
-                           "arrive — quiet market, symbol has no SmartAPI feed, etc.); this is "
-                           "the floor (never recompute faster than this even while ticks are "
-                           "flooding in, since ticks arrive every ~0.25s during market hours — "
-                           "waking on every single one would make the heavy Greeks/OI-velocity/ "
-                           "GEX recompute run MORE often than the old fixed poll, not less).")
+_parser.add_argument("--poll-seconds", type=int, default=6)
+_parser.add_argument(
+    "--pipeline-timeout-seconds",
+    type=float,
+    default=8.0,
+    help="Maximum time the live engine waits for one REST analytics pass. "
+    "The blocking worker is allowed to finish safely in the background, "
+    "while live websocket ticks and the dashboard remain responsive.",
+)
+_parser.add_argument(
+    "--min-tick-recompute-seconds",
+    type=float,
+    default=3.0,
+    help="Floor on how often live tick activity can wake engine_loop "
+    "early. --poll-seconds becomes a ceiling (fires anyway if no ticks "
+    "arrive — quiet market, symbol has no live feed, etc.); this is "
+    "the floor (never recompute faster than this even while ticks are "
+    "flooding in, since ticks arrive every ~0.25s during market hours — "
+    "waking on every single one would make the heavy Greeks/OI-velocity/ "
+    "GEX recompute run MORE often than the old fixed poll, not less).",
+)
 _parser.add_argument("--host", default="localhost")
 _parser.add_argument("--port", type=int, default=8765)
-_parser.add_argument("--http-port", type=int, default=5500, help="HTTP static file server port")
-_parser.add_argument("--relay", action="store_true", help="Enable Node relay posting (off by default)")
-_parser.add_argument("--extra-chains", action="store_true", dest="extra_chains", help="Enable multi-expiry NEAR/MONTHLY chains (slower; off by default)")
-_parser.add_argument("--strict-expiry", action="store_true", help="Don't auto-resolve to different expiry if requested expiry has no data")
-_parser.add_argument("--no-virtual-oi", action="store_true", help="Disable VirtualOI model inference for faster performance")
-_parser.add_argument("--no-delta", action="store_true", help="Always broadcast full payloads instead of deltas")
-_parser.add_argument("--no-index-quotes", action="store_true",
-                      help="Disable the NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX ticker-strip background fetch")
-_parser.add_argument("--no-broker", action="store_true",
-                      help="Disable authenticated broker traffic, including login, account data, "
-                           "REST quotes, futures and websocket overlay; use NSE/BSE public REST "
-                           "polling only. The unauthenticated daily ScripMaster remains available "
-                           "for instrument metadata and lot sizes.")
+_parser.add_argument(
+    "--http-port", type=int, default=5500, help="HTTP static file server port"
+)
+_parser.add_argument(
+    "--relay", action="store_true", help="Enable Node relay posting (off by default)"
+)
+_parser.add_argument(
+    "--extra-chains",
+    action="store_true",
+    dest="extra_chains",
+    help="Enable multi-expiry NEAR/MONTHLY chains (slower; off by default)",
+)
+_parser.add_argument(
+    "--strict-expiry",
+    action="store_true",
+    help="Don't auto-resolve to different expiry if requested expiry has no data",
+)
+_parser.add_argument(
+    "--no-virtual-oi",
+    action="store_true",
+    help="Disable VirtualOI model inference for faster performance",
+)
+_parser.add_argument(
+    "--no-delta",
+    action="store_true",
+    help="Always broadcast full payloads instead of deltas",
+)
+_parser.add_argument(
+    "--no-index-quotes",
+    action="store_true",
+    help="Disable the NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX ticker-strip background fetch",
+)
+_parser.add_argument(
+    "--no-broker",
+    action="store_true",
+    help="Disable authenticated broker traffic, including login, account data, "
+    "REST quotes, futures and websocket overlay; use NSE/BSE public REST "
+    "polling only. The unauthenticated daily ScripMaster remains available "
+    "for instrument metadata and lot sizes.",
+)
 _parser.add_argument("--no-smartapi", action="store_true", help=argparse.SUPPRESS)
-_parser.add_argument("--strikes-each-side", type=int, default=None,
-                      help="Override how many strikes each side of ATM option_chain_json computes "
-                           "Greeks/OI-velocity/signal analytics for (engine's n_strikes_each_side). "
-                           "Defaults to 50 under --no-broker (REST-only chains have no fast overlay "
-                           "to compensate, so the analytics pane needs the wider engine-side window "
-                           "up front) and 10 with SmartAPI enabled (matches start_smartapi_feed's own "
-                           "strikes_around_atm default). Pass this explicitly to use the same value "
-                           "in both modes.")
-_parser.add_argument("--index-quote-seconds", type=int, default=20,
-                      help="How often (s) to refresh the OTHER three indices' ticker quotes. "
-                           "Kept separate from --poll-seconds because it runs the full pipeline "
-                           "once per non-active symbol and shares NSE rate limits with it.")
-_parser.add_argument("--funds-poll-seconds", type=int, default=15,
-                      help="How often (s) to refresh real AngelOne account funds/margin "
-                           "(getRMS) once funds polling is toggled on (see toggle_live_mode "
-                           "in ws_handler — starts/stops live over the socket when the "
-                           "dashboard's LIVE pill flips, no restart needed). "
-                           "Kept independent of --poll-seconds since RMS limits don't need "
-                           "tick-level freshness and this is a real network round-trip to "
-                           "AngelOne on top of whatever the main pipeline is already doing.")
-_parser.add_argument("--portfolio-poll-seconds", type=float, default=0.5,
-                      help="Minimum interval (s) between paper-trading portfolio/orders "
-                           "re-broadcasts triggered off the fast SmartAPI tick stream (see "
-                           "_smartapi_sync_and_broadcast). Previously portfolio/orders only "
-                           "went out once per --poll-seconds, inside engine_loop()'s slower "
-                           "NSE/BSE REST pipeline tick — so with SmartAPI enabled, option "
-                           "chain/spot LTP updated sub-second while positions' last_price/"
-                           "unrealized_pnl in the Paper Trading panel stayed pinned to the "
-                           "much slower --poll-seconds cadence. get_portfolio_summary() is "
-                           "just a couple of small indexed SQLite reads (no network I/O), so "
-                           "this can safely run much faster than --poll-seconds — throttled "
-                           "here (rather than fired on every single tick) purely to avoid "
-                           "flooding clients with WS messages when many strikes tick in a "
-                           "tight burst. Set to 0 to broadcast on every SmartAPI tick with no "
-                           "throttling at all.")
+_parser.add_argument(
+    "--strikes-each-side",
+    type=int,
+    default=None,
+    help="Override how many strikes each side of ATM option_chain_json computes "
+    "Greeks/OI-velocity/signal analytics for (engine's n_strikes_each_side). "
+    "Defaults to 50 under --no-broker (REST-only chains have no fast overlay "
+    "to compensate, so the analytics pane needs the wider engine-side window "
+    "up front) and 10 with the live broker overlay enabled (matches the "
+    "feed adapter's own strikes_around_atm default). Pass this explicitly "
+    "to use the same value in both modes.",
+)
+_parser.add_argument(
+    "--index-quote-seconds",
+    type=int,
+    default=20,
+    help="How often (s) to refresh the OTHER three indices' ticker quotes. "
+    "Kept separate from --poll-seconds because it runs the full pipeline "
+    "once per non-active symbol and shares NSE rate limits with it.",
+)
+_parser.add_argument(
+    "--funds-poll-seconds",
+    type=int,
+    default=15,
+    help="How often (s) to refresh real AngelOne account funds/margin "
+    "(getRMS) once funds polling is toggled on (see toggle_live_mode "
+    "in ws_handler — starts/stops live over the socket when the "
+    "dashboard's LIVE pill flips, no restart needed). "
+    "Kept independent of --poll-seconds since RMS limits don't need "
+    "tick-level freshness and this is a real network round-trip to "
+    "AngelOne on top of whatever the main pipeline is already doing.",
+)
+_parser.add_argument(
+    "--portfolio-poll-seconds",
+    type=float,
+    default=0.5,
+    help="Minimum interval (s) between paper-trading portfolio/orders "
+    "re-broadcasts triggered off the fast live tick stream (see "
+    "_smartapi_sync_and_broadcast). Previously portfolio/orders only "
+    "went out once per --poll-seconds, inside engine_loop()'s slower "
+    "NSE/BSE REST pipeline tick — so with the live feed enabled, option "
+    "chain/spot LTP updated sub-second while positions' last_price/"
+    "unrealized_pnl in the Paper Trading panel stayed pinned to the "
+    "much slower --poll-seconds cadence. get_portfolio_summary() is "
+    "just a couple of small indexed SQLite reads (no network I/O), so "
+    "this can safely run much faster than --poll-seconds — throttled "
+    "here (rather than fired on every single tick) purely to avoid "
+    "flooding clients with WS messages when many strikes tick in a "
+    "tight burst. Set to 0 to broadcast on every live tick with no "
+    "throttling at all.",
+)
 ARGS = _parser.parse_args()
 
-SYMBOL       = ARGS.symbol.strip().upper()
+SYMBOL = ARGS.symbol.strip().upper()
 # Manual price-source selector — "EQ" (default, cash-market spot from the
 # NSE option-chain response) or "FUT" (near-month futures LTP). See
 # option_chain_json.py's PRICE_SOURCE docstring for the 3:15-3:30 EQ-goes-
@@ -238,37 +330,60 @@ PRICE_SOURCE = "EQ"
 # ?futuresExpiry= on the WS URL, see ws_handler() — and read fresh into
 # RuntimeConfig every tick by run_pipeline_once() -> _configure_pipeline_globals().
 FUTURES_EXPIRY = "NEAR"
-EXPIRY       = ARGS.expiry
+EXPIRY = ARGS.expiry
 POLL_SECONDS = ARGS.poll_seconds
 PIPELINE_TIMEOUT_SECONDS = max(1.0, ARGS.pipeline_timeout_seconds)
 MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
-WS_HOST      = ARGS.host
-WS_PORT      = ARGS.port
-HTTP_PORT    = ARGS.http_port
-USE_RELAY    = ARGS.relay
-USE_DELTA    = not ARGS.no_delta
-USE_INDEX_QUOTES     = not ARGS.no_index_quotes
-INDEX_QUOTE_SECONDS  = ARGS.index_quote_seconds
-FUNDS_POLL_SECONDS   = ARGS.funds_poll_seconds
+WS_HOST = ARGS.host
+WS_PORT = ARGS.port
+HTTP_PORT = ARGS.http_port
+USE_RELAY = ARGS.relay
+USE_DELTA = not ARGS.no_delta
+USE_INDEX_QUOTES = not ARGS.no_index_quotes
+INDEX_QUOTE_SECONDS = ARGS.index_quote_seconds
+FUNDS_POLL_SECONDS = ARGS.funds_poll_seconds
 PORTFOLIO_POLL_SECONDS = ARGS.portfolio_poll_seconds
-USE_SMARTAPI         = not (ARGS.no_broker or ARGS.no_smartapi)
-STRIKES_EACH_SIDE    = ARGS.strikes_each_side if ARGS.strikes_each_side is not None else (15 if USE_SMARTAPI else 50)
-option_chain_json.set_runtime_config(RuntimeConfig(
-    strikes_each_side=STRIKES_EACH_SIDE,
-    use_smartapi=USE_SMARTAPI,
-))
+USE_SMARTAPI = not (ARGS.no_broker or ARGS.no_smartapi)
+STRIKES_EACH_SIDE = (
+    ARGS.strikes_each_side
+    if ARGS.strikes_each_side is not None
+    else (15 if USE_SMARTAPI else 50)
+)
+option_chain_json.set_runtime_config(
+    RuntimeConfig(
+        strikes_each_side=STRIKES_EACH_SIDE,
+        use_smartapi=USE_SMARTAPI,
+    )
+)
 
+_md_label = (
+    "Upstox"
+    if _broker_settings.market_data_provider == "UPSTOX"
+    else "Shoonya"
+    if _broker_settings.market_data_provider == "SHOONYA"
+    else "SmartAPI"
+)
+if USE_SMARTAPI:
+    _chain_source = f"{_md_label} REST"
+    _overlay_state = f"{_md_label} websocket overlay ENABLED"
+else:
+    _chain_source = "NSE/BSE public REST (--no-broker)"
+    _overlay_state = f"{_md_label} overlay DISABLED (--no-broker)"
 print(
-    f"[feed] chain source: {'SmartAPI REST' if USE_SMARTAPI else 'NSE/BSE public REST (--no-broker)'}, "
+    f"[feed] chain source: {_chain_source}, "
     f"analytics recompute ceiling={POLL_SECONDS}s floor={MIN_TICK_RECOMPUTE_SECONDS}s "
-    f"+ {'SmartAPI websocket overlay ENABLED' if USE_SMARTAPI else 'SmartAPI overlay DISABLED (--no-broker)'} "
+    f"+ {_overlay_state} "
     f"| index context via market_api.py (20s-cached)",
     flush=True,
 )
 print(
     f"[paper-trading] portfolio fast-path broadcast: "
-    f"{'every SmartAPI tick (no throttle)' if PORTFOLIO_POLL_SECONDS <= 0 else f'throttled to >= {PORTFOLIO_POLL_SECONDS}s'}"
-    + ("" if USE_SMARTAPI else " (inactive — --no-broker, falls back to --poll-seconds cadence)"),
+    f"{'every ' + LIVE_FEED_PROVIDER.title() + ' tick (no throttle)' if PORTFOLIO_POLL_SECONDS <= 0 else f'throttled to >= {PORTFOLIO_POLL_SECONDS}s'}"
+    + (
+        ""
+        if USE_SMARTAPI
+        else " (inactive — --no-broker, falls back to --poll-seconds cadence)"
+    ),
     flush=True,
 )
 
@@ -286,8 +401,8 @@ _BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
 # pinned manually, same as smartapi_pipeline_adapter.py's _VIX_TOKEN.
 # Re-verify against a fresh ScripMaster dump if quotes ever go stale/empty;
 # nothing here will warn you if Angel reassigns the token.
-_VIX_TRADINGSYMBOL = "India VIX"   # SmartAPI's own tradingsymbol string
-_VIX_TOKEN = "99926017"            # exch_seg=NSE, verified against live ScripMaster 2026-07-14
+_VIX_TRADINGSYMBOL = "India VIX"  # SmartAPI's own tradingsymbol string
+_VIX_TOKEN = "99926017"  # exch_seg=NSE, verified against live ScripMaster 2026-07-14
 
 CONNECTED = set()
 LAST_PAYLOAD = None
@@ -345,6 +460,7 @@ EOD_TRIGGER_TIME = dtime(15, 45)  # run shortly after NSE cash market close (15:
 MARKET_OPEN_TIME = dtime(9, 15)
 MARKET_CLOSE_TIME = dtime(15, 30)
 
+
 def _market_session_status(now: datetime) -> str:
     """Best-effort NSE session label for the UI.
 
@@ -358,15 +474,21 @@ def _market_session_status(now: datetime) -> str:
     if MARKET_OPEN_TIME <= now.time() <= MARKET_CLOSE_TIME:
         return "OPEN"
     return "MARKET_CLOSED"
-_EOD_DONE_DATE = None             # tracks which date's EOD job already ran
-_LAST_SESSION_DATE = None         # tracks which date's SmartAPI OI baseline is currently active
+
+
+_EOD_DONE_DATE = None  # tracks which date's EOD job already ran
+_LAST_SESSION_DATE = (
+    None  # tracks which date's SmartAPI OI baseline is currently active
+)
 
 # ── Live trading configuration ──────────────────────────────────────────
 # Master switch — OFF by default. Must be explicitly set to actually place
 # real orders on the AngelOne account. Read once at process start (not
 # re-checked per-request) since flipping this on/off mid-session is a
 # deliberate deploy-time decision, not something to toggle casually.
-LIVE_TRADING_ENABLED = os.environ.get("LIVE_TRADING_ENABLED", "").strip().lower() == "true"
+LIVE_TRADING_ENABLED = (
+    os.environ.get("LIVE_TRADING_ENABLED", "").strip().lower() == "true"
+)
 
 # Instant kill switch — checked on EVERY live order attempt, no restart
 # needed. Create this file to immediately block all live orders regardless
@@ -395,7 +517,10 @@ if LIVE_TRADING_ENABLED:
         flush=True,
     )
 else:
-    print("[live-trading] disabled (paper trading only) — set LIVE_TRADING_ENABLED=true to enable", flush=True)
+    print(
+        "[live-trading] disabled (paper trading only) — set LIVE_TRADING_ENABLED=true to enable",
+        flush=True,
+    )
 
 
 def _live_trading_kill_switch_active():
@@ -557,7 +682,9 @@ def _submit_live_order_idempotent(client_order_id, *args, **kwargs):
         if existing is not None:
             return existing, True
         order_id = smartapi_place_order(
-            *args, **kwargs, order_tag=client_order_id,
+            *args,
+            **kwargs,
+            order_tag=client_order_id,
         )
         order_id = _LIVE_ORDER_STORE.record(client_order_id, order_id)
         _LIVE_ORDER_RESULTS[client_order_id] = order_id
@@ -576,15 +703,23 @@ def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
     if instrument_type in ("CE", "PE"):
         if _shoonya_resolve_option_contract is not None:
             return _shoonya_resolve_option_contract(
-                symbol, expiry, strike, instrument_type, exchange,
+                symbol,
+                expiry,
+                strike,
+                instrument_type,
+                exchange,
             )
         # expiry here is option_chain_json's format ("14-Jul-2026"); SmartAPI's
         # ScripMaster uses "14JUL2026" (no separators) — convert before lookup.
         try:
-            expiry_ddmmmyyyy = datetime.strptime(expiry, "%d-%b-%Y").strftime("%d%b%Y").upper()
+            expiry_ddmmmyyyy = (
+                datetime.strptime(expiry, "%d-%b-%Y").strftime("%d%b%Y").upper()
+            )
         except (ValueError, TypeError):
             return None
-        resolved = market_data.find_option_token(symbol, expiry_ddmmmyyyy, strike, instrument_type, exchange)
+        resolved = market_data.find_option_token(
+            symbol, expiry_ddmmmyyyy, strike, instrument_type, exchange
+        )
         if not resolved:
             return None
         return exchange, resolved["tradingsymbol"], resolved["token"]
@@ -598,6 +733,7 @@ def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
 
     # INDEX (spot) — not a tradeable instrument on its own; refuse.
     return None
+
 
 # option_chain_json keeps its runtime config (SYMBOL/EXCHANGE/EXPIRY/...) as
 # plain module globals, mutated in place before each main() call — that's
@@ -633,7 +769,9 @@ async def _publish_pipeline_status(status, reason="", elapsed=None):
     previous = (_PIPELINE_STATUS.get("status"), _PIPELINE_STATUS.get("reason"))
     _PIPELINE_STATUS["status"] = status
     _PIPELINE_STATUS["reason"] = reason
-    _PIPELINE_STATUS["elapsedSeconds"] = round(elapsed, 3) if elapsed is not None else None
+    _PIPELINE_STATUS["elapsedSeconds"] = (
+        round(elapsed, 3) if elapsed is not None else None
+    )
     if status == "LIVE":
         _PIPELINE_STATUS["lastSuccessAt"] = datetime.now().astimezone().isoformat()
     current = (status, reason)
@@ -643,7 +781,7 @@ async def _publish_pipeline_status(status, reason="", elapsed=None):
 
 def _json_default(obj):
     """orjson doesn't natively handle numpy scalars — coerce them to native Python types."""
-    if isinstance(obj, np.generic):       # covers float64, int64, bool_, etc.
+    if isinstance(obj, np.generic):  # covers float64, int64, bool_, etc.
         return obj.item()
     if isinstance(obj, np.ndarray):
         return obj.tolist()
@@ -672,7 +810,9 @@ def compute_diff(old, new, key_field="strike"):
 
     if isinstance(new, list) and isinstance(old, list):
         if new and isinstance(new[0], dict) and key_field in new[0]:
-            old_by_key = {row.get(key_field): row for row in old if isinstance(row, dict)}
+            old_by_key = {
+                row.get(key_field): row for row in old if isinstance(row, dict)
+            }
             changed_rows = []
             for row in new:
                 k = row.get(key_field)
@@ -738,6 +878,7 @@ def _eod_task_done(task: asyncio.Task):
     exc = task.exception()
     if exc is not None:
         import traceback
+
         print(f"[eod] FAILED: {exc!r}", flush=True)
         traceback.print_exception(type(exc), exc, exc.__traceback__)
     else:
@@ -753,17 +894,24 @@ def _flow_task_done(task: asyncio.Task):
     exc = task.exception()
     if exc is not None:
         import traceback
+
         print(f"[flow] FAILED: {exc!r}", flush=True)
         traceback.print_exception(type(exc), exc, exc.__traceback__)
         return
     ok = task.result()
-    print(f"[flow] record_today_flow {'succeeded' if ok else 'returned False (no data yet)'}", flush=True)
+    print(
+        f"[flow] record_today_flow {'succeeded' if ok else 'returned False (no data yet)'}",
+        flush=True,
+    )
 
 
 async def ws_handler(request):
     global PRICE_SOURCE, FUTURES_EXPIRY, _LAST_SENT
     if not _origin_allowed(request):
-        print(f"[ws] REJECTED — disallowed Origin: {request.headers.get('Origin')!r}", flush=True)
+        print(
+            f"[ws] REJECTED — disallowed Origin: {request.headers.get('Origin')!r}",
+            flush=True,
+        )
         return web.Response(status=403, text="Origin not allowed")
 
     ws = web.WebSocketResponse(heartbeat=20)
@@ -808,7 +956,10 @@ async def ws_handler(request):
     if requested_price_source:
         src = requested_price_source.strip().upper()
         if src not in ("EQ", "FUT"):
-            print(f"[ws] ignoring invalid ?priceSource={requested_price_source!r} (must be EQ or FUT)", flush=True)
+            print(
+                f"[ws] ignoring invalid ?priceSource={requested_price_source!r} (must be EQ or FUT)",
+                flush=True,
+            )
     PRICE_SOURCE = "EQ"
 
     requested_futures_expiry = request.query.get("futuresExpiry")
@@ -817,7 +968,10 @@ async def ws_handler(request):
         fexp = requested_futures_expiry.strip().upper()
         if fexp in ("NEAR", "NEXT", "FAR"):
             if fexp != FUTURES_EXPIRY:
-                print(f"[ws] futures expiry switch requested: {FUTURES_EXPIRY} -> {fexp}", flush=True)
+                print(
+                    f"[ws] futures expiry switch requested: {FUTURES_EXPIRY} -> {fexp}",
+                    flush=True,
+                )
                 FUTURES_EXPIRY = fexp
                 futures_reference_switched = True
                 # Do not diff the newly-selected contract against a cached
@@ -826,42 +980,67 @@ async def ws_handler(request):
                 _LAST_SENT = None
                 _SYMBOL_SWITCH_EVENT.set()
         else:
-            print(f"[ws] ignoring invalid ?futuresExpiry={requested_futures_expiry!r} (must be NEAR, NEXT, or FAR)", flush=True)
+            print(
+                f"[ws] ignoring invalid ?futuresExpiry={requested_futures_expiry!r} (must be NEAR, NEXT, or FAR)",
+                flush=True,
+            )
     try:
-
         # New clients need a full snapshot before they can apply deltas.
         # (If switch_symbol() just cleared LAST_PAYLOAD above, this is
         # skipped on purpose — better to wait for the next tick's real data
         # on the new symbol than hand back a snapshot of the old one.)
         async with _MARKET_STREAM_LOCK:
             if LAST_PAYLOAD is not None and not futures_reference_switched:
-                msg_str = orjson.dumps({
-                    "type": "full", "payload": LAST_PAYLOAD, "version": _BASELINE_ID,
-                }, default=_json_default).decode()
+                msg_str = orjson.dumps(
+                    {
+                        "type": "full",
+                        "payload": LAST_PAYLOAD,
+                        "version": _BASELINE_ID,
+                    },
+                    default=_json_default,
+                ).decode()
                 await ws.send_str(msg_str)
         if INDEX_QUOTES:
-            msg_str = orjson.dumps({"type": "indexQuotes", "payload": INDEX_QUOTES}, default=_json_default).decode()
+            msg_str = orjson.dumps(
+                {"type": "indexQuotes", "payload": INDEX_QUOTES}, default=_json_default
+            ).decode()
             await ws.send_str(msg_str)
         # A late-joining dashboard must see an already-delayed analytics
         # pass immediately; status transitions are otherwise only broadcast
         # when they change.
-        await ws.send_str(orjson.dumps({
-            "type": "pipelineStatus", "payload": _PIPELINE_STATUS,
-        }, default=_json_default).decode())
+        await ws.send_str(
+            orjson.dumps(
+                {
+                    "type": "pipelineStatus",
+                    "payload": _PIPELINE_STATUS,
+                },
+                default=_json_default,
+            ).decode()
+        )
         # Real account funds (Live mode) — same "hand over what we already
         # have" treatment as INDEX_QUOTES above. Stays None/skipped for the
         # life of the process when LIVE_TRADING_ENABLED is false, since
         # funds_loop() never runs in that case.
         if LAST_FUNDS is not None:
-            msg_str = orjson.dumps({"type": "funds", "payload": LAST_FUNDS}, default=_json_default).decode()
+            msg_str = orjson.dumps(
+                {"type": "funds", "payload": LAST_FUNDS}, default=_json_default
+            ).decode()
             await ws.send_str(msg_str)
         # Algo status (live-trading/kill-switch/account-guard/auto-executor
         # state) — hand a new client whatever algo_status_loop() last
         # computed instead of leaving the status panel blank for up to
         # ALGO_STATUS_POLL_SECONDS until the next periodic broadcast.
         try:
-            status = LAST_ALGO_STATUS if LAST_ALGO_STATUS is not None else _build_algo_status()
-            await ws.send_str(orjson.dumps({"type": "algoStatus", "payload": status}, default=_json_default).decode())
+            status = (
+                LAST_ALGO_STATUS
+                if LAST_ALGO_STATUS is not None
+                else _build_algo_status()
+            )
+            await ws.send_str(
+                orjson.dumps(
+                    {"type": "algoStatus", "payload": status}, default=_json_default
+                ).decode()
+            )
         except Exception as e:
             print(f"[algo-status] initial snapshot failed: {e}", flush=True)
         # Most recent position-reconciliation mismatch, if any — same
@@ -870,11 +1049,20 @@ async def ws_handler(request):
         # blank until the next drift happens to recur.
         if LAST_RECONCILIATION_ALERT is not None:
             try:
-                await ws.send_str(orjson.dumps(
-                    {"type": "reconciliationAlert", "payload": LAST_RECONCILIATION_ALERT},
-                    default=_json_default).decode())
+                await ws.send_str(
+                    orjson.dumps(
+                        {
+                            "type": "reconciliationAlert",
+                            "payload": LAST_RECONCILIATION_ALERT,
+                        },
+                        default=_json_default,
+                    ).decode()
+                )
             except Exception as e:
-                print(f"[position_reconciler] initial alert snapshot failed: {e}", flush=True)
+                print(
+                    f"[position_reconciler] initial alert snapshot failed: {e}",
+                    flush=True,
+                )
         # Hand a new client whatever paper-trading state already exists
         # (positions/orders survive process restarts via SQLite) instead of
         # leaving the panel empty until the next place_order/tick.
@@ -883,13 +1071,20 @@ async def ws_handler(request):
             init_portfolio = PT_ENGINE.get_portfolio_summary(init_prices)
             init_spot = init_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
             init_portfolio["funds"] = PT_ENGINE.get_fund_summary(
-                spot_price=init_spot, current_prices=init_prices)
-            await ws.send_str(orjson.dumps(
-                {"type": "portfolio", "payload": init_portfolio},
-                default=_json_default).decode())
-            await ws.send_str(orjson.dumps(
-                {"type": "orders", "payload": PT_ENGINE.get_orders()},
-                default=_json_default).decode())
+                spot_price=init_spot, current_prices=init_prices
+            )
+            await ws.send_str(
+                orjson.dumps(
+                    {"type": "portfolio", "payload": init_portfolio},
+                    default=_json_default,
+                ).decode()
+            )
+            await ws.send_str(
+                orjson.dumps(
+                    {"type": "orders", "payload": PT_ENGINE.get_orders()},
+                    default=_json_default,
+                ).decode()
+            )
         except Exception as e:
             print(f"[paper-trading] initial snapshot failed: {e}", flush=True)
         async for msg in ws:
@@ -904,6 +1099,7 @@ async def ws_handler(request):
                         await _handle_place_order(data.get("payload") or {})
                     except Exception as e:
                         import traceback
+
                         print(f"[paper-trading] place_order FAILED: {e}", flush=True)
                         traceback.print_exc()
                 elif data.get("type") == "cancel_order":
@@ -911,7 +1107,10 @@ async def ws_handler(request):
                         order_id = (data.get("payload") or {}).get("order_id")
                         if order_id:
                             success = PT_ENGINE.cancel_order(order_id)
-                            print(f"[paper-trading] CANCEL {order_id}: {'success' if success else 'failed'}", flush=True)
+                            print(
+                                f"[paper-trading] CANCEL {order_id}: {'success' if success else 'failed'}",
+                                flush=True,
+                            )
                             current_prices = _build_current_prices(LAST_PAYLOAD)
                             await _broadcast_portfolio(current_prices)
                     except Exception as e:
@@ -931,8 +1130,16 @@ async def ws_handler(request):
                         start_funds_polling()
                     else:
                         stop_funds_polling()
-            elif msg.type in (web.WSMsgType.ERROR, web.WSMsgType.CLOSE, web.WSMsgType.CLOSING, web.WSMsgType.CLOSED):
-                print(f"[ws] connection ended via {msg.type} close_code={ws.close_code}", flush=True)
+            elif msg.type in (
+                web.WSMsgType.ERROR,
+                web.WSMsgType.CLOSE,
+                web.WSMsgType.CLOSING,
+                web.WSMsgType.CLOSED,
+            ):
+                print(
+                    f"[ws] connection ended via {msg.type} close_code={ws.close_code}",
+                    flush=True,
+                )
     finally:
         CONNECTED.discard(ws)
         METRICS.websocket_disconnected(len(CONNECTED))
@@ -1012,7 +1219,8 @@ async def _broadcast_portfolio(current_prices):
     # stays synced with the backend's PT_STARTING_CAPITAL and SPAN estimation.
     spot = current_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
     portfolio["funds"] = PT_ENGINE.get_fund_summary(
-        spot_price=spot, current_prices=current_prices)
+        spot_price=spot, current_prices=current_prices
+    )
 
     await broadcast({"type": "portfolio", "payload": portfolio})
     await broadcast({"type": "orders", "payload": orders})
@@ -1059,7 +1267,9 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
 
     try:
         qty_value = float(payload.get("qty_lots") or 0)
-        qty_lots = int(qty_value) if np.isfinite(qty_value) and qty_value.is_integer() else 0
+        qty_lots = (
+            int(qty_value) if np.isfinite(qty_value) and qty_value.is_integer() else 0
+        )
     except (TypeError, ValueError):
         qty_lots = 0
 
@@ -1095,7 +1305,9 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
         validation_reason = f"unsupported order_type {order_type}"
     elif qty_lots < 1:
         validation_reason = "qty_lots must be a positive whole number"
-    elif instrument_type in ("CE", "PE") and (not expiry or strike is None or strike <= 0):
+    elif instrument_type in ("CE", "PE") and (
+        not expiry or strike is None or strike <= 0
+    ):
         validation_reason = "CE/PE orders require a valid expiry and positive strike"
     elif instrument_type == "FUT" and not expiry:
         validation_reason = "FUT orders require an expiry"
@@ -1129,7 +1341,9 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
             or not 8 <= len(client_order_id) <= 20
             or not client_order_id.isalnum()
         ):
-            rejection_reason = "live orders require an 8-20 character alphanumeric client_order_id"
+            rejection_reason = (
+                "live orders require an 8-20 character alphanumeric client_order_id"
+            )
         else:
             completed_order_id = _completed_live_order(client_order_id)
             if completed_order_id is not None:
@@ -1145,7 +1359,9 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
             rejection_reason = "live trading disabled on server"
         elif rejection_reason is None and _live_trading_kill_switch_active():
             rejection_reason = "live trading kill switch active"
-        elif rejection_reason is None and (qty_lots < 1 or qty_lots > LIVE_MAX_LOTS_PER_ORDER):
+        elif rejection_reason is None and (
+            qty_lots < 1 or qty_lots > LIVE_MAX_LOTS_PER_ORDER
+        ):
             rejection_reason = f"qty_lots {qty_lots} outside allowed range (1-{LIVE_MAX_LOTS_PER_ORDER})"
         elif rejection_reason is None and not _check_live_rate_limit():
             rejection_reason = f"rate limit exceeded ({LIVE_MAX_ORDERS_PER_MINUTE}/min)"
@@ -1157,14 +1373,19 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
             # the symbol to paper_trading.py's LOT_SIZES (after confirming
             # against NSE's current circular — see that dict's own comment)
             # before it can be traded live.
-            rejection_reason = f"no verified lot size for {symbol} — refusing to guess on a live order"
+            rejection_reason = (
+                f"no verified lot size for {symbol} — refusing to guess on a live order"
+            )
         elif rejection_reason is None:
             guard_tripped, guard_trip_reason = _ACCOUNT_GUARD.is_tripped()
             if guard_tripped:
                 rejection_reason = f"account risk guard tripped: {guard_trip_reason}"
 
         if rejection_reason:
-            print(f"[live-trading] REJECTED: {rejection_reason} — {symbol} {side} {qty_lots} lot(s)", flush=True)
+            print(
+                f"[live-trading] REJECTED: {rejection_reason} — {symbol} {side} {qty_lots} lot(s)",
+                flush=True,
+            )
             await _broadcast_portfolio(current_prices)
             return {"status": "rejected", "reason": rejection_reason}
 
@@ -1201,15 +1422,26 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
         try:
             live_positions = await asyncio.to_thread(smartapi_get_positions)
             projected_open_lots = projected_open_lots_from_positions(
-                live_positions, PT_LOT_SIZES, tradingsymbol,
-                transaction_type, quantity,
+                live_positions,
+                PT_LOT_SIZES,
+                tradingsymbol,
+                transaction_type,
+                quantity,
             )
         except Exception as e:
-            print(f"[account_guard] could not fetch position book for exposure check: {e}", flush=True)
+            print(
+                f"[account_guard] could not fetch position book for exposure check: {e}",
+                flush=True,
+            )
             projected_open_lots = None
-        allowed, exposure_reason = _ACCOUNT_GUARD.check_new_order(0, projected_open_lots)
+        allowed, exposure_reason = _ACCOUNT_GUARD.check_new_order(
+            0, projected_open_lots
+        )
         if not allowed:
-            print(f"[live-trading] REJECTED: {exposure_reason} — {symbol} {side} {qty_lots} lot(s)", flush=True)
+            print(
+                f"[live-trading] REJECTED: {exposure_reason} — {symbol} {side} {qty_lots} lot(s)",
+                flush=True,
+            )
             await _broadcast_portfolio(current_prices)
             return {"status": "rejected", "reason": exposure_reason}
 
@@ -1217,11 +1449,19 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
             order_id, duplicate = await asyncio.to_thread(
                 _submit_live_order_idempotent,
                 client_order_id,
-                tradingsymbol, symboltoken, exchange, transaction_type, quantity,
-                order_type=order_type, price=limit_price or 0.0,
+                tradingsymbol,
+                symboltoken,
+                exchange,
+                transaction_type,
+                quantity,
+                order_type=order_type,
+                price=limit_price or 0.0,
             )
-            print(f"[live-trading] PLACED: {tradingsymbol} {transaction_type} {quantity} "
-                  f"qty (order_id={order_id})", flush=True)
+            print(
+                f"[live-trading] PLACED: {tradingsymbol} {transaction_type} {quantity} "
+                f"qty (order_id={order_id})",
+                flush=True,
+            )
             live_result = {
                 "status": "placed",
                 "order_id": order_id,
@@ -1229,14 +1469,20 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
                 "duplicate": duplicate,
             }
         except Exception as e:
-            print(f"[live-trading] FAILED: {tradingsymbol} {transaction_type} {quantity} — {e}", flush=True)
+            print(
+                f"[live-trading] FAILED: {tradingsymbol} {transaction_type} {quantity} — {e}",
+                flush=True,
+            )
             live_result = {"status": "failed", "reason": str(e)}
         finally:
             try:
                 post_fill_positions = await asyncio.to_thread(smartapi_get_positions)
                 _ACCOUNT_GUARD.update_pnl(pnl_from_positions(post_fill_positions))
             except Exception as e:
-                print(f"[account_guard] could not refresh daily P&L after order: {e}", flush=True)
+                print(
+                    f"[account_guard] could not refresh daily P&L after order: {e}",
+                    flush=True,
+                )
             try:
                 # Fast post-fill confirmation that this order's fill is
                 # actually reflected in the position book — the periodic
@@ -1246,31 +1492,48 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
                 # relationship update_pnl() above has to the periodic
                 # daily-loss check.
                 post_fill_orders = await asyncio.to_thread(smartapi_get_order_book)
-                post_fill_result = _POSITION_RECONCILER.check(post_fill_orders, post_fill_positions, PT_LOT_SIZES)
-                await _broadcast_reconciliation_alert(post_fill_result, source="post_fill")
+                post_fill_result = _POSITION_RECONCILER.check(
+                    post_fill_orders, post_fill_positions, PT_LOT_SIZES
+                )
+                await _broadcast_reconciliation_alert(
+                    post_fill_result, source="post_fill"
+                )
             except Exception as e:
-                print(f"[position_reconciler] could not run post-fill check: {e}", flush=True)
+                print(
+                    f"[position_reconciler] could not run post-fill check: {e}",
+                    flush=True,
+                )
             await _broadcast_portfolio(current_prices)
         return live_result
 
     # ── Paper trading path (unchanged) ──────────────────────────────────
     order = PT_ENGINE.place_order(
-        symbol, side, qty_lots,
-        instrument_type=instrument_type, expiry=expiry, strike=strike,
-        order_type=order_type, limit_price=limit_price,
+        symbol,
+        side,
+        qty_lots,
+        instrument_type=instrument_type,
+        expiry=expiry,
+        strike=strike,
+        order_type=order_type,
+        limit_price=limit_price,
         current_ltp=current_ltp,
         client_order_id=client_order_id,
     )
-    print(f"[paper-trading] {order.status}: {symbol} {side} {qty_lots} lot(s) "
-          f"{instrument_type} {expiry} {strike} "
-          f"@ {order.fill_price if order.fill_price is not None else limit_price}"
-          + (f" — {order.reject_reason}" if order.reject_reason else ""),
-          flush=True)
+    print(
+        f"[paper-trading] {order.status}: {symbol} {side} {qty_lots} lot(s) "
+        f"{instrument_type} {expiry} {strike} "
+        f"@ {order.fill_price if order.fill_price is not None else limit_price}"
+        + (f" — {order.reject_reason}" if order.reject_reason else ""),
+        flush=True,
+    )
 
     await _broadcast_portfolio(current_prices)
-    return {"status": order.status, "reason": order.reject_reason,
-            "order_id": getattr(order, "id", None),
-            "client_order_id": getattr(order, "client_order_id", client_order_id)}
+    return {
+        "status": order.status,
+        "reason": order.reject_reason,
+        "order_id": getattr(order, "id", None),
+        "client_order_id": getattr(order, "client_order_id", client_order_id),
+    }
 
 
 async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_lots):
@@ -1294,21 +1557,25 @@ async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_
     a {"status": ...} dict on every path (see its own docstring) — a
     non-"placed" status here is turned into an exception, same as if
     smartapi_place_order itself had thrown."""
-    result = await _handle_place_order({
-        "symbol": symbol,
-        "instrument_type": instrument_type,
-        "expiry": expiry,
-        "strike": strike,
-        "side": side,
-        "order_type": "MARKET",
-        "qty_lots": qty_lots,
-        "client_order_id": "a" + uuid.uuid4().hex[:19],
-        "live": True,
-        "confirmed": True,
-    })
+    result = await _handle_place_order(
+        {
+            "symbol": symbol,
+            "instrument_type": instrument_type,
+            "expiry": expiry,
+            "strike": strike,
+            "side": side,
+            "order_type": "MARKET",
+            "qty_lots": qty_lots,
+            "client_order_id": "a" + uuid.uuid4().hex[:19],
+            "live": True,
+            "confirmed": True,
+        }
+    )
     status = (result or {}).get("status")
     if status != "placed":
-        reason = (result or {}).get("reason") or f"unexpected status {status!r} from _handle_place_order"
+        reason = (result or {}).get(
+            "reason"
+        ) or f"unexpected status {status!r} from _handle_place_order"
         raise RuntimeError(reason)
     return result
 
@@ -1338,10 +1605,14 @@ def _build_algo_status() -> dict:
     try:
         guard_status["current_open_lots"] = (
             open_lots_from_positions(LAST_LIVE_POSITIONS, PT_LOT_SIZES)
-            if LAST_LIVE_POSITIONS is not None else None
+            if LAST_LIVE_POSITIONS is not None
+            else None
         )
     except Exception as e:
-        print(f"[algo-status] could not compute open lots from cached positions: {e}", flush=True)
+        print(
+            f"[algo-status] could not compute open lots from cached positions: {e}",
+            flush=True,
+        )
         guard_status["current_open_lots"] = None
 
     exec_status = _AUTO_EXECUTOR.get_status(SYMBOL)
@@ -1349,10 +1620,14 @@ def _build_algo_status() -> dict:
 
     return {
         "broker": (
-            "Public Data" if _NO_SMARTAPI_REQUESTED
-            else "Shoonya" if _broker_settings.execution_broker == "SHOONYA"
-            else "Upstox" if _broker_settings.execution_broker == "UPSTOX"
-            else "Zerodha" if _broker_settings.execution_broker == "KITE"
+            "Public Data"
+            if _NO_SMARTAPI_REQUESTED
+            else "Shoonya"
+            if _broker_settings.execution_broker == "SHOONYA"
+            else "Upstox"
+            if _broker_settings.execution_broker == "UPSTOX"
+            else "Zerodha"
+            if _broker_settings.execution_broker == "KITE"
             else "Angel One"
         ),
         "liveTradingEnabled": LIVE_TRADING_ENABLED,
@@ -1412,11 +1687,16 @@ async def broadcast(message):
     if isinstance(message, dict) and message.get("type") == "full":
         _BASELINE_SEQ += 1
         payload = message.get("payload") or {}
-        _BASELINE_ID = f"{payload.get('symbol', '')}:{payload.get('expiry', '')}:{_BASELINE_SEQ}"
+        _BASELINE_ID = (
+            f"{payload.get('symbol', '')}:{payload.get('expiry', '')}:{_BASELINE_SEQ}"
+        )
         message = {**message, "version": _BASELINE_ID}
     elif isinstance(message, dict) and message.get("type") == "delta":
         if _BASELINE_ID is None:
-            print("[ws] dropping delta without an established full-snapshot baseline", flush=True)
+            print(
+                "[ws] dropping delta without an established full-snapshot baseline",
+                flush=True,
+            )
             return
         message = {**message, "baseVersion": _BASELINE_ID}
     if not CONNECTED:
@@ -1425,8 +1705,7 @@ async def broadcast(message):
     msg_str = orjson.dumps(message, default=_json_default).decode()
     clients = list(CONNECTED)
     results = await asyncio.gather(
-        *(ws.send_str(msg_str) for ws in clients),
-        return_exceptions=True
+        *(ws.send_str(msg_str) for ws in clients), return_exceptions=True
     )
     for ws, result in zip(clients, results):
         if isinstance(result, Exception):
@@ -1457,18 +1736,22 @@ BRIDGE_CONNECTED = set()
 # NSE trading symbols (not display names) since that's what market_api's
 # FNO_STOCK_INDEX rows key on.
 SECTOR_MAP = {
-    'IT':      ['INFY', 'TCS'],
-    'BANKING': ['HDFCBANK', 'ICICIBANK'],
-    'AUTO':    ['MARUTI', 'M&M'],
-    'ENERGY':  ['RELIANCE', 'ONGC'],
-    'METALS':  ['TATASTEEL', 'JSWSTEEL'],
-    'PHARMA':  ['SUNPHARMA', 'DRREDDY'],
+    "IT": ["INFY", "TCS"],
+    "BANKING": ["HDFCBANK", "ICICIBANK"],
+    "AUTO": ["MARUTI", "M&M"],
+    "ENERGY": ["RELIANCE", "ONGC"],
+    "METALS": ["TATASTEEL", "JSWSTEEL"],
+    "PHARMA": ["SUNPHARMA", "DRREDDY"],
 }
 
-_BRIDGE_SECTORS_TTL = 20   # seconds — matches market_api's README "20s-cached" note
-_BRIDGE_OI_TTL = 6 * 3600  # seconds — participant OI is EOD data, refreshing hourly is plenty
+_BRIDGE_SECTORS_TTL = 20  # seconds — matches market_api's README "20s-cached" note
+_BRIDGE_OI_TTL = (
+    6 * 3600
+)  # seconds — participant OI is EOD data, refreshing hourly is plenty
 _BRIDGE_FLOW_TTL = 6 * 3600  # same rationale — cash-market flow is also EOD data
-_BRIDGE_BIAS_TTL = 6 * 3600  # same rationale — bias is a pure combiner over the (EOD-only) flow + OI data above, no network call of its own
+_BRIDGE_BIAS_TTL = (
+    6 * 3600
+)  # same rationale — bias is a pure combiner over the (EOD-only) flow + OI data above, no network call of its own
 
 _bridge_sectors_cache = {"sectors": [], "fetchedAt": 0.0}
 _bridge_oi_cache = {"ratio": None, "oi": None, "fetchedAt": 0.0}
@@ -1488,6 +1771,7 @@ def _fetch_bridge_futures_sync():
     try:
         if USE_SMARTAPI:
             from smartapi_pipeline_adapter import fetch_futures_wide
+
             df = fetch_futures_wide(SYMBOL)
         else:
             df = market_api.fetch_public_futures(SYMBOL, FUTURES_EXPIRY)
@@ -1495,10 +1779,12 @@ def _fetch_bridge_futures_sync():
         print(f"[bridge] fetch_futures_wide FAILED: {e}", flush=True)
         return None
     if df is None or df.empty:
-        print(f"[bridge] fetch_futures_wide returned EMPTY for {SYMBOL} "
-              f"(no FUTIDX contract resolved, or get_batch_quotes had no row "
-              f"for it) — futures tile will stay hidden until this succeeds",
-              flush=True)
+        print(
+            f"[bridge] fetch_futures_wide returned EMPTY for {SYMBOL} "
+            f"(no FUTIDX contract resolved, or get_batch_quotes had no row "
+            f"for it) — futures tile will stay hidden until this succeeds",
+            flush=True,
+        )
         return None
 
     row = df.iloc[0]
@@ -1506,14 +1792,19 @@ def _fetch_bridge_futures_sync():
     chg = row.get("Change")
     pct = row.get("PctChange")
     if ltp is None:
-        print(f"[bridge] fetch_futures_wide returned a row for {SYMBOL} "
-              f"but LTP is None: {row.to_dict()}", flush=True)
+        print(
+            f"[bridge] fetch_futures_wide returned a row for {SYMBOL} "
+            f"but LTP is None: {row.to_dict()}",
+            flush=True,
+        )
         return None
     return {
         "label": "NIFTY FUT (CUR)" if SYMBOL == "NIFTY" else f"{SYMBOL} FUT (CUR)",
         "val": f"{ltp:,.2f}",
         "chg": f"{'+' if (chg or 0) >= 0 else ''}{chg:.2f}" if chg is not None else "—",
-        "pct": f"{'+' if (pct or 0) >= 0 else ''}{pct:.2f}%" if pct is not None else "—",
+        "pct": f"{'+' if (pct or 0) >= 0 else ''}{pct:.2f}%"
+        if pct is not None
+        else "—",
         "dir": "up" if (chg or 0) >= 0 else "down",
     }
 
@@ -1534,7 +1825,6 @@ async def _refresh_bridge_futures():
         _bridge_futures_cache["fetchedAt"] = now
 
 
-
 def _build_bridge_quotes():
     quotes = []
 
@@ -1543,25 +1833,35 @@ def _build_bridge_quotes():
         chg = LAST_PAYLOAD.get("spotChange")
         pct = LAST_PAYLOAD.get("spotChgPct")
         if spot is not None:
-            quotes.append({
-                "label": SYMBOL,
-                "val": f"{spot:,.2f}",
-                "chg": f"{'+' if (chg or 0) >= 0 else ''}{chg:.2f}" if chg is not None else "—",
-                "pct": f"{'+' if (pct or 0) >= 0 else ''}{pct:.2f}%" if pct is not None else "—",
-                "dir": "up" if (chg or 0) >= 0 else "down",
-            })
+            quotes.append(
+                {
+                    "label": SYMBOL,
+                    "val": f"{spot:,.2f}",
+                    "chg": f"{'+' if (chg or 0) >= 0 else ''}{chg:.2f}"
+                    if chg is not None
+                    else "—",
+                    "pct": f"{'+' if (pct or 0) >= 0 else ''}{pct:.2f}%"
+                    if pct is not None
+                    else "—",
+                    "dir": "up" if (chg or 0) >= 0 else "down",
+                }
+            )
 
         # INDIA VIX — real value, mTerminals_json.py already computes this
         vix = LAST_PAYLOAD.get("indiaVix")
         vix_pct = LAST_PAYLOAD.get("indiaVixChgPct")
         if vix is not None:
-            quotes.append({
-                "label": "INDIA VIX",
-                "val": f"{vix:.2f}",
-                "chg": "—",  # no absolute VIX change field on the payload, only %
-                "pct": f"{'+' if (vix_pct or 0) >= 0 else ''}{vix_pct:.2f}%" if vix_pct is not None else "—",
-                "dir": "up" if (vix_pct or 0) >= 0 else "down",
-            })
+            quotes.append(
+                {
+                    "label": "INDIA VIX",
+                    "val": f"{vix:.2f}",
+                    "chg": "—",  # no absolute VIX change field on the payload, only %
+                    "pct": f"{'+' if (vix_pct or 0) >= 0 else ''}{vix_pct:.2f}%"
+                    if vix_pct is not None
+                    else "—",
+                    "dir": "up" if (vix_pct or 0) >= 0 else "down",
+                }
+            )
 
     # NIFTY FUT (CUR) — real REST LTP from _fetch_bridge_futures_sync(),
     # refreshed on its own TTL by _refresh_bridge_futures() in bridge_loop().
@@ -1577,13 +1877,19 @@ def _build_bridge_quotes():
         idx_pct = q.get("spotChgPct")
         if idx_spot is None:
             continue
-        quotes.append({
-            "label": label,
-            "val": f"{idx_spot:,.2f}",
-            "chg": f"{'+' if (idx_chg or 0) >= 0 else ''}{idx_chg:.2f}" if idx_chg is not None else "—",
-            "pct": f"{'+' if (idx_pct or 0) >= 0 else ''}{idx_pct:.2f}%" if idx_pct is not None else "—",
-            "dir": "up" if (idx_chg or 0) >= 0 else "down",
-        })
+        quotes.append(
+            {
+                "label": label,
+                "val": f"{idx_spot:,.2f}",
+                "chg": f"{'+' if (idx_chg or 0) >= 0 else ''}{idx_chg:.2f}"
+                if idx_chg is not None
+                else "—",
+                "pct": f"{'+' if (idx_pct or 0) >= 0 else ''}{idx_pct:.2f}%"
+                if idx_pct is not None
+                else "—",
+                "dir": "up" if (idx_chg or 0) >= 0 else "down",
+            }
+        )
 
     return quotes
 
@@ -1642,12 +1948,16 @@ def _fetch_bridge_sectors_sync():
                 pct = float(pct)
             except (TypeError, ValueError):
                 pct = 0.0
-            stocks.append({
-                "n": sym,
-                "v": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
-                "dir": "up" if pct >= 0 else "down",
-            })
-        sectors.append({"name": name, "tag": "—", "cls": "tag-neutral", "stocks": stocks})
+            stocks.append(
+                {
+                    "n": sym,
+                    "v": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
+                    "dir": "up" if pct >= 0 else "down",
+                }
+            )
+        sectors.append(
+            {"name": name, "tag": "—", "cls": "tag-neutral", "stocks": stocks}
+        )
 
     return sectors
 
@@ -1667,28 +1977,43 @@ def _fetch_bridge_oi_sync():
         return None, None
 
     participants = report["participants"]
-    colors = {"fii": "var(--violet)", "pro": "var(--amber)", "retail": "var(--grey)", "dii": "var(--green)"}
+    colors = {
+        "fii": "var(--violet)",
+        "pro": "var(--amber)",
+        "retail": "var(--grey)",
+        "dii": "var(--green)",
+    }
     totals = {}
     for key in ("fii", "pro", "retail", "dii"):
         raw = participants[key]["raw"]
-        totals[key] = raw.get("total_long_contracts", 0.0) + raw.get("total_short_contracts", 0.0)
+        totals[key] = raw.get("total_long_contracts", 0.0) + raw.get(
+            "total_short_contracts", 0.0
+        )
     total_all = sum(totals.values()) or 1.0
 
     oi = []
     for key in ("fii", "pro", "retail", "dii"):
         derived = participants[key]["derived"]
-        oi.append({
-            "name": key.upper(),
-            "pct": round(totals[key] / total_all * 1000) / 10,
-            "color": colors[key],
-            "trend": "LONG BUILD" if derived["index_fut_net"] >= 0 else "SHORT BUILD",
-            "dir": "up" if derived["index_fut_net"] >= 0 else "down",
-        })
+        oi.append(
+            {
+                "name": key.upper(),
+                "pct": round(totals[key] / total_all * 1000) / 10,
+                "color": colors[key],
+                "trend": "LONG BUILD"
+                if derived["index_fut_net"] >= 0
+                else "SHORT BUILD",
+                "dir": "up" if derived["index_fut_net"] >= 0 else "down",
+            }
+        )
 
     fii_raw = participants["fii"]["raw"]
     fii_long = fii_raw.get("future_index_long", 0.0)
     fii_short = fii_raw.get("future_index_short", 0.0)
-    ratio = round(fii_long / (fii_long + fii_short) * 1000) / 10 if (fii_long + fii_short) else None
+    ratio = (
+        round(fii_long / (fii_long + fii_short) * 1000) / 10
+        if (fii_long + fii_short)
+        else None
+    )
 
     return ratio, oi
 
@@ -1717,7 +2042,10 @@ async def _refresh_bridge_flow():
     # since time.monotonic() is not guaranteed to start near 0 (e.g. it's
     # commonly seconds-since-boot on Linux), so a fetchedAt=0.0 sentinel can
     # look "fresh" against a large TTL for hours after the process starts.
-    if _bridge_flow_cache["flow"] is not None and now - _bridge_flow_cache["fetchedAt"] < _BRIDGE_FLOW_TTL:
+    if (
+        _bridge_flow_cache["flow"] is not None
+        and now - _bridge_flow_cache["fetchedAt"] < _BRIDGE_FLOW_TTL
+    ):
         return
     flow = await asyncio.to_thread(_fetch_bridge_flow_sync)
     if flow is not None:
@@ -1741,7 +2069,10 @@ def _fetch_bridge_bias_sync():
 async def _refresh_bridge_bias():
     now = time.monotonic()
     # Same fetchedAt=0.0-sentinel fix as _refresh_bridge_flow above.
-    if _bridge_bias_cache["bias"] is not None and now - _bridge_bias_cache["fetchedAt"] < _BRIDGE_BIAS_TTL:
+    if (
+        _bridge_bias_cache["bias"] is not None
+        and now - _bridge_bias_cache["fetchedAt"] < _BRIDGE_BIAS_TTL
+    ):
         return
     bias = await asyncio.to_thread(_fetch_bridge_bias_sync)
     if bias is not None:
@@ -1763,7 +2094,10 @@ async def _refresh_bridge_oi():
     now = time.monotonic()
     # Same fix as _refresh_bridge_flow above: don't let a fetchedAt=0.0
     # sentinel masquerade as "fresh" against a long TTL right after startup.
-    if _bridge_oi_cache["oi"] is not None and now - _bridge_oi_cache["fetchedAt"] < _BRIDGE_OI_TTL:
+    if (
+        _bridge_oi_cache["oi"] is not None
+        and now - _bridge_oi_cache["fetchedAt"] < _BRIDGE_OI_TTL
+    ):
         return
     ratio, oi = await asyncio.to_thread(_fetch_bridge_oi_sync)
     if oi is not None:
@@ -1793,7 +2127,10 @@ async def bridge_ws_handler(request):
     blank while waiting for the next tick), then relies on bridge_loop()
     for live updates."""
     if not _origin_allowed(request):
-        print(f"[bridge] REJECTED — disallowed Origin: {request.headers.get('Origin')!r}", flush=True)
+        print(
+            f"[bridge] REJECTED — disallowed Origin: {request.headers.get('Origin')!r}",
+            flush=True,
+        )
         return web.Response(status=403, text="Origin not allowed")
 
     ws = web.WebSocketResponse(heartbeat=20)
@@ -1817,7 +2154,10 @@ async def bridge_ws_handler(request):
             pass  # this bridge is broadcast-only; incoming messages are ignored
     finally:
         BRIDGE_CONNECTED.discard(ws)
-        print(f"[bridge] dashboard disconnected. Total: {len(BRIDGE_CONNECTED)}", flush=True)
+        print(
+            f"[bridge] dashboard disconnected. Total: {len(BRIDGE_CONNECTED)}",
+            flush=True,
+        )
 
     return ws
 
@@ -1836,19 +2176,29 @@ async def bridge_loop():
             await _refresh_bridge_flow()
             await _refresh_bridge_bias()
             await _refresh_bridge_futures()
-            await broadcast_bridge({
-                "quotes": _build_bridge_quotes(),
-                "skew": _build_bridge_skew((LAST_PAYLOAD or {}).get("greeks")),
-                "sectors": _bridge_sectors_cache["sectors"],
-                "ratio": _bridge_oi_cache["ratio"],
-                "oi": _bridge_oi_cache["oi"],
-                "flow": _bridge_flow_cache["flow"],
-                "bias": _bridge_bias_cache["bias"],
-            })
+            await broadcast_bridge(
+                {
+                    "quotes": _build_bridge_quotes(),
+                    "skew": _build_bridge_skew((LAST_PAYLOAD or {}).get("greeks")),
+                    "sectors": _bridge_sectors_cache["sectors"],
+                    "ratio": _bridge_oi_cache["ratio"],
+                    "oi": _bridge_oi_cache["oi"],
+                    "flow": _bridge_flow_cache["flow"],
+                    "bias": _bridge_bias_cache["bias"],
+                }
+            )
         await asyncio.sleep(2)
 
 
-def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, strict_expiry=None, no_virtual_oi=None, price_source=None, futures_expiry=None):
+def _configure_pipeline_globals(
+    symbol,
+    expiry=None,
+    no_extra_chains=None,
+    strict_expiry=None,
+    no_virtual_oi=None,
+    price_source=None,
+    futures_expiry=None,
+):
     """Point option_chain_json's runtime config at `symbol`, via
     option_chain_json.set_runtime_config() (see pipeline_config.py). Used
     only by run_pipeline_once() for the primary --symbol's full
@@ -1864,18 +2214,23 @@ def _configure_pipeline_globals(symbol, expiry=None, no_extra_chains=None, stric
     fallback (BSE vs NSE nearest-expiry rule) exactly as before."""
     exchange = "BSE" if symbol in _BSE_SYMBOLS else "NSE"
     resolved_expiry = expiry or (
-        option_chain_json.BSE_EXPIRY_DEFAULT.get(symbol, option_chain_json._nearest_Thursday)()
-        if exchange == "BSE" else option_chain_json._nearest_Tuesday()
+        option_chain_json.BSE_EXPIRY_DEFAULT.get(
+            symbol, option_chain_json._nearest_Thursday
+        )()
+        if exchange == "BSE"
+        else option_chain_json._nearest_Tuesday()
     )
-    option_chain_json.set_runtime_config(RuntimeConfig(
-        symbol=symbol,
-        expiry=resolved_expiry,
-        no_extra_chains=no_extra_chains,
-        strict_expiry=strict_expiry,
-        no_virtual_oi=no_virtual_oi,
-        price_source=price_source,
-        futures_expiry=futures_expiry,   # add this line too
-    ))
+    option_chain_json.set_runtime_config(
+        RuntimeConfig(
+            symbol=symbol,
+            expiry=resolved_expiry,
+            no_extra_chains=no_extra_chains,
+            strict_expiry=strict_expiry,
+            no_virtual_oi=no_virtual_oi,
+            price_source=price_source,
+            futures_expiry=futures_expiry,  # add this line too
+        )
+    )
 
 
 def switch_symbol(new_symbol, new_expiry=None):
@@ -1949,7 +2304,9 @@ def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
 async def _smartapi_sync_and_broadcast(message):
     """Serialize SmartAPI mutations with engine full/delta computation."""
     async with _MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(message, _smartapi_feed_matches_displayed_expiry)
+        await _live_feed_sync_and_broadcast_locked(
+            message, _smartapi_feed_matches_displayed_expiry
+        )
 
 
 async def _upstox_sync_and_broadcast(message):
@@ -1961,7 +2318,9 @@ async def _upstox_sync_and_broadcast(message):
     LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
     serializes either way."""
     async with _MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(message, _upstox_feed_matches_displayed_expiry)
+        await _live_feed_sync_and_broadcast_locked(
+            message, _upstox_feed_matches_displayed_expiry
+        )
 
 
 async def _shoonya_sync_and_broadcast(message):
@@ -1973,7 +2332,9 @@ async def _shoonya_sync_and_broadcast(message):
     LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
     serializes either way."""
     async with _MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(message, _shoonya_feed_matches_displayed_expiry)
+        await _live_feed_sync_and_broadcast_locked(
+            message, _shoonya_feed_matches_displayed_expiry
+        )
 
 
 async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
@@ -2009,16 +2370,22 @@ async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
     feed_update_applied = False
     try:
         payload = message.get("payload") if isinstance(message, dict) else None
-        chain_delta = (payload or {}).get("chain") if isinstance(payload, dict) else None
+        chain_delta = (
+            (payload or {}).get("chain") if isinstance(payload, dict) else None
+        )
         if isinstance(chain_delta, dict) and chain_delta.get("_keyed"):
             changed_rows = chain_delta.get("changed") or []
             current_expiry = (LAST_PAYLOAD or {}).get("expiry")
             if changed_rows and matches_expiry_fn(current_expiry):
                 feed_update_applied = True
                 if isinstance(LAST_PAYLOAD, dict):
-                    _apply_smartapi_rows_to_chain_list(LAST_PAYLOAD.get("chain"), changed_rows)
+                    _apply_smartapi_rows_to_chain_list(
+                        LAST_PAYLOAD.get("chain"), changed_rows
+                    )
                 if isinstance(_LAST_SENT, dict):
-                    _apply_smartapi_rows_to_chain_list(_LAST_SENT.get("chain"), changed_rows)
+                    _apply_smartapi_rows_to_chain_list(
+                        _LAST_SENT.get("chain"), changed_rows
+                    )
             elif changed_rows:
                 # Mismatch: this stale-expiry chain delta must not reach
                 # clients at all. Broadcast a copy of the message with
@@ -2094,19 +2461,27 @@ async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
         except Exception as e:
             # Same best-effort posture as the sync block above — a paper
             # trading hiccup must never take down the live market-data feed.
-            print(f"[paper-trading] fast-path portfolio broadcast failed: {e}", flush=True)
+            print(
+                f"[paper-trading] fast-path portfolio broadcast failed: {e}", flush=True
+            )
 
 
 _smartapi_stream = None
 _smartapi_aggregator = None
-_smartapi_loop = None       # captured once at startup, reused for symbol switches
-_smartapi_exchange = None   # exchange type currently subscribed (NFO/BFO), for unsubscribe
-_smartapi_tokens = None     # token list currently subscribed, for unsubscribe
-_smartapi_current_expiry = None  # expiry string the SmartAPI feed is streaming, e.g. "31JUL2026"
-_smartapi_index_token = None     # underlying INDEX token currently subscribed for fast spot ticks, if any
+_smartapi_loop = None  # captured once at startup, reused for symbol switches
+_smartapi_exchange = (
+    None  # exchange type currently subscribed (NFO/BFO), for unsubscribe
+)
+_smartapi_tokens = None  # token list currently subscribed, for unsubscribe
+_smartapi_current_expiry = (
+    None  # expiry string the SmartAPI feed is streaming, e.g. "31JUL2026"
+)
+_smartapi_index_token = (
+    None  # underlying INDEX token currently subscribed for fast spot ticks, if any
+)
 _smartapi_index_exchange = None  # EXCHANGE_TYPE key ("NSE_CM"/"BSE_CM") the index token was subscribed under — DIFFERENT from _smartapi_exchange (NFO/BFO), so it needs its own unsubscribe call
-_smartapi_futures_token = None      # current-month futures token subscribed for VWAP/volume, if resolved (see _resolve_futures_token)
-_smartapi_futures_exchange = None   # NFO/BFO — same exchange as _smartapi_exchange, tracked separately since it's folded into _smartapi_tokens for unsubscribe but needs its own basis-calc lookup
+_smartapi_futures_token = None  # current-month futures token subscribed for VWAP/volume, if resolved (see _resolve_futures_token)
+_smartapi_futures_exchange = None  # NFO/BFO — same exchange as _smartapi_exchange, tracked separately since it's folded into _smartapi_tokens for unsubscribe but needs its own basis-calc lookup
 
 # Serializes ALL entry points into the SmartAPI feed lifecycle —
 # start_smartapi_feed() (both the initial startup call AND the fallback
@@ -2183,22 +2558,35 @@ def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
 
     expiries = market_data.list_expiries(target_symbol, exchange=exchange)
     if not expiries:
-        print(f"[smartapi] No expiries found for {target_symbol}, skipping feed", flush=True)
+        print(
+            f"[smartapi] No expiries found for {target_symbol}, skipping feed",
+            flush=True,
+        )
         return None
 
     if expiry:
         target_date = _parse_any_expiry(expiry)
-        resolved_expiry = next((e for e in expiries if _parse_any_expiry(e) == target_date), None)
+        resolved_expiry = next(
+            (e for e in expiries if _parse_any_expiry(e) == target_date), None
+        )
         if resolved_expiry is None:
-            print(f"[smartapi] Requested expiry '{expiry}' not available for "
-                  f"{target_symbol} (have: {expiries}) — falling back to nearest", flush=True)
+            print(
+                f"[smartapi] Requested expiry '{expiry}' not available for "
+                f"{target_symbol} (have: {expiries}) — falling back to nearest",
+                flush=True,
+            )
             resolved_expiry = expiries[0]
     else:
         resolved_expiry = expiries[0]
 
-    chain = market_data.get_atm_chain(target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange)
+    chain = market_data.get_atm_chain(
+        target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange
+    )
     if not chain:
-        print(f"[smartapi] Could not build ATM chain for {target_symbol}, skipping feed", flush=True)
+        print(
+            f"[smartapi] Could not build ATM chain for {target_symbol}, skipping feed",
+            flush=True,
+        )
         return None
 
     token_meta = {
@@ -2219,8 +2607,11 @@ def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
     index_token = None
     index_exchange_type = None
     if index_info is None:
-        print(f"[smartapi] No INDEX_TOKENS entry for {target_symbol} — "
-              f"spot will only update via the slower REST poll, not SmartAPI", flush=True)
+        print(
+            f"[index-quote] No INDEX_TOKENS entry for {target_symbol} — "
+            f"spot will only update via the slower REST poll, not the live feed",
+            flush=True,
+        )
     else:
         index_token = index_info["token"]
         # INDEX_TOKENS' exchange is "NSE"/"BSE" (cash market); EXCHANGE_TYPE's
@@ -2240,11 +2631,21 @@ def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
     # both fields. Tagged "FUT" (not "INDEX"/"CE"/"PE") — REQUIRES
     # TickAggregator.on_tick() to actually understand this tag before any
     # tick for it does anything; see _resolve_futures_token()'s docstring.
-    futures_token, futures_exchange_type = _resolve_futures_token(target_symbol, exchange)
+    futures_token, futures_exchange_type = _resolve_futures_token(
+        target_symbol, exchange
+    )
     if futures_token:
         token_meta[str(futures_token)] = {"strike": None, "option_type": "FUT"}
 
-    return exchange, token_meta, resolved_expiry, index_token, index_exchange_type, futures_token, futures_exchange_type
+    return (
+        exchange,
+        token_meta,
+        resolved_expiry,
+        index_token,
+        index_exchange_type,
+        futures_token,
+        futures_exchange_type,
+    )
 
 
 def _resolve_futures_token(target_symbol, exchange):
@@ -2282,9 +2683,9 @@ def _resolve_futures_token(target_symbol, exchange):
 
 _upstox_stream = None
 _upstox_aggregator = None
-_upstox_loop = None             # captured once at startup, reused for symbol switches
-_upstox_keys = None             # instrument_key list currently subscribed, for unsubscribe
-_upstox_current_expiry = None   # ISO 'YYYY-MM-DD' expiry the Upstox feed is streaming
+_upstox_loop = None  # captured once at startup, reused for symbol switches
+_upstox_keys = None  # instrument_key list currently subscribed, for unsubscribe
+_upstox_current_expiry = None  # ISO 'YYYY-MM-DD' expiry the Upstox feed is streaming
 
 # Same reentrant-serialization purpose as _smartapi_switch_lock above — see
 # that lock's docstring for the exact race it closes (a backgrounded
@@ -2326,30 +2727,42 @@ def _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry=None)
     NOTE: no futures-VWAP leg here, matching _resolve_futures_token()
     above being a documented no-op stub on the SmartAPI side today too —
     nothing working yet to mirror."""
-    from brokers.upstox_client import list_expiries as _up_list_expiries
-    from brokers.upstox_client import get_atm_chain as _up_get_atm_chain
     from brokers.upstox_client import INDEX_KEYS as _UP_INDEX_KEYS
+    from brokers.upstox_client import get_atm_chain as _up_get_atm_chain
+    from brokers.upstox_client import list_expiries as _up_list_expiries
 
     exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
 
     expiries = _up_list_expiries(target_symbol, exchange=exchange)
     if not expiries:
-        print(f"[upstox] No expiries found for {target_symbol}, skipping feed", flush=True)
+        print(
+            f"[upstox] No expiries found for {target_symbol}, skipping feed", flush=True
+        )
         return None
 
     if expiry:
         target_date = _parse_any_expiry(expiry)
-        resolved_expiry = next((e for e in expiries if _parse_any_expiry(e) == target_date), None)
+        resolved_expiry = next(
+            (e for e in expiries if _parse_any_expiry(e) == target_date), None
+        )
         if resolved_expiry is None:
-            print(f"[upstox] Requested expiry '{expiry}' not available for "
-                  f"{target_symbol} (have: {expiries}) — falling back to nearest", flush=True)
+            print(
+                f"[upstox] Requested expiry '{expiry}' not available for "
+                f"{target_symbol} (have: {expiries}) — falling back to nearest",
+                flush=True,
+            )
             resolved_expiry = expiries[0]
     else:
         resolved_expiry = expiries[0]
 
-    chain = _up_get_atm_chain(target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange)
+    chain = _up_get_atm_chain(
+        target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange
+    )
     if not chain:
-        print(f"[upstox] Could not build ATM chain for {target_symbol}, skipping feed", flush=True)
+        print(
+            f"[upstox] Could not build ATM chain for {target_symbol}, skipping feed",
+            flush=True,
+        )
         return None
 
     token_meta = {
@@ -2360,8 +2773,11 @@ def _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry=None)
 
     index_key = _UP_INDEX_KEYS.get(target_symbol)
     if index_key is None:
-        print(f"[upstox] No INDEX_KEYS entry for {target_symbol} — "
-              f"spot will only update via the slower REST poll, not Upstox", flush=True)
+        print(
+            f"[upstox] No INDEX_KEYS entry for {target_symbol} — "
+            f"spot will only update via the slower REST poll, not Upstox",
+            flush=True,
+        )
     else:
         # Tagged "INDEX" — same convention TickAggregator.on_tick() already
         # understands for SmartAPI's index token (see _resolve_chain_tokens()).
@@ -2384,27 +2800,38 @@ def start_upstox_feed(loop, underlying=None, strikes_around_atm=10, expiry=None)
     with _upstox_switch_lock:
         if _upstox_stream is not None:
             target_symbol = (underlying or SYMBOL).upper()
-            print(f"[upstox] Feed already running, switching to {target_symbol} instead of starting a new one", flush=True)
+            print(
+                f"[upstox] Feed already running, switching to {target_symbol} instead of starting a new one",
+                flush=True,
+            )
             _switch_upstox_symbol_blocking(target_symbol, strikes_around_atm, expiry)
             return
 
         _upstox_loop = loop
         target_symbol = (underlying or SYMBOL).upper()
 
-        resolved = _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry)
+        resolved = _resolve_upstox_chain_tokens(
+            target_symbol, strikes_around_atm, expiry
+        )
         if resolved is None:
             return
         token_meta, resolved_expiry, index_key = resolved
 
         _upstox_aggregator = TickAggregator(
-            token_meta, loop, _upstox_sync_and_broadcast,
+            token_meta,
+            loop,
+            _upstox_sync_and_broadcast,
             tick_event=_TICK_ACTIVITY_EVENT,
         )
         _upstox_aggregator.start()
 
-        _upstox_stream = UpstoxTickStream(on_tick=_upstox_aggregator.on_tick, mode="full")
+        _upstox_stream = UpstoxTickStream(
+            on_tick=_upstox_aggregator.on_tick, mode="full"
+        )
         _upstox_stream.connect()
-        threading.Thread(target=_upstox_stream.run_forever_with_reconnect, daemon=True).start()
+        threading.Thread(
+            target=_upstox_stream.run_forever_with_reconnect, daemon=True
+        ).start()
         time.sleep(2)  # let the WS connection establish before subscribing
 
         keys = list(token_meta.keys())
@@ -2413,8 +2840,11 @@ def start_upstox_feed(loop, underlying=None, strikes_around_atm=10, expiry=None)
         _upstox_current_expiry = resolved_expiry
 
         option_count = len(keys) - (1 if index_key else 0)
-        print(f"[upstox] Streaming {option_count} {target_symbol} option legs"
-              f"{' + spot' if index_key else ''} (expiry {resolved_expiry})", flush=True)
+        print(
+            f"[upstox] Streaming {option_count} {target_symbol} option legs"
+            f"{' + spot' if index_key else ''} (expiry {resolved_expiry})",
+            flush=True,
+        )
 
 
 def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
@@ -2430,7 +2860,9 @@ def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=Non
                 start_upstox_feed(_upstox_loop, new_symbol, strikes_around_atm, expiry)
             return
 
-        resolved = _resolve_upstox_chain_tokens(new_symbol.upper(), strikes_around_atm, expiry)
+        resolved = _resolve_upstox_chain_tokens(
+            new_symbol.upper(), strikes_around_atm, expiry
+        )
         if resolved is None:
             return
         new_token_meta, new_expiry, new_index_key = resolved
@@ -2440,7 +2872,9 @@ def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=Non
             try:
                 _upstox_stream.unsubscribe(_upstox_keys)
             except Exception as e:
-                print(f"[upstox] Unsubscribe failed (continuing anyway): {e}", flush=True)
+                print(
+                    f"[upstox] Unsubscribe failed (continuing anyway): {e}", flush=True
+                )
 
         _upstox_aggregator.update_token_meta(new_token_meta)
         _upstox_stream.subscribe(new_keys)
@@ -2448,8 +2882,11 @@ def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=Non
         _upstox_keys = new_keys
         _upstox_current_expiry = new_expiry
         option_count = len(new_keys) - (1 if new_index_key else 0)
-        print(f"[upstox] Switched stream to {option_count} {new_symbol.upper()} option legs"
-              f"{' + spot' if new_index_key else ''} (expiry {new_expiry})", flush=True)
+        print(
+            f"[upstox] Switched stream to {option_count} {new_symbol.upper()} option legs"
+            f"{' + spot' if new_index_key else ''} (expiry {new_expiry})",
+            flush=True,
+        )
 
 
 def restart_upstox_feed(new_symbol, new_expiry=None):
@@ -2473,9 +2910,13 @@ def restart_upstox_feed(new_symbol, new_expiry=None):
 
 _shoonya_stream = None
 _shoonya_aggregator = None
-_shoonya_loop = None             # captured once at startup, reused for symbol switches
-_shoonya_instruments = None      # 'EXCH|TOKEN' strings currently subscribed, for unsubscribe
-_shoonya_current_expiry = None   # expiry (Shoonya's 'DD-Mon-YYYY' format) the feed is streaming
+_shoonya_loop = None  # captured once at startup, reused for symbol switches
+_shoonya_instruments = (
+    None  # 'EXCH|TOKEN' strings currently subscribed, for unsubscribe
+)
+_shoonya_current_expiry = (
+    None  # expiry (Shoonya's 'DD-Mon-YYYY' format) the feed is streaming
+)
 
 # Same reentrant-serialization purpose as _smartapi_switch_lock/
 # _upstox_switch_lock above.
@@ -2509,34 +2950,50 @@ def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None
     ShoonyaTickStream.subscribe() expects and what its ticks report back
     as `token` after stripping the exchange prefix — see
     _shoonya_sync_and_broadcast() below for the strip)."""
-    from brokers.shoonya_market_data import list_expiries as _sh_list_expiries
     from brokers.shoonya_market_data import get_atm_chain as _sh_get_atm_chain
     from brokers.shoonya_market_data import index_tokens as _sh_index_tokens
+    from brokers.shoonya_market_data import list_expiries as _sh_list_expiries
 
     exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
 
     expiries = _sh_list_expiries(target_symbol, exchange=exchange)
     if not expiries:
-        print(f"[shoonya] No expiries found for {target_symbol}, skipping feed", flush=True)
+        print(
+            f"[shoonya] No expiries found for {target_symbol}, skipping feed",
+            flush=True,
+        )
         return None
 
     if expiry:
         target_date = _parse_any_expiry(expiry)
-        resolved_expiry = next((e for e in expiries if _parse_any_expiry(e) == target_date), None)
+        resolved_expiry = next(
+            (e for e in expiries if _parse_any_expiry(e) == target_date), None
+        )
         if resolved_expiry is None:
-            print(f"[shoonya] Requested expiry '{expiry}' not available for "
-                  f"{target_symbol} (have: {expiries}) — falling back to nearest", flush=True)
+            print(
+                f"[shoonya] Requested expiry '{expiry}' not available for "
+                f"{target_symbol} (have: {expiries}) — falling back to nearest",
+                flush=True,
+            )
             resolved_expiry = expiries[0]
     else:
         resolved_expiry = expiries[0]
 
-    chain = _sh_get_atm_chain(target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange)
+    chain = _sh_get_atm_chain(
+        target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange
+    )
     if not chain:
-        print(f"[shoonya] Could not build ATM chain for {target_symbol}, skipping feed", flush=True)
+        print(
+            f"[shoonya] Could not build ATM chain for {target_symbol}, skipping feed",
+            flush=True,
+        )
         return None
 
     instrument_meta = {
-        f"{exchange}|{row['token']}": {"strike": row["strike"], "option_type": row["type"]}
+        f"{exchange}|{row['token']}": {
+            "strike": row["strike"],
+            "option_type": row["type"],
+        }
         for row in chain["rows"]
     }
 
@@ -2546,8 +3003,11 @@ def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None
     index_info = _sh_index_tokens().get(target_symbol)
     index_instrument = None
     if index_info is None or not index_info.get("token"):
-        print(f"[shoonya] No index token resolved for {target_symbol} — "
-              f"spot will only update via the slower REST poll, not Shoonya", flush=True)
+        print(
+            f"[shoonya] No index token resolved for {target_symbol} — "
+            f"spot will only update via the slower REST poll, not Shoonya",
+            flush=True,
+        )
     else:
         index_instrument = f"{index_info['exchange']}|{index_info['token']}"
         # Tagged "INDEX" — same convention TickAggregator.on_tick() already
@@ -2569,27 +3029,36 @@ def start_shoonya_feed(loop, underlying=None, strikes_around_atm=10, expiry=None
     with _shoonya_switch_lock:
         if _shoonya_stream is not None:
             target_symbol = (underlying or SYMBOL).upper()
-            print(f"[shoonya] Feed already running, switching to {target_symbol} instead of starting a new one", flush=True)
+            print(
+                f"[shoonya] Feed already running, switching to {target_symbol} instead of starting a new one",
+                flush=True,
+            )
             _switch_shoonya_symbol_blocking(target_symbol, strikes_around_atm, expiry)
             return
 
         _shoonya_loop = loop
         target_symbol = (underlying or SYMBOL).upper()
 
-        resolved = _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry)
+        resolved = _resolve_shoonya_chain_tokens(
+            target_symbol, strikes_around_atm, expiry
+        )
         if resolved is None:
             return
         instrument_meta, resolved_expiry, index_instrument = resolved
 
         _shoonya_aggregator = TickAggregator(
-            instrument_meta, loop, _shoonya_sync_and_broadcast,
+            instrument_meta,
+            loop,
+            _shoonya_sync_and_broadcast,
             tick_event=_TICK_ACTIVITY_EVENT,
         )
         _shoonya_aggregator.start()
 
         _shoonya_stream = ShoonyaTickStream(on_tick=_shoonya_aggregator.on_tick)
         _shoonya_stream.connect()
-        threading.Thread(target=_shoonya_stream.run_forever_with_reconnect, daemon=True).start()
+        threading.Thread(
+            target=_shoonya_stream.run_forever_with_reconnect, daemon=True
+        ).start()
         time.sleep(2)  # let the WS connection establish before subscribing
 
         instruments = list(instrument_meta.keys())
@@ -2598,8 +3067,11 @@ def start_shoonya_feed(loop, underlying=None, strikes_around_atm=10, expiry=None
         _shoonya_current_expiry = resolved_expiry
 
         option_count = len(instruments) - (1 if index_instrument else 0)
-        print(f"[shoonya] Streaming {option_count} {target_symbol} option legs"
-              f"{' + spot' if index_instrument else ''} (expiry {resolved_expiry})", flush=True)
+        print(
+            f"[shoonya] Streaming {option_count} {target_symbol} option legs"
+            f"{' + spot' if index_instrument else ''} (expiry {resolved_expiry})",
+            flush=True,
+        )
 
 
 def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
@@ -2612,10 +3084,14 @@ def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=No
     with _shoonya_switch_lock:
         if _shoonya_stream is None or _shoonya_aggregator is None:
             if _shoonya_loop is not None:
-                start_shoonya_feed(_shoonya_loop, new_symbol, strikes_around_atm, expiry)
+                start_shoonya_feed(
+                    _shoonya_loop, new_symbol, strikes_around_atm, expiry
+                )
             return
 
-        resolved = _resolve_shoonya_chain_tokens(new_symbol.upper(), strikes_around_atm, expiry)
+        resolved = _resolve_shoonya_chain_tokens(
+            new_symbol.upper(), strikes_around_atm, expiry
+        )
         if resolved is None:
             return
         new_instrument_meta, new_expiry, new_index_instrument = resolved
@@ -2625,7 +3101,9 @@ def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=No
             try:
                 _shoonya_stream.unsubscribe(_shoonya_instruments)
             except Exception as e:
-                print(f"[shoonya] Unsubscribe failed (continuing anyway): {e}", flush=True)
+                print(
+                    f"[shoonya] Unsubscribe failed (continuing anyway): {e}", flush=True
+                )
 
         _shoonya_aggregator.update_token_meta(new_instrument_meta)
         _shoonya_stream.subscribe(new_instruments)
@@ -2633,8 +3111,11 @@ def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=No
         _shoonya_instruments = new_instruments
         _shoonya_current_expiry = new_expiry
         option_count = len(new_instruments) - (1 if new_index_instrument else 0)
-        print(f"[shoonya] Switched stream to {option_count} {new_symbol.upper()} option legs"
-              f"{' + spot' if new_index_instrument else ''} (expiry {new_expiry})", flush=True)
+        print(
+            f"[shoonya] Switched stream to {option_count} {new_symbol.upper()} option legs"
+            f"{' + spot' if new_index_instrument else ''} (expiry {new_expiry})",
+            flush=True,
+        )
 
 
 def restart_shoonya_feed(new_symbol, new_expiry=None):
@@ -2678,7 +3159,10 @@ def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=Non
             # after startup actually finished) — switch symbol on the
             # EXISTING connection instead of creating a second one.
             target_symbol = (underlying or SYMBOL).upper()
-            print(f"[smartapi] Feed already running, switching to {target_symbol} instead of starting a new one", flush=True)
+            print(
+                f"[smartapi] Feed already running, switching to {target_symbol} instead of starting a new one",
+                flush=True,
+            )
             _switch_smartapi_symbol_blocking(target_symbol, strikes_around_atm, expiry)
             return
 
@@ -2688,24 +3172,40 @@ def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=Non
         resolved = _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry)
         if resolved is None:
             return
-        exchange, token_meta, expiry, index_token, index_exchange_type, futures_token, futures_exchange_type = resolved
+        (
+            exchange,
+            token_meta,
+            expiry,
+            index_token,
+            index_exchange_type,
+            futures_token,
+            futures_exchange_type,
+        ) = resolved
 
         _smartapi_aggregator = TickAggregator(
-            token_meta, loop, _smartapi_sync_and_broadcast,
+            token_meta,
+            loop,
+            _smartapi_sync_and_broadcast,
             tick_event=_TICK_ACTIVITY_EVENT,
         )
         _smartapi_aggregator.start()
 
         _smartapi_stream = SmartTickStream(on_tick=_smartapi_aggregator.on_tick, mode=3)
         _smartapi_stream.connect()
-        threading.Thread(target=_smartapi_stream.run_forever_with_reconnect, daemon=True).start()
+        threading.Thread(
+            target=_smartapi_stream.run_forever_with_reconnect, daemon=True
+        ).start()
         time.sleep(2)  # let the WS connection establish before subscribing
 
         # Option legs subscribe under the F&O exchange (NFO/BFO) as before.
         # Futures token (if resolved) also lives under NFO/BFO, same as the
         # option legs — folded into this same subscribe call rather than a
         # separate one, since it's the same exchange type either way.
-        option_tokens = [t for t in token_meta.keys() if t not in (str(index_token), str(futures_token))]
+        option_tokens = [
+            t
+            for t in token_meta.keys()
+            if t not in (str(index_token), str(futures_token))
+        ]
         fo_tokens = option_tokens + ([str(futures_token)] if futures_token else [])
         _smartapi_stream.subscribe(EXCHANGE_TYPE[exchange], fo_tokens)
         _smartapi_exchange = exchange
@@ -2720,7 +3220,9 @@ def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=Non
         # each rather than unsubscribing the index token under NFO/BFO,
         # which would silently no-op or error against AngelOne.
         if index_token:
-            _smartapi_stream.subscribe(EXCHANGE_TYPE[index_exchange_type], [str(index_token)])
+            _smartapi_stream.subscribe(
+                EXCHANGE_TYPE[index_exchange_type], [str(index_token)]
+            )
             _smartapi_index_token = str(index_token)
             _smartapi_index_exchange = index_exchange_type
         else:
@@ -2728,8 +3230,11 @@ def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=Non
             _smartapi_index_exchange = None
 
         _smartapi_current_expiry = expiry
-        print(f"[smartapi] Streaming {len(option_tokens)} {target_symbol} option legs"
-              f"{' + spot' if index_token else ''}{' + futures VWAP' if futures_token else ''} (expiry {expiry})", flush=True)
+        print(
+            f"[smartapi] Streaming {len(option_tokens)} {target_symbol} option legs"
+            f"{' + spot' if index_token else ''}{' + futures VWAP' if futures_token else ''} (expiry {expiry})",
+            flush=True,
+        )
 
 
 def _switch_smartapi_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
@@ -2756,36 +3261,64 @@ def _switch_smartapi_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=N
             # No feed running yet (e.g. switch happened before startup finished
             # initializing it) — fall back to a full start instead.
             if _smartapi_loop is not None:
-                start_smartapi_feed(_smartapi_loop, new_symbol, strikes_around_atm, expiry)
+                start_smartapi_feed(
+                    _smartapi_loop, new_symbol, strikes_around_atm, expiry
+                )
             return
 
         resolved = _resolve_chain_tokens(new_symbol.upper(), strikes_around_atm, expiry)
         if resolved is None:
             return
-        new_exchange, new_token_meta, new_expiry, new_index_token, new_index_exchange_type, new_futures_token, new_futures_exchange_type = resolved
-        new_option_tokens = [t for t in new_token_meta.keys() if t not in (str(new_index_token), str(new_futures_token))]
-        new_fo_tokens = new_option_tokens + ([str(new_futures_token)] if new_futures_token else [])
+        (
+            new_exchange,
+            new_token_meta,
+            new_expiry,
+            new_index_token,
+            new_index_exchange_type,
+            new_futures_token,
+            new_futures_exchange_type,
+        ) = resolved
+        new_option_tokens = [
+            t
+            for t in new_token_meta.keys()
+            if t not in (str(new_index_token), str(new_futures_token))
+        ]
+        new_fo_tokens = new_option_tokens + (
+            [str(new_futures_token)] if new_futures_token else []
+        )
 
         if _smartapi_tokens and _smartapi_exchange:
             try:
-                _smartapi_stream.unsubscribe(EXCHANGE_TYPE[_smartapi_exchange], _smartapi_tokens)
+                _smartapi_stream.unsubscribe(
+                    EXCHANGE_TYPE[_smartapi_exchange], _smartapi_tokens
+                )
             except Exception as e:
-                print(f"[smartapi] Unsubscribe failed (continuing anyway): {e}", flush=True)
+                print(
+                    f"[smartapi] Unsubscribe failed (continuing anyway): {e}",
+                    flush=True,
+                )
 
         # Index token was subscribed under a DIFFERENT exchange type
         # (NSE_CM/BSE_CM, not NFO/BFO) — must be unsubscribed under that
         # same exchange, or AngelOne silently ignores/errors the call.
         if _smartapi_index_token and _smartapi_index_exchange:
             try:
-                _smartapi_stream.unsubscribe(EXCHANGE_TYPE[_smartapi_index_exchange], [_smartapi_index_token])
+                _smartapi_stream.unsubscribe(
+                    EXCHANGE_TYPE[_smartapi_index_exchange], [_smartapi_index_token]
+                )
             except Exception as e:
-                print(f"[smartapi] Index unsubscribe failed (continuing anyway): {e}", flush=True)
+                print(
+                    f"[smartapi] Index unsubscribe failed (continuing anyway): {e}",
+                    flush=True,
+                )
 
         _smartapi_aggregator.update_token_meta(new_token_meta)
         _smartapi_stream.subscribe(EXCHANGE_TYPE[new_exchange], new_fo_tokens)
 
         if new_index_token:
-            _smartapi_stream.subscribe(EXCHANGE_TYPE[new_index_exchange_type], [str(new_index_token)])
+            _smartapi_stream.subscribe(
+                EXCHANGE_TYPE[new_index_exchange_type], [str(new_index_token)]
+            )
             _smartapi_index_token = str(new_index_token)
             _smartapi_index_exchange = new_index_exchange_type
         else:
@@ -2797,8 +3330,11 @@ def _switch_smartapi_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=N
         _smartapi_exchange = new_exchange
         _smartapi_tokens = new_fo_tokens
         _smartapi_current_expiry = new_expiry
-        print(f"[smartapi] Switched stream to {len(new_option_tokens)} {new_symbol.upper()} option legs"
-              f"{' + spot' if new_index_token else ''}{' + futures VWAP' if new_futures_token else ''} (expiry {new_expiry})", flush=True)
+        print(
+            f"[smartapi] Switched stream to {len(new_option_tokens)} {new_symbol.upper()} option legs"
+            f"{' + spot' if new_index_token else ''}{' + futures VWAP' if new_futures_token else ''} (expiry {new_expiry})",
+            flush=True,
+        )
 
 
 def restart_smartapi_feed(new_symbol, new_expiry=None):
@@ -2825,7 +3361,8 @@ def restart_smartapi_feed(new_symbol, new_expiry=None):
 def run_pipeline_once():
     # Remap global runtime variables inside our new option_chain_json engine
     _configure_pipeline_globals(
-        SYMBOL, EXPIRY,
+        SYMBOL,
+        EXPIRY,
         no_extra_chains=not ARGS.extra_chains,
         strict_expiry=ARGS.strict_expiry,
         no_virtual_oi=ARGS.no_virtual_oi,
@@ -2852,7 +3389,7 @@ def _map_market_api_quote(entry):
     if not entry:
         return None
     return {
-        "spot":       entry.get("Last Price"),
+        "spot": entry.get("Last Price"),
         "spotChange": entry.get("Change"),
         "spotChgPct": entry.get("% Change"),
     }
@@ -2878,7 +3415,9 @@ def fetch_nse_index_quotes_sync():
     """
     try:
         df_idx = option_chain_json._fetch_all_indices_cached()
-        vix_value, vix_pchange, ticker_payload = market_api.get_unified_market_data(df_idx)
+        vix_value, vix_pchange, ticker_payload = market_api.get_unified_market_data(
+            df_idx
+        )
     except Exception as e:
         print(f"[index-quote] get_unified_market_data FAILED: {e}", flush=True)
         return {}
@@ -2891,7 +3430,7 @@ def fetch_nse_index_quotes_sync():
     if vix_value is not None:
         out["INDIA VIX"] = {
             "spot": vix_value,
-            "spotChange": None,   # get_unified_market_data() gives % change only
+            "spotChange": None,  # get_unified_market_data() gives % change only
             "spotChgPct": vix_pchange,
         }
     return out
@@ -2921,7 +3460,7 @@ def _map_smartapi_quote(row):
     if not row:
         return None
     return {
-        "spot":       safe_float_smartapi(row.get("ltp")),
+        "spot": safe_float_smartapi(row.get("ltp")),
         "spotChange": safe_float_smartapi(row.get("netChange")),
         "spotChgPct": safe_float_smartapi(row.get("percentChange")),
     }
@@ -2935,29 +3474,13 @@ def safe_float_smartapi(val):
 
 
 def fetch_index_quotes_smartapi_sync():
-    """SmartAPI batched alternative to fetch_nse_index_quotes_sync() +
-    fetch_bse_index_quote_sync(): ONE getMarketData call for every NSE
-    ticker symbol (NIFTY/BANKNIFTY/MIDCPNIFTY/India VIX together) and ONE
-    more for SENSEX on BSE — two REST calls total, each governed by
-    getMarketData's 0.35s min-interval floor, well inside the
-    INDEX_QUOTE_SECONDS (default 20s) cadence this is called on. This is
-    NOT the per-symbol ltpData pattern that tripped Angel's rate limit on
-    2026-07-17 — that incident is exactly why batching via getMarketData
-    is used here instead.
+    """Provider-batched alternative to fetch_nse_index_quotes_sync() +
+    fetch_bse_index_quote_sync().
 
-    Uses get_batch_quotes_by_token() (not get_batch_quotes()), keyed by
-    str(symbolToken) rather than Angel's tradingSymbol display name.
-    (2026-08-02: two bugs in a row here before landing on this — first
-    the docstring/lookup assumed str(symbolToken) keying when
-    get_batch_quotes() actually keys by tradingSymbol, so every symbol
-    missed; switching to `nse_raw.get(sym)` then "fixed" only VIX, purely
-    because _VIX_TRADINGSYMBOL happens to already be hardcoded to Angel's
-    real display string ("India VIX") — NIFTY/BANKNIFTY/MIDCPNIFTY's
-    short codes don't match whatever Angel actually calls them. Token is
-    the only identifier guaranteed to round-trip correctly regardless of
-    Angel's naming, so this now keys by that instead of guessing another
-    display-name string. See get_batch_quotes_by_token()'s docstring in
-    smartapi_client.py.)
+    For Upstox and Shoonya, this uses the normalized spot-quote helper for
+    NIFTY/BANKNIFTY/MIDCPNIFTY/INDIA VIX/SENSEX directly. For SmartAPI, it
+    batches token-based REST calls so the ticker strip can stay current
+    without per-symbol throttling.
 
     Returns {"NIFTY": {...}, ..., "INDIA VIX": {...}, "SENSEX": {...}},
     same shape/keys as the market_api path, so index_quote_loop() can use
@@ -2965,8 +3488,52 @@ def fetch_index_quotes_smartapi_sync():
     """
     out = {}
 
+    if _broker_settings.market_data_provider in ("UPSTOX", "SHOONYA"):
+        provider_label = _broker_settings.market_data_provider.title()
+        vix_lookup = "INDIAVIX" if _broker_settings.market_data_provider == "UPSTOX" else "INDIA VIX"
+        targets = [
+            ("NIFTY", "NIFTY"),
+            ("BANKNIFTY", "BANKNIFTY"),
+            ("MIDCPNIFTY", "MIDCPNIFTY"),
+            ("INDIA VIX", vix_lookup),
+            ("SENSEX", "SENSEX"),
+        ]
+        for out_key, lookup in targets:
+            try:
+                quote = market_data.get_spot_quote(lookup)
+            except Exception as e:
+                print(f"[index-quote] {provider_label.lower()} {out_key} FAILED: {e}", flush=True)
+                continue
+            if not quote:
+                print(
+                    f"[index-quote] {provider_label.lower()}: no row for {out_key} (lookup={lookup!r})",
+                    flush=True,
+                )
+                continue
+            ltp, close = quote.get("ltp"), quote.get("close")
+            change = round(ltp - close, 2) if (ltp is not None and close) else 0.0
+            pct = round((change / close) * 100.0, 2) if close else 0.0
+            out[out_key] = {
+                "Symbol": out_key,
+                "BackendSymbol": out_key,
+                "Last Price": ltp,
+                "% Change": pct,
+                "Change": change,
+                "Prev Close": close,
+                "Open": quote.get("open"),
+                "High": quote.get("high"),
+                "Low": quote.get("low"),
+                "Volume": 0,
+                "Turnover": 0,
+            }
+        return out
+
     nse_symbols = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY"]
-    nse_pairs = [(s, market_data.index_tokens()[s]["token"]) for s in nse_symbols if s in market_data.index_tokens()]
+    nse_pairs = [
+        (s, market_data.index_tokens()[s]["token"])
+        for s in nse_symbols
+        if s in market_data.index_tokens()
+    ]
     nse_pairs.append((_VIX_TRADINGSYMBOL, _VIX_TOKEN))
 
     try:
@@ -2982,12 +3549,18 @@ def fetch_index_quotes_smartapi_sync():
             out_key = "INDIA VIX" if sym == _VIX_TRADINGSYMBOL else sym
             out[out_key] = quote
         elif not row:
-            print(f"[index-quote] smartapi: no row for {sym} (check token/session)", flush=True)
+            print(
+                f"[index-quote] smartapi: no row for {sym} "
+                f"(requested token={token!r}, check token/session)",
+                flush=True,
+            )
 
     if "SENSEX" in market_data.index_tokens():
         bse_pairs = [("SENSEX", market_data.index_tokens()["SENSEX"]["token"])]
         try:
-            bse_raw = market_data.get_batch_quotes_by_token("BSE", bse_pairs, mode="FULL")
+            bse_raw = market_data.get_batch_quotes_by_token(
+                "BSE", bse_pairs, mode="FULL"
+            )
         except Exception as e:
             print(f"[index-quote] smartapi BSE batch FAILED: {e}", flush=True)
             bse_raw = {}
@@ -2996,7 +3569,10 @@ def fetch_index_quotes_smartapi_sync():
         if quote is not None:
             out["SENSEX"] = quote
         elif not row:
-            print("[index-quote] smartapi: no row for SENSEX (check token/session)", flush=True)
+            print(
+                "[index-quote] smartapi: no row for SENSEX (check token/session)",
+                flush=True,
+            )
 
     return out
 
@@ -3063,8 +3639,11 @@ async def index_quote_loop():
             INDEX_QUOTES.update(updates)
             await broadcast({"type": "indexQuotes", "payload": updates})
             for sym, quote in updates.items():
-                print(f"[index-quote] {sym} spot={quote.get('spot')} "
-                      f"chg%={quote.get('spotChgPct')}", flush=True)
+                print(
+                    f"[index-quote] {sym} spot={quote.get('spot')} "
+                    f"chg%={quote.get('spotChgPct')}",
+                    flush=True,
+                )
         await asyncio.sleep(INDEX_QUOTE_SECONDS)
 
 
@@ -3099,8 +3678,11 @@ async def _funds_poll_body():
             funds = await asyncio.to_thread(smartapi_get_funds)
             LAST_FUNDS = funds
             await broadcast({"type": "funds", "payload": funds})
-            print(f"[funds] available={funds.get('available_margin')} "
-                  f"utilised={funds.get('utilised_margin')}", flush=True)
+            print(
+                f"[funds] available={funds.get('available_margin')} "
+                f"utilised={funds.get('utilised_margin')}",
+                flush=True,
+            )
         except Exception as e:
             # A failed funds poll (session hiccup, AngelOne rate limit,
             # network blip) should never take down the loop — same
@@ -3108,7 +3690,10 @@ async def _funds_poll_body():
             # cycle; the frontend keeps showing the last good LAST_FUNDS
             # (or "n/a" if there's never been one) until the next cycle
             # succeeds.
-            print(f"[funds] poll failed (will retry in {FUNDS_POLL_SECONDS}s): {e}", flush=True)
+            print(
+                f"[funds] poll failed (will retry in {FUNDS_POLL_SECONDS}s): {e}",
+                flush=True,
+            )
         await asyncio.sleep(FUNDS_POLL_SECONDS)
 
 
@@ -3133,16 +3718,22 @@ async def reconcile_loop():
             if result.clean:
                 print("[position_reconciler] periodic check: clean", flush=True)
             else:
-                print(f"[position_reconciler] periodic check: "
-                      f"{len(result.mismatches)} mismatch(es), "
-                      f"{len(result.unparseable_symbols)} unparseable", flush=True)
+                print(
+                    f"[position_reconciler] periodic check: "
+                    f"{len(result.mismatches)} mismatch(es), "
+                    f"{len(result.unparseable_symbols)} unparseable",
+                    flush=True,
+                )
                 await _broadcast_reconciliation_alert(result, source="periodic")
         except Exception as e:
             # Same defensive posture as _funds_poll_body/engine_loop — a
             # failed reconciliation cycle should never take down the loop,
             # just skip to the next one.
-            print(f"[position_reconciler] periodic check failed "
-                  f"(will retry in {POSITION_RECONCILE_SECONDS}s): {e}", flush=True)
+            print(
+                f"[position_reconciler] periodic check failed "
+                f"(will retry in {POSITION_RECONCILE_SECONDS}s): {e}",
+                flush=True,
+            )
         await asyncio.sleep(POSITION_RECONCILE_SECONDS)
 
 
@@ -3161,7 +3752,10 @@ async def algo_status_loop():
             # Same defensive posture as every other periodic loop here —
             # a bad read (e.g. a locked SQLite file mid-write) should
             # never take the loop down, just skip to the next cycle.
-            print(f"[algo-status] poll failed (will retry in {ALGO_STATUS_POLL_SECONDS}s): {e}", flush=True)
+            print(
+                f"[algo-status] poll failed (will retry in {ALGO_STATUS_POLL_SECONDS}s): {e}",
+                flush=True,
+            )
         await asyncio.sleep(ALGO_STATUS_POLL_SECONDS)
 
 
@@ -3226,22 +3820,32 @@ async def engine_loop():
             _LAST_SESSION_DATE = now.date()
             if _smartapi_aggregator is not None:
                 _smartapi_aggregator.reset_session()
-                print(f"[smartapi] Reset OI session baseline for new trading day {now.date()}", flush=True)
+                print(
+                    f"[smartapi] Reset OI session baseline for new trading day {now.date()}",
+                    flush=True,
+                )
             # Futures OI session baseline (Market Regime input) — same
             # per-day reset as the option-chain aggregator above, see
             # oi/futures_oi_tracker.py's class docstring for why this is a
             # separate tracker rather than a field on _smartapi_aggregator.
             _get_futures_oi_tracker().reset_session()
-            print(f"[futures_oi] Reset futures OI session baseline for new trading day {now.date()}", flush=True)
+            print(
+                f"[futures_oi] Reset futures OI session baseline for new trading day {now.date()}",
+                flush=True,
+            )
 
         if (
             is_trading_day(now)
             and now.time() >= EOD_TRIGGER_TIME
             and _EOD_DONE_DATE != now.date()
         ):
-            _EOD_DONE_DATE = now.date()  # set before await, so a slow fetch can't cause a double-fire
+            _EOD_DONE_DATE = (
+                now.date()
+            )  # set before await, so a slow fetch can't cause a double-fire
             print(f"[eod] triggering EOD fetch for {now.date()}", flush=True)
-            eod_task = asyncio.create_task(asyncio.to_thread(fetch_all_eod, now, True))  # save=True
+            eod_task = asyncio.create_task(
+                asyncio.to_thread(fetch_all_eod, now, True)
+            )  # save=True
             eod_task.add_done_callback(_eod_task_done)
 
             # Cash-market FII/DII net flow (₹Cr) — separate NSE endpoint from
@@ -3271,13 +3875,21 @@ async def engine_loop():
             elapsed = time.monotonic() - tick_start
             await _publish_pipeline_status(
                 "DELAYED",
-                (f"REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; live prices continue via WebSocket"
-                 if USE_SMARTAPI else
-                 f"Public REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; SmartAPI remains disabled"),
+                (
+                    f"REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; live prices continue via WebSocket"
+                    if USE_SMARTAPI
+                    else f"Public REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; SmartAPI remains disabled"
+                ),
                 elapsed,
             )
-            overlay_state = "SmartAPI websocket overlay remains active" if USE_SMARTAPI else "public REST polling will retry; SmartAPI remains disabled"
-            print(f"[pipeline] DELAYED after {elapsed:.2f}s — {overlay_state}", flush=True)
+            overlay_state = (
+                f"{_md_label} websocket overlay remains active"
+                if USE_SMARTAPI
+                else f"public REST polling will retry; {_md_label} remains disabled"
+            )
+            print(
+                f"[pipeline] DELAYED after {elapsed:.2f}s — {overlay_state}", flush=True
+            )
         except Exception as e:
             payload = None
             _PIPELINE_TASK = None
@@ -3289,7 +3901,7 @@ async def engine_loop():
         if payload is not None:
             # Transport/session context is part of the canonical payload so the
             # Dashboard can distinguish an exchange closure from a broken feed.
-            payload['marketSession'] = _market_session_status(now)
+            payload["marketSession"] = _market_session_status(now)
             # Strategy -> execution bridge: hand this tick's decision
             # block to the auto-executor. No-op unless
             # AUTO_STRATEGY_EXECUTION_ENABLED=true; see
@@ -3357,9 +3969,11 @@ async def engine_loop():
                     diff = await asyncio.to_thread(compute_diff, _LAST_SENT, payload)
                     diff_elapsed = time.monotonic() - diff_start
                     if diff_elapsed > 0.25:
-                        print(f"[ws] WARNING: compute_diff took {diff_elapsed:.2f}s "
-                              f"— this was blocking the event loop before this fix",
-                              flush=True)
+                        print(
+                            f"[ws] WARNING: compute_diff took {diff_elapsed:.2f}s "
+                            f"— this was blocking the event loop before this fix",
+                            flush=True,
+                        )
                     if diff is not None:
                         await broadcast({"type": "delta", "payload": diff})
                     else:
@@ -3394,7 +4008,9 @@ async def engine_loop():
             # re-run the heavy Greeks/OI-velocity/GEX pipeline faster than
             # this floor. Without the floor, "wake on every tick" would
             # make this run MORE often than the old fixed poll, not less.
-            floor_remaining = MIN_TICK_RECOMPUTE_SECONDS - (time.monotonic() - tick_start)
+            floor_remaining = MIN_TICK_RECOMPUTE_SECONDS - (
+                time.monotonic() - tick_start
+            )
             if floor_remaining > 0:
                 await asyncio.sleep(min(floor_remaining, remaining))
                 remaining = POLL_SECONDS - (time.monotonic() - tick_start)
@@ -3415,11 +4031,17 @@ async def engine_loop():
                         print("[ws] symbol switch — ticking early", flush=True)
                     elif wait_tick in done:
                         _TICK_ACTIVITY_EVENT.clear()
-                        print("[ws] tick activity — ticking early "
-                              f"(floor={MIN_TICK_RECOMPUTE_SECONDS}s)", flush=True)
+                        print(
+                            "[ws] tick activity — ticking early "
+                            f"(floor={MIN_TICK_RECOMPUTE_SECONDS}s)",
+                            flush=True,
+                        )
                     # else: timed out at the POLL_SECONDS ceiling, nothing to clear
                 except Exception as e:
-                    print(f"[ws] WARNING: wake-wait failed, falling back to plain sleep: {e}", flush=True)
+                    print(
+                        f"[ws] WARNING: wake-wait failed, falling back to plain sleep: {e}",
+                        flush=True,
+                    )
                     await asyncio.sleep(remaining)
         elif pipeline_elapsed > POLL_SECONDS:
             print(
@@ -3438,9 +4060,9 @@ async def no_cache_middleware(request, handler):
     the static files served here so a normal refresh always picks up
     the latest edit."""
     response = await handler(request)
-    if request.path == '/' or request.path.endswith(('.html', '.js', '.css')):
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
-        response.headers['Pragma'] = 'no-cache'
+    if request.path == "/" or request.path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -3472,7 +4094,10 @@ async def spot_history_handler(request):
 
     index_info = market_data.index_tokens().get(SYMBOL)
     if index_info is None:
-        print(f"[http] /api/spot-history: no INDEX_TOKENS entry for {SYMBOL}, returning empty", flush=True)
+        print(
+            f"[http] /api/spot-history: no INDEX_TOKENS entry for {SYMBOL}, returning empty",
+            flush=True,
+        )
         return web.json_response([])
 
     now = datetime.now()
@@ -3490,11 +4115,18 @@ async def spot_history_handler(request):
         # the event loop, or every connected client's WS heartbeat stalls
         # for its duration.
         candles = await asyncio.to_thread(
-            get_candle_data, index_info["exchange"], index_info["token"],
-            interval, fromdate, todate,
+            get_candle_data,
+            index_info["exchange"],
+            index_info["token"],
+            interval,
+            fromdate,
+            todate,
         )
     except Exception as e:
-        print(f"[http] /api/spot-history: getCandleData failed for {SYMBOL}: {e}", flush=True)
+        print(
+            f"[http] /api/spot-history: getCandleData failed for {SYMBOL}: {e}",
+            flush=True,
+        )
         return web.json_response([])
 
     rows = []
@@ -3527,12 +4159,15 @@ _RANGE_TO_SMARTAPI = {
     # a Friday/Monday holiday on either side (India's longest ordinary
     # market closures), while staying far under Angel One's ~30-day
     # intraday cap that fetch_candles_chunked already knows how to split.
-    "1m":  {"interval": "ONE_MINUTE",     "days": 5},
-    "5m":  {"interval": "FIVE_MINUTE",    "days": 7},
+    "1m": {"interval": "ONE_MINUTE", "days": 5},
+    "5m": {"interval": "FIVE_MINUTE", "days": 7},
     "15m": {"interval": "FIFTEEN_MINUTE", "days": 30},
-    "1h":  {"interval": "ONE_HOUR",       "days": 90},
-    "1d":  {"interval": "ONE_DAY",        "days": 730},
-    "all": {"interval": "ONE_DAY",        "days": 2000},  # smartapi_history's own daily-interval cap
+    "1h": {"interval": "ONE_HOUR", "days": 90},
+    "1d": {"interval": "ONE_DAY", "days": 730},
+    "all": {
+        "interval": "ONE_DAY",
+        "days": 2000,
+    },  # smartapi_history's own daily-interval cap
 }
 
 
@@ -3555,8 +4190,8 @@ _RANGE_TO_SMARTAPI = {
 # call — the rest either share the in-flight request or get served from
 # the short-lived cache — instead of each one hitting SmartAPI
 # independently.
-_HISTORY_CACHE = {}      # (symbol, range) -> (fetched_at_monotonic, rows)
-_HISTORY_INFLIGHT = {}   # (symbol, range) -> asyncio.Future, resolves to rows
+_HISTORY_CACHE = {}  # (symbol, range) -> (fetched_at_monotonic, rows)
+_HISTORY_INFLIGHT = {}  # (symbol, range) -> asyncio.Future, resolves to rows
 _HISTORY_FAILURE_CACHE = {}  # (symbol, range) -> failed_at_monotonic
 # Deliberately short — well under any candle's own bucket width (the
 # smallest is ONE_MINUTE) — so this is purely about not re-fetching
@@ -3594,13 +4229,19 @@ async def _get_history_cached(req_symbol, range_key, cfg):
     fut = asyncio.get_event_loop().create_future()
     _HISTORY_INFLIGHT[key] = fut
     try:
-        fromdate = (datetime.now() - timedelta(days=cfg["days"])).strftime("%Y-%m-%d %H:%M")
+        fromdate = (datetime.now() - timedelta(days=cfg["days"])).strftime(
+            "%Y-%m-%d %H:%M"
+        )
         todate = datetime.now().strftime("%Y-%m-%d %H:%M")
         # get_index_candles is blocking (chunked REST calls with pacing
         # sleeps between them) — offload same as spot_history_handler does,
         # or every connected client's WS heartbeat stalls for its duration.
         candles = await asyncio.to_thread(
-            get_index_candles, req_symbol, cfg["interval"], fromdate, todate,
+            get_index_candles,
+            req_symbol,
+            cfg["interval"],
+            fromdate,
+            todate,
         )
         rows = []
         for c in candles or []:
@@ -3611,14 +4252,16 @@ async def _get_history_cached(req_symbol, range_key, cfg):
                 t_ms = int(datetime.fromisoformat(c["timestamp"]).timestamp() * 1000)
             except (ValueError, TypeError, KeyError):
                 continue
-            rows.append({
-                "t": t_ms,
-                "o": c.get("open"),
-                "h": c.get("high"),
-                "l": c.get("low"),
-                "c": c.get("close"),
-                "v": c.get("volume"),
-            })
+            rows.append(
+                {
+                    "t": t_ms,
+                    "o": c.get("open"),
+                    "h": c.get("high"),
+                    "l": c.get("low"),
+                    "c": c.get("close"),
+                    "v": c.get("volume"),
+                }
+            )
         _HISTORY_CACHE[key] = (now, rows)
         _HISTORY_FAILURE_CACHE.pop(key, None)
         fut.set_result(rows)
@@ -3669,12 +4312,16 @@ async def backtest_handler(request):
 
     start = request.query.get("start") or None
     end = request.query.get("end") or None
-    use_account_guard = str(request.query.get("useAccountGuard", "")).strip().lower() in ("1", "true", "yes")
+    use_account_guard = str(
+        request.query.get("useAccountGuard", "")
+    ).strip().lower() in ("1", "true", "yes")
     # See run_backtest()'s override_execute_recommended docstring — needed
     # when captured history was logged while confidence never crossed the
     # hardcoded T.CONFIDENCE_EXECUTE_MIN (40), which freezes executeRecommended
     # False on every snapshot regardless of minConfidence passed here.
-    override_execute_recommended = str(request.query.get("overrideExecuteRecommended", "")).strip().lower() in ("1", "true", "yes")
+    override_execute_recommended = str(
+        request.query.get("overrideExecuteRecommended", "")
+    ).strip().lower() in ("1", "true", "yes")
 
     try:
         result = await run_backtest(
@@ -3705,22 +4352,31 @@ async def backtest_handler(request):
 
     trades = [
         {
-            "symbol": t.symbol, "expiry": t.expiry, "instrumentType": t.instrument_type,
-            "side": t.side, "strike": t.strike, "qtyLots": t.qty_lots,
-            "entryTime": t.entry_time, "entryPrice": t.entry_price,
-            "exitTime": t.exit_time, "exitPrice": t.exit_price,
-            "exitReason": t.exit_reason, "pnl": t.pnl,
+            "symbol": t.symbol,
+            "expiry": t.expiry,
+            "instrumentType": t.instrument_type,
+            "side": t.side,
+            "strike": t.strike,
+            "qtyLots": t.qty_lots,
+            "entryTime": t.entry_time,
+            "entryPrice": t.entry_price,
+            "exitTime": t.exit_time,
+            "exitPrice": t.exit_price,
+            "exitReason": t.exit_reason,
+            "pnl": t.pnl,
         }
         for t in result.trades
     ]
 
-    return web.json_response({
-        "symbol": req_symbol,
-        "summary": result.summary(),
-        "metadata": result.metadata(),
-        "trades": trades,
-        "equityCurve": equity_curve,
-    })
+    return web.json_response(
+        {
+            "symbol": req_symbol,
+            "summary": result.summary(),
+            "metadata": result.metadata(),
+            "trades": trades,
+            "equityCurve": equity_curve,
+        }
+    )
 
 
 async def history_handler(request):
@@ -3752,9 +4408,13 @@ async def history_handler(request):
         # Public first-load bootstrap is cash/index only. In particular, do
         # not disguise EQ candles as NEAR/NEXT/FAR futures history.
         from brokers.public_history import fetch_public_history
+
         public_interval = {
-            "ONE_MINUTE": "1m", "FIVE_MINUTE": "5m",
-            "FIFTEEN_MINUTE": "15m", "ONE_HOUR": "60m", "ONE_DAY": "1d",
+            "ONE_MINUTE": "1m",
+            "FIVE_MINUTE": "5m",
+            "FIFTEEN_MINUTE": "15m",
+            "ONE_HOUR": "60m",
+            "ONE_DAY": "1d",
         }[cfg["interval"]]
         rows = await asyncio.to_thread(
             fetch_public_history,
@@ -3770,13 +4430,19 @@ async def history_handler(request):
         return response
 
     if req_symbol not in market_data.index_tokens():
-        print(f"[http] /api/history: no INDEX_TOKENS entry for {req_symbol}, returning empty", flush=True)
+        print(
+            f"[http] /api/history: no INDEX_TOKENS entry for {req_symbol}, returning empty",
+            flush=True,
+        )
         return web.json_response([])
 
     try:
         rows = await _get_history_cached(req_symbol, range_key, cfg)
     except Exception as e:
-        print(f"[http] /api/history: get_index_candles failed for {req_symbol} range={range_key}: {e}", flush=True)
+        print(
+            f"[http] /api/history: get_index_candles failed for {req_symbol} range={range_key}: {e}",
+            flush=True,
+        )
         return web.json_response([])
 
     return web.json_response(rows)
@@ -3793,6 +4459,7 @@ async def lot_sizes_handler(request):
     """
     try:
         from brokers.smartapi_instruments import get_all_lot_sizes
+
         lots = await asyncio.to_thread(get_all_lot_sizes)
         return web.json_response(lots)
     except Exception as e:
@@ -3841,7 +4508,9 @@ def _build_health_snapshot(now=None):
     if USE_SMARTAPI and LIVE_FEED_PROVIDER == "UPSTOX" and _upstox_stream is not None:
         connected_event = getattr(_upstox_stream, "_connected", None)
         upstox_connected = bool(connected_event and connected_event.is_set())
-    elif USE_SMARTAPI and LIVE_FEED_PROVIDER == "SHOONYA" and _shoonya_stream is not None:
+    elif (
+        USE_SMARTAPI and LIVE_FEED_PROVIDER == "SHOONYA" and _shoonya_stream is not None
+    ):
         connected_event = getattr(_shoonya_stream, "_connected", None)
         shoonya_connected = bool(connected_event and connected_event.is_set())
     elif USE_SMARTAPI and _smartapi_stream is not None:
@@ -3853,7 +4522,9 @@ def _build_health_snapshot(now=None):
     pipeline_delayed = _PIPELINE_STATUS.get("status") == "DELAYED"
     if pipeline_delayed:
         degraded = True
-        reasons.append(_PIPELINE_STATUS.get("reason") or "Analytics pipeline is delayed")
+        reasons.append(
+            _PIPELINE_STATUS.get("reason") or "Analytics pipeline is delayed"
+        )
     return {
         "status": "degraded" if degraded else "ok",
         "service": "mterminals",
@@ -3904,7 +4575,9 @@ def _log_health_transition(snapshot):
             "reason": "; ".join(reasons) or feed.get("reason") or "",
             "symbol": feed.get("symbol"),
             "expiry": feed.get("expiry"),
-            "connected_clients": (snapshot.get("websocket") or {}).get("connectedClients"),
+            "connected_clients": (snapshot.get("websocket") or {}).get(
+                "connectedClients"
+            ),
             "age_seconds": feed.get("ageSeconds"),
         },
     )
@@ -3914,7 +4587,9 @@ async def health_handler(request):
     """GET /health — dependency-free liveness and market freshness status."""
     snapshot = _build_health_snapshot()
     _log_health_transition(snapshot)
-    return web.json_response(snapshot, status=200 if snapshot["status"] == "ok" else 503)
+    return web.json_response(
+        snapshot, status=200 if snapshot["status"] == "ok" else 503
+    )
 
 
 async def metrics_handler(request):
@@ -3936,22 +4611,23 @@ async def main():
     # session Bearer token and API private key in plaintext on every
     # request failure.
     from logging_config import configure_logging
+
     configure_logging()
 
     app = web.Application(middlewares=[no_cache_middleware])
 
-    app.router.add_get('/health', health_handler)
-    app.router.add_get('/metrics', metrics_handler)
-    app.router.add_get('/ws', ws_handler)
-    app.router.add_get('/bridge', bridge_ws_handler)
-    app.router.add_get('/dashboard-relay', bridge_ws_handler)
-    app.router.add_get('/api/spot-history', spot_history_handler)
-    app.router.add_get('/api/history', history_handler)
-    app.router.add_get('/api/backtest', backtest_handler)
-    app.router.add_get('/api/lot-sizes', lot_sizes_handler)
+    app.router.add_get("/health", health_handler)
+    app.router.add_get("/metrics", metrics_handler)
+    app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/bridge", bridge_ws_handler)
+    app.router.add_get("/dashboard-relay", bridge_ws_handler)
+    app.router.add_get("/api/spot-history", spot_history_handler)
+    app.router.add_get("/api/history", history_handler)
+    app.router.add_get("/api/backtest", backtest_handler)
+    app.router.add_get("/api/lot-sizes", lot_sizes_handler)
 
     FRONTEND_DIR = SCRIPT_DIR / "frontend"
-    app.router.add_static('/', path=FRONTEND_DIR, name='static')
+    app.router.add_static("/", path=FRONTEND_DIR, name="static")
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -3959,7 +4635,9 @@ async def main():
     site = web.TCPSite(runner, WS_HOST, HTTP_PORT)
     await site.start()
     print(f"[http] serving static files at http://{WS_HOST}:{HTTP_PORT}/")
-    print(f"[http] Dashboard available at http://{WS_HOST}:{HTTP_PORT}/dist/Dashboard/DashboardPro.html")
+    print(
+        f"[http] Dashboard available at http://{WS_HOST}:{HTTP_PORT}/dist/Dashboard/DashboardPro.html"
+    )
     print(f"[ws] WebSocket endpoint at ws://{WS_HOST}:{HTTP_PORT}/ws symbol={SYMBOL}")
 
     loop = asyncio.get_running_loop()
@@ -3986,8 +4664,11 @@ async def main():
                 "smartapi_startup",
             )
     else:
-        print("[broker] authenticated services disabled (--no-broker) — no broker login, "
-              "account/order REST call, or websocket connection; public daily ScripMaster allowed", flush=True)
+        print(
+            "[broker] authenticated services disabled (--no-broker) — no broker login, "
+            "account/order REST call, or websocket connection; public daily ScripMaster allowed",
+            flush=True,
+        )
 
     try:
         _create_background_task(index_quote_loop(), "index_quote_loop")
@@ -4015,6 +4696,7 @@ async def main():
         # (Ctrl+C, restart) never loses up to a minute of unflushed history.
         try:
             from oi_analysis import flush_history_to_disk
+
             flush_history_to_disk()
         except Exception as e:
             print(f"[shutdown] Could not flush OI history: {e}")

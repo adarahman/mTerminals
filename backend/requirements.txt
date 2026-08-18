@@ -33,3 +33,7 @@ smartapi-python>=1.4
 # Shoonya execution is optional. Its official SDK is installed separately
 # from https://github.com/Shoonya-Dev/ShoonyaApi-py because it is not
 # published as a conventional versioned PyPI package.
+
+# Upstox execution and market data is optional. Requires official SDK:
+# pip install upstox-python-sdk
+upstox-python-sdk>=2.0

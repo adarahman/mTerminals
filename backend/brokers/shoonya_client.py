@@ -13,7 +13,107 @@ import sys
 import threading
 from datetime import datetime
 
+import time
+
 import pyotp
+
+# Rate limiting configuration for Shoonya API calls
+# Shoonya generally has more lenient rate limits than SmartAPI,
+# but we still implement sensible throttling to avoid issues
+_SHOONYA_RATE_LIMIT_MIN_INTERVAL = {
+    "get_quotes": 0.20,     # ~5 calls per second for quotes
+    "get_order_book": 0.30, # ~3 calls per second for order book
+    "get_positions": 0.30,  # ~3 calls per second for positions  
+    "get_limits": 0.50,     # ~2 calls per second for limits
+    "place_order": 0.35,    # ~3 calls per second for orders
+    "searchscrip": 0.25,    # ~4 calls per second for symbol search
+}
+_SHOONYA_RATE_LIMIT_DEFAULT_INTERVAL = 0.15  # ~6-7 calls per second default
+_SHOONYA_RATE_LIMIT_BACKOFF_S = 1.5
+_SHOONYA_RATE_LIMIT_MAX_RETRIES = 3
+_shoonya_rate_limit_lock = threading.Lock()
+_shoonya_rate_limit_last_ts: dict[str, float] = {}
+_shoonya_rate_limit_global_last = 0.0
+
+
+def _is_rate_limited(err) -> bool:
+    """Check if an error indicates rate limiting."""
+    text = str(err).lower()
+    return (
+        "rate limit" in text
+        or "too many requests" in text
+        or "access denied" in text
+        or "exceed" in text
+    )
+
+
+def _shoonya_rate_limit_wait(fn_name: str) -> None:
+    """Sleep just enough to respect per-endpoint + global spacing for Shoonya."""
+    global _shoonya_rate_limit_global_last
+    min_gap = _SHOONYA_RATE_LIMIT_MIN_INTERVAL.get(fn_name, _SHOONYA_RATE_LIMIT_DEFAULT_INTERVAL)
+    with _shoonya_rate_limit_lock:
+        now = time.monotonic()
+        last_fn = _shoonya_rate_limit_last_ts.get(fn_name, 0.0)
+        wait_fn = min_gap - (now - last_fn)
+        wait_global = _SHOONYA_RATE_LIMIT_DEFAULT_INTERVAL - (now - _shoonya_rate_limit_global_last)
+        wait = max(0.0, wait_fn, wait_global)
+        if wait > 0:
+            time.sleep(wait)
+            now = time.monotonic()
+        _shoonya_rate_limit_last_ts[fn_name] = now
+        _shoonya_rate_limit_global_last = now
+
+
+def _shoonya_call_with_retry(fn_name, api_method, *args, **kwargs):
+    """Execute a Shoonya API call with rate limiting and retry logic."""
+    _shoonya_rate_limit_wait(fn_name)
+    delay = _SHOONYA_RATE_LIMIT_BACKOFF_S
+    last_exc = None
+    
+    for attempt in range(1, _SHOONYA_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            result = api_method(*args, **kwargs)
+            # Check if result indicates an error
+            if isinstance(result, dict) and result.get("stat") == "Not_Ok":
+                emsg = str(result.get("emsg", ""))
+                if _is_rate_limited(emsg):
+                    logger.warning(
+                        f"[shoonya_client] {fn_name} rate-limited ({emsg}); "
+                        f"backing off {delay}s (attempt {attempt}/{_SHOONYA_RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    if attempt < _SHOONYA_RATE_LIMIT_MAX_RETRIES:
+                        time.sleep(delay)
+                        delay *= 2
+                        _shoonya_rate_limit_wait(fn_name)
+                        continue
+                    else:
+                        logger.warning(
+                            f"[shoonya_client] {fn_name} still rate-limited after "
+                            f"{_SHOONYA_RATE_LIMIT_MAX_RETRIES} retries; giving up"
+                        )
+                        raise BrokerError(f"Rate-limited after retries: {emsg}")
+                # Other errors, raise immediately
+                raise BrokerError(f"Shoonya {fn_name} rejected: {emsg}")
+            return result
+        except Exception as e:
+            last_exc = e
+            if _is_rate_limited(e):
+                logger.warning(
+                    f"[shoonya_client] {fn_name} rate-limited ({e}); "
+                    f"backing off {delay}s (attempt {attempt}/{_SHOONYA_RATE_LIMIT_MAX_RETRIES})"
+                )
+                if attempt < _SHOONYA_RATE_LIMIT_MAX_RETRIES:
+                    time.sleep(delay)
+                    delay *= 2
+                    _shoonya_rate_limit_wait(fn_name)
+                    continue
+            # Non-rate-limit errors, raise immediately
+            raise BrokerError(f"Shoonya {fn_name} failed: {e}") from e
+    
+    # Should not reach here, but just in case
+    if last_exc:
+        raise BrokerError(f"Shoonya {fn_name} failed after retries: {last_exc}")
+    raise BrokerError(f"Shoonya {fn_name} failed with unknown error")
 
 try:  # ws_server_live adds backend/ to sys.path; package-level tests do not.
     from config import settings
@@ -21,6 +121,18 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
     from backend.config import settings
 
 logger = logging.getLogger(__name__)
+
+# How long a failed login is cached before the next attempt is allowed.
+# Without this, every call site that touches `_session.api` (searchscrip,
+# get_quotes, get_order_book, ...) re-runs the full login handshake from
+# scratch on every single invocation whenever the previous attempt failed,
+# since `self._api` is only ever set on success. Observed in practice:
+# ~8 login attempts/second, every one generating a fresh TOTP code and
+# POSTing a new login request. Besides being wasteful, hammering a
+# broker's login endpoint at that rate is a plausible reason it starts
+# returning empty/non-JSON responses in the first place — a client-side
+# retry storm masquerading as a broker-side outage.
+_LOGIN_RETRY_COOLDOWN_SEC = 30
 
 
 class BrokerError(RuntimeError):
@@ -52,6 +164,8 @@ class ShoonyaSession:
         self._api_factory = api_factory or _default_api_factory
         self._api = None
         self._lock = threading.RLock()
+        self._last_login_attempt = 0.0  # time.monotonic() of the last attempt
+        self._last_login_error: BrokerError | None = None
 
     @property
     def api(self):
@@ -62,32 +176,54 @@ class ShoonyaSession:
         with self._lock:
             if self._api is not None:
                 return self._api
-            required = {
-                "SHOONYA_USER_ID": settings.shoonya_user_id,
-                "SHOONYA_PASSWORD": settings.shoonya_password,
-                "SHOONYA_TOTP_SECRET": settings.shoonya_totp_secret,
-                "SHOONYA_VENDOR_CODE": settings.shoonya_vendor_code,
-                "SHOONYA_API_SECRET": settings.shoonya_api_secret,
-            }
-            missing = [name for name, value in required.items() if not value]
-            if missing:
-                raise BrokerError("Missing Shoonya settings: " + ", ".join(missing))
-            api = self._api_factory()
+
+            now = time.monotonic()
+            if (self._last_login_error is not None
+                    and (now - self._last_login_attempt) < _LOGIN_RETRY_COOLDOWN_SEC):
+                # A recent attempt already failed — re-raise the cached
+                # error instead of re-running the login handshake (fresh
+                # TOTP code + login POST) on every single caller. Callers
+                # see the same BrokerError they would have gotten from a
+                # real attempt; they just don't each trigger one.
+                raise self._last_login_error
+
+            self._last_login_attempt = now
             try:
-                two_fa = pyotp.TOTP(settings.shoonya_totp_secret).now()
-                result = api.login(
-                    userid=settings.shoonya_user_id,
-                    password=settings.shoonya_password,
-                    twoFA=two_fa,
-                    vendor_code=settings.shoonya_vendor_code,
-                    api_secret=settings.shoonya_api_secret,
-                    imei=settings.shoonya_imei,
+                required = {
+                    "SHOONYA_USER_ID": settings.shoonya_user_id,
+                    "SHOONYA_PASSWORD": settings.shoonya_password,
+                    "SHOONYA_TOTP_SECRET": settings.shoonya_totp_secret,
+                    "SHOONYA_VENDOR_CODE": settings.shoonya_vendor_code,
+                    "SHOONYA_API_SECRET": settings.shoonya_api_secret,
+                }
+                missing = [name for name, value in required.items() if not value]
+                if missing:
+                    raise BrokerError("Missing Shoonya settings: " + ", ".join(missing))
+                api = self._api_factory()
+                try:
+                    two_fa = pyotp.TOTP(settings.shoonya_totp_secret).now()
+                    result = api.login(
+                        userid=settings.shoonya_user_id,
+                        password=settings.shoonya_password,
+                        twoFA=two_fa,
+                        vendor_code=settings.shoonya_vendor_code,
+                        api_secret=settings.shoonya_api_secret,
+                        imei=settings.shoonya_imei,
+                    )
+                except Exception as exc:
+                    raise BrokerError(f"Shoonya login failed: {exc}") from exc
+                if not result or result.get("stat") != "Ok":
+                    raise BrokerError(f"Shoonya login rejected: {(result or {}).get('emsg', 'unknown error')}")
+            except BrokerError as err:
+                self._last_login_error = err
+                logger.warning(
+                    "[shoonya_client] login attempt failed, will not retry for "
+                    f"{_LOGIN_RETRY_COOLDOWN_SEC}s: {err}"
                 )
-            except Exception as exc:
-                raise BrokerError(f"Shoonya login failed: {exc}") from exc
-            if not result or result.get("stat") != "Ok":
-                raise BrokerError(f"Shoonya login rejected: {(result or {}).get('emsg', 'unknown error')}")
+                raise
+
             self._api = api
+            self._last_login_error = None
             logger.info("[shoonya_client] Logged in, session established")
             return api
 
@@ -135,7 +271,7 @@ def place_order(tradingsymbol, symboltoken, exchange, transaction_type,
 
     price_type = "MKT" if order_type.upper() == "MARKET" else "LMT"
     try:
-        result = _session.api.place_order(
+        result = _shoonya_call_with_retry("place_order", _session.api.place_order,
             buy_or_sell="B" if transaction_type.upper() == "BUY" else "S",
             product_type=product_type or settings.shoonya_product_type,
             exchange=exchange,
@@ -163,8 +299,9 @@ def place_order(tradingsymbol, symboltoken, exchange, transaction_type,
 
 
 def get_order_book():
+    result = _shoonya_call_with_retry("get_order_book", _session.api.get_order_book)
     normalized = []
-    for row in _rows(_session.api.get_order_book()):
+    for row in _rows(result):
         item = dict(row)
         item.setdefault("orderid", _order_id(row))
         item.setdefault("ordertag", row.get("remarks"))
@@ -175,8 +312,9 @@ def get_order_book():
 
 
 def get_positions():
+    result = _shoonya_call_with_retry("get_positions", _session.api.get_positions)
     normalized = []
-    for row in _rows(_session.api.get_positions()):
+    for row in _rows(result):
         item = dict(row)
         item.setdefault("tradingsymbol", row.get("tsym"))
         realized = float(row.get("rpnl") or 0)
@@ -187,7 +325,7 @@ def get_positions():
 
 
 def get_funds():
-    data = _session.api.get_limits() or {}
+    data = _shoonya_call_with_retry("get_limits", _session.api.get_limits) or {}
     if data.get("stat") == "Not_Ok":
         raise BrokerError(f"Shoonya get_limits rejected: {data.get('emsg', data)}")
     def number(*keys):

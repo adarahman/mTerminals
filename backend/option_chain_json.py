@@ -1,41 +1,49 @@
+import argparse
+import logging
 import os
 import sys
-import argparse
-import traceback
-import logging
 import threading
-import pandas as pd
 import time
-from datetime import date, datetime, timedelta
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from storage.caches import TTLSlot
-from engine import build_engine_result
-from oi.oi_analysis import (
-    build_oi_history, compute_dte,
-    read_last_json_snapshot, append_json_history,
-)
-# Authenticated SmartAPI adapters are imported lazily only when
-# USE_SMARTAPI is true. The separate unauthenticated daily instrument
-# master remains available through brokers.smartapi_instruments for lot
-# sizes/reference metadata without initializing a login session.
+from datetime import date, datetime, timedelta
 
-from market_api import (
-    fetch_all_indices,
-    fetch_option_chain, parse_option_chain_response,
-    fetch_bse_json_options,
-    get_unified_market_data, fetch_bse_index_quote, fetch_public_futures,
-    BSE_INDEX_SCRIP_CODES,
-)
+import pandas as pd
+
+from config import settings as _pipeline_settings
+from engine import build_engine_result
 from expiry_manager import (
-    make_expiry_manager,
-    _nearest_Tuesday,
-    _nearest_Thursday,
     BSE_EXPIRY_DEFAULT,
     _generate_bse_expiry_series,
+    _nearest_Thursday,
+    _nearest_Tuesday,
+    make_expiry_manager,
 )
-from lot_sizes import LOT_SIZES
 from index_contributors import SYMBOL_TO_INDEX_BASKET, _compute_index_contributors
+from lot_sizes import LOT_SIZES
+
+# Authenticated broker adapters are imported lazily only when
+# USE_SMARTAPI is true. The separate unauthenticated daily instrument
+# master remains available through the broker instrument helpers for lot
+# sizes/reference metadata without initializing a login session.
+from market_api import (
+    BSE_INDEX_SCRIP_CODES,
+    fetch_all_indices,
+    fetch_bse_index_quote,
+    fetch_bse_json_options,
+    fetch_option_chain,
+    fetch_public_futures,
+    get_unified_market_data,
+    parse_option_chain_response,
+)
+from oi.oi_analysis import (
+    append_json_history,
+    build_oi_history,
+    compute_dte,
+    read_last_json_snapshot,
+)
 from pipeline_config import RuntimeConfig
+from storage.caches import TTLSlot
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +108,7 @@ def _fetch_all_indices_cached():
 
     return _DF_IDX_CACHE.value
 
+
 # ─── Virtual OI estimator coordinator loader ──────────────────────────
 # Import conditionally to avoid loading models when --no-virtual-oi is set
 load_virtual_oi_coordinator = None
@@ -117,26 +126,42 @@ load_virtual_oi_coordinator = None
 
 _parser = argparse.ArgumentParser(prog="option_chain_json", add_help=True)
 _parser.add_argument("--exchange", default="NSE", choices=["NSE", "BSE"])
-_parser.add_argument("--symbol",   default="NIFTY")
+_parser.add_argument("--symbol", default="NIFTY")
 _parser.add_argument("--interval", default=0, type=int)
-_parser.add_argument("--no-extra-chains", action="store_true", help="Disable multi-expiry chains for faster performance")
-_parser.add_argument("--strict-expiry", action="store_true", help="Don't auto-resolve to different expiry if requested expiry has no data")
-_parser.add_argument("--no-virtual-oi", action="store_true", help="Disable VirtualOI model inference for faster performance")
+_parser.add_argument(
+    "--no-extra-chains",
+    action="store_true",
+    help="Disable multi-expiry chains for faster performance",
+)
+_parser.add_argument(
+    "--strict-expiry",
+    action="store_true",
+    help="Don't auto-resolve to different expiry if requested expiry has no data",
+)
+_parser.add_argument(
+    "--no-virtual-oi",
+    action="store_true",
+    help="Disable VirtualOI model inference for faster performance",
+)
 
 _pre, _ = _parser.parse_known_args()
 _sym = (_pre.symbol or "NIFTY").strip().upper()
-_default_expiry = BSE_EXPIRY_DEFAULT.get(_sym, _nearest_Thursday)() if _sym in {"SENSEX", "BANKEX", "SENSEX50"} else _nearest_Tuesday()
+_default_expiry = (
+    BSE_EXPIRY_DEFAULT.get(_sym, _nearest_Thursday)()
+    if _sym in {"SENSEX", "BANKEX", "SENSEX50"}
+    else _nearest_Tuesday()
+)
 
 _parser.add_argument("--expiry", default=_default_expiry, help="Expiry DD-Mmm-YYYY")
 _args, _unknown = _parser.parse_known_args()
 
-EXCHANGE      = _args.exchange.strip().upper()
-SYMBOL        = _args.symbol.strip().upper()
-EXPIRY        = _args.expiry.strip()
+EXCHANGE = _args.exchange.strip().upper()
+SYMBOL = _args.symbol.strip().upper()
+EXPIRY = _args.expiry.strip()
 LOOP_INTERVAL = _args.interval
 NO_EXTRA_CHAINS = _args.no_extra_chains
-STRICT_EXPIRY  = _args.strict_expiry
-NO_VIRTUAL_OI  = _args.no_virtual_oi
+STRICT_EXPIRY = _args.strict_expiry
+NO_VIRTUAL_OI = _args.no_virtual_oi
 
 # How many strikes each side of ATM the engine computes Greeks/OI-velocity/
 # signal analytics for. Standalone default is 10; a long-lived host
@@ -190,7 +215,12 @@ FUTURES_EXPIRY = "NEAR"
 # unconditionally every POLL_SECONDS tick from startup, which is what
 # tripped Angel's getMarketData rate limit even with --no-smartapi set.
 # This flag closes that gap.
-USE_SMARTAPI = True
+# NOTE: SmartAPI is enabled by default unless the user explicitly
+# disables it via CLI/env. MARKET_DATA_PROVIDER selects the REST quote
+# adapter, not whether the authenticated SmartAPI chain pipeline is on.
+# This keeps Upstox/Shoonya websocket provider selection independent from
+# the SmartAPI REST chain path.
+USE_SMARTAPI = os.environ.get("MTERMINALS_NO_SMARTAPI") != "1"
 
 
 def set_runtime_config(cfg: RuntimeConfig) -> None:
@@ -216,32 +246,46 @@ def set_runtime_config(cfg: RuntimeConfig) -> None:
     """
     global SYMBOL, EXPIRY, NO_EXTRA_CHAINS, STRICT_EXPIRY, NO_VIRTUAL_OI
     global STRIKES_EACH_SIDE, USE_SMARTAPI, PRICE_SOURCE, FUTURES_EXPIRY
-    if cfg.symbol is not None: SYMBOL = cfg.symbol
-    if cfg.expiry is not None: EXPIRY = cfg.expiry
-    if cfg.no_extra_chains is not None: NO_EXTRA_CHAINS = cfg.no_extra_chains
-    if cfg.strict_expiry is not None: STRICT_EXPIRY = cfg.strict_expiry
-    if cfg.no_virtual_oi is not None: NO_VIRTUAL_OI = cfg.no_virtual_oi
-    if cfg.strikes_each_side is not None: STRIKES_EACH_SIDE = cfg.strikes_each_side
-    if cfg.use_smartapi is not None: USE_SMARTAPI = cfg.use_smartapi
+    if cfg.symbol is not None:
+        SYMBOL = cfg.symbol
+    if cfg.expiry is not None:
+        EXPIRY = cfg.expiry
+    if cfg.no_extra_chains is not None:
+        NO_EXTRA_CHAINS = cfg.no_extra_chains
+    if cfg.strict_expiry is not None:
+        STRICT_EXPIRY = cfg.strict_expiry
+    if cfg.no_virtual_oi is not None:
+        NO_VIRTUAL_OI = cfg.no_virtual_oi
+    if cfg.strikes_each_side is not None:
+        STRIKES_EACH_SIDE = cfg.strikes_each_side
+    if cfg.use_smartapi is not None:
+        USE_SMARTAPI = cfg.use_smartapi
     if cfg.price_source is not None:
         src = cfg.price_source.strip().upper()
         if src not in ("EQ", "FUT"):
-            raise ValueError(f"price_source must be 'EQ' or 'FUT', got {cfg.price_source!r}")
+            raise ValueError(
+                f"price_source must be 'EQ' or 'FUT', got {cfg.price_source!r}"
+            )
         PRICE_SOURCE = src
     if cfg.futures_expiry is not None:
         fexp = cfg.futures_expiry.strip().upper()
         if fexp not in ("NEAR", "NEXT", "FAR"):
-            raise ValueError(f"futures_expiry must be 'NEAR', 'NEXT', or 'FAR', got {cfg.futures_expiry!r}")
+            raise ValueError(
+                f"futures_expiry must be 'NEAR', 'NEXT', or 'FAR', got {cfg.futures_expiry!r}"
+            )
         FUTURES_EXPIRY = fexp
 
 
 logger.info("\n=== LIGHTWEIGHT JSON OPTIONS PIPELINE INITIALIZATION ===")
 logger.info(f"    Exchange: {EXCHANGE} | Symbol: {SYMBOL} | Expiry: {EXPIRY}")
-logger.info(f"    Loop    : {'every ' + str(LOOP_INTERVAL) + ' min' if LOOP_INTERVAL > 0 else 'single run'}\n")
+logger.info(
+    f"    Loop    : {'every ' + str(LOOP_INTERVAL) + ' min' if LOOP_INTERVAL > 0 else 'single run'}\n"
+)
 
 # =====================================================================
 # FETCH, PARSE & STRUCTURING
 # =====================================================================
+
 
 def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
     """market_api.fetch_bse_json_options() normalised to match
@@ -265,7 +309,12 @@ def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
     df["Spot"] = spot
     df["Symbol"] = symbol
     for side in ("CE", "PE"):
-        for col in (f"{side}_PctChgOI", f"{side}_pChange", f"{side}_BuyQty", f"{side}_SellQty"):
+        for col in (
+            f"{side}_PctChgOI",
+            f"{side}_pChange",
+            f"{side}_BuyQty",
+            f"{side}_SellQty",
+        ):
             if col not in df.columns:
                 df[col] = 0
     return df
@@ -273,7 +322,10 @@ def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
 
 def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
     if USE_SMARTAPI:
-        from smartapi_pipeline_adapter import fetch_option_chain_wide, get_available_expiries
+        from smartapi_pipeline_adapter import (
+            fetch_option_chain_wide,
+            get_available_expiries,
+        )
     if exchange == "BSE":
         # Was fetch_bse_json_options() — BSE's own JSON option-chain HTTP
         # endpoint. fetch_option_chain_wide() is exchange-parametrized
@@ -285,7 +337,9 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         if USE_SMARTAPI:
             df = fetch_option_chain_wide(symbol, expiry, exchange="BFO")
             if df.empty:
-                raise RuntimeError(f"SmartAPI BFO chain fetch empty for {symbol} {expiry}")
+                raise RuntimeError(
+                    f"SmartAPI BFO chain fetch empty for {symbol} {expiry}"
+                )
         else:
             # NSE-native path never covers BSE, so this is market_api.py's
             # own BSE scrape, normalised to the same column schema
@@ -294,7 +348,9 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
             # doesn't need to know which source it came from.
             df = _fetch_bse_chain_no_smartapi(symbol, expiry)
             if df.empty:
-                raise RuntimeError(f"NSE-fallback BFO chain fetch empty for {symbol} {expiry}")
+                raise RuntimeError(
+                    f"NSE-fallback BFO chain fetch empty for {symbol} {expiry}"
+                )
         spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0
         expiry_dates = _generate_bse_expiry_series(symbol)
         return df, spot, expiry_dates
@@ -302,8 +358,19 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         # When using NSE API (no-smartapi mode), get expiries from NSE itself
         # instead of SmartAPI ScripMaster to avoid format mismatches
         if USE_SMARTAPI:
-            expiry_dates = get_available_expiries(symbol)
+            if getattr(_pipeline_settings, "market_data_provider", "SMARTAPI") in ("UPSTOX", "SHOONYA"):
+                from brokers.market_data import market_data
+
+                expiry_dates = [
+                    pd.to_datetime(e, format="%d%b%Y").strftime("%d-%b-%Y")
+                    for e in market_data.list_expiries(
+                        symbol, exchange=("BFO" if exchange == "BSE" else "NFO")
+                    )
+                ]
+            else:
+                expiry_dates = get_available_expiries(symbol)
             resolved = expiry
+
             # Compare by parsed calendar date, not raw string equality — the
             # frontend's expiry string ("28-Jul-2026", from payload.expiryDates)
             # and get_available_expiries(symbol)'s own strings can be the exact
@@ -320,21 +387,34 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
                     return pd.to_datetime(s, format="%d-%b-%Y").date()
                 except (ValueError, TypeError):
                     return None
+
             target_date = _expiry_date(resolved)
-            matched = next((e for e in expiry_dates
-                            if target_date is not None and _expiry_date(e) == target_date), None)
+            matched = next(
+                (
+                    e
+                    for e in expiry_dates
+                    if target_date is not None and _expiry_date(e) == target_date
+                ),
+                None,
+            )
             if matched is not None:
                 resolved = matched
             else:
                 if strict_expiry:
                     raise RuntimeError(...)
                 today = date.today()
-                future = [e for e in expiry_dates if pd.to_datetime(e, format="%d-%b-%Y").date() >= today]
+                future = [
+                    e
+                    for e in expiry_dates
+                    if pd.to_datetime(e, format="%d-%b-%Y").date() >= today
+                ]
                 if not future:
                     raise RuntimeError(...)
                 resolved = future[0]
                 logger.info(f"[Expiry] '{expiry}' unavailable → selected: '{resolved}'")
-            df = fetch_option_chain_wide(symbol, resolved, strikes_around_atm=STRIKES_EACH_SIDE)
+            df = fetch_option_chain_wide(
+                symbol, resolved, strikes_around_atm=STRIKES_EACH_SIDE
+            )
         else:
             # NSE mode: get expiries directly from NSE API response
             payload = fetch_option_chain(symbol, expiry)
@@ -346,26 +426,33 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
             if resolved != expiry:
                 payload = fetch_option_chain(symbol, resolved)
             df = parse_option_chain_response(payload, resolved)
-        
+
         if df.empty:
-            raise RuntimeError(f"{'SmartAPI' if USE_SMARTAPI else 'NSE'} chain fetch empty for {symbol} {resolved}")
+            raise RuntimeError(
+                f"{'SmartAPI' if USE_SMARTAPI else 'NSE'} chain fetch empty for {symbol} {resolved}"
+            )
         spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0
         return df, spot, resolved, expiry_dates
+
 
 def _resolve_expiry(data, requested_expiry, strict=False):
     available = data["records"].get("expiryDates", [])
     if requested_expiry and data["records"].get("data", []):
         return requested_expiry
     if strict:
-        raise RuntimeError(f"Requested expiry '{requested_expiry}' has no data. Available: {available}")
+        raise RuntimeError(
+            f"Requested expiry '{requested_expiry}' has no data. Available: {available}"
+        )
     today = date.today()
     for exp in available:
         try:
             if pd.to_datetime(exp, format="%d-%b-%Y").date() >= today:
                 logger.info(f"[Expiry] '{requested_expiry}' empty → selected: '{exp}'")
                 return exp
-        except Exception: continue
+        except Exception:
+            continue
     raise RuntimeError(f"No valid future expiry found: {available}")
+
 
 # Lot-size resolution (_STATIC_LOT_SIZES/_LiveLotSizes/LOT_SIZES) — moved
 # to lot_sizes.py (Step 5b of the v4 migration plan; see the import near
@@ -375,28 +462,49 @@ def _resolve_expiry(data, requested_expiry, strict=False):
 # — moved to index_contributors.py (Step 5c of the v4 migration plan; see
 # the import near the top of this file).
 
-def _build_expiry_bundle(symbol, expiry, exchange="NSE", strict_expiry=False, **engine_kwargs):
+
+def _build_expiry_bundle(
+    symbol, expiry, exchange="NSE", strict_expiry=False, **engine_kwargs
+):
     if exchange == "BSE":
         df, spot, _ = _fetch_and_parse(symbol, expiry, exchange, strict_expiry)
         resolved = expiry
     else:
-        df, spot, resolved, _ = _fetch_and_parse(symbol, expiry, exchange, strict_expiry)
+        df, spot, resolved, _ = _fetch_and_parse(
+            symbol, expiry, exchange, strict_expiry
+        )
 
-    df_clean = df.dropna(subset=["StrikePrice"]).drop_duplicates(subset=["StrikePrice"]).sort_values("StrikePrice").copy()
+    df_clean = (
+        df.dropna(subset=["StrikePrice"])
+        .drop_duplicates(subset=["StrikePrice"])
+        .sort_values("StrikePrice")
+        .copy()
+    )
     dte = compute_dte(resolved)
-    
-    engine_kwargs.pop("velocity_window_minutes", None)  # dead param, removed from build_engine_result; discarded here so it can't leak through **engine_kwargs below
+
+    engine_kwargs.pop(
+        "velocity_window_minutes", None
+    )  # dead param, removed from build_engine_result; discarded here so it can't leak through **engine_kwargs below
     engine_result = build_engine_result(
-        df=df, df_clean=df_clean, df_idx=None, df_fut=None, df_full_history=None,
-        symbol=symbol, expiry=resolved, dte=dte, lot_size=engine_kwargs.pop("lot_size", LOT_SIZES.get(symbol, 65)),
+        df=df,
+        df_clean=df_clean,
+        df_idx=None,
+        df_fut=None,
+        df_full_history=None,
+        symbol=symbol,
+        expiry=resolved,
+        dte=dte,
+        lot_size=engine_kwargs.pop("lot_size", LOT_SIZES.get(symbol, 65)),
         n_strikes_each_side=engine_kwargs.pop("n_strikes_each_side", STRIKES_EACH_SIDE),
-        **engine_kwargs
+        **engine_kwargs,
     )
     return df_clean, engine_result.master, engine_result.to_ctx_dict(), dte, resolved
+
 
 # =====================================================================
 # PIPELINE EXECUTION
 # =====================================================================
+
 
 def main():
     global EXPIRY
@@ -415,11 +523,11 @@ def main():
     try:
         if USE_SMARTAPI:
             from smartapi_pipeline_adapter import (
-                fetch_futures_wide,
                 fetch_all_pills_and_vix_batched,
-                fetch_vix_smartapi,
-                fetch_ticker_payload_smartapi,
+                fetch_futures_wide,
                 fetch_sensex_ticker_smartapi,
+                fetch_ticker_payload_smartapi,
+                fetch_vix_smartapi,
             )
         # ── Fetch chain + futures + all-indices + VIX + ticker pills concurrently ──
         # These five NSE/BSE calls are independent of each other (futures/
@@ -430,7 +538,9 @@ def main():
         # get_unified_market_data() below, removing a redundant NSE round-trip.)
         with ThreadPoolExecutor(max_workers=5) as ex:
             if EXCHANGE == "BSE":
-                fut_chain = ex.submit(_fetch_and_parse, SYMBOL, EXPIRY, "BSE", STRICT_EXPIRY)
+                fut_chain = ex.submit(
+                    _fetch_and_parse, SYMBOL, EXPIRY, "BSE", STRICT_EXPIRY
+                )
                 # Was fetch_bse_futures() (BSE HTTP + scrip code lookup).
                 # fetch_futures_wide() already resolves FUTIDX contracts
                 # generically off the ScripMaster (_get_futures_contract),
@@ -439,10 +549,26 @@ def main():
                 # fetch_futures_wide()'s docstring for why reusing the
                 # options chain's own expiry here was wrong; `which`
                 # (FUTURES_EXPIRY) picks the monthly contract instead.
-                fut_fut = ex.submit(fetch_futures_wide, SYMBOL, None, exchange="BFO", which=FUTURES_EXPIRY) if USE_SMARTAPI else ex.submit(fetch_public_futures, SYMBOL, FUTURES_EXPIRY)
+                fut_fut = (
+                    ex.submit(
+                        fetch_futures_wide,
+                        SYMBOL,
+                        None,
+                        exchange="BFO",
+                        which=FUTURES_EXPIRY,
+                    )
+                    if USE_SMARTAPI
+                    else ex.submit(fetch_public_futures, SYMBOL, FUTURES_EXPIRY)
+                )
             else:
-                fut_chain = ex.submit(_fetch_and_parse, SYMBOL, EXPIRY, "NSE", STRICT_EXPIRY)
-                fut_fut = ex.submit(fetch_futures_wide, SYMBOL, None, which=FUTURES_EXPIRY) if USE_SMARTAPI else ex.submit(fetch_public_futures, SYMBOL, FUTURES_EXPIRY)
+                fut_chain = ex.submit(
+                    _fetch_and_parse, SYMBOL, EXPIRY, "NSE", STRICT_EXPIRY
+                )
+                fut_fut = (
+                    ex.submit(fetch_futures_wide, SYMBOL, None, which=FUTURES_EXPIRY)
+                    if USE_SMARTAPI
+                    else ex.submit(fetch_public_futures, SYMBOL, FUTURES_EXPIRY)
+                )
             # df_idx now TTL-cached (see _fetch_all_indices_cached above) —
             # still submitted through the pool each tick, but only actually
             # hits NSE once every DF_IDX_TTL_SECONDS; other ticks get the
@@ -454,27 +580,38 @@ def main():
             # chain/futures/idx fetches above instead of adding wall-clock
             # time; .result() below blocks only this thread until it's
             # ready, then the three wrapper calls just read the cache.
-            fut_batch = ex.submit(fetch_all_pills_and_vix_batched) if USE_SMARTAPI else None
+            fut_batch = (
+                ex.submit(fetch_all_pills_and_vix_batched) if USE_SMARTAPI else None
+            )
             if fut_batch is not None:
                 fut_batch.result()
             # In broker mode, ticker/VIX/SENSEX use SmartAPI. Under
             # --no-smartapi these futures stay absent and the public
             # NSE/BSE fallback below derives the same display payload.
-            fut_ticker = ex.submit(fetch_ticker_payload_smartapi) if USE_SMARTAPI else None
+            fut_ticker = (
+                ex.submit(fetch_ticker_payload_smartapi) if USE_SMARTAPI else None
+            )
             fut_unified = ex.submit(fetch_vix_smartapi) if USE_SMARTAPI else None
-            fut_sensex = ex.submit(fetch_sensex_ticker_smartapi) if USE_SMARTAPI else None
+            fut_sensex = (
+                ex.submit(fetch_sensex_ticker_smartapi) if USE_SMARTAPI else None
+            )
             fut_public_bse_quotes = (
-                {sym: ex.submit(fetch_bse_index_quote, sym) for sym in BSE_INDEX_SCRIP_CODES}
-                if not USE_SMARTAPI else {}
+                {
+                    sym: ex.submit(fetch_bse_index_quote, sym)
+                    for sym in BSE_INDEX_SCRIP_CODES
+                }
+                if not USE_SMARTAPI
+                else {}
             )
 
             if EXCHANGE == "BSE":
                 df, spot, expiry_dates = fut_chain.result()
             else:
                 df, spot, resolved, expiry_dates = fut_chain.result()
-                if resolved != EXPIRY: EXPIRY = resolved
-            df_fut  = fut_fut.result()
-            df_idx  = fut_idx.result()
+                if resolved != EXPIRY:
+                    EXPIRY = resolved
+            df_fut = fut_fut.result()
+            df_idx = fut_idx.result()
 
             # EQ remains the canonical option-pricing and decision reference.
             # Futures are passed separately into build_engine_result() for
@@ -488,8 +625,12 @@ def main():
                 # Strict broker-free path: derive NSE ticker pills from the
                 # already-fetched index frame and obtain VIX from NSE. BSE's
                 # public endpoint supplies SENSEX without an AngelOne login.
-                _live_vix, _live_vix_chg_pct, ticker_payload = get_unified_market_data(df_idx)
-                bse_quotes = [future.result() for future in fut_public_bse_quotes.values()]
+                _live_vix, _live_vix_chg_pct, ticker_payload = get_unified_market_data(
+                    df_idx
+                )
+                bse_quotes = [
+                    future.result() for future in fut_public_bse_quotes.values()
+                ]
                 bse_quotes = [quote for quote in bse_quotes if quote]
                 sensex_quote = next(
                     (quote for quote in bse_quotes if quote.get("Symbol") == "SENSEX"),
@@ -538,7 +679,12 @@ def main():
         contributors = _compute_index_contributors(df_idx, SYMBOL, spot)
 
         dte = compute_dte(EXPIRY)
-        df_clean = df.dropna(subset=["StrikePrice"]).drop_duplicates(subset=["StrikePrice"]).sort_values("StrikePrice").copy()
+        df_clean = (
+            df.dropna(subset=["StrikePrice"])
+            .drop_duplicates(subset=["StrikePrice"])
+            .sort_values("StrikePrice")
+            .copy()
+        )
 
         # BUGFIX: em (ExpiryManager) used to only get built inside the
         # `if not NO_EXTRA_CHAINS` block below, purely to fetch extra chain
@@ -569,21 +715,31 @@ def main():
         if not NO_EXTRA_CHAINS and em is not None:
             try:
                 slots = [
-                    (slot_name, slot) for slot_name, slot in
-                    [("NEAR", em.context.near), ("MONTHLY", em.context.monthly)]
+                    (slot_name, slot)
+                    for slot_name, slot in [
+                        ("NEAR", em.context.near),
+                        ("MONTHLY", em.context.monthly),
+                    ]
                     if slot and slot.date_str != str(EXPIRY)
                 ]
                 if slots:
                     with ThreadPoolExecutor(max_workers=len(slots)) as ex2:
                         futs = {
-                            ex2.submit(_build_expiry_bundle, SYMBOL, slot.date_str, EXCHANGE): (slot_name, slot)
+                            ex2.submit(
+                                _build_expiry_bundle, SYMBOL, slot.date_str, EXCHANGE
+                            ): (slot_name, slot)
                             for slot_name, slot in slots
                         }
                         for f in as_completed(futs):
                             slot_name, slot = futs[f]
                             try:
                                 n_df, n_master, n_ctx, n_dte, _ = f.result()
-                                extra_chains[slot.date_str] = (n_df, n_master, n_ctx, n_dte)
+                                extra_chains[slot.date_str] = (
+                                    n_df,
+                                    n_master,
+                                    n_ctx,
+                                    n_dte,
+                                )
                             except Exception as e:
                                 logger.warning(f"[{slot_name}] Skip extra bundle ({e})")
             except Exception as e:
@@ -600,22 +756,33 @@ def main():
         # Falls back to "" (→ engine.py's "NEAR"/"FAR" text placeholders)
         # only if em wasn't available at all, never to a stale value.
         _near_expiry_str = em.context.current.date_str if em is not None else ""
-        _far_expiry_str  = (
-            em.context.monthly.date_str if em is not None and em.context.monthly
-            else em.context.far.date_str if em is not None and em.context.far
+        _far_expiry_str = (
+            em.context.monthly.date_str
+            if em is not None and em.context.monthly
+            else em.context.far.date_str
+            if em is not None and em.context.far
             else ""
         )
 
         engine_result = build_engine_result(
-            df=df, df_clean=df_clean, df_idx=df_idx, df_fut=df_fut, df_full_history=history_df,
-            symbol=SYMBOL, expiry=EXPIRY, dte=dte, lot_size=LOT_SIZES.get(SYMBOL, 65),
-            n_strikes_each_side=STRIKES_EACH_SIDE, india_vix=_live_vix,
+            df=df,
+            df_clean=df_clean,
+            df_idx=df_idx,
+            df_fut=df_fut,
+            df_full_history=history_df,
+            symbol=SYMBOL,
+            expiry=EXPIRY,
+            dte=dte,
+            lot_size=LOT_SIZES.get(SYMBOL, 65),
+            n_strikes_each_side=STRIKES_EACH_SIDE,
+            india_vix=_live_vix,
             india_vix_chg_pct=_live_vix_chg_pct,
-            near_expiry=_near_expiry_str, far_expiry=_far_expiry_str
+            near_expiry=_near_expiry_str,
+            far_expiry=_far_expiry_str,
         )
 
-
         from mTerminals_json import export_dashboard_json
+
         ctx_dict = engine_result.to_ctx_dict()
 
         # SENSEX never appears in df_idx (fetch_all_indices()/DEFAULT_INDICES
@@ -624,9 +791,13 @@ def main():
         # cause as the ticker-pill issue, just for the primary header value.
         # Patch it here from the BSE quote already fetched above (sensex_quote)
         # instead of touching engine.py's NSE-oriented lookup.
-        active_bse_quote = next(
-            (quote for quote in all_indices if quote.get("Symbol") == SYMBOL), None
-        ) if SYMBOL in _BSE_SYMBOLS else None
+        active_bse_quote = (
+            next(
+                (quote for quote in all_indices if quote.get("Symbol") == SYMBOL), None
+            )
+            if SYMBOL in _BSE_SYMBOLS
+            else None
+        )
         if active_bse_quote:
             if active_bse_quote.get("Change") is not None:
                 ctx_dict["spot_change"] = active_bse_quote["Change"]
@@ -634,20 +805,33 @@ def main():
                 ctx_dict["spot_chg_pct"] = active_bse_quote["% Change"]
 
         export_dashboard_json(
-            df_clean=df_clean, master=engine_result.master, ctx_dict=ctx_dict,
-            SYMBOL=SYMBOL, EXPIRY=EXPIRY, dte=dte, engine_result=engine_result,
-            out_path="mTerminals.json", expiry_dates=expiry_dates, extra_chains=extra_chains if extra_chains else None,
-            use_virtual_oi=not NO_VIRTUAL_OI, contributors=contributors, all_indices=all_indices,
-            price_source=PRICE_SOURCE, futures_expiry=FUTURES_EXPIRY,
+            df_clean=df_clean,
+            master=engine_result.master,
+            ctx_dict=ctx_dict,
+            SYMBOL=SYMBOL,
+            EXPIRY=EXPIRY,
+            dte=dte,
+            engine_result=engine_result,
+            out_path="mTerminals.json",
+            expiry_dates=expiry_dates,
+            extra_chains=extra_chains if extra_chains else None,
+            use_virtual_oi=not NO_VIRTUAL_OI,
+            contributors=contributors,
+            all_indices=all_indices,
+            price_source=PRICE_SOURCE,
+            futures_expiry=FUTURES_EXPIRY,
         )
         logger.info("\nSUCCESS: JSON Framework updated snapshot successfully.")
 
     except Exception:
         traceback.print_exc()
 
+
 if __name__ == "__main__":
     if LOOP_INTERVAL > 0:
-        logger.info(f"[Loop] Active monitoring interval: {LOOP_INTERVAL} min. Use Ctrl+C to terminate.\n")
+        logger.info(
+            f"[Loop] Active monitoring interval: {LOOP_INTERVAL} min. Use Ctrl+C to terminate.\n"
+        )
         while True:
             main()
             time.sleep(LOOP_INTERVAL * 60)

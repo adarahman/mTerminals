@@ -50,8 +50,11 @@ _ENV_CANDIDATES = [
 ENV_PATH = next((p for p in _ENV_CANDIDATES if os.path.isfile(p)), None)
 
 if ENV_PATH:
-    load_dotenv(ENV_PATH)
-    logger.info(f"Loaded .env from {ENV_PATH}")
+    # Project settings must win over inherited shell vars so a stale daily
+    # token or old broker selection in the parent process does not silently
+    # override the checked-in .env defaults for the current checkout.
+    load_dotenv(ENV_PATH, override=True)
+    logger.info(f"Loaded .env from {ENV_PATH} (override=True)")
 else:
     logger.warning(
         "No .env file found at either of: "
@@ -162,23 +165,37 @@ class Settings:
     )
 
     # -- Live tick-streaming feed provider ---------------------------------
-    # Independent of BOTH execution_broker (order routing) and
-    # market_data_provider (REST chain-building polling): selects which
-    # broker's WEBSOCKET tick feed ws_server_live.py's start_smartapi_feed()/
-    # start_upstox_feed()/start_shoonya_feed() dispatch (see that file's
-    # USE_SMARTAPI/LIVE_FEED_PROVIDER block) uses to overlay fast
-    # leg-level ticks onto the slower NSE/BSE-polled chain. Defaults to
-    # SMARTAPI to preserve existing behavior. Set to UPSTOX only once
-    # UPSTOX_ACCESS_TOKEN is populated (see upstox_client.py's docstring —
-    # no unattended daily refresh) AND `pip install upstox-python-sdk` has
-    # been run (see upstox_ws_client.py's module docstring for why that's
-    # a separate, optional dependency rather than a hard one). Set to
-    # SHOONYA once the SHOONYA_* settings below are populated — no extra
-    # pip install needed: shoonya_ws_client.py's websocket path ships
-    # inside the same ShoonyaApi-py checkout brokers/shoonya_client.py
-    # already depends on (see setup_shoonya.sh).
+    # Selects which broker's WEBSOCKET tick feed ws_server_live.py's
+    # start_smartapi_feed()/start_upstox_feed()/start_shoonya_feed()
+    # dispatch (see that file's USE_SMARTAPI/LIVE_FEED_PROVIDER block) uses
+    # to overlay fast leg-level ticks onto the slower NSE/BSE-polled chain.
+    #
+    # Deliberately NOT independently defaulted from execution_broker
+    # (order routing) or market_data_provider (REST chain-building
+    # polling) anymore: in practice all three are almost always the same
+    # broker, and a fourth env var that silently defaults to SMARTAPI
+    # regardless of what EXECUTION_BROKER says is exactly the kind of
+    # drift that leaves the tick feed on one broker while orders/quotes
+    # run on another with nothing in .env explaining why. So the default
+    # here rides on EXECUTION_BROKER, and LIVE_FEED_PROVIDER only needs to
+    # be set explicitly for the one legitimate case where the tick feed
+    # should differ from the order broker (e.g. Shoonya ticks overlaid on
+    # Upstox-routed orders).
+    #
+    # Set to UPSTOX only once UPSTOX_ACCESS_TOKEN is populated (see
+    # upstox_client.py's docstring — no unattended daily refresh) AND
+    # `pip install upstox-python-sdk` has been run (see
+    # upstox_ws_client.py's module docstring for why that's a separate,
+    # optional dependency rather than a hard one). Set to SHOONYA once the
+    # SHOONYA_* settings below are populated — no extra pip install
+    # needed: shoonya_ws_client.py's websocket path ships inside the same
+    # ShoonyaApi-py checkout brokers/shoonya_client.py already depends on
+    # (see setup_shoonya.sh).
     live_feed_provider: str = field(
-        default_factory=lambda: os.getenv("LIVE_FEED_PROVIDER", "SMARTAPI").strip().upper()
+        default_factory=lambda: os.getenv(
+            "LIVE_FEED_PROVIDER",
+            os.getenv("EXECUTION_BROKER", "SMARTAPI"),
+        ).strip().upper()
     )
 
     # -- Shoonya / Finvasia credentials (brokers/shoonya_client.py) ------
@@ -206,7 +223,7 @@ class Settings:
 
     # -- Tunables ---------------------------------------------------------
     quote_cache_ttl_s: float = field(
-        default_factory=lambda: float(os.getenv("SMARTAPI_QUOTE_TTL_S", "1.5"))
+        default_factory=lambda: float(os.getenv("SMARTAPI_QUOTE_TTL_S", "5.0"))
     )
 
     # -- Instrument-master cache dir (brokers/smartapi_instruments.py) --

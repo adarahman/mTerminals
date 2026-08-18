@@ -104,17 +104,38 @@ def _build_index_tokens():
     """Dynamically build the index token map from the ScripMaster
     (instrumenttype == 'AMXIDX') instead of hardcoding entries — new or
     renamed indices (e.g. NIFTYNXT50, which was previously missing) are
-    picked up automatically on the next ScripMaster refresh."""
+    picked up automatically on the next ScripMaster refresh.
+
+    Warns (does not raise — a live feed shouldn't die over this) if more
+    than one AMXIDX row shares the same `name`: the loop below keeps
+    whichever row it sees last, silently, which means a stale/duplicate
+    ScripMaster entry can quietly replace a working token with a bad one
+    and every downstream quote call for that symbol starts failing with
+    no indication why. Added after NIFTY's index-quote lookups started
+    consistently returning no row from Angel while BANKNIFTY/SENSEX kept
+    working — this log line is what would confirm or rule that out."""
     tokens = {}
+    seen_tokens: dict[str, str] = {}  # name -> first token seen, to detect dupes
     data = _load_scrip_master()
     for row in data:
         if row.get("instrumenttype") == "AMXIDX":
             name = row.get("name", "").upper()
-            if name:
-                tokens[name] = {
-                    "token": row["token"],
-                    "exchange": row.get("exch_seg", "NSE"),
-                }
+            token = row.get("token")
+            if not name:
+                continue
+            if name in seen_tokens and seen_tokens[name] != token:
+                logger.warning(
+                    f"[smartapi_client] duplicate AMXIDX ScripMaster row for "
+                    f"{name!r}: token {seen_tokens[name]!r} vs {token!r} — "
+                    f"keeping the later one ({token!r}). If quotes for "
+                    f"{name} start failing, this duplicate is the first "
+                    f"thing to check."
+                )
+            seen_tokens[name] = token
+            tokens[name] = {
+                "token": token,
+                "exchange": row.get("exch_seg", "NSE"),
+            }
 
     # A few BSE indices carry a long descriptive `name` in the ScripMaster
     # (e.g. "S&P BSE SENSEX 50") instead of the short code the rest of this
@@ -325,10 +346,10 @@ class SmartApiSession:
 # documented at 1 req/sec. Everything else shares a mild global ceiling so
 # bursty multi-call paths (batch quotes + LTP + funds) don't stampede.
 _RATE_LIMIT_MIN_INTERVAL = {
-    "getCandleData": 0.40,   # ~2.5/s — under Angel's ~3/s historical cap
-    "optionGreek": 1.05,     # Angel docs: 1 req/sec
-    "placeOrderFullResponse": 0.35,
-    "placeOrder": 0.35,
+    "getCandleData": 0.75,   # ~1.3/s — moderate spacing under Angel's ~3/s historical cap
+    "optionGreek": 1.50,     # Angel docs: 1 req/sec with moderate buffer
+    "placeOrderFullResponse": 0.40,
+    "placeOrder": 0.40,
     # ltpData was previously falling through to the 25/s default, which is
     # far looser than Angel actually enforces for single-symbol LTP calls —
     # this is what produced the repeated "Access denied because of
@@ -338,12 +359,12 @@ _RATE_LIMIT_MIN_INTERVAL = {
     # call for many symbols) over calling ltpData per symbol wherever the
     # caller can gather symbols up front — this floor just protects the
     # cases where a single ltpData call is unavoidable.
-    "ltpData": 1.0,           # ~1/s — matches Angel's documented LTP cap
-    "getMarketData": 0.35,    # batch quote call — cheaper per-symbol but still capped
+    "ltpData": 0.90,           # ~1.1/s — moderate spacing to avoid rate limits
+    "getMarketData": 0.75,    # batch quote call — moderate spacing to avoid rate limits
 }
-_RATE_LIMIT_DEFAULT_INTERVAL = 0.04  # ~25/s soft ceiling for RMS/orderBook/position etc
-_RATE_LIMIT_BACKOFF_S = 1.25
-_RATE_LIMIT_MAX_RETRIES = 3  # total attempts after the first backoff (was: 1, silently gave up after)
+_RATE_LIMIT_DEFAULT_INTERVAL = 0.15  # ~6.7/s soft ceiling for RMS/orderBook/position etc
+_RATE_LIMIT_BACKOFF_S = 3.0  # Moderate backoff time for recovery
+_RATE_LIMIT_MAX_RETRIES = 6  # Moderate retries for resilience
 _rate_limit_lock = threading.Lock()
 _rate_limit_last_ts: dict[str, float] = {}
 _rate_limit_global_last = 0.0

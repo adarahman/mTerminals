@@ -47,7 +47,13 @@ class ChartRenderer {
       const [a, b] = findSeg(segs, 'virtual', v);
       const virtDelta = b.virtual - a.virtual;
       if (virtDelta <= 0) return a.real;
-      return a.real + ((v - a.virtual) / virtDelta) * (b.real - a.virtual);
+      // BUGFIX: was `(b.real - a.virtual)` — mixed the virtual axis into the
+      // real-axis delta, so any segment where a.virtual !== a.real (i.e. any
+      // segment after a compressed gap, which is the whole reason this
+      // virtual/real mapping exists) produced a wrong interpolated
+      // timestamp. toVirtual() above already does this correctly with
+      // `(b.virtual - a.virtual)`; this mirrors that on the real axis.
+      return a.real + ((v - a.virtual) / virtDelta) * (b.real - a.real);
     };
     const isInGap = (t) => {
       if (t <= first.real || t >= last.real) return false;
