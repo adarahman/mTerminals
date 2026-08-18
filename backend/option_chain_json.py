@@ -358,15 +358,45 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         # When using NSE API (no-smartapi mode), get expiries from NSE itself
         # instead of SmartAPI ScripMaster to avoid format mismatches
         if USE_SMARTAPI:
-            if getattr(_pipeline_settings, "market_data_provider", "SMARTAPI") in ("UPSTOX", "SHOONYA"):
+            provider = getattr(
+                _pipeline_settings,
+                "market_data_provider",
+                "SMARTAPI",
+            ).upper()
+
+            if provider in ("UPSTOX", "SHOONYA"):
                 from brokers.market_data import market_data
 
-                expiry_dates = [
-                    pd.to_datetime(e, format="%d%b%Y").strftime("%d-%b-%Y")
-                    for e in market_data.list_expiries(
-                        symbol, exchange=("BFO" if exchange == "BSE" else "NFO")
+                try:
+                    provider_expiries = market_data.list_expiries(
+                        symbol,
+                        exchange=("BFO" if exchange == "BSE" else "NFO"),
                     )
-                ]
+
+                    expiry_dates = [
+                        pd.to_datetime(e, format="%d%b%Y").strftime("%d-%b-%Y")
+                        for e in provider_expiries
+                    ]
+                except Exception as exc:
+                    logger.warning(
+                        "[Expiry] %s expiry lookup failed for %s: %s",
+                        provider,
+                        symbol,
+                        exc,
+                    )
+                    expiry_dates = []
+
+                # Provider authentication/search failure must not kill
+                # the option-chain pipeline. ScripMaster is already loaded.
+                if not expiry_dates:
+                    logger.warning(
+                        "[Expiry] %s returned no expiries for %s; "
+                        "falling back to ScripMaster",
+                        provider,
+                        symbol,
+                    )
+                    expiry_dates = get_available_expiries(symbol)
+
             else:
                 expiry_dates = get_available_expiries(symbol)
             resolved = expiry
@@ -611,6 +641,13 @@ def main():
                 if resolved != EXPIRY:
                     EXPIRY = resolved
             df_fut = fut_fut.result()
+
+            # Broker-neutral market_data adapters may return a quote dict.
+            # The analytics engine expects a DataFrame.
+            if isinstance(df_fut, dict):
+                df_fut = pd.DataFrame([df_fut])
+            elif df_fut is None:
+                df_fut = pd.DataFrame()
             df_idx = fut_idx.result()
 
             # EQ remains the canonical option-pricing and decision reference.

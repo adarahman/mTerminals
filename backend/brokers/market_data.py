@@ -350,12 +350,20 @@ class ShoonyaMarketData:
     """
 
     @staticmethod
-    def _to_shoonya(expiry_ddmmmyyyy: Optional[str]) -> Optional[str]:
-        """'31JUL2026' -> '31-Jul-2026'. None/empty passes through, same
-        convention UpstoxMarketData's _to_iso() uses."""
-        if not expiry_ddmmmyyyy:
-            return expiry_ddmmmyyyy
-        return datetime.strptime(expiry_ddmmmyyyy, "%d%b%Y").strftime("%d-%b-%Y")
+    def _to_shoonya(expiry):
+        """Normalize expiry to Shoonya DD-Mmm-YYYY format."""
+        if isinstance(expiry, datetime):
+            return expiry.strftime("%d-%b-%Y")
+
+        value = str(expiry).strip()
+
+        for fmt in ("%d-%b-%Y", "%d%b%Y", "%d-%m-%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt).strftime("%d-%b-%Y")
+            except ValueError:
+                continue
+
+        raise ValueError(f"Unsupported expiry format: {expiry!r}")
 
     @staticmethod
     def _to_ddmmmyyyy(expiry_shoonya: Optional[str]) -> Optional[str]:
