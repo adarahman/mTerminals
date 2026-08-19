@@ -148,6 +148,7 @@ if not _NO_SMARTAPI_REQUESTED:
             "EXECUTION_BROKER must be SMARTAPI, SHOONYA, UPSTOX, or KITE, "
             f"got {_broker_settings.execution_broker!r}"
         )
+    from brokers.smartapi_client import INDEX_TOKENS as _SMARTAPI_INDEX_TOKENS
     from brokers.smartapi_history import get_candle_data, get_index_candles
     from brokers.smartapi_ws_client import EXCHANGE_TYPE, SmartTickStream
     from smartapi_feed_adapter import TickAggregator
@@ -196,6 +197,7 @@ else:
     _shoonya_resolve_option_contract = None
     get_index_candles = _smartapi_disabled
     get_candle_data = _smartapi_disabled
+    _SMARTAPI_INDEX_TOKENS = {}
     SmartTickStream = None
     TickAggregator = None
     EXCHANGE_TYPE = {}
@@ -4419,7 +4421,13 @@ async def spot_history_handler(request):
     # get_candle_data's docstring), not meant for a huge historical pull.
     minutes = max(1, min(minutes, 24 * 60))
 
-    index_info = market_data.index_tokens().get(SYMBOL)
+    # History is always sourced from SmartAPI (Angel One) via
+    # get_candle_data(), independent of the active DATA_SOURCE — so resolve
+    # the instrument from SmartAPI's own INDEX_TOKENS, never the active
+    # provider's (Kite/Breeze have no index-token model and return {},
+    # which would make ZERODHA break the chart backfill despite Angel One
+    # having the data).
+    index_info = _SMARTAPI_INDEX_TOKENS.get(SYMBOL)
     if index_info is None:
         print(
             f"[http] /api/spot-history: no INDEX_TOKENS entry for {SYMBOL}, returning empty",
@@ -4756,7 +4764,10 @@ async def history_handler(request):
         response.headers["X-MTerminals-Instrument"] = instrument
         return response
 
-    if req_symbol not in market_data.index_tokens():
+    # History is SmartAPI-sourced regardless of the active DATA_SOURCE (see
+    # spot_history_handler); gate on SmartAPI's own INDEX_TOKENS so ZERODHA
+    # (no index-token model) can't make history return empty.
+    if req_symbol not in _SMARTAPI_INDEX_TOKENS:
         print(
             f"[http] /api/history: no INDEX_TOKENS entry for {req_symbol}, returning empty",
             flush=True,
