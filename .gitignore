@@ -61,3 +61,9 @@ runtime/**
 !runtime/**/.gitkeep
 !runtime/shoonya_api/
 !runtime/shoonya_api/**
+
+# Scratch token-minting / connectivity scripts (not part of the app)
+/kite_access_token.py
+/kite_access_token copy.py
+/breeze_access_token.py
+/test_connection.py
