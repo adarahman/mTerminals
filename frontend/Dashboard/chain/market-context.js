@@ -8,21 +8,34 @@ function renderIndexTicker(d) {
   const indices = d.allIndices || [];
   const active = d.symbol || 'NIFTY';
 
-  // VIX Logic remains the same, assuming d.indiaVix is still passed.
-  // %change badge — reads d.indiaVixChgPct, which mTerminals_json.py sends
-  // as ctx_dict["india_vix_chg_pct"] (defaults to 0.0 upstream if that
-  // context field isn't populated yet — so a real 0 and "not wired up"
-  // will look identical until india_vix_chg_pct is actually computed).
-  const vixRegime = (d.vixRegime || '').toLowerCase();
-  const vixColor = vixRegime === 'high' ? '#FF6B6B' : vixRegime === 'low' ? '#20C997' : '#FFD43B';
-  const vixUp = (d.indiaVixChgPct || 0) >= 0;
-  const vixChgHtml = d.indiaVixChgPct !== undefined
-    ? `<span class="idx-pill-chg ${vixUp ? 'up' : 'down'}">${vixUp ? '▲' : '▼'}${Math.abs(d.indiaVixChgPct).toFixed(2)}%</span>`
+  // FUT pill in the first slot (replaces the old VIX pill): near-month
+  // futures symbol + price, day change / % change (smallest tier), basis,
+  // and the NEAR/NEXT/FAR contract dropdown — the whole futures-reference
+  // widget, moved in here from the expiry strip (same ids the top-bar
+  // patch in chain-dashboard-renderer.js updates: topbar-future,
+  // topbar-basis, futuresExpirySelect).
+  const futPrice = Number(d.future) || 0;
+  const futChg = Number(d.futureChange) || 0;
+  const futPct = Number(d.futureChgPct) || 0;
+  const futUp = futPct >= 0;
+  const futExpiry = d.futuresExpiry || 'NEAR';
+  const futOptions = ['NEAR', 'NEXT', 'FAR']
+    .map(v => `<option value="${v}"${futExpiry === v ? ' selected' : ''}>${v}</option>`)
+    .join('');
+  const futChgHtml = (d.futureChgPct !== undefined && (futChg || futPct))
+    ? `<span class="idx-pill-chg ${futUp ? 'up' : 'down'}">${futUp ? '▲' : '▼'} ${Math.abs(futChg).toFixed(2)} ${Math.abs(futPct).toFixed(2)}%</span>`
     : '';
-  const vixPill = `<div class="idx-pill idx-pill-vix" data-index-symbol="VIX" title="India VIX">
-    <span class="idx-pill-sym">VIX</span>
-    <span class="idx-pill-val" style="color:${vixColor};">${fmtN(d.indiaVix, 1)}</span>
-    ${vixChgHtml}
+  const futBasisHtml = `<small id="topbar-basis" class="idx-pill-basis">${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}</small>`;
+  const futPill = `<div class="idx-pill idx-pill-fut" data-index-symbol="FUT" title="Near-month futures — confirmation only, does not change Greeks or confidence">
+    <span class="idx-pill-fut-row">
+      <span class="idx-pill-sym">FUT</span>
+      <span class="idx-pill-val" id="topbar-future">${futPrice > 0 ? fmtI(futPrice) : '—'}</span>
+      <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Futures reference contract" onchange="onFuturesExpiryPicked(this.value)">${futOptions}</select>
+    </span>
+    <span class="idx-pill-fut-row idx-pill-fut-meta">
+      ${futChgHtml}
+      ${futBasisHtml}
+    </span>
   </div>`;
 
   // Map display names to backend symbols (matches market_api.py INDEX_RENAME)
@@ -51,7 +64,7 @@ function renderIndexTicker(d) {
       </button>`;
     }).join('');
 
-  return `<div class="index-ticker" id="index-ticker-bar">${vixPill}${pills}</div>`;
+  return `<div class="index-ticker" id="index-ticker-bar">${futPill}${pills}</div>`;
 }
 
 // Patch the frequently-changing quote values without replacing ticker buttons.
@@ -62,7 +75,7 @@ function patchIndexTicker(d) {
   if (!ticker) return;
   const active = d.symbol || 'NIFTY';
   const indices = (d.allIndices || []).filter((idx) => (idx.BackendSymbol || idx.Symbol) !== active);
-  const expected = ['VIX'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
+  const expected = ['FUT'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
   const existing = Array.from(ticker.querySelectorAll('[data-index-symbol]'))
     .map((el) => el.dataset.indexSymbol);
 
@@ -73,19 +86,19 @@ function patchIndexTicker(d) {
     return;
   }
 
-  const vix = ticker.querySelector('[data-index-symbol="VIX"]');
-  if (vix) {
-    const value = vix.querySelector('.idx-pill-val');
-    const change = vix.querySelector('.idx-pill-chg');
-    const pct = Number(d.indiaVixChgPct || 0);
-    const regime = String(d.vixRegime || '').toLowerCase();
-    if (value) {
-      value.textContent = fmtN(d.indiaVix, 1);
-      value.style.color = regime === 'high' ? '#FF6B6B' : regime === 'low' ? '#20C997' : '#FFD43B';
-    }
-    if (change && d.indiaVixChgPct !== undefined) {
-      change.className = 'idx-pill-chg ' + (pct >= 0 ? 'up' : 'down');
-      change.textContent = `${pct >= 0 ? '▲' : '▼'}${Math.abs(pct).toFixed(2)}%`;
+  const fut = ticker.querySelector('[data-index-symbol="FUT"]');
+  if (fut) {
+    const value = fut.querySelector('.idx-pill-val');
+    const change = fut.querySelector('.idx-pill-chg');
+    const basis = fut.querySelector('.idx-pill-basis');
+    const futPrice = Number(d.future) || 0;
+    const futChg = Number(d.futureChange) || 0;
+    const futPct = Number(d.futureChgPct) || 0;
+    if (value) value.textContent = futPrice > 0 ? fmtI(futPrice) : '—';
+    if (basis) basis.textContent = `Basis ${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}`;
+    if (change && d.futureChgPct !== undefined && (futChg || futPct)) {
+      change.className = 'idx-pill-chg ' + (futPct >= 0 ? 'up' : 'down');
+      change.textContent = `${futPct >= 0 ? '▲' : '▼'} ${Math.abs(futChg).toFixed(2)} ${Math.abs(futPct).toFixed(2)}%`;
     }
   }
 
@@ -187,12 +200,17 @@ window.onSymbolPicked = onSymbolPicked;
 // Inside dashboard.js, within the DataService or global scope:
 function switchActiveIndex(sym) {
   if (!sym) return;
-  // If you need to hit a specific API before connecting:
-  // fetch(`http://api/set_index?symbol=${sym}`).then(...)
-  
-  // Default behavior
-  const base = (_wsUrl || '').split('?')[0];
-  connectWebSocket(`${base}?symbol=${encodeURIComponent(sym)}`);
+  // Rebuild the WS URL preserving any existing query params (dataSource,
+  // futuresExpiry, ...) so a symbol switch doesn't silently drop them —
+  // same pattern as setFuturesExpiry()/applyExpirySelection().
+  const [base, query] = (_wsUrl || '').split('?');
+  const params = new URLSearchParams(query || '');
+  // URLSearchParams percent-encodes values itself — passing sym through
+  // encodeURIComponent() first double-encodes it ("ZYDUS LIFESCIENCES LTD"
+  // became "ZYDUS%20LIFESCIENCES%20LTD" on the backend, which then failed
+  // every expiry/chain lookup). Set the raw value.
+  params.set('symbol', sym);
+  connectWebSocket(`${base}?${params.toString()}`);
   // Phase 5 (event-bus.js): announce the switch on the shared bus. Purely
   // additive — connectWebSocket() above is still the only thing that
   // actually performs the switch; this just gives other modules a way to
@@ -200,6 +218,29 @@ function switchActiveIndex(sym) {
   if (window.eventBus) window.eventBus.emit('symbol:change', { symbol: sym });
 }
 window.switchActiveIndex = switchActiveIndex;
+
+// DATA SOURCE dropdown — runtime market-data provider switch
+// (ANGEL ONE/UPSTOX/SHOONYA/ZERODHA/ICICI DIRECT/KOTAK NEO/NSE/BSE).
+// Mirrors setFuturesExpiry():
+// preserves the existing WS query params (symbol, expiry, futuresExpiry)
+// and just sets dataSource=... then reconnects. The backend applies it
+// process-wide via ws_handler() -> switch_data_source() on the very next
+// engine_loop tick — no server restart, all connected clients switch
+// together (see switch_data_source()'s docstring for the full sequence).
+function switchDataSource(ds) {
+  if (!ds) return;
+  const [base, query] = (_wsUrl || '').split('?');
+  const params = new URLSearchParams(query || '');
+  params.set('dataSource', ds.toUpperCase());
+  connectWebSocket(`${base}?${params.toString()}`);
+  if (window.eventBus) window.eventBus.emit('dataSource:change', { dataSource: ds.toUpperCase() });
+}
+window.switchDataSource = switchDataSource;
+
+function onDataSourcePicked(val){
+  switchDataSource(val);
+}
+window.onDataSourcePicked = onDataSourcePicked;
 
 window.renderIndexTicker = renderIndexTicker;
 window.patchIndexTicker = patchIndexTicker;

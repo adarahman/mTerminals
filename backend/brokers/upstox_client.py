@@ -105,6 +105,30 @@ _CACHE_DIR = Path(
     )
 )
 
+# Minimum length for an F&O trading_symbol leading-token alias ("TCS",
+# "INFY", "M&MFIN"). Shorter tokens (e.g. "LT") are too ambiguous — they
+# only resolve via an exact trading_symbol match, never via name-prefix
+# matching.
+_MIN_TICKER_ALIAS_LEN = 3
+
+
+def _angel_index_spot(underlying):
+    """Best-effort spot for an index Upstox's own master has no spot
+    instrument for (e.g. NIFTYNXT50). Only consults Angel's index tokens —
+    never an arbitrary stock — so this stays a no-op unless the symbol is a
+    recognized index AND the SmartAPI path is available."""
+    try:
+        from brokers.smartapi_client import INDEX_TOKENS, get_index_quote
+
+        if (underlying or "").upper() not in INDEX_TOKENS:
+            return None
+        q = get_index_quote(underlying)
+        if not q:
+            return None
+        return {"last_price": q.get("ltp")}
+    except Exception:
+        return None
+
 # Common index instrument_keys — Upstox has no numeric "index token" the
 # way SmartAPI/Shoonya do; the instrument_key IS the identifier, and for
 # indices it's a fixed literal string rather than something resolved from
@@ -349,6 +373,128 @@ def _row_expiry_date(row: dict) -> Optional[str]:
     return str(raw)
 
 
+# Cache of Upstox master full-company-name -> trading_symbol (ticker), keyed
+# by the condense-normalized name. Built lazily from the (unauthenticated,
+# 20h-cached) instrument dump so it survives the same refresh window; cheap
+# to rebuild and never blocks a broker session.
+_COMPANY_NAME_TO_TICKER_CACHE: Optional[dict] = None
+
+
+def _build_company_name_to_ticker() -> dict:
+    """{condensed_full_company_name: ticker} from Upstox's master.
+
+    Resolves free-text full-company-name inputs typed into the Dashboard's
+    "Other..." prompt (which Angel's ticker-only ScripMaster can't reverse-
+    engineer). Upstox's master carries the full name in `name` AND the clean
+    exchange ticker in `trading_symbol` on its EQ rows (e.g.
+    name="MARUTI SUZUKI INDIA LTD.", trading_symbol="MARUTI"), so EQ rows are
+    the primary source — they give the unadorned ticker and cover scrips that
+    have an EQ listing but no active F&O options (M&M FINANCE, etc.). F&O
+    option rows are only used as a fallback so a freshly-added derivative
+    name still resolves; its trading_symbol's leading token is the ticker.
+    Condensed keys survive trailing "Ltd"/".", case, and whitespace noise."""
+    from brokers.symbol_names import _condense
+
+    out = {}
+    # Pass 1: EQ rows (clean, unadorned tickers like "MARUTI", "ADANIENSOL").
+    # These are authoritative — a ticker with no embedded strike/expiry is the
+    # real exchange symbol, and they cover scrips with no active F&O options.
+    for scope in ("NSE", "BSE"):
+        try:
+            rows = _load_instrument_dump(scope)
+        except Exception:
+            continue
+        for row in rows:
+            name = (row.get("name") or "").strip()
+            if not name:
+                continue
+            ts = (_row_symbol(row) or "").upper()
+            if " " not in ts and len(ts) >= _MIN_TICKER_ALIAS_LEN:
+                out.setdefault(_condense(name), ts)
+    # Pass 2: F&O option/future rows as a fallback ONLY — their trading_symbol
+    # embeds strike+expiry and must be split to a leading token. Skipped where
+    # an EQ row already established the ticker for that name.
+    for scope in ("NSE", "BSE"):
+        try:
+            rows = _load_instrument_dump(scope)
+        except Exception:
+            continue
+        for row in rows:
+            name = (row.get("name") or "").strip()
+            if not name:
+                continue
+            if row.get("segment", "").endswith("_FO") and row.get(
+                "instrument_type"
+            ) in ("CE", "PE", "FUT"):
+                ticker = (_row_symbol(row) or "").split(" ", 1)[0].upper()
+                if len(ticker) >= _MIN_TICKER_ALIAS_LEN:
+                    out.setdefault(_condense(name), ticker)
+    return out
+
+
+def _resolve_company_name_to_ticker(underlying: str) -> Optional[str]:
+    """Resolve a full company name (typed in the Dashboard's "Other..." prompt)
+    to its exchange ticker using Upstox's instrument dump as a reference.
+
+    Used by Angel/SmartAPI's canonicalization as a fallback when Angel's own
+    ScripMaster (ticker-only `name` field) can't map the full company name.
+    Returns the canonical ticker, or None."""
+    global _COMPANY_NAME_TO_TICKER_CACHE
+    req = (underlying or "").strip().upper()
+    if not req:
+        return None
+    if _COMPANY_NAME_TO_TICKER_CACHE is None:
+        try:
+            _COMPANY_NAME_TO_TICKER_CACHE = _build_company_name_to_ticker()
+        except Exception as exc:
+            logger.warning("[upstox_client] company-name index build failed: %s", exc)
+            return None
+    from brokers.symbol_names import _condense, _COMMON_UNDERLYING_ALIASES
+
+    # 1. Curated alias table FIRST — it's authoritative for well-known
+    #    full-name -> ticker pairs and must win over noisier fallbacks.
+    if req in _COMMON_UNDERLYING_ALIASES:
+        return _COMMON_UNDERLYING_ALIASES[req]
+    # 2. exact (condensed) hit against the master-derived name index.
+    cond = _condense(req)
+    if cond in _COMPANY_NAME_TO_TICKER_CACHE:
+        return _COMPANY_NAME_TO_TICKER_CACHE[cond]
+    # 3. No prefix fallback — too lossy over a multi-hundred-scrip universe.
+    return None
+
+
+def _canonical_name(underlying: str, rows: list, key: str = "name",
+                    instrument_types=("CE", "PE")):
+    """Tolerant key mapping against Upstox's own master (see
+    brokers/symbol_names.py). Upstox stores full company names ("ZYDUS
+    LIFESCIENCES LTD") while callers often hold the ticker ("ZYDUSLIFE"),
+    and vice versa for Angel. Returns the master's exact key on a UNIQUE
+    match, else None (exact-match behavior is preserved on ambiguity).
+
+    When `key` is "name", aliases are seeded from each F&O row's
+    trading_symbol leading token ("ZYDUSLIFE 960 CE 27 OCT 26" -> "ZYDUSLIFE"),
+    so a ticker typed in the picker resolves to the stored company name."""
+    from brokers.symbol_names import canonicalize_underlying
+
+    mapping = {}
+    for row in rows:
+        if row.get("instrument_type") not in instrument_types:
+            continue
+        canonical = (row.get(key) or "").strip()
+        if not canonical:
+            continue
+        mapping[canonical.upper()] = canonical
+        if key == "name":
+            # CE/PE trading symbols are "<TICKER> <strike> <CE|PE> <exp>",
+            # so their leading token is the exchange ticker ("INFY", "TATAMOTORS")
+            # — alias it to the master's full company name so a ticker picked
+            # from the (Angel-sourced) dropdown still resolves on Upstox.
+            ticker = (_row_symbol(row) or "").split(" ", 1)[0].upper()
+            if len(ticker) >= _MIN_TICKER_ALIAS_LEN:
+                mapping.setdefault(ticker, canonical)
+    return canonicalize_underlying(underlying, mapping)
+
+
 def list_expiries(underlying: str, exchange: str = "NFO") -> list:
     """Sorted YYYY-MM-DD expiry strings for underlying's option chain."""
     scope = _scope_for_exchange(exchange)
@@ -361,6 +507,16 @@ def list_expiries(underlying: str, exchange: str = "NFO") -> list:
         and (row.get("name") or "").upper() == underlying
         and _row_expiry_date(row)
     }
+    if not expiries:
+        canonical = _canonical_name(underlying, rows)
+        if canonical and canonical != underlying:
+            expiries = {
+                _row_expiry_date(row)
+                for row in rows
+                if row.get("instrument_type") in ("CE", "PE")
+                and (row.get("name") or "").upper() == canonical
+                and _row_expiry_date(row)
+            }
     return sorted(expiries)
 
 
@@ -389,6 +545,20 @@ def find_option_token(
                 "trading_symbol": _row_symbol(row),
                 "lot_size": row.get("lot_size"),
             }
+    canonical = _canonical_name(underlying, rows)
+    if canonical and canonical != underlying:
+        for row in rows:
+            if (
+                row.get("instrument_type") == opt_type
+                and (row.get("name") or "").upper() == canonical
+                and _row_expiry_date(row) == expiry
+                and float(row.get("strike_price") or -1) == strike_val
+            ):
+                return {
+                    "instrument_key": row.get("instrument_key"),
+                    "trading_symbol": _row_symbol(row),
+                    "lot_size": row.get("lot_size"),
+                }
     return None
 
 
@@ -402,6 +572,30 @@ def find_equity_token(symbol: str, exchange: str = "NSE") -> Optional[dict]:
                 "instrument_key": row.get("instrument_key"),
                 "trading_symbol": _row_symbol(row),
             }
+    # Tolerant retry: "ZYDUS LIFESCIENCES LTD" -> trading symbol "ZYDUSLIFE"
+    # using Upstox's own EQ rows (full name stored in `name`).
+    canonical = _canonical_name(symbol, rows, key="trading_symbol", instrument_types=("EQ",))
+    if canonical and canonical != symbol:
+        for row in rows:
+            if row.get("instrument_type") == "EQ" and _row_symbol(row).upper() == canonical:
+                return {
+                    "instrument_key": row.get("instrument_key"),
+                    "trading_symbol": _row_symbol(row),
+                }
+    # Comprehensive resolver: full company name -> ticker built from the master's
+    # EQ rows (covers "ADANI ENERGY SOLUTION LTD" -> ADANIENSOL, "MARUTI SUZUKI
+    # INDIA LTD" -> MARUTI, etc.). This is the authoritative fallback for names
+    # whose ticker isn't a token-prefix of the company name and aren't in the
+    # small curated alias table. Guarded so a missing Upstox dump (e.g. network
+    # blip during cache refresh) can't break the Angel path.
+    ticker = _resolve_company_name_to_ticker(symbol)
+    if ticker:
+        for row in rows:
+            if row.get("instrument_type") == "EQ" and _row_symbol(row).upper() == ticker.upper():
+                return {
+                    "instrument_key": row.get("instrument_key"),
+                    "trading_symbol": _row_symbol(row),
+                }
     return None
 
 
@@ -486,19 +680,34 @@ def get_atm_chain(
     the way SmartAPI's does."""
     spot = get_spot_quote(underlying)
     if not spot or not spot.get("last_price"):
+        # Upstox's master can carry an index's OPTIONS without a matching
+        # spot/index instrument (e.g. NIFTYNXT50) — without a spot price the
+        # ATM chain can't be anchored. Borrow the spot from Angel's index
+        # tokens (SmartAPI path is always available when USE_SMARTAPI), which
+        # shares the same NSE-derived strike grid, so mixing sources is safe.
+        spot = _angel_index_spot(underlying)
+    if not spot or not spot.get("last_price"):
         return None
     spot_price = spot["last_price"]
 
     scope = _scope_for_exchange(exchange)
     rows = _load_instrument_dump(scope)
-    underlying_u = underlying.upper()
+    name_u = _canonical_name(underlying, rows) or underlying.upper()
     legs = [
         r
         for r in rows
         if r.get("instrument_type") in ("CE", "PE")
-        and (r.get("name") or "").upper() == underlying_u
+        and (r.get("name") or "").upper() == name_u
         and _row_expiry_date(r) == expiry
     ]
+    if not legs and name_u != underlying.upper():
+        legs = [
+            r
+            for r in rows
+            if r.get("instrument_type") in ("CE", "PE")
+            and (r.get("name") or "").upper() == underlying.upper()
+            and _row_expiry_date(r) == expiry
+        ]
     if not legs:
         return None
 
@@ -535,6 +744,7 @@ def get_atm_chain(
                 "type": r.get("instrument_type"),
                 "instrument_key": r.get("instrument_key"),
                 "trading_symbol": _row_symbol(r),
+                "lot_size": r.get("lot_size"),
                 "ltp": q.get("last_price"),
                 "oi": q.get("oi"),
                 "volume": q.get("volume"),
@@ -542,7 +752,7 @@ def get_atm_chain(
         )
     out_rows.sort(key=lambda x: (x["strike"], x["type"]))
     return {
-        "underlying": underlying_u,
+        "underlying": name_u,
         "spot": spot_price,
         "atm_strike": atm_strike,
         "expiry": expiry,

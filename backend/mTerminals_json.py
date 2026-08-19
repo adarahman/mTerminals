@@ -922,6 +922,30 @@ def _get_fno_symbols():
         logger.warning(f"[_get_fno_symbols] F&O underlying list lookup failed: {e}")
         return _FNO_SYMBOLS_FALLBACK
 
+
+def _active_data_source() -> str:
+    """Key of the runtime-active market-data provider (e.g. "NSE_BSE",
+    "UPSTOX"). Reads the same runtime facade the pipeline routes on, so the
+    payload always reflects what the Dashboard's DATA SOURCE picker shows."""
+    try:
+        from brokers.market_data import get_active_provider
+
+        return get_active_provider()
+    except Exception:
+        return "SMARTAPI"
+
+
+def _data_sources_payload() -> list:
+    """Per-provider picker metadata: id/label/status/active/capabilities.
+    Lets the Dashboard render the DATA SOURCE dropdown + status without a
+    hardcoded client-side copy of the provider registry."""
+    try:
+        from brokers.market_data import provider_status
+
+        return provider_status()
+    except Exception:
+        return []
+
 # ── Main export function ───────────────────────────────────────────────────────
 def export_dashboard_json(
     df_clean,
@@ -1385,6 +1409,12 @@ def export_dashboard_json(
         # the frontend needs this to label which contract the FUT price
         # came from, not just that it's a FUT price.
         "futuresExpiry": str(futures_expiry) if futures_expiry else "",
+        # ── DATA SOURCE (runtime-switchable, see ws_server_live.py's
+        # ?dataSource= handler) ───────────────────────────────────────────
+        # dataSource: the ACTIVE provider key; dataSources: every selectable
+        # provider + its capability/status for the Dashboard's picker.
+        "dataSource":    _active_data_source(),
+        "dataSources":   _data_sources_payload(),
         "expiry":        str(EXPIRY),
         "expiryDates":   expiry_dates or [],   # <-- NEW: full list
         "dte":           _to_int(dte),
@@ -1392,6 +1422,8 @@ def export_dashboard_json(
 
         "future":        _r(spot + _r(ctx_dict.get("basis", 0), 2), 2),
         "basis":         _r(ctx_dict.get("basis", 0), 2),
+        "futureChange":  _r(ctx_dict.get("fut_change", 0), 2),
+        "futureChgPct":  _r(ctx_dict.get("fut_chg_pct", 0), 2),
 
         "maxPain":       _to_int(ctx_dict.get("max_pain",      0)),
         "maxPainDist":   _r(ctx_dict.get("max_pain_dist",      0), 2),

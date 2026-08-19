@@ -428,6 +428,7 @@ _scrip_indexes = {
     "expiries": {},        # (exch, name) -> sorted list of expiry strings (ddMMMyyyy)
     "equity": {},          # "RELIANCE" -> {token, tradingsymbol}  (NSE -EQ rows)
     "strikes": {},         # (exch, name, expiry) -> sorted unique strike ints
+    "names": set(),        # F&O underlying names (NFO/BFO), for tolerant matching
 }
 
 
@@ -453,6 +454,7 @@ def _build_scrip_indexes(data) -> None:
     expiry_sets = {}
     equity_idx = {}
     strike_sets = {}
+    fno_names = set()
 
     for row in data:
         exch = row.get("exch_seg")
@@ -473,6 +475,7 @@ def _build_scrip_indexes(data) -> None:
             continue
 
         name_u = name.upper()
+        fno_names.add(name_u)
         ek = (exch, name_u)
         expiry_sets.setdefault(ek, set()).add(expiry)
 
@@ -502,6 +505,7 @@ def _build_scrip_indexes(data) -> None:
     _scrip_indexes["expiries"] = expiries
     _scrip_indexes["equity"] = equity_idx
     _scrip_indexes["strikes"] = strikes
+    _scrip_indexes["names"] = fno_names
     logger.info(
         "[smartapi_client] ScripMaster indexed: %d option contracts, "
         "%d underlyings, %d equity tokens",
@@ -618,6 +622,15 @@ def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="
     hit = _scrip_indexes["option"].get(key)
     if hit:
         return hit
+    # Tolerant retry: the picker can hand us a full company name (e.g.
+    # "ZYDUS LIFESCIENCES LTD") while the master stores the ticker
+    # ("ZYDUSLIFE"). Canonicalize and retry once on an exact-key miss.
+    canonical = _canonical_underlying(underlying)
+    if canonical and canonical != (underlying or "").upper():
+        key = (exchange, canonical, key[2], key[3], key[4])
+        hit = _scrip_indexes["option"].get(key)
+        if hit:
+            return hit
 
     logger.warning(
         f"[smartapi_client] No token found for {underlying} {expiry_ddmmmyyyy} "
@@ -626,10 +639,57 @@ def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="
     return None
 
 
+def _canonical_underlying(underlying):
+    """Tolerant F&O name mapping against the ScripMaster (see
+    brokers/symbol_names.py). None when the master is cold, the request
+    is empty, or no UNIQUE match exists — the caller then keeps its
+    exact-name behavior and fails loudly instead of guessing."""
+    from brokers.symbol_names import canonicalize_underlying, _COMMON_UNDERLYING_ALIASES
+
+    req = (underlying or "").strip().upper()
+    if not req:
+        return None
+    try:
+        _load_scrip_master()
+        names = _scrip_indexes.get("names") or set()
+    except Exception:
+        names = set()
+    # 1. derive from the master's own F&O underlying names (handles full-name
+    #    -> ticker and ticker -> full name for names that embed each other).
+    hit = canonicalize_underlying(req, names)
+    if hit:
+        return hit
+    # 2. Angel's ScripMaster stores the exchange TICKER in the `name` field
+    #    for most stocks and never carries the full company name, so a
+    #    full-name request ("ADANI ENERGY SOLUTION LTD") can't be reverse-
+    #    engineered from Angel's master alone. Upstox's master DOES carry the
+    #    full name + trading_symbol pair for every EQ/FO row, so consult it as
+    #    a fallback — this is a reference lookup, not a broker switch: we only
+    #    borrow Upstox's instrument dump (a static, unauthenticated JSON) to
+    #    resolve the ticker, then continue resolving against Angel's master.
+    try:
+        from brokers.upstox_client import _resolve_company_name_to_ticker
+
+        ticker = _resolve_company_name_to_ticker(req)
+        if ticker and ticker.upper() in names:
+            return ticker.upper()
+    except Exception:
+        pass
+    # 3. last resort: a small curated full-name -> ticker table for cases the
+    #    Angel master (tickers only) can't reverse-engineer — e.g. INFY/INFOSYS.
+    return _COMMON_UNDERLYING_ALIASES.get(req)
+
+
 def list_expiries(underlying, exchange="NFO"):
     """Return sorted list of available expiry strings for an underlying."""
     _load_scrip_master()
-    return list(_scrip_indexes["expiries"].get((exchange, (underlying or "").upper()), []))
+    result = list(_scrip_indexes["expiries"].get((exchange, (underlying or "").upper()), []))
+    if result:
+        return result
+    canonical = _canonical_underlying(underlying)
+    if canonical and canonical != (underlying or "").upper():
+        return list(_scrip_indexes["expiries"].get((exchange, canonical), []))
+    return result
 
 
 # Known index underlyings among F&O contracts — used to split the full
@@ -866,7 +926,14 @@ def get_spot_quote(underlying):
     be a stock, e.g. in get_atm_chain()."""
     if underlying.upper() in INDEX_TOKENS:
         return get_index_quote(underlying)
-    return get_equity_quote(underlying)
+    equity = get_equity_quote(underlying)
+    if equity:
+        return equity
+    # Tolerant retry: "ZYDUS LIFESCIENCES LTD" -> ticker "ZYDUSLIFE".
+    canonical = _canonical_underlying(underlying)
+    if canonical and canonical != underlying.upper():
+        return get_equity_quote(canonical)
+    return None
 
 
 def get_ltp(exchange, tradingsymbol, token):
@@ -986,11 +1053,12 @@ def _get_strike_interval(underlying):
         return _stock_strike_interval_cache[underlying]
 
     _load_scrip_master()
-    expiries = list_expiries(underlying, exchange="NFO")
+    canonical = _canonical_underlying(underlying) or underlying
+    expiries = list_expiries(canonical, exchange="NFO")
     interval = 50  # last-resort fallback if nothing resolves below
     if expiries:
         nearest = expiries[0]
-        strikes = _scrip_indexes["strikes"].get(("NFO", underlying, nearest), [])
+        strikes = _scrip_indexes["strikes"].get(("NFO", canonical, nearest), [])
         if len(strikes) >= 2:
             gaps = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
             if gaps:
@@ -1125,9 +1193,14 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     strike_set = set(strikes)
 
     _load_scrip_master()
-    chain_map = _scrip_indexes["chain"].get(
-        (exchange, underlying.upper(), expiry_ddmmmyyyy), {}
-    )
+    name_u = (underlying or "").upper()
+    chain_map = _scrip_indexes["chain"].get((exchange, name_u, expiry_ddmmmyyyy), {})
+    if not chain_map:
+        canonical = _canonical_underlying(underlying)
+        if canonical and canonical != name_u:
+            chain_map = _scrip_indexes["chain"].get(
+                (exchange, canonical, expiry_ddmmmyyyy), {}
+            )
     strike_lookup = {
         key: info
         for key, info in chain_map.items()
@@ -1197,8 +1270,12 @@ def get_option_greeks(underlying, expiry_ddmmmyyyy):
     This is ONE call per expiry (not per strike), so it's safe to call at
     normal poll cadence — just don't call it in a per-strike loop.
     """
+    name_u = (underlying or "").upper()
+    canonical = _canonical_underlying(underlying)
+    if canonical and canonical != name_u:
+        name_u = canonical
     result = _session.call(
-        "optionGreek", {"name": underlying.upper(), "expirydate": expiry_ddmmmyyyy}
+        "optionGreek", {"name": name_u, "expirydate": expiry_ddmmmyyyy}
     )
     if not result.get("status"):
         logger.warning(

@@ -44,13 +44,13 @@
 
 /* was inline after: .index-ticker  —  @media (max-width:1100px) */
 @media (max-width:1599px){
-  .top-bar-left .idx-pill:not(.idx-pill-vix){display:none;}
+  .top-bar-left .idx-pill:not(.idx-pill-fut){display:none;}
 }
 
 @media (max-width:1100px){
   .index-ticker{max-width:260px;}
   .index-ticker .idx-pill-val{display:none;}
-  .index-ticker .idx-pill-vix .idx-pill-val{display:inline-block;}
+  .index-ticker .idx-pill-fut .idx-pill-val{display:inline-block;}
 }
 
 /* was inline after: .exec-grid  —  @media (max-width:900px) */

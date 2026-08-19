@@ -29,11 +29,19 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
       spotEl.className = 'spot' + (isBear ? ' bearish' : '');
       if (spotFlashCls) { void spotEl.offsetWidth; spotEl.classList.add(spotFlashCls); }
     }
-    const badgeEl = document.getElementById('topbar-badge');
-    if (badgeEl && d.spotChgPct !== undefined) {
-      badgeEl.className = 'badge ' + (d.spotChgPct >= 0 ? 'badge-bull' : 'badge-bear');
-      badgeEl.textContent = `${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%`;
-      badgeEl.title = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points`;
+    const pctEl = document.getElementById('spot-chg-pct');
+    const ptsEl = document.getElementById('spot-chg-pts');
+    if (d.spotChgPct !== undefined && (pctEl || ptsEl)) {
+      const chgCls = d.spotChgPct >= 0 ? 'chg-pos' : 'chg-neg';
+      if (pctEl) {
+        pctEl.className = 'chg-token ' + chgCls;
+        pctEl.textContent = `${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%`;
+      }
+      if (ptsEl) {
+        ptsEl.className = 'chg-token ' + chgCls;
+        ptsEl.textContent = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}`;
+        ptsEl.title = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points`;
+      }
     }
     const futureEl = document.getElementById('topbar-future');
     if(futureEl) futureEl.textContent = Number(d.future)>0?fmtI(d.future):'—';
@@ -44,7 +52,7 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
     const tickerEl = document.getElementById('index-ticker-bar');
     if (tickerEl && window.patchIndexTicker) patchIndexTicker(d);
     const dteEl = document.getElementById('dte-display');
-    if (dteEl) dteEl.textContent = '· ' + (d.dte||0) + 'd';
+    if (dteEl) dteEl.textContent = (d.dte||0) + 'd';
     const timeEl = document.getElementById('time-display');
     if (timeEl) timeEl.textContent = d.refreshTime || '--';
   }

@@ -76,6 +76,15 @@ def _default_api_factory():
             raise BrokerError(
                 "Breeze SDK is not installed. Run `pip install breeze-connect`."
             ) from exc
+        # The SDK pins its internal loggers to DEBUG at import time and lets
+        # them propagate to the root logger, so every get_quotes()/
+        # get_option_chain_quotes() call dumps its full JSON response to the
+        # console on every tick. Override to WARNING so only real errors
+        # surface; the SDK still writes its own apiLogs.log / websocketLogs.log
+        # files regardless.
+        for sdk_logger_name in ("APILogger", "WebsocketLogger"):
+            sdk_logger = logging.getLogger(sdk_logger_name)
+            sdk_logger.setLevel(logging.WARNING)
     finally:
         sys.path.extend(removed_paths)
         if saved_config_module is not None:

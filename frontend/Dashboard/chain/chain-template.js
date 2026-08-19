@@ -49,9 +49,27 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
       + `<optgroup label="Stocks">${stocks.map(opt).join('')}</optgroup>`;
 };
 
+// DATA SOURCE options — the seven runtime market-data providers
+// (SMARTAPI/UPSTOX/KITE/SHOONYA/BREEZE/KOTAK/NSE_BSE) from the backend's
+// d.dataSources [{id,label,status,active,capabilities}]. The select text
+// stays compact (short label only) so the control doesn't dominate the
+// top bar; each provider's status (LIVE/POLLING/UNAVAILABLE/
+// SESSION_REQUIRED) rides in the option tooltip and is also shown
+// live by the separate data-source-status-pill next to the select. The
+// active one is pre-selected via the backend's `active` flag.
+ChainView.prototype.renderDataSourceOptions = function(sources, active) {
+  if (!Array.isArray(sources) || !sources.length) {
+    const a = active || 'NSE_BSE';
+    return `<option value="${a}">${escapeHtml(a)}</option>`;
+  }
+  return sources.map(s => {
+    const id = s.id;
+    const label = s.label || id;
+    return `<option value="${id}"${s.active?' selected':''} title="Status: ${escapeHtml(s.status||'')}">${escapeHtml(label)}</option>`;
+  }).join('');
+};
+
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
-  const brokerName = (window.AppState && AppState.wsState && AppState.wsState.algoStatus
-    && AppState.wsState.algoStatus.broker) || 'Broker';
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
@@ -59,8 +77,6 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
     || (feedState.quality === 'PARTIAL' && Array.isArray(feedState.missing) && feedState.missing.length
       ? `Missing: ${feedState.missing.join(', ')}` : '');
   const feedReason = escapeHtml(feedReasonRaw);
-  const feedReasonVisible = ((marketSession === 'MARKET_CLOSED' || marketSession === 'HOLIDAY')
-    && /market session|market closed|holiday/i.test(String(feedReasonRaw))) ? '' : feedReason;
   let feedLabel = rawFeedStatus;
   let feedStatus = rawFeedStatus.toLowerCase();
   if (marketSession === 'HOLIDAY') {
@@ -111,29 +127,44 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            symbol is currently active if it isn't already in that list. -->
       <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY', d.fnoSymbols)}</select>
       <span class="price-source-tag" title="EQ is the fixed option-pricing and decision reference">EQ</span>
-      <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
-      ${d.spotChgPct!==undefined?`<span id="topbar-badge" class="badge ${d.spotChgPct>=0?'badge-bull':'badge-bear'}" title="${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>`:''}
+      <span class="spot-block">
+        <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
+        ${d.spotChgPct!==undefined?`
+        <span class="spot-change-row">
+          <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
+          <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
+        </span>`:''}
+      </span>
       ${renderIndexTicker(d)}
     </div>
     <div class="expiry-strip">
       <div class="expiry-pill feed-health-pill">
-        <span class="expiry-pill-label">Feed</span>
-        <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedReason}">${feedLabel}</span>
-        <span id="active-broker-label" class="active-broker-label" title="Active account and execution broker">${escapeHtml(brokerName)}</span>
-        <span class="feed-status-reason" id="feed-status-reason"${feedReasonVisible?'':' hidden'}>${feedReasonVisible}</span>
-      </div>
-      <div class="expiry-divider"></div>
-      <div class="expiry-pill futures-reference" title="Futures are confirmation only and do not change Greeks or confidence">
-        <span class="expiry-pill-label">Futures reference</span>
-        <span class="futures-reference-row">
-          <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Futures reference contract" onchange="onFuturesExpiryPicked(this.value)">
-            <option value="NEAR"${(d.futuresExpiry||'NEAR')==='NEAR'?' selected':''}>NEAR</option>
-            <option value="NEXT"${d.futuresExpiry==='NEXT'?' selected':''}>NEXT</option>
-            <option value="FAR"${d.futuresExpiry==='FAR'?' selected':''}>FAR</option>
-          </select>
-          <span id="topbar-future" class="futures-reference-value">${Number(d.future)>0?fmtI(d.future):'—'}</span>
+        <span class="feed-row">
+          <span class="expiry-pill-label">Feed</span>
+          <span class="feed-status-pill" id="feed-status-pill" data-status="${feedStatus}" title="${feedReason}">${feedLabel}</span>
         </span>
-        <small id="topbar-basis">Basis ${Number(d.basis)>=0?'+':''}${fmtN(Number(d.basis)||0,1)}</small>
+        <!-- DATA SOURCE (broker) dropdown — sits on its own aligned row
+             below the feed status. The runtime market-data provider
+             (ANGEL ONE/UPSTOX/SHOONYA/ZERODHA/ICICI DIRECT/KOTAK NEO/NSE/BSE);
+             picking one
+             reconnects the WS with ?dataSource=... (see
+             switchDataSource() in market-context.js); the backend applies
+             it process-wide on the next engine_loop tick via
+             switch_data_source() — no server restart. Per-provider status
+             lives in each option's tooltip; the active provider's live
+             state (LIVE/POLLING/UNAVAILABLE/SESSION_REQUIRED) is the small
+             pill to its right. -->
+        <span class="feed-row">
+          <select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource)}</select>
+          ${(() => {
+            const list = Array.isArray(d.dataSources) ? d.dataSources : [];
+            const active = list.find(s => s.active) || (d.dataSource ? list.find(s => s.id === d.dataSource) : null) || {};
+            const st = active.status || '';
+            // Tiny plain borderless readout (see .data-source-status-pill in
+            // navigation.css) — the dropdown itself is the primary signal.
+            return st ? `<span class="feed-status-pill data-source-status-pill" data-status="${String(st).toLowerCase()}" title="Active market-data source status">${escapeHtml(st)}</span>` : '';
+          })()}
+        </span>
       </div>
       <div class="expiry-divider"></div>
       <!-- Expiry is its own dedicated pill, separate from DTE, and sits
@@ -142,8 +173,11 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            render (see moveExpirySelectIntoTopBar()) rather than rebuilt,
            so its option list and current value survive live ticks. -->
       <div class="expiry-pill">
-        <span class="expiry-pill-label">Expiry</span>
-        <span class="expiry-value-row"><span id="expiry-slot"></span><span class="expiry-dte" id="dte-display">· ${(d.dte||0)}d</span></span>
+        <span class="expiry-row">
+          <span class="expiry-pill-label">Expiry</span>
+          <span class="expiry-dte" id="dte-display">${(d.dte||0)}d</span>
+        </span>
+        <span class="expiry-row"><span id="expiry-slot"></span></span>
       </div>
       <div class="expiry-divider"></div>
       <div class="expiry-pill">

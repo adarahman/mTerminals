@@ -34,6 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
     from backend.config import settings as _md_settings
 from brokers.smartapi_client import (
     STRIKE_INTERVALS,
+    _canonical_underlying,
     _get_strike_interval,
     # NOTE: _load_scrip_master/_round_to_strike/_get_strike_interval are
     # SmartAPI-private (underscore) internals, reached into directly here
@@ -96,16 +97,28 @@ def _from_smartapi_expiry(smart_expiry: str) -> str:
     return datetime.strptime(smart_expiry, "%d%b%Y").strftime("%d-%b-%Y")
 
 
+def _canon_underlying(underlying: str) -> str:
+    """Upper-case a requested underlying, mapped to the ScripMaster's exact
+    name when a full company name was typed ("ZYDUS LIFESCIENCES LTD" ->
+    "ZYDUSLIFE"). Falls back to the raw request on ambiguity/None — the
+    downstream scan then simply finds no rows and fails loudly."""
+    u = (underlying or "").strip().upper()
+    if not u:
+        return u
+    return _canonical_underlying(u) or u
+
+
 def get_available_expiries(underlying: str, exchange: str = "NFO") -> list[str]:
     """Replacement for the expiryDates list NSE's option-chain-v3 gives for
     free — needed by NEAR/MONTHLY calendar-spread slot resolution."""
     data = _load_scrip_master()
+    name_u = _canon_underlying(underlying)
     smart_expiries = sorted(
         {
             row["expiry"]
             for row in data
             if row.get("exch_seg") == exchange
-            and row.get("name") == underlying.upper()
+            and row.get("name") == name_u
             and row.get("instrumenttype") in ("OPTIDX", "OPTSTK")
             and row.get("expiry")
         },
@@ -289,25 +302,102 @@ def fetch_option_chain_wide(
     market_api.parse_option_chain_response(fetch_option_chain(symbol, expiry), expiry).
     Same output columns; source is smartapi_client.py's get_batch_quotes()
     (kept separate from get_atm_chain() specifically to retain depth/qty
-    fields get_atm_chain() drops)."""
+    fields get_atm_chain() drops).
+
+    The source broker is the RUNTIME-active provider (see
+    brokers.market_data.get_active_provider() — switchable via the
+    Dashboard's DATA SOURCE picker without a restart), not the frozen
+    config value. Upstox/Shoonya/Breeze return their whole ATM chain from
+    one get_atm_chain() call (rows already carry ltp/oi/volume); Kite's
+    get_atm_chain() returns instrument metadata only, so this adds one
+    get_batch_quotes() pass to pull live quotes onto those rows."""
     expiry_smart = _to_smartapi_expiry(expiry_dash)
 
-    if _md_settings.market_data_provider in ("UPSTOX", "SHOONYA"):
-        chain = market_data.get_atm_chain(
-            underlying,
-            expiry_dash,
-            strikes_around_atm=strikes_around_atm,
-            exchange=exchange,
-        )
-        if not chain:
-            logger.warning(
-                f"no {_md_settings.market_data_provider.title()} option chain for {underlying} {expiry_dash}"
+    # Canonicalize once at the entry point: _chg_oi()/_seed_day_anchor_from_nse()
+    # key _day_open_oi by `underlying` and fetch NSE's option-chain API (which
+    # only accepts the exchange TICKER), so a full-company-name request
+    # ("ADANI ENERGY SOLUTION LTD") must be mapped to "ADANIENSOL" here or the
+    # previous-close OI anchor never seeds and ChgOI degenerates to an abrupt
+    # first-tick delta. Idempotent for inputs that are already canonical
+    # tickers. Every provider below accepts the canonical form internally.
+    underlying = _canon_underlying(underlying)
+
+    from brokers.market_data import get_active_provider
+
+    provider = get_active_provider()
+
+    if provider in ("UPSTOX", "SHOONYA", "BREEZE", "KITE", "KOTAK"):
+        chain = None
+        chain_error = None
+        try:
+            chain = market_data.get_atm_chain(
+                underlying,
+                expiry_dash,
+                strikes_around_atm=strikes_around_atm,
+                exchange=exchange,
             )
+        except Exception as exc:
+            chain_error = exc
+        if not chain:
+            # A broker auth/network failure (login down, session dead) must
+            # not empty the whole chain: fall back to the public NSE/BSE
+            # source. Its rows already arrive in the DataFrame's LOTS
+            # convention, so the per-provider OI normalization below must
+            # NOT re-run — `provider` is reassigned accordingly.
+            logger.warning(
+                f"[{provider}] no option chain for {underlying} {expiry_dash} "
+                f"({chain_error or 'empty'}) — falling back to public NSE/BSE"
+            )
+            try:
+                from brokers.market_data import NseBseMarketData
+
+                chain = NseBseMarketData().get_atm_chain(
+                    underlying,
+                    expiry_dash,
+                    strikes_around_atm=strikes_around_atm,
+                    exchange=exchange,
+                )
+                provider = "NSE_BSE"
+            except Exception as fallback_exc:
+                logger.warning(
+                    f"[nse_bse] fallback chain also failed for {underlying} "
+                    f"{expiry_dash}: {fallback_exc}"
+                )
+                return pd.DataFrame()
+        if not chain:
+            logger.warning(f"no {provider.title()} option chain for {underlying} {expiry_dash}")
             return pd.DataFrame()
         spot = float(chain.get("spot") or 0.0)
         rows = chain.get("rows") or []
         if not rows:
             return pd.DataFrame()
+
+        if provider == "KITE":
+            # Kite's get_atm_chain() returns instrument metadata only
+            # (strike/type/token/tradingsymbol) — overlay live quotes via one
+            # get_batch_quotes() call so the normalized rows below carry
+            # ltp/oi/volume like the other providers' get_atm_chain() does.
+            pairs = [
+                (row.get("tradingsymbol"), row.get("token"))
+                for row in rows
+                if row.get("tradingsymbol")
+            ]
+            try:
+                quotes = market_data.get_batch_quotes(exchange, pairs, mode="FULL") or {}
+            except Exception as exc:
+                logger.warning(
+                    f"[kite] batch quote overlay failed for {underlying} {expiry_dash}: {exc}"
+                )
+                quotes = {}
+            for row in rows:
+                q = quotes.get(row.get("tradingsymbol")) or {}
+                if not q:
+                    continue
+                row["ltp"] = q.get("last_price")
+                row["oi"] = q.get("oi")
+                row["volume"] = q.get("volume")
+                row["net_change"] = q.get("net_change")
+                row["pct_change"] = q.get("percent_change")
 
         try:
             expiry_dt = datetime.strptime(expiry_dash, "%d-%b-%Y").date()
@@ -338,9 +428,31 @@ def fetch_option_chain_wide(
             )
             ltp = safe_float(row.get("ltp"))
             oi_now = safe_float(row.get("oi"))
+            # OI unit normalization — the DataFrame/_chg_oi() convention is
+            # LOTS (contracts), same as NSE's anchor: build_master_table_nse()
+            # re-multiplies by lot_size downstream to quantity for display.
+            # Upstox/Kite/Shoonya/Breeze report OI in QUANTITY (shares) like
+            # SmartAPI's opnInterest (see the ROOT CAUSE note in the SmartAPI
+            # branch below; Breeze's open_interest is likewise raw share
+            # counts — ICICI's own SDK docs show a 2435175 OI on a NIFTY
+            # 23200 CE, i.e. ~32469 lots at lot_size 75) — feeding raw share
+            # counts through would make CE_OI/PE_OI lot_size× too large AND,
+            # mixed against NSE's lot anchor inside _chg_oi(), turn ChgOI
+            # into garbage. Convert to lots using the broker's own lot_size
+            # when the row carries it. Kotak's quotes() open_interest is
+            # treated the same way pending live verification in the Kotak
+            # smoke test (see kotak_market_data.py's docstring caveats).
+            if provider in ("UPSTOX", "SHOONYA", "KITE", "BREEZE", "KOTAK"):
+                lot_size = row.get("lot_size") or _lot_size(underlying)
+                if lot_size:
+                    oi_now = oi_now / lot_size
+            chg_oi = _chg_oi(underlying, expiry_dash, strike_val, side, oi_now)
+            prev_oi = float(oi_now or 0.0) - chg_oi
             rec[f"{side}_OI"] = oi_now
-            rec[f"{side}_ChgOI"] = 0.0
-            rec[f"{side}_PctChgOI"] = 0.0
+            rec[f"{side}_ChgOI"] = chg_oi
+            rec[f"{side}_PctChgOI"] = (
+                round((chg_oi / prev_oi) * 100.0, 2) if prev_oi > 0 else 0.0
+            )
             rec[f"{side}_Volume"] = row.get("volume")
             rec[f"{side}_IV"] = (
                 round(
@@ -387,11 +499,12 @@ def fetch_option_chain_wide(
     }
 
     data = _load_scrip_master()
+    name_u = _canon_underlying(underlying)
     strike_lookup = {}
     for row in data:
         if not (
             row.get("exch_seg") == exchange
-            and row.get("name") == underlying.upper()
+            and row.get("name") == name_u
             and row.get("expiry") == expiry_smart
         ):
             continue
@@ -550,11 +663,12 @@ def _get_futures_contract(
             return None
 
     data = _load_scrip_master()
+    name_u = _canon_underlying(underlying)
     cands = [
         row
         for row in data
         if row.get("exch_seg") == exchange
-        and row.get("name") == underlying.upper()
+        and row.get("name") == name_u
         and row.get("instrumenttype") in _FNO_FUT_TYPES
     ]
     cands = [(row, _parse_expiry(row)) for row in cands]
@@ -593,7 +707,9 @@ def fetch_futures_wide(
     None and use `which` (NEAR/NEXT/FAR) to pick a monthly slot by
     relative position instead — see option_chain_json.py's FUTURES_EXPIRY.
     """
-    provider = _md_settings.market_data_provider
+    from brokers.market_data import get_active_provider
+
+    provider = get_active_provider()
 
     if provider == "UPSTOX":
         from brokers.upstox_client import _load_instrument_dump
@@ -601,6 +717,9 @@ def fetch_futures_wide(
         scope = "BSE" if exchange.upper() in ("BFO", "BSE") else "NSE"
         data = _load_instrument_dump(scope)
         underlying_u = underlying.upper()
+        from brokers.upstox_client import _canonical_name as _up_canonical
+
+        name_u = _up_canonical(underlying, data) or underlying_u
 
         def _parse_expiry(row):
             raw = row.get("expiry")
@@ -626,7 +745,7 @@ def fetch_futures_wide(
             row
             for row in data
             if row.get("instrument_type") == "FUT"
-            and (row.get("name") or "").upper() == underlying_u
+            and (row.get("name") or "").upper() == name_u
         ]
         cands = [(row, _parse_expiry(row)) for row in cands]
         cands = [(row, exp) for row, exp in cands if exp is not None]
@@ -702,7 +821,15 @@ def fetch_futures_wide(
             ]
         )
 
-    if provider == "SHOONYA":
+    if provider in ("SHOONYA", "KITE", "BREEZE", "KOTAK", "NSE_BSE"):
+        # These providers have no broker-native FUTIDX resolution wired into
+        # the pipeline — Shoonya's precedent already routes futures to the
+        # public NSE/BSE endpoints (market_api.fetch_public_futures), and
+        # Kite/Breeze/Kotak inherit the same behavior rather than
+        # re-implementing per-broker futures contract lookup. NSE_BSE never
+        # actually reaches here (option_chain_json.main() uses
+        # fetch_public_futures directly in its public-API path), but is
+        # listed for completeness.
         from market_api import fetch_public_futures
 
         return fetch_public_futures(underlying, which=which)
@@ -716,29 +843,69 @@ def fetch_futures_wide(
             return None
 
     data = _load_scrip_master()
+    name_u = _canon_underlying(underlying)
     cands = [
         row
         for row in data
         if row.get("exch_seg") == exchange
-        and row.get("name") == underlying.upper()
+        and row.get("name") == name_u
         and row.get("instrumenttype") in _FNO_FUT_TYPES
     ]
     cands = [(row, _parse_expiry(row)) for row in cands]
     cands = [(row, exp) for row, exp in cands if exp is not None]
     if not cands:
-        return None
+        return pd.DataFrame()
     cands.sort(key=lambda pair: pair[1])
     if expiry_dash:
         target = _to_smartapi_expiry(expiry_dash)
         matches = [row for row, _exp in cands if row["expiry"] == target]
         if not matches:
-            return None
-        return matches[0]
-    today = datetime.combine(date.today(), datetime.min.time())
-    live = [(row, exp) for row, exp in cands if exp >= today] or cands
-    idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
-    idx = min(idx, len(live) - 1)
-    return live[idx][0]
+            return pd.DataFrame()
+        fut = matches[0]
+    else:
+        today = datetime.combine(date.today(), datetime.min.time())
+        live = [(row, exp) for row, exp in cands if exp >= today] or cands
+        idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
+        idx = min(idx, len(live) - 1)
+        fut = live[idx][0]
+
+    quotes = market_data.get_batch_quotes(
+        exchange, [(fut.get("symbol"), fut.get("token"))], mode="FULL"
+    )
+    q = quotes.get(fut.get("symbol")) if quotes else None
+    if not q:
+        return pd.DataFrame()
+
+    spot_quote = market_data.get_spot_quote(underlying)
+    spot = spot_quote["ltp"] if spot_quote else 0.0
+    ltp = safe_float(q.get("ltp"))
+    prev_close = safe_float(q.get("close"))
+    change = safe_float(q.get("netChange"))
+    pct = safe_float(q.get("percentChange"))
+    if not pct and prev_close and ltp:
+        pct = round(((ltp - prev_close) / prev_close) * 100.0, 2)
+
+    return pd.DataFrame(
+        [
+            {
+                "Contract": fut.get("symbol"),
+                "Underlying": underlying,
+                "Expiry": _from_smartapi_expiry(fut["expiry"]),
+                "LTP": ltp,
+                "Change": change,
+                "PctChange": pct,
+                "Open": safe_float(q.get("open")),
+                "High": safe_float(q.get("high")),
+                "Low": safe_float(q.get("low")),
+                "PrevClose": prev_close,
+                "Volume": safe_float(q.get("tradeVolume")),
+                "Turnover": None,
+                "OI": safe_float(q.get("opnInterest")),
+                "Spot": spot,
+                "Basis": round(ltp - spot, 2) if spot else None,
+            }
+        ]
+    )
 
 
 # ── VIX ──────────────────────────────────────────────────────────────────
@@ -756,6 +923,26 @@ _TICKER_SYMBOLS = _NSE_TICKER_SYMBOLS + _BSE_TICKER_SYMBOLS
 # functions below so existing callers (ThreadPoolExecutor submissions in
 # option_chain_json.py) don't need to change at all.
 _BATCH_CACHE = TickScopedDict()
+
+
+def _throttled_warning(key: str, msg: str, cooldown_s: float = 60.0) -> None:
+    """Emit `msg` at most once per `cooldown_s` per `key`.
+
+    A dead provider (stale Kite access token, Shoonya outage) currently
+    fails the same way on EVERY tick — 8 spot-quote warnings per ~1.5s
+    cycle drowns the log and hides the one useful diagnostic. First
+    occurrence logs a WARNING, repeats within the window stay silent so
+    the operator sees the cause once and then only hears about recovery.
+    """
+    now = time.monotonic()
+    last = _WARN_COOLDOWNS.get(key)
+    if last is not None and (now - last) < cooldown_s:
+        return
+    _WARN_COOLDOWNS[key] = now
+    logger.warning(msg)
+
+
+_WARN_COOLDOWNS: dict[str, float] = {}
 
 
 def fetch_all_pills_and_vix_batched():
@@ -778,6 +965,46 @@ def fetch_all_pills_and_vix_batched():
     request itself succeeded and Angel returned NIFTY's row under a
     different tradingSymbol string."""
     index_tokens = market_data.index_tokens()
+
+    if not index_tokens:
+        # Providers without an index-token model (Kite/Breeze — see their
+        # index_tokens() in brokers/market_data.py) get the same pills via
+        # one get_spot_quote() per index instead of a token batch. Kept
+        # inside this function so the _BATCH_CACHE consumers below
+        # (fetch_ticker_payload_smartapi/fetch_vix_smartapi/fetch_sensex_
+        # ticker_smartapi) stay provider-agnostic.
+        from brokers.market_data import get_active_provider
+
+        spot_quotes = {}
+        for sym in _TICKER_SYMBOLS:
+            try:
+                q = market_data.get_spot_quote(sym)
+            except Exception as exc:
+                _throttled_warning(
+                    f"spot:{sym}",
+                    f"[{get_active_provider()}] spot quote {sym} failed: {exc}",
+                )
+                q = None
+            if q and q.get("ltp"):
+                spot_quotes[sym] = q
+        try:
+            vix_q = market_data.get_spot_quote("INDIA VIX")
+        except Exception as exc:
+            _throttled_warning(
+                "spot:INDIA VIX",
+                f"[{get_active_provider()}] VIX spot quote failed: {exc}",
+            )
+            vix_q = None
+        nse_quotes = {
+            sym: spot_quotes[sym] for sym in _NSE_TICKER_SYMBOLS if sym in spot_quotes
+        }
+        if vix_q and vix_q.get("ltp"):
+            nse_quotes[_VIX_TRADINGSYMBOL] = vix_q
+        bse_quotes = {
+            sym: spot_quotes[sym] for sym in _BSE_TICKER_SYMBOLS if sym in spot_quotes
+        }
+        _BATCH_CACHE.refill(nse_quotes, bse_quotes)
+        return
 
     nse_pairs = [
         (sym, index_tokens[sym]["token"])

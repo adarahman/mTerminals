@@ -231,6 +231,11 @@ def _mapped_quote(exchange: str, token: str) -> dict | None:
         "volume": safe_float(row.get("v")),
         "net_change": safe_float(row.get("nc")),
         "pct_change": safe_float(row.get("pc")),
+        # Noren reports OI in quantity (shares), not lots — `ls` (lot size)
+        # is carried in the same quote response so the pipeline can convert
+        # to the lots/contracts convention _chg_oi() and build_master_table_nse()
+        # expect (same fix as Upstox/Kite in fetch_option_chain_wide()).
+        "lot_size": int(safe_float(row.get("ls"))) or None,
     }
 
 

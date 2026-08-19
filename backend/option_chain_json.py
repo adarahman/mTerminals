@@ -320,7 +320,26 @@ def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
     return df
 
 
+def _canon_symbol(symbol):
+    """Map a full-company-name symbol to the exchange ticker once, so every
+    downstream consumer uses one consistent key: the chain DataFrame's Symbol
+    column, _day_open_oi()/NSE-anchor keys, LOT_SIZES lookups and
+    build_engine_result()'s own symbol filter must all agree or the OI /
+    ChgOI / lot-size scaling silently diverge. Idempotent for tickers.
+    No-op (returns the raw upper symbol) in no-smartapi mode."""
+    raw = (symbol or "").strip().upper()
+    if not USE_SMARTAPI or not raw:
+        return raw
+    try:
+        from smartapi_pipeline_adapter import _canon_underlying
+
+        return _canon_underlying(raw)
+    except Exception:
+        return raw
+
+
 def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
+    symbol = _canon_symbol(symbol)
     if USE_SMARTAPI:
         from smartapi_pipeline_adapter import (
             fetch_option_chain_wide,
@@ -358,13 +377,11 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         # When using NSE API (no-smartapi mode), get expiries from NSE itself
         # instead of SmartAPI ScripMaster to avoid format mismatches
         if USE_SMARTAPI:
-            provider = getattr(
-                _pipeline_settings,
-                "market_data_provider",
-                "SMARTAPI",
-            ).upper()
+            from brokers.market_data import get_active_provider
 
-            if provider in ("UPSTOX", "SHOONYA"):
+            provider = get_active_provider()
+
+            if provider in ("UPSTOX", "SHOONYA", "KITE", "BREEZE", "KOTAK"):
                 from brokers.market_data import market_data
 
                 try:
@@ -431,7 +448,10 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
                 resolved = matched
             else:
                 if strict_expiry:
-                    raise RuntimeError(...)
+                    raise RuntimeError(
+                        f"requested expiry {expiry!r} not available for "
+                        f"{symbol!r} (offered: {expiry_dates})"
+                    )
                 today = date.today()
                 future = [
                     e
@@ -439,7 +459,10 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
                     if pd.to_datetime(e, format="%d-%b-%Y").date() >= today
                 ]
                 if not future:
-                    raise RuntimeError(...)
+                    raise RuntimeError(
+                        f"no future expiries available for {symbol!r} "
+                        f"(offered: {expiry_dates})"
+                    )
                 resolved = future[0]
                 logger.info(f"[Expiry] '{expiry}' unavailable → selected: '{resolved}'")
             df = fetch_option_chain_wide(
@@ -496,6 +519,7 @@ def _resolve_expiry(data, requested_expiry, strict=False):
 def _build_expiry_bundle(
     symbol, expiry, exchange="NSE", strict_expiry=False, **engine_kwargs
 ):
+    symbol = _canon_symbol(symbol)
     if exchange == "BSE":
         df, spot, _ = _fetch_and_parse(symbol, expiry, exchange, strict_expiry)
         resolved = expiry

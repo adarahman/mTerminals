@@ -1,0 +1,506 @@
+"""Kotak Neo market-data adapter — implements brokers.market_data's
+MarketData Protocol as a runtime-selectable provider alongside SmartAPI/
+Upstox/Shoonya/Kite/Breeze/NSE_BSE.
+
+Two real gaps versus the SmartAPI implementation, called out here
+rather than papered over (same "honest approximation" posture as
+option_chain_json's Unusual Volume Activity card):
+
+1. No live option-chain endpoint. Kotak's NEO API has no "whole expiry
+   chain" REST call (Kotak's own support page: "Option Chain API is
+   unavailable at the moment" — see the kotakneo.com FAQ). The adapter
+   therefore builds the ATM window the same way Kite does: resolve the
+   contract set from the NFO scrip master (search_scrip / scrip_master
+   CSV), then pull live ltp/oi/volume per token with quotes(). This is
+   a real architectural difference, not a data gap — get_atm_chain()
+   below returns rows WITH live quotes (like Breeze/Upstox), so the
+   pipeline's fetch_option_chain_wide() treats it like the other
+   quote-carrying providers rather than the Kite metadata-only path.
+
+2. Two-step TOTP+MPIN login, no long-lived token. See
+   brokers/kotak_client.py's module docstring for the full reasoning.
+   The session auto-logs-in from KOTAK_TOTP_SECRET + KOTAK_MPIN on
+   first use, exactly like shoonya_client.py does for Shoonya.
+
+Scrip-master caching: the NFO scrip master CSV (a few thousand rows for
+the index options + all F&O stocks) is the resolution source for both
+list_expiries() and find_option_token(). It is re-downloaded at most
+every 6 hours (Kotak's file-paths endpoint is the authoritative listing,
+and contracts roll over at the start of each expiry cycle) and cached
+under paths.RUNTIME_DIR the same way brokers/breeze_market_data.py caches
+its stock-code map — so it survives restarts without living inside the
+package.
+
+Strike-price encoding: the CSV stores dStrikePrice in PAISE (1755000
+for strike 17550.00), matching the SDK's own search_scrip filter math
+(dStrikePrice * 100). The adapter normalizes to the pipeline's rupee
+convention.
+"""
+from __future__ import annotations
+
+import csv
+import logging
+import os
+import time
+from datetime import datetime, timedelta
+from io import StringIO
+
+try:
+    from config import settings
+    from paths import RUNTIME_DIR
+except ModuleNotFoundError:  # pragma: no cover - depends on launch style
+    from backend.config import settings
+    from backend.paths import RUNTIME_DIR
+
+from brokers.kotak_client import _session
+
+logger = logging.getLogger(__name__)
+
+# Same physical strike spacing SmartAPI's STRIKE_INTERVALS uses — kept as
+# an independent copy rather than importing brokers.smartapi_client (that
+# module imports the SmartApi SDK at module top level, which would make a
+# Kotak-only deployment depend on smartapi-python being installed just to
+# read a constants dict). Same category of duplication as the two LOT_SIZES
+# dicts already tracked as a dedup TODO elsewhere in this codebase.
+_STRIKE_INTERVALS = {
+    "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+    "MIDCPNIFTY": 25, "SENSEX": 100, "BANKEX": 100,
+}
+
+# Index names Kotak's quotes API expects for spot/index tokens (the docs
+# list these literal display names — NSE indices do NOT take a numeric
+# instrument token). Keyed by the codebase's underlying symbol.
+_INDEX_NAMES = {
+    "NIFTY": "Nifty 50",
+    "BANKNIFTY": "Nifty Bank",
+    "FINNIFTY": "Nifty Fin Service",
+    "MIDCPNIFTY": "NIFTY MIDCAP 100",
+    "SENSEX": "SENSEX",
+    "BANKEX": "BANKEX",
+}
+
+# Indices with exchange-segment mapping; everything else is NFO stock
+# derivatives.
+_INDEX_EXCHANGE = {"NSE": "nse_fo", "BFO": "bse_fo", "NFO": "nse_fo"}
+
+_FO_CSV_TTL_S = 6 * 3600  # re-download the NFO scrip master at most every 6h
+_FO_CSV_PATH = os.path.join(RUNTIME_DIR, "kotak_cache", "nse_fo.csv")
+_fo_cache_lock = None  # lazy-initialized below (RUNTIME_DIR may not exist yet)
+
+
+def _load_fo_scrips() -> list[dict]:
+    """The full NFO scrip-master CSV as a list of dicts, disk-cached for
+    _FO_CSV_TTL_S. Returns [] on any failure — callers must treat an
+    empty result as "cannot resolve contracts right now", not retry the
+    download in a tight loop (the cache TTL already paces refetch)."""
+    global _fo_cache_lock
+    if _fo_cache_lock is None:
+        _fo_cache_lock = __import__("threading").Lock()
+    with _fo_cache_lock:
+        if (
+            os.path.isfile(_FO_CSV_PATH)
+            and (time.time() - os.path.getmtime(_FO_CSV_PATH)) < _FO_CSV_TTL_S
+        ):
+            try:
+                return _parse_fo_csv_file(_FO_CSV_PATH)
+            except Exception as exc:
+                logger.warning("[kotak_market_data] cached scrip-master parse failed: %s", exc)
+
+        rows = _download_fo_scrips()
+        if rows:
+            try:
+                os.makedirs(os.path.dirname(_FO_CSV_PATH), exist_ok=True)
+                _write_fo_csv(_FO_CSV_PATH, rows)
+            except OSError as exc:
+                logger.warning("[kotak_market_data] could not cache scrip master: %s", exc)
+        return rows
+
+
+def _download_fo_scrips() -> list[dict]:
+    """Download the NFO scrip-master CSV via the SDK's file-paths endpoint.
+    Returns [] on failure so callers can fall back to whatever they were
+    doing without the master (e.g. an empty chain) rather than crash."""
+    try:
+        url = _session.client.scrip_master(exchange_segment="nse_fo")
+    except Exception as exc:
+        logger.warning("[kotak_market_data] scrip_master() failed: %s", exc)
+        return []
+    if not isinstance(url, str) or not url.startswith("http"):
+        logger.warning(
+            "[kotak_market_data] scrip_master() returned unexpected %r", url
+        )
+        return []
+    try:
+        import requests
+
+        resp = requests.get(url, timeout=60)
+        resp.raise_for_status()
+        return _parse_fo_csv_text(resp.text)
+    except Exception as exc:
+        logger.warning("[kotak_market_data] scrip-master download failed: %s", exc)
+        return []
+
+
+def _write_fo_csv(path: str, rows: list[dict]) -> None:
+    headers = sorted({k for row in rows for k in row.keys()})
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _parse_fo_csv_file(path: str) -> list[dict]:
+    with open(path, newline="") as f:
+        return _parse_fo_csv_text(f.read())
+
+
+def _parse_fo_csv_text(text: str) -> list[dict]:
+    reader = csv.DictReader(StringIO(text))
+    rows = []
+    for raw in reader:
+        if not raw:
+            continue
+        inst_type = (raw.get("pInstType") or "").strip()
+        if inst_type not in ("OPTIDX", "OPTSTK"):
+            continue  # futures/other rows are not option-chain material
+        opt_type = (raw.get("pOptionType") or "").strip().upper()
+        if opt_type not in ("CE", "PE"):
+            continue
+        try:
+            strike_paise = float(raw.get("dStrikePrice;") or 0)
+        except (TypeError, ValueError):
+            continue
+        try:
+            lot_size = int(float(raw.get("lLotSize") or 0))
+        except (TypeError, ValueError):
+            lot_size = 0
+        try:
+            exp_raw = int(float(raw.get("pExpiryDate") or 0))
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            {
+                "name": (raw.get("pSymbolName") or "").strip().upper(),
+                "tradingsymbol": (raw.get("pTrdSymbol") or "").strip().upper(),
+                "token": (raw.get("pSymbol") or "").strip(),
+                "option_type": opt_type,
+                "strike": round(strike_paise / 100.0),
+                "expiry": _unix_to_iso(exp_raw),
+                "lot_size": lot_size,
+            }
+        )
+    return rows
+
+
+def _unix_to_iso(epoch_seconds: int) -> str:
+    """Kotak's scrip-master CSV stores expiry as a unix timestamp plus a
+    ~10-year offset (their DB lapse workaround, see the SDK's own
+    search_scrip conversion). Reversing it with the same 315511200s
+    offset the SDK adds, formatted as this codebase's '%d-%b-%Y'."""
+    return datetime.fromtimestamp(epoch_seconds + 315511200).strftime("%d-%b-%Y")
+
+
+def _round_to_strike(price, underlying):
+    interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
+    return int(round(price / interval) * interval)
+
+
+def _filters_for(underlying, expiry_iso=None, option_type=None, strikes=None):
+    """Predicate matching a scrip-master row against an underlying, expiry
+    ('DD-Mon-YYYY'), optional CE/PE, and optional strike set."""
+    underlying_u = underlying.upper()
+    exp_dt = datetime.strptime(expiry_iso, "%d-%b-%Y").date() if expiry_iso else None
+
+    def matches(row):
+        if row["name"] != underlying_u:
+            return False
+        if exp_dt is not None:
+            try:
+                row_exp = datetime.strptime(row["expiry"], "%d-%b-%Y").date()
+            except (TypeError, ValueError):
+                return False
+            if row_exp != exp_dt:
+                return False
+        if option_type is not None and row["option_type"] != option_type:
+            return False
+        if strikes is not None and row["strike"] not in strikes:
+            return False
+        return True
+
+    return matches
+
+
+def list_expiries(underlying: str, exchange: str = "NFO") -> list:
+    """Sorted 'DD-Mon-YYYY' expiry strings for `underlying`, nearest first,
+    derived from the NFO scrip master. Returns [] if the master can't be
+    fetched (callers already treat that as "no expiries right now")."""
+    del exchange  # Kotak resolves the segment from the underlying itself
+    rows = _load_fo_scrips()
+    if not rows:
+        return []
+    matches = [r for r in rows if r["name"] == underlying.upper() and r["option_type"] == "CE"]
+    dates = set()
+    for r in matches:
+        try:
+            dates.add(datetime.strptime(r["expiry"], "%d-%b-%Y").date())
+        except (TypeError, ValueError):
+            continue
+    return [d.strftime("%d-%b-%Y") for d in sorted(dates)]
+
+
+def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
+    """{'tradingsymbol', 'token'} for one contract via the scrip master, or
+    None if unresolved."""
+    del exchange
+    rows = _load_fo_scrips()
+    if not rows:
+        return None
+    target_exp = _parse_expiry_date(expiry_ddmmmyyyy)
+    matches = [
+        r
+        for r in rows
+        if r["name"] == underlying.upper()
+        and _parse_expiry_date(r["expiry"]) == target_exp
+        and r["strike"] == int(round(float(strike)))
+        and r["option_type"] == opt_type.upper()
+    ]
+    if not matches:
+        return None
+    return {"tradingsymbol": matches[0]["tradingsymbol"], "token": matches[0]["token"]}
+
+
+def _parse_expiry_date(expiry_iso: str):
+    try:
+        return datetime.strptime(expiry_iso, "%d-%b-%Y").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _ohlc_val(row, key, alt_key="open"):
+    """Extract one OHLC component from Kotak's quote row, which nests OHLC
+    inside 'ohlc' when quote_type='all' but may also carry flat fields."""
+    ohlc = row.get("ohlc")
+    if isinstance(ohlc, dict):
+        val = ohlc.get(key)
+        if val is not None:
+            return float(val)
+    flat = row.get(key) if key != "close" else row.get("previous_close")
+    if flat is not None:
+        return float(flat)
+    return float(alt_key and row.get(alt_key) or 0)
+
+
+def _spot_quote(underlying: str) -> dict | None:
+    """Kotak quotes() for the underlying's index token (index names are
+    literals like 'Nifty 50', not numeric tokens). None on failure."""
+    index_name = _INDEX_NAMES.get(underlying.upper())
+    if not index_name:
+        return None
+    try:
+        result = _session.client.quotes(
+            instrument_tokens=[
+                {"instrument_token": index_name, "exchange_segment": "nse_cm"}
+            ],
+            quote_type="all",
+        )
+    except Exception as exc:
+        logger.warning("[kotak_market_data] index quote %s failed: %s", underlying, exc)
+        return None
+    rows = _unwrap_quotes(result)
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        "ltp": float(row.get("last_traded_price") or 0),
+        "open": _ohlc_val(row, "open"),
+        "high": _ohlc_val(row, "high"),
+        "low": _ohlc_val(row, "low"),
+        "close": _ohlc_val(row, "close", alt_key=None),
+    }
+
+
+def _unwrap_quotes(result):
+    """Kotak's quotes() returns the raw JSON body; the payload can be a
+    bare list (v2) or wrapped in 'data'/'message' (v1-era). Normalize to a
+    list of row dicts."""
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        for key in ("data", "message", "quotes"):
+            val = result.get(key)
+            if isinstance(val, list):
+                return val
+            if isinstance(val, dict):
+                # Single row wrapped in a dict.
+                return [val]
+    return []
+
+
+def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
+    """Resolve the ATM window from the scrip master, then overlay live
+    ltp/oi/volume per token via quotes(). Returns the chain dict shape
+    from the MarketData Protocol ('underlying', 'spot', 'atm_strike',
+    'expiry', 'rows') or None."""
+    del exchange
+    quote = _spot_quote(underlying)
+    if not quote:
+        logger.warning("[kotak_market_data] could not fetch spot for %s", underlying)
+        return None
+    spot = quote["ltp"]
+    atm = _round_to_strike(spot, underlying)
+    interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
+    strikes = {atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)}
+
+    rows = _load_fo_scrips()
+    if not rows:
+        return None
+    target_exp = _parse_expiry_date(expiry_ddmmmyyyy)
+    matches = [
+        r for r in rows
+        if r["name"] == underlying.upper()
+        and _parse_expiry_date(r["expiry"]) == target_exp
+        and r["strike"] in strikes
+    ]
+    if not matches:
+        return None
+
+    # Batch-quote all CE+PE tokens in one quotes() call.
+    tokens = [{"instrument_token": m["token"], "exchange_segment": "nse_fo"} for m in matches]
+    try:
+        qresult = _session.client.quotes(instrument_tokens=tokens, quote_type="all")
+        qrows = _unwrap_quotes(qresult)
+    except Exception as exc:
+        logger.warning("[kotak_market_data] batch quote failed: %s", exc)
+        qrows = []
+    quote_by_token = {}
+    for q in qrows:
+        tok = str(q.get("instrument_token") or "")
+        if tok:
+            quote_by_token[tok] = q
+
+    out = []
+    for m in matches:
+        q = quote_by_token.get(m["token"]) or {}
+        out.append(
+            {
+                "strike": m["strike"],
+                "type": m["option_type"],
+                "tradingsymbol": m["tradingsymbol"],
+                "token": m["token"],
+                "ltp": float(q.get("last_traded_price") or 0),
+                "open": _ohlc_val(q, "open"),
+                "high": _ohlc_val(q, "high"),
+                "low": _ohlc_val(q, "low"),
+                "close": _ohlc_val(q, "close", alt_key=None),
+                "oi": float(q.get("open_interest") or 0),
+                "volume": float(q.get("volume") or 0),
+                "net_change": q.get("change"),
+                "pct_change": q.get("net_change_percentage"),
+                "lot_size": m["lot_size"],
+            }
+        )
+
+    out.sort(key=lambda r: (r["strike"], r["type"]))
+    return {
+        "underlying": underlying.upper(),
+        "spot": spot,
+        "atm_strike": atm,
+        "expiry": expiry_ddmmmyyyy,
+        "rows": out,
+    }
+
+
+def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
+    """One quotes() call for up to all pairs. `symbol_token_pairs` is
+    (tradingsymbol, token) as returned by find_option_token(); the response
+    is keyed by the numeric instrument token, so it's re-keyed by the
+    caller's tradingsymbol here to match the Protocol contract."""
+    del mode
+    seg = _INDEX_EXCHANGE.get(str(exchange).upper(), "nse_fo")
+    tokens = [
+        {"instrument_token": str(token), "exchange_segment": seg}
+        for _symbol, token in symbol_token_pairs
+        if token
+    ]
+    if not tokens:
+        return {}
+    try:
+        result = _session.client.quotes(instrument_tokens=tokens, quote_type="all")
+        qrows = _unwrap_quotes(result)
+    except Exception as exc:
+        logger.warning("[kotak_market_data] batch quotes failed: %s", exc)
+        return {}
+    by_token = {str(q.get("instrument_token") or ""): q for q in qrows}
+    out = {}
+    for symbol, token in symbol_token_pairs:
+        q = by_token.get(str(token))
+        if q:
+            out[symbol] = q
+    return out
+
+
+def get_batch_quotes_by_token(exchange, symbol_token_pairs, mode="FULL"):
+    """Same request as get_batch_quotes(), keyed by str(token) instead of
+    tradingsymbol — matches the SmartAPI/Breeze convention."""
+    by_symbol = get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+    return {str(token): by_symbol[symbol] for symbol, token in symbol_token_pairs if symbol in by_symbol}
+
+
+def get_spot_quote(underlying):
+    return _spot_quote(underlying)
+
+
+def get_fno_underlyings(force_refresh=False):
+    """Indices + F&O stocks derived from the NFO scrip master. Returns the
+    Protocol's {'indices', 'stocks'} shape; empty lists if the master can't
+    be fetched."""
+    del force_refresh
+    rows = _load_fo_scrips()
+    if not rows:
+        return {"indices": list(_INDEX_NAMES), "stocks": []}
+    names = sorted({r["name"] for r in rows})
+    indices = sorted(n for n in names if n in _INDEX_NAMES)
+    stocks = [n for n in names if n not in _INDEX_NAMES]
+    return {"indices": indices or list(_INDEX_NAMES), "stocks": stocks}
+
+
+def index_tokens():
+    """Shaped like SmartApiMarketData.index_tokens(), but 'token' here is
+    Kotak's literal index display name ('Nifty 50'), not a numeric
+    instrument token — the same opaqueness caveat as Breeze's
+    stock_code-based index_tokens(): callers that pass 'token' straight
+    through to get_batch_quotes() (as smartapi_pipeline_adapter.py does)
+    still work."""
+    return {
+        name: {"token": display, "exchange": "NSE"}
+        for name, display in _INDEX_NAMES.items()
+    }
+
+
+class KotakMarketData:
+    """Adapter satisfying brokers.market_data.MarketData — see that
+    module's Protocol for the interface contract."""
+
+    def list_expiries(self, underlying, exchange="NFO"):
+        return list_expiries(underlying, exchange=exchange)
+
+    def get_atm_chain(self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
+        return get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm, exchange=exchange)
+
+    def find_option_token(self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
+        return find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange)
+
+    def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
+        return get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+
+    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        return get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
+
+    def get_spot_quote(self, underlying):
+        return get_spot_quote(underlying)
+
+    def get_fno_underlyings(self, force_refresh=False):
+        return get_fno_underlyings(force_refresh=force_refresh)
+
+    def index_tokens(self):
+        return index_tokens()

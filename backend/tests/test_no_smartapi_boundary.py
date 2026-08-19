@@ -41,14 +41,17 @@ def test_project_dotenv_overrides_stale_parent_env():
     env["EXECUTION_BROKER"] = "SHOONYA"
     env["LIVE_FEED_PROVIDER"] = "SHOONYA"
     env["MARKET_DATA_PROVIDER"] = "SHOONYA"
-    # But the .env file has SmartAPI as the authoritative value
+    # But the .env file has KITE as the authoritative value (this repo's
+    # current provider setup — KITE access token is deliberately left
+    # empty in .env so the runtime DATA SOURCE falls back to NSE/BSE until
+    # a token is pasted; see ws_server_live._resolve_default_data_source()).
     probe = (
         'import sys; '
         'sys.path.insert(0, "backend"); '
         'import config; '
-        'assert config.settings.execution_broker == "SMARTAPI", f"Got {config.settings.execution_broker}"; '
-        'assert config.settings.live_feed_provider == "SMARTAPI", f"Got {config.settings.live_feed_provider}"; '
-        'assert config.settings.market_data_provider == "SMARTAPI", f"Got {config.settings.market_data_provider}"; '
+        'assert config.settings.execution_broker == "KITE", f"Got {config.settings.execution_broker}"; '
+        'assert config.settings.live_feed_provider == "KITE", f"Got {config.settings.live_feed_provider}"; '
+        'assert config.settings.market_data_provider == "KITE", f"Got {config.settings.market_data_provider}"; '
         'print("OK")'
     )
     result = subprocess.run(

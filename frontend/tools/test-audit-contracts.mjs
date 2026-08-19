@@ -25,7 +25,7 @@ const checks = [
   ['current audit targets implementation-aligned PDS v1.3', current.includes('PDS-01_Dashboard.md` v1.3') && pds.includes('| **Version** | 1.3 |')],
   ['current audit has no open P0 or P1 violation', current.toLowerCase().includes('no open p0 or p1') && current.includes('closed compliant')],
   ['all 22 historical findings have a disposition', (current.match(/\| P[012]-\d\d /g) || []).length === 22],
-  ['persistent feed status evidence exists', template.includes('feed-status-pill') && template.includes('feed-status-reason')],
+  ['persistent feed status evidence exists', template.includes('feed-status-pill') && template.includes('feed-source-row') && template.includes('id="dataSourceSelect"')],
   ['strike handoff evidence exists', sync.includes('openOptionChainAtStrike') && sync.includes('openStrikeDetailReportModal(n)')],
   ['compact breakpoint evidence exists', responsive.includes('@media (max-width:1279px)') && responsive.includes('.exec-grid{grid-template-columns:1fr;}')],
   ['modal accessibility evidence exists', modal.includes('aria-modal') && modal.includes('invoker.focus()') && modal.includes("e.key !== 'Tab'")],

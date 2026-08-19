@@ -6,6 +6,8 @@ state and execution, using Shoonya's official Noren Python API.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import re
@@ -16,6 +18,7 @@ from datetime import datetime
 import time
 
 import pyotp
+import requests
 
 # Rate limiting configuration for Shoonya API calls
 # Shoonya generally has more lenient rate limits than SmartAPI,
@@ -134,6 +137,84 @@ logger = logging.getLogger(__name__)
 # retry storm masquerading as a broker-side outage.
 _LOGIN_RETRY_COOLDOWN_SEC = 30
 
+_LOGIN_TIMEOUT_S = 15
+
+
+def _login_url(api) -> str:
+    """Authorize endpoint for the Noren/Shoonya REST API.
+
+    The official SDK keeps host + routes in a name-mangled private attr
+    (`_NorenApi__service_config`); read it when present and fall back to
+    the well-known production endpoint only if the SDK layout ever changes.
+    """
+    config = getattr(api, "_NorenApi__service_config", None) or {}
+    host = config.get("host") or "https://api.shoonya.com/NorenWClientTP/"
+    route = (config.get("routes") or {}).get("authorize") or "/QuickAuth"
+    return f"{host}{route}"
+
+
+def _authorize_login(api, userid, password, two_fa, vendor_code, api_secret, imei):
+    """Perform the Noren QuickAuth handshake with real diagnostics.
+
+    The stock SDK's login() does `json.loads(res.text)` with no timeout and
+    no status/body inspection, so a dead or blocked endpoint surfaces as a
+    cryptic "Expecting value: line 1 column 1 (char 0)". This replicates the
+    exact same request/response contract (SHA-256 password/appkey, jData
+    form body) but reports WHAT actually came back — HTTP status, content
+    type, and a body snippet — so an outage (HTML/empty/non-200) is
+    distinguishable from a credentials rejection (JSON stat=Not_Ok). On
+    success it seeds the SDK session via set_session(), matching what
+    login() would have set internally.
+    """
+    pwd = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    app_key = hashlib.sha256(f"{userid}|{api_secret}".encode("utf-8")).hexdigest()
+    values = {
+        "source": "API",
+        "apkversion": "1.0.0",
+        "uid": userid,
+        "pwd": pwd,
+        "factor2": two_fa,
+        "vc": vendor_code,
+        "appkey": app_key,
+        "imei": imei,
+    }
+    url = _login_url(api)
+    try:
+        res = requests.post(url, data="jData=" + json.dumps(values), timeout=_LOGIN_TIMEOUT_S)
+    except requests.RequestException as exc:
+        raise BrokerError(
+            f"Shoonya login request to {url} failed: {exc} "
+            "(endpoint unreachable — check network/VPN or Shoonya status)"
+        ) from exc
+
+    body = res.text or ""
+    if res.status_code != 200:
+        raise BrokerError(
+            f"Shoonya login rejected with HTTP {res.status_code} from {url} — "
+            f"body: {body[:200]!r}. Non-200/HTML/empty responses indicate a "
+            "Shoonya-side outage or network block, not bad credentials."
+        )
+    if not body.strip():
+        raise BrokerError(
+            f"Shoonya login returned an empty body from {url} — Shoonya-side "
+            "outage or network block."
+        )
+    try:
+        result = json.loads(body)
+    except ValueError:
+        raise BrokerError(
+            f"Shoonya login returned non-JSON from {url} "
+            f"(content-type={res.headers.get('content-type', 'unknown')!r}, "
+            f"body={body[:200]!r}) — Shoonya-side outage or network block."
+        ) from None
+    if not isinstance(result, dict) or result.get("stat") != "Ok":
+        raise BrokerError(
+            "Shoonya login rejected: "
+            f"{(result or {}).get('emsg', 'unknown error')}"
+        )
+    api.set_session(userid, password, result["susertoken"])
+    return result
+
 
 class BrokerError(RuntimeError):
     pass
@@ -202,14 +283,17 @@ class ShoonyaSession:
                 api = self._api_factory()
                 try:
                     two_fa = pyotp.TOTP(settings.shoonya_totp_secret).now()
-                    result = api.login(
+                    result = _authorize_login(
+                        api,
                         userid=settings.shoonya_user_id,
                         password=settings.shoonya_password,
-                        twoFA=two_fa,
+                        two_fa=two_fa,
                         vendor_code=settings.shoonya_vendor_code,
                         api_secret=settings.shoonya_api_secret,
                         imei=settings.shoonya_imei,
                     )
+                except BrokerError:
+                    raise
                 except Exception as exc:
                     raise BrokerError(f"Shoonya login failed: {exc}") from exc
                 if not result or result.get("stat") != "Ok":

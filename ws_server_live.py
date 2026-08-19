@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
+from urllib.parse import unquote
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "backend"))
@@ -64,6 +65,14 @@ def _smartapi_disabled(*_args, **_kwargs):
 
 if not _NO_SMARTAPI_REQUESTED:
     from brokers.market_data import market_data
+    from brokers.market_data import (
+        PROVIDER_CAPABILITIES as _MD_PROVIDER_CAPABILITIES,
+        PROVIDER_KEYS as _MD_PROVIDER_KEYS,
+        get_active_provider as _md_get_active_provider,
+        provider_has_credentials as _md_provider_has_credentials,
+        provider_status as _md_provider_status,
+        set_active_provider as _md_set_active_provider,
+    )
 
     if _broker_settings.execution_broker == "SHOONYA":
         from brokers.shoonya_client import (
@@ -146,6 +155,30 @@ else:
     # Do not even import the broker modules: importing them initializes the
     # SDK and instrument master. Any accidentally reached broker-only path
     # fails closed instead of silently logging in.
+    #
+    # --no-broker: NSE/BSE public API is the only data source. The broker
+    # adapter registry still gets imported lazily by the pipeline (see
+    # option_chain_json._fetch_and_parse), but ws_server_live's own helpers
+    # must exist for the DATA SOURCE dropdown/reporting in this mode too.
+    _MD_PROVIDER_KEYS = ("NSE_BSE",)
+    _MD_PROVIDER_CAPABILITIES = {
+        "NSE_BSE": {"snapshot": True, "websocket": False, "execution": False}
+    }
+
+    def _md_get_active_provider():
+        return "NSE_BSE"
+
+    def _md_provider_has_credentials(name):
+        return name == "NSE_BSE"
+
+    def _md_set_active_provider(name):
+        return name
+
+    def _md_provider_status():
+        from brokers.market_data import provider_status as _ps
+
+        return _ps()
+
     class _DisabledMarketData:
         index_tokens = staticmethod(lambda: {})
         list_expiries = staticmethod(_smartapi_disabled)
@@ -356,14 +389,59 @@ option_chain_json.set_runtime_config(
     )
 )
 
+
+def _resolve_default_data_source() -> str:
+    """Startup default for the runtime DATA SOURCE dropdown.
+
+    Prefers the configured MARKET_DATA_PROVIDER when that provider is
+    usable (registered AND has credentials). Otherwise falls back to the
+    first credentialed BROKER source (registry order), so a stale/empty
+    token in .env doesn't silently strand the dashboard on the public
+    NSE/BSE API and "break" a previously-working broker setup. NSE/BSE is
+    only the default when NO broker has credentials at all — the true
+    login-free case (fresh install, or --no-broker forces it explicitly
+    regardless)."""
+    configured = _broker_settings.market_data_provider
+    if configured in _MD_PROVIDER_KEYS and _md_provider_has_credentials(configured):
+        return configured
+    for candidate in _MD_PROVIDER_KEYS:
+        if candidate == "NSE_BSE":
+            continue
+        if _md_provider_has_credentials(candidate):
+            return candidate
+    return "NSE_BSE"
+
+
+# Runtime market-data source — the Dashboard's DATA SOURCE dropdown. Switched
+# via ?dataSource= on the WS URL (see ws_handler() -> switch_data_source())
+# WITHOUT a server restart; every connected client shares one process-wide
+# value, same as SYMBOL/EXPIRY. The active provider is also pushed into
+# brokers.market_data's runtime facade (set_active_provider) so the option
+# chain pipeline, index-quote loops, and payload all route consistently.
+DATA_SOURCE = _resolve_default_data_source()
+if not USE_SMARTAPI:
+    DATA_SOURCE = "NSE_BSE"  # --no-broker: public NSE/BSE is the only source
+_md_set_active_provider(DATA_SOURCE)
+
 _md_label = (
     "Upstox"
-    if _broker_settings.market_data_provider == "UPSTOX"
+    if DATA_SOURCE == "UPSTOX"
     else "Shoonya"
-    if _broker_settings.market_data_provider == "SHOONYA"
+    if DATA_SOURCE == "SHOONYA"
+    else "Kite"
+    if DATA_SOURCE == "KITE"
+    else "Breeze"
+    if DATA_SOURCE == "BREEZE"
+    else "Kotak"
+    if DATA_SOURCE == "KOTAK"
+    else "NSE/BSE"
+    if DATA_SOURCE == "NSE_BSE"
     else "SmartAPI"
 )
-if USE_SMARTAPI:
+if DATA_SOURCE == "NSE_BSE":
+    _chain_source = "NSE/BSE public REST (polling)"
+    _overlay_state = "NSE/BSE public REST polling (no websocket overlay)"
+elif USE_SMARTAPI:
     _chain_source = f"{_md_label} REST"
     _overlay_state = f"{_md_label} websocket overlay ENABLED"
 else:
@@ -949,6 +1027,19 @@ async def ws_handler(request):
     requested_expiry = request.query.get("expiry")
     if requested_symbol or requested_expiry:
         switch_symbol(requested_symbol or SYMBOL, requested_expiry)
+
+    # ?dataSource=... is the Dashboard's DATA SOURCE dropdown — the runtime
+    # market-data provider (SMARTAPI/UPSTOX/KITE/SHOONYA/BREEZE/KOTAK/NSE_BSE),
+    # process-wide like ?symbol=, switchable WITHOUT a server restart. See
+    # switch_data_source() for the switch sequence. Unknown keys raise here
+    # so a stale frontend build can't silently pick a source the backend
+    # doesn't know — just log and continue on the current source.
+    requested_data_source = request.query.get("dataSource")
+    if requested_data_source:
+        try:
+            switch_data_source(requested_data_source)
+        except ValueError as e:
+            print(f"[ws] ignoring invalid ?dataSource={requested_data_source!r}: {e}", flush=True)
 
     # Legacy priceSource URLs no longer alter analytics. EQ is the fixed
     # option-pricing and decision reference; FUT is displayed separately.
@@ -2207,11 +2298,17 @@ def _configure_pipeline_globals(
     fetch_nse_index_quotes_sync()/fetch_bse_index_quote_sync()), so this no
     longer needs to stay in sync with a second caller.
 
+    Re-pushes the RUNTIME data source into both option_chain_json's
+    use_smartapi gate (NSE_BSE -> public REST path, any broker -> broker
+    REST path) and brokers.market_data's active-provider facade, so a
+    ?dataSource= switch takes effect on the very next pipeline pass.
+
     No longer pokes an `exchange` — option_chain_json.main() always
     recomputes EXCHANGE locally from SYMBOL, so that poke was inert before
     this refactor too (see pipeline_config.py's module docstring). The
     `exchange` local below still exists, purely to pick the right EXPIRY
     fallback (BSE vs NSE nearest-expiry rule) exactly as before."""
+    _md_set_active_provider(DATA_SOURCE)
     exchange = "BSE" if symbol in _BSE_SYMBOLS else "NSE"
     resolved_expiry = expiry or (
         option_chain_json.BSE_EXPIRY_DEFAULT.get(
@@ -2228,7 +2325,8 @@ def _configure_pipeline_globals(
             strict_expiry=strict_expiry,
             no_virtual_oi=no_virtual_oi,
             price_source=price_source,
-            futures_expiry=futures_expiry,  # add this line too
+            futures_expiry=futures_expiry,
+            use_smartapi=(DATA_SOURCE != "NSE_BSE"),
         )
     )
 
@@ -2255,6 +2353,11 @@ def switch_symbol(new_symbol, new_expiry=None):
     one broadcast to all of CONNECTED) rather than trying to serve several
     symbols out of a single process."""
     global SYMBOL, EXPIRY, LAST_PAYLOAD, _LAST_SENT
+    # Defensive normalization: a stale/cached frontend bundle can send the
+    # symbol still percent-encoded (double-encoded on the wire). aiohttp
+    # decodes once, leaving "ZYDUS%20LIFESCIENCES%20LTD"; undo that so the
+    # engine never probes a literal "%20" symbol. No-op for clean input.
+    new_symbol = unquote(new_symbol)
     new_symbol = new_symbol.strip().upper()
     if new_symbol == SYMBOL and (new_expiry is None or new_expiry == EXPIRY):
         return  # already on this symbol+expiry, nothing to do
@@ -2273,6 +2376,136 @@ def switch_symbol(new_symbol, new_expiry=None):
             restart_shoonya_feed(new_symbol, new_expiry)
         else:
             restart_smartapi_feed(new_symbol, new_expiry)
+
+
+def _feed_allowed(feed_provider: str) -> bool:
+    """Whether ticks from the given broker feed may still merge/broadcast.
+
+    Returns False when a runtime DATA SOURCE switch moved away from
+    `feed_provider`, or when the active source is a polling-only provider
+    (KITE/BREEZE/KOTAK/NSE_BSE — no WebSocket feed in this codebase). Every
+    *_sync_and_broadcast() entry point gates on this BEFORE touching
+    LAST_PAYLOAD/_LAST_SENT, so a feed left running after a switch can't
+    contaminate the new provider's baseline (acceptance: no cross-provider
+    data mixing), and switching away from a broker feed effectively stops
+    it without a restart."""
+    caps = _MD_PROVIDER_CAPABILITIES.get(DATA_SOURCE, {})
+    return DATA_SOURCE == feed_provider and bool(caps.get("websocket"))
+
+
+def _stop_active_broker_feed(provider: str) -> None:
+    """Best-effort unsubscribe of the given broker feed's tokens so a
+    provider switched away from stops consuming feed bandwidth. Fire-and-
+    forget (daemon thread) — the real "stop" from the payload's point of
+    view is _feed_allowed()'s broadcast gate, which takes effect
+    synchronously on the next tick. Each feed's own switch lock serializes
+    against any in-flight symbol-switch thread."""
+    def _run():
+        global _smartapi_tokens, _upstox_keys, _shoonya_instruments
+        if provider == "SMARTAPI":
+            with _smartapi_switch_lock:
+                if _smartapi_stream is not None:
+                    if _smartapi_tokens and _smartapi_exchange:
+                        try:
+                            _smartapi_stream.unsubscribe(
+                                EXCHANGE_TYPE[_smartapi_exchange], _smartapi_tokens
+                            )
+                        except Exception:
+                            pass
+                    if _smartapi_index_token and _smartapi_index_exchange:
+                        try:
+                            _smartapi_stream.unsubscribe(
+                                EXCHANGE_TYPE[_smartapi_index_exchange],
+                                [_smartapi_index_token],
+                            )
+                        except Exception:
+                            pass
+                    _smartapi_tokens = None
+        elif provider == "UPSTOX":
+            with _upstox_switch_lock:
+                if _upstox_stream is not None and _upstox_keys:
+                    try:
+                        _upstox_stream.unsubscribe(_upstox_keys)
+                    except Exception:
+                        pass
+                    _upstox_keys = None
+        elif provider == "SHOONYA":
+            with _shoonya_switch_lock:
+                if _shoonya_stream is not None and _shoonya_instruments:
+                    try:
+                        _shoonya_stream.unsubscribe(_shoonya_instruments)
+                    except Exception:
+                        pass
+                    _shoonya_instruments = None
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def switch_data_source(new_source: str) -> None:
+    """Runtime data-source switch — triggered by ws_handler() when a client
+    reconnects with ?dataSource=... on the WS URL (the Dashboard's DATA
+    SOURCE dropdown). Works WITHOUT a server restart: the next engine_loop
+    tick builds the new source's full baseline and broadcasts it.
+
+    Sequence (satisfies the runtime-switch acceptance criteria):
+      1. validate the provider key;
+      2. stop the OLD broker feed (best-effort unsubscribe + gate its
+         broadcasts via _feed_allowed so its ticks can't leak into the new
+         baseline);
+      3. push the new provider into brokers.market_data's runtime facade
+         (set_active_provider) so the chain pipeline, index-quote loops and
+         payload all route to it next tick;
+      4. clear LAST_PAYLOAD/_LAST_SENT so the next tick is a FULL baseline
+         from the new source (never a diff against the old source's shape);
+      5. start the new provider's WebSocket feed IF it has one
+         (SMARTAPI/UPSTOX/SHOONYA only — KITE/BREEZE/KOTAK/NSE_BSE are
+         polling-only in this codebase);
+      6. poke _SYMBOL_SWITCH_EVENT so engine_loop wakes immediately.
+
+    Process-wide, exactly like switch_symbol(): all CONNECTED clients share
+    one engine loop and one DATA_SOURCE."""
+    global DATA_SOURCE
+    new_source = (new_source or "").strip().upper()
+    if new_source not in _MD_PROVIDER_KEYS:
+        print(
+            f"[data-source] rejecting invalid data source {new_source!r} "
+            f"(valid: {sorted(_MD_PROVIDER_KEYS)})",
+            flush=True,
+        )
+        raise ValueError(
+            f"Unknown data source {new_source!r}. Valid: {sorted(_MD_PROVIDER_KEYS)}"
+        )
+    if new_source == DATA_SOURCE:
+        return  # already on this source, nothing to do
+    old_source = DATA_SOURCE
+    print(
+        f"[data-source] switch requested: {old_source} -> {new_source}", flush=True
+    )
+
+    # 1+2. Stop the old broker feed's effect on the payload.
+    _stop_active_broker_feed(old_source)
+
+    # 3. Route the whole pipeline to the new source.
+    DATA_SOURCE = new_source
+    _md_set_active_provider(new_source)
+
+    # 4. Next tick is a FULL baseline from the new source.
+    global LAST_PAYLOAD, _LAST_SENT
+    LAST_PAYLOAD = None
+    _LAST_SENT = None
+
+    # 5. Start the new provider's feed if it has one.
+    if _MD_PROVIDER_CAPABILITIES.get(new_source, {}).get("websocket"):
+        if new_source == "UPSTOX":
+            restart_upstox_feed(SYMBOL, EXPIRY)
+        elif new_source == "SHOONYA":
+            restart_shoonya_feed(SYMBOL, EXPIRY)
+        else:
+            restart_smartapi_feed(SYMBOL, EXPIRY)
+
+    # 6. Wake engine_loop immediately.
+    _SYMBOL_SWITCH_EVENT.set()
+    print(f"[data-source] switched to {new_source}", flush=True)
 
 
 def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
@@ -2302,7 +2535,14 @@ def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
 
 
 async def _smartapi_sync_and_broadcast(message):
-    """Serialize SmartAPI mutations with engine full/delta computation."""
+    """Serialize SmartAPI mutations with engine full/delta computation.
+
+    Gated on _feed_allowed("SMARTAPI") so a runtime DATA SOURCE switch
+    away from SMARTAPI stops its ticks from reaching clients or merging
+    into LAST_PAYLOAD/_LAST_SENT (acceptance: no cross-provider
+    contamination)."""
+    if not _feed_allowed("SMARTAPI"):
+        return
     async with _MARKET_STREAM_LOCK:
         await _live_feed_sync_and_broadcast_locked(
             message, _smartapi_feed_matches_displayed_expiry
@@ -2316,7 +2556,10 @@ async def _upstox_sync_and_broadcast(message):
     feeds are mutually exclusive in practice (LIVE_FEED_PROVIDER picks
     one), so there's no risk of the two racing to merge into
     LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
-    serializes either way."""
+    serializes either way. Gated on _feed_allowed("UPSTOX") too, same
+    reason as the SmartAPI gate above."""
+    if not _feed_allowed("UPSTOX"):
+        return
     async with _MARKET_STREAM_LOCK:
         await _live_feed_sync_and_broadcast_locked(
             message, _upstox_feed_matches_displayed_expiry
@@ -2330,7 +2573,10 @@ async def _shoonya_sync_and_broadcast(message):
     feeds are mutually exclusive in practice (LIVE_FEED_PROVIDER picks
     one), so there's no risk of them racing to merge into
     LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
-    serializes either way."""
+    serializes either way. Gated on _feed_allowed("SHOONYA") too, same
+    reason as the SmartAPI gate above."""
+    if not _feed_allowed("SHOONYA"):
+        return
     async with _MARKET_STREAM_LOCK:
         await _live_feed_sync_and_broadcast_locked(
             message, _shoonya_feed_matches_displayed_expiry
@@ -2466,6 +2712,12 @@ async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
             )
 
 
+_MAIN_LOOP = None  # the asyncio event loop main() runs on; lets a runtime
+# switch to a provider whose feed was never started at boot (e.g. switching
+# to UPSTOX when LIVE_FEED_PROVIDER points elsewhere) start that feed on the
+# live loop instead of silently doing nothing (the _*_loop globals are only
+# captured inside start_*_feed(), so they stay None for never-started feeds).
+
 _smartapi_stream = None
 _smartapi_aggregator = None
 _smartapi_loop = None  # captured once at startup, reused for symbol switches
@@ -2589,10 +2841,21 @@ def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
         )
         return None
 
-    token_meta = {
-        row["token"]: {"strike": row["strike"], "option_type": row["type"]}
-        for row in chain["rows"]
-    }
+    token_meta = {}
+    skipped = 0
+    for row in chain["rows"] or []:
+        tok = row.get("token") or row.get("instrument_key")
+        if not tok:
+            skipped += 1
+            continue
+        token_meta[str(tok)] = {"strike": row.get("strike"), "option_type": row.get("type")}
+    if skipped and not token_meta:
+        print(
+            f"[smartapi] No broker tokens resolved for {target_symbol} {resolved_expiry} "
+            f"(provider returned {skipped} token-less rows) — live feed disabled, "
+            "falling back to REST poll",
+            flush=True,
+        )
 
     # Also resolve the underlying's own token so the SmartAPI feed can
     # stream spot at the same tick rate as the option legs, instead of spot
@@ -2856,8 +3119,12 @@ def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=Non
 
     with _upstox_switch_lock:
         if _upstox_stream is None or _upstox_aggregator is None:
-            if _upstox_loop is not None:
-                start_upstox_feed(_upstox_loop, new_symbol, strikes_around_atm, expiry)
+            # Feed never started at boot (LIVE_FEED_PROVIDER pointed
+            # elsewhere) — start it now on whatever loop we have rather
+            # than silently no-op'ing the switch.
+            loop = _upstox_loop if _upstox_loop is not None else _MAIN_LOOP
+            if loop is not None:
+                start_upstox_feed(loop, new_symbol, strikes_around_atm, expiry)
             return
 
         resolved = _resolve_upstox_chain_tokens(
@@ -3083,9 +3350,13 @@ def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=No
 
     with _shoonya_switch_lock:
         if _shoonya_stream is None or _shoonya_aggregator is None:
-            if _shoonya_loop is not None:
+            # Feed never started at boot (LIVE_FEED_PROVIDER pointed
+            # elsewhere) — start it now on whatever loop we have rather
+            # than silently no-op'ing the switch.
+            loop = _shoonya_loop if _shoonya_loop is not None else _MAIN_LOOP
+            if loop is not None:
                 start_shoonya_feed(
-                    _shoonya_loop, new_symbol, strikes_around_atm, expiry
+                    loop, new_symbol, strikes_around_atm, expiry
                 )
             return
 
@@ -3259,10 +3530,13 @@ def _switch_smartapi_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=N
     with _smartapi_switch_lock:
         if _smartapi_stream is None or _smartapi_aggregator is None:
             # No feed running yet (e.g. switch happened before startup finished
-            # initializing it) — fall back to a full start instead.
-            if _smartapi_loop is not None:
+            # initializing it, or this provider was never booted because
+            # LIVE_FEED_PROVIDER pointed elsewhere) — fall back to a full
+            # start on whatever loop we have (main loop last-resort).
+            loop = _smartapi_loop if _smartapi_loop is not None else _MAIN_LOOP
+            if loop is not None:
                 start_smartapi_feed(
-                    _smartapi_loop, new_symbol, strikes_around_atm, expiry
+                    loop, new_symbol, strikes_around_atm, expiry
                 )
             return
 
@@ -3473,14 +3747,43 @@ def safe_float_smartapi(val):
         return None
 
 
+_INDEX_QUOTE_WARN_COOLDOWNS: dict[str, float] = {}
+
+
+def _throttled_index_quote_warning(key: str, msg: str, cooldown_s: float = 60.0) -> None:
+    """Print `msg` at most once per `cooldown_s` per `key`.
+
+    A dead provider (stale Kite access token, Shoonya outage) fails the
+    same symbols every index-quote pass; printing all five on every pass
+    drowns the log in identical lines. The first failure logs, repeats
+    within the window stay silent, and a fresh window re-logs so recovery
+    is visible.
+    """
+    now = time.monotonic()
+    last = _INDEX_QUOTE_WARN_COOLDOWNS.get(key)
+    if last is not None and (now - last) < cooldown_s:
+        return
+    _INDEX_QUOTE_WARN_COOLDOWNS[key] = now
+    print(msg, flush=True)
+
+
 def fetch_index_quotes_smartapi_sync():
     """Provider-batched alternative to fetch_nse_index_quotes_sync() +
     fetch_bse_index_quote_sync().
 
-    For Upstox and Shoonya, this uses the normalized spot-quote helper for
-    NIFTY/BANKNIFTY/MIDCPNIFTY/INDIA VIX/SENSEX directly. For SmartAPI, it
-    batches token-based REST calls so the ticker strip can stay current
-    without per-symbol throttling.
+    Routes on the RUNTIME data source (DATA_SOURCE, switchable via the
+    Dashboard's DATA SOURCE dropdown without a restart):
+      - UPSTOX/SHOONYA/KITE/BREEZE/KOTAK: per-symbol normalized spot quote
+        via market_data.get_spot_quote() (Kite's SENSEX lookup fails
+        cleanly and the index_quote_loop fallback fills it from BSE's
+        public API; Kotak's INDIA VIX lookup likewise fails cleanly and
+        the fallback fills it);
+      - SMARTAPI: token-batched REST calls so the ticker strip can stay
+        current without per-symbol throttling;
+      - NSE_BSE: returns {} — index_quote_loop()'s market_api fallback
+        (fetch_nse_index_quotes_sync/fetch_bse_index_quote_sync) IS the
+        primary path for the public API, so there's nothing extra to do
+        here and this avoids a redundant second scrape per tick.
 
     Returns {"NIFTY": {...}, ..., "INDIA VIX": {...}, "SENSEX": {...}},
     same shape/keys as the market_api path, so index_quote_loop() can use
@@ -3488,9 +3791,9 @@ def fetch_index_quotes_smartapi_sync():
     """
     out = {}
 
-    if _broker_settings.market_data_provider in ("UPSTOX", "SHOONYA"):
-        provider_label = _broker_settings.market_data_provider.title()
-        vix_lookup = "INDIAVIX" if _broker_settings.market_data_provider == "UPSTOX" else "INDIA VIX"
+    if DATA_SOURCE in ("UPSTOX", "SHOONYA", "KITE", "BREEZE", "KOTAK"):
+        provider_label = DATA_SOURCE.title()
+        vix_lookup = "INDIAVIX" if DATA_SOURCE == "UPSTOX" else "INDIA VIX"
         targets = [
             ("NIFTY", "NIFTY"),
             ("BANKNIFTY", "BANKNIFTY"),
@@ -3502,7 +3805,10 @@ def fetch_index_quotes_smartapi_sync():
             try:
                 quote = market_data.get_spot_quote(lookup)
             except Exception as e:
-                print(f"[index-quote] {provider_label.lower()} {out_key} FAILED: {e}", flush=True)
+                _throttled_index_quote_warning(
+                    f"{DATA_SOURCE}:{out_key}",
+                    f"[index-quote] {provider_label.lower()} {out_key} FAILED: {e}",
+                )
                 continue
             if not quote:
                 print(
@@ -3526,6 +3832,12 @@ def fetch_index_quotes_smartapi_sync():
                 "Volume": 0,
                 "Turnover": 0,
             }
+        return out
+
+    if DATA_SOURCE == "NSE_BSE":
+        # Public NSE/BSE REST is the primary index-quote path — the
+        # index_quote_loop() fallback below fills every symbol from
+        # fetch_nse_index_quotes_sync()/fetch_bse_index_quote_sync().
         return out
 
     nse_symbols = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY"]
@@ -3818,12 +4130,17 @@ async def engine_loop():
         # _EOD_DONE_DATE below.
         if _LAST_SESSION_DATE != now.date():
             _LAST_SESSION_DATE = now.date()
-            if _smartapi_aggregator is not None:
-                _smartapi_aggregator.reset_session()
-                print(
-                    f"[smartapi] Reset OI session baseline for new trading day {now.date()}",
-                    flush=True,
-                )
+            for _agg_name, _agg in (
+                ("smartapi", _smartapi_aggregator),
+                ("upstox", _upstox_aggregator),
+                ("shoonya", _shoonya_aggregator),
+            ):
+                if _agg is not None:
+                    _agg.reset_session()
+                    print(
+                        f"[{_agg_name}] Reset OI session baseline for new trading day {now.date()}",
+                        flush=True,
+                    )
             # Futures OI session baseline (Market Regime input) — same
             # per-day reset as the option-chain aggregator above, see
             # oi/futures_oi_tracker.py's class docstring for why this is a
@@ -3915,14 +4232,17 @@ async def engine_loop():
                     "auto_executor",
                 )
 
-            # Feed NSE's authoritative changeinOpenInterest into the
-            # SmartAPI aggregator's OI baselines every cycle (not just at
-            # feed startup — start_smartapi_feed() runs concurrently with
-            # this loop via asyncio.to_thread, so there's no guaranteed
-            # ordering). seed_session_baseline() only fills tokens without
-            # an existing baseline, so calling this every cycle is safe —
-            # it just closes the gap for whichever tokens ticked before
-            # NSE data was available.
+            # Feed NSE's authoritative changeinOpenInterest into the live
+            # feed aggregators' OI baselines every cycle (not just at feed
+            # startup — start_*_feed() runs concurrently with this loop via
+            # asyncio.to_thread, so there's no guaranteed ordering).
+            # seed_session_baseline() only fills tokens without an existing
+            # baseline, so calling this every cycle is safe — it just closes
+            # the gap for whichever tokens ticked before NSE data was
+            # available. Previously only the SmartAPI aggregator was seeded;
+            # Upstox/Shoonya fell back to first-tick bootstrap, which
+            # re-anchored ceDOI/peDOI on every symbol switch / feed restart
+            # (the "ChgOI changing abruptly" symptom).
             #
             # Guard against r[oi_field] == 0: NSE's parse_option_chain_
             # response() (market_api.py) returns None for a strike/side it
@@ -3936,10 +4256,17 @@ async def engine_loop():
             # leaves on_tick()'s own bootstrap-on-first-tick fallback to
             # establish that token's baseline instead — self-correcting,
             # never wrong the way a false zero would be.
-            if _smartapi_aggregator is not None:
+            chain_rows = payload.get("chain", [])
+            for aggregator in (
+                _smartapi_aggregator,
+                _upstox_aggregator,
+                _shoonya_aggregator,
+            ):
+                if aggregator is None:
+                    continue
                 baselines = {}
-                nse_rows_by_strike = {r["strike"]: r for r in payload.get("chain", [])}
-                for token, meta in _smartapi_aggregator.token_meta.items():
+                nse_rows_by_strike = {r["strike"]: r for r in chain_rows}
+                for token, meta in aggregator.token_meta.items():
                     if meta.get("option_type") not in ("CE", "PE"):
                         continue
                     r = nse_rows_by_strike.get(meta["strike"])
@@ -3950,7 +4277,7 @@ async def engine_loop():
                     if oi_field in r and chg_field in r and r[oi_field] != 0:
                         baselines[token] = r[oi_field] - r[chg_field]
                 if baselines:
-                    _smartapi_aggregator.seed_session_baseline(baselines)
+                    aggregator.seed_session_baseline(baselines)
 
             async with _MARKET_STREAM_LOCK:
                 # Publish the new canonical snapshot and derive its wire
@@ -4547,7 +4874,10 @@ def _build_health_snapshot(now=None):
             "staleAfterSeconds": stale_after,
             "smartapiEnabled": USE_SMARTAPI,
             "smartapiConnected": smartapi_connected,
-            "liveFeedProvider": LIVE_FEED_PROVIDER if USE_SMARTAPI else None,
+            "dataSource": DATA_SOURCE,
+            "liveFeedProvider": (
+                LIVE_FEED_PROVIDER if USE_SMARTAPI and _feed_allowed(DATA_SOURCE) else None
+            ),
             "upstoxConnected": upstox_connected,
             "shoonyaConnected": shoonya_connected,
         },
@@ -4641,6 +4971,8 @@ async def main():
     print(f"[ws] WebSocket endpoint at ws://{WS_HOST}:{HTTP_PORT}/ws symbol={SYMBOL}")
 
     loop = asyncio.get_running_loop()
+    global _MAIN_LOOP
+    _MAIN_LOOP = loop
     # start_smartapi_feed() makes blocking REST calls (_resolve_chain_tokens)
     # and has an internal time.sleep(2) — calling it directly here would
     # freeze the event loop (and every already-connected client's WS

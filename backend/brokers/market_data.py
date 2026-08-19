@@ -608,16 +608,632 @@ class FallbackMarketData:
         return self._primary.index_tokens()
 
 
-# Selected by config.settings.market_data_provider (SMARTAPI default) and
-# optionally wrapped for failover by market_data_fallback_provider. See
-# UpstoxMarketData's and ShoonyaMarketData's docstrings for the one known
-# gap each before relying on either as a PRIMARY in production; see
-# FallbackMarketData's docstring above for the same caveat as a fallback.
+# ── NSE/BSE Public API provider ──────────────────────────────────────────
+# The sixth market-data source: the PUBLIC, unauthenticated NSE/BSE REST
+# endpoints behind market_api.py (option-chain v3, BSE JSON options,
+# allIndices snapshot, public futures). No broker credentials, no login,
+# no WebSocket — snapshot/polling only.
+#
+# Routing: the exchange is resolved from the requested underlying, never
+# chosen by the caller. NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY (and any
+# single-stock F&O) route to NSE; SENSEX/BANKEX/SENSEX50 route to BSE.
+_BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
+
+
+def resolve_exchange_for_symbol(symbol: str) -> str:
+    """Which exchange the NSE/BSE public API should query for `symbol`.
+
+    Returns "BSE" for SENSEX/BANKEX/SENSEX50 (the three BSE-listed
+    F&O indices this codebase supports) and "NSE" for everything else
+    (NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY and individual F&O stocks).
+
+    This is the single routing decision both the NSE/BSE market-data
+    adapter AND ws_server_live.py's runtime data-source switch use, so
+    symbol → exchange can never drift between the two."""
+    return "BSE" if symbol.strip().upper() in _BSE_SYMBOLS else "NSE"
+
+
+def _normalize_expiry_dash(expiry) -> Optional[str]:
+    """'31JUL2026' | '31-Jul-2026' | '2026-07-31' -> '31-Jul-2026'
+    (market_api.py's native option-chain expiry format)."""
+    if not expiry:
+        return expiry
+    for fmt in ("%d-%b-%Y", "%d%b%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(str(expiry), fmt).strftime("%d-%b-%Y")
+        except ValueError:
+            continue
+    raise ValueError(f"Unsupported expiry format: {expiry!r}")
+
+
+def _atm_from_rows(rows, spot) -> float:
+    if not rows or not spot:
+        return 0.0
+    strikes = sorted({float(r.get("strike")) for r in rows if r.get("strike") is not None})
+    if not strikes:
+        return 0.0
+    return float(min(strikes, key=lambda s: abs(s - spot)))
+
+
+class NseBseMarketData:
+    """Market-data provider backed by the PUBLIC NSE/BSE REST endpoints in
+    market_api.py — zero broker credentials required.
+
+    Exchange routing is symbol-driven (see resolve_exchange_for_symbol):
+    NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY -> NSE option-chain-v3 + allIndices;
+    SENSEX/BANKEX/SENSEX50 -> BSE JSON options + BSE index quote.
+
+    Snapshot/polling only: there is no WebSocket client for the public
+    NSE/BSE APIs, so PROVIDER_CAPABILITIES marks this provider
+    snapshot=True / websocket=False / execution=False and the dashboard
+    labels its status POLLING — the expected mode for this provider, not
+    an error condition.
+
+    NEVER an execution broker: NSE/BSE is a read-only market-data source.
+    config.py rejects EXCHANGE_BROKER=NSE_BSE at startup so it can't be
+    wired into order routing.
+
+    Failures RAISE (rather than returning None) so that when this provider
+    is wrapped by FallbackMarketData — either as primary or as
+    MARKET_DATA_FALLBACK_PROVIDER — the circuit breaker can route to the
+    other provider instead of the caller silently receiving partial data.
+    """
+
+    def list_expiries(self, underlying, exchange="NFO"):
+        underlying = underlying.upper()
+        if underlying in _BSE_SYMBOLS:
+            # BSE expiry calendar is computed (no public BSE expiry-list
+            # endpoint) — same helper the BSE chain path already uses.
+            from expiry_manager import _generate_bse_expiry_series
+
+            return _generate_bse_expiry_series(underlying)
+        # NSE: public daily ScripMaster (cached, no broker login needed).
+        from smartapi_pipeline_adapter import get_available_expiries
+
+        return get_available_expiries(underlying, exchange=exchange)
+
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
+        del strikes_around_atm  # public API returns the whole expiry; caller filters
+        from market_api import (
+            BSE_INDEX_SCRIP_CODES,
+            fetch_bse_json_options,
+            fetch_option_chain,
+            parse_option_chain_response,
+        )
+
+        underlying = underlying.upper()
+        expiry_dash = _normalize_expiry_dash(expiry_ddmmmyyyy)
+        if underlying in _BSE_SYMBOLS:
+            scrip_cd = BSE_INDEX_SCRIP_CODES.get(underlying)
+            if not scrip_cd:
+                raise RuntimeError(f"No public BSE derivative code for {underlying}")
+            df, spot = fetch_bse_json_options(
+                expiry_dash.replace("-", " "), scrip_cd=scrip_cd
+            )
+            if df is None or df.empty:
+                raise RuntimeError(
+                    f"Public BSE option chain empty for {underlying} {expiry_dash}"
+                )
+            df = df.rename(columns={"Strike": "StrikePrice"})
+            spot = float(df["Spot"].iloc[0]) if "Spot" in df.columns else 0.0
+        else:
+            payload = fetch_option_chain(underlying, expiry_dash)
+            df = parse_option_chain_response(payload, expiry_dash)
+            spot = float(df["Spot"].iloc[0]) if "Spot" in df.columns else 0.0
+
+        if df.empty:
+            raise RuntimeError(f"Public {underlying} chain empty for {expiry_dash}")
+
+        rows = []
+        for rec in df.to_dict("records"):
+            strike = rec.get("StrikePrice")
+            if strike is None:
+                continue
+            for side in ("CE", "PE"):
+                rows.append(
+                    {
+                        "strike": float(strike),
+                        "type": side,
+                        "tradingsymbol": None,
+                        "token": None,
+                        "ltp": _safe_float(rec.get(f"{side}_LTP")),
+                        "open": None,
+                        "high": None,
+                        "low": None,
+                        "close": None,
+                        "oi": _safe_float(rec.get(f"{side}_OI")),
+                        "volume": _safe_float(rec.get(f"{side}_Volume")),
+                        "net_change": rec.get(f"{side}_Change"),
+                        "pct_change": rec.get(f"{side}_pChange"),
+                    }
+                )
+        rows.sort(key=lambda r: (r["strike"], r["type"]))
+        return {
+            "underlying": underlying,
+            "spot": spot,
+            "atm_strike": _atm_from_rows(rows, spot),
+            "expiry": expiry_ddmmmyyyy,
+            "rows": rows,
+        }
+
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        # The public APIs have no token/tradingsymbol concept — callers that
+        # need one must use a broker provider. Returns None (unresolved).
+        return None
+
+    def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
+        # No batch-quote endpoint on the public APIs; the pipeline reads the
+        # full chain via get_atm_chain()/option_chain_json instead.
+        return {}
+
+    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        return {}
+
+    def get_spot_quote(self, underlying):
+        from market_api import (
+            INDEX_RENAME,
+            fetch_all_indices_snapshot,
+            fetch_bse_index_quote,
+            get_index_from_snapshot,
+        )
+
+        underlying = underlying.upper()
+        if underlying in _BSE_SYMBOLS:
+            entry = fetch_bse_index_quote(underlying)
+            if not entry:
+                return None
+            return {
+                "ltp": _safe_float(entry.get("Last Price")),
+                "open": None,
+                "high": None,
+                "low": None,
+                "close": _safe_float(entry.get("Prev Close")),
+            }
+        snapshot = fetch_all_indices_snapshot()
+        if snapshot.empty:
+            raise RuntimeError(f"NSE allIndices snapshot returned no data")
+        inverse = {v: k for k, v in INDEX_RENAME.items()}
+        display = inverse.get(underlying, underlying)
+        row = get_index_from_snapshot(snapshot, display) or get_index_from_snapshot(
+            snapshot, underlying
+        )
+        if not row:
+            raise RuntimeError(f"No allIndices row for {underlying}")
+        return {
+            "ltp": _safe_float(row.get("last")),
+            "open": _safe_float(row.get("open")),
+            "high": _safe_float(row.get("high")),
+            "low": _safe_float(row.get("low")),
+            "close": _safe_float(row.get("previousClose")),
+        }
+
+    def get_fno_underlyings(self, force_refresh=False):
+        # Public ScripMaster universe — no broker login required.
+        from brokers.smartapi_instruments import (
+            get_fno_underlyings as _public_fno_underlyings,
+        )
+
+        return _public_fno_underlyings(refresh=force_refresh)
+
+    def index_tokens(self):
+        # No token model on the public APIs — index quotes go through
+        # get_spot_quote()/fetch_all_indices_snapshot() instead.
+        return {}
+
+
+# ── Kite Connect provider ────────────────────────────────────────────────
+class KiteMarketData:
+    """Adapter over brokers.kite_client, implementing the same MarketData
+    Protocol SmartApiMarketData/UpstoxMarketData do.
+
+    Kite's own module already speaks SmartAPI's DDMMMYYYY expiry convention
+    (see kite_client.list_expiries's docstring), so — unlike the Upstox/
+    Shoonya adapters — no format translation is needed at this boundary;
+    this class is a thin pass-through delegating to kite_client's
+    module-level functions.
+
+    Capability note: Kite has REST market data but NO WebSocket tick client
+    in this codebase (there is no brokers/kite_ws_client.py), so
+    PROVIDER_CAPABILITIES marks websocket=False and the dashboard reports
+    POLLING for Kite — matching how its data is actually delivered, rather
+    than claiming a live stream that doesn't exist."""
+
+    def list_expiries(self, underlying, exchange="NFO"):
+        from brokers.kite_client import list_expiries as _k_list_expiries
+
+        return _k_list_expiries(underlying, exchange=exchange)
+
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
+        from brokers.kite_client import get_atm_chain as _k_get_atm_chain
+
+        chain = _k_get_atm_chain(
+            underlying,
+            expiry_ddmmmyyyy,
+            strikes_around_atm,
+            exchange=exchange,
+        )
+        if chain is None:
+            return None
+        chain = dict(chain)
+        chain["expiry"] = expiry_ddmmmyyyy
+        return chain
+
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        from brokers.kite_client import find_option_token as _k_find_option_token
+
+        return _k_find_option_token(
+            underlying, expiry_ddmmmyyyy, strike, opt_type, exchange=exchange
+        )
+
+    def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
+        del mode
+        from brokers.kite_client import get_quotes as _k_get_quotes
+
+        if not symbol_token_pairs:
+            return {}
+        keys = [f"{exchange}:{tradingsymbol}" for tradingsymbol, _ in symbol_token_pairs]
+        raw = _k_get_quotes(keys)
+        return {
+            tradingsymbol: raw[key]
+            for (tradingsymbol, _), key in zip(symbol_token_pairs, keys)
+            if raw.get(key)
+        }
+
+    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        by_symbol = self.get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+        return {
+            str(token): by_symbol[tradingsymbol]
+            for tradingsymbol, token in symbol_token_pairs
+            if tradingsymbol in by_symbol
+        }
+
+    def get_spot_quote(self, underlying):
+        from brokers.kite_client import get_spot_quote as _k_get_spot_quote
+
+        return _k_get_spot_quote(underlying)
+
+    def get_fno_underlyings(self, force_refresh=False):
+        # Public ScripMaster universe (same source kite_client's instrument
+        # dump comes from, minus the broker session requirement).
+        from brokers.smartapi_instruments import (
+            get_fno_underlyings as _public_fno_underlyings,
+        )
+
+        return _public_fno_underlyings(refresh=force_refresh)
+
+    def index_tokens(self):
+        # Kite has no index token model — index quotes go through
+        # get_spot_quote() (see fetch_index_quotes_smartapi_sync()'s
+        # provider-aware branch for KITE/BREEZE).
+        return {}
+
+
+# ── ICICI Breeze provider ────────────────────────────────────────────────
+class BreezeMarketData:
+    """Adapter over brokers.breeze_market_data's module-level functions,
+    implementing the same MarketData Protocol. NOTE: this is a DIFFERENT
+    class from brokers.breeze_market_data's own BreezeMarketData — that one
+    works in Breeze's native DD-Mon-YYYY expiry convention; this one wraps
+    the module-level functions with the Protocol's documented SmartAPI-
+    format boundary (DDMMMYYYY), the same pattern ShoonyaMarketData draws
+    for its own DD-Mon-YYYY convention.
+
+    Capability note: Breeze has REST market data but NO WebSocket tick
+    client in this codebase (there is no brokers/breeze_ws_client.py), so
+    PROVIDER_CAPABILITIES marks websocket=False and the dashboard reports
+    POLLING for Breeze. BREEZE_API_SESSION expires daily and has no
+    automated refresh path (see config.py / .env), so provider_status()
+    reports SESSION_REQUIRED when it isn't populated."""
+
+    @staticmethod
+    def _to_dash(expiry):
+        """'31JUL2026' | '31-Jul-2026' | '2026-07-31' -> '31-Jul-2026'
+        (brokers.breeze_market_data's native expiry convention)."""
+        if not expiry:
+            return expiry
+        for fmt in ("%d-%b-%Y", "%d%b%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(str(expiry), fmt).strftime("%d-%b-%Y")
+            except ValueError:
+                continue
+        raise ValueError(f"Unsupported expiry format: {expiry!r}")
+
+    @staticmethod
+    def _to_ddmmmyyyy(expiry_dash):
+        """'31-Jul-2026' -> '31JUL2026' (upper-cased, matching the
+        Protocol's SmartAPI convention)."""
+        if not expiry_dash:
+            return expiry_dash
+        return (
+            datetime.strptime(str(expiry_dash), "%d-%b-%Y")
+            .strftime("%d%b%Y")
+            .upper()
+        )
+
+    def list_expiries(self, underlying, exchange="NFO"):
+        from brokers.breeze_market_data import list_expiries as _bz_list_expiries
+
+        return [
+            self._to_ddmmmyyyy(e)
+            for e in _bz_list_expiries(underlying, exchange=exchange)
+        ]
+
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
+        from brokers.breeze_market_data import get_atm_chain as _bz_get_atm_chain
+
+        chain = _bz_get_atm_chain(
+            underlying,
+            self._to_dash(expiry_ddmmmyyyy),
+            strikes_around_atm,
+            exchange=exchange,
+        )
+        if chain is None:
+            return None
+        chain = dict(chain)
+        chain["expiry"] = expiry_ddmmmyyyy
+        return chain
+
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        from brokers.breeze_market_data import (
+            find_option_token as _bz_find_option_token,
+        )
+
+        return _bz_find_option_token(
+            underlying,
+            self._to_dash(expiry_ddmmmyyyy),
+            strike,
+            opt_type,
+            exchange=exchange,
+        )
+
+    def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
+        from brokers.breeze_market_data import (
+            get_batch_quotes as _bz_get_batch_quotes,
+        )
+
+        return _bz_get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+
+    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        from brokers.breeze_market_data import (
+            get_batch_quotes_by_token as _bz_get_batch_quotes_by_token,
+        )
+
+        return _bz_get_batch_quotes_by_token(
+            exchange, symbol_token_pairs, mode=mode
+        )
+
+    def get_spot_quote(self, underlying):
+        from brokers.breeze_market_data import get_spot_quote as _bz_get_spot_quote
+
+        return _bz_get_spot_quote(underlying)
+
+    def get_fno_underlyings(self, force_refresh=False):
+        from brokers.breeze_market_data import (
+            get_fno_underlyings as _bz_get_fno_underlyings,
+        )
+
+        return _bz_get_fno_underlyings(force_refresh=force_refresh)
+
+    def index_tokens(self):
+        from brokers.breeze_market_data import index_tokens as _bz_index_tokens
+
+        return _bz_index_tokens()
+
+
+class KotakMarketData:
+    """Adapter over brokers.kotak_market_data's module-level functions,
+    implementing the same MarketData Protocol. Same pattern as
+    ShoonyaMarketData/BreezeMarketData: the module-level functions work in
+    the codebase's native DD-Mon-YYYY expiry convention; this wrapper
+    converts to/from the Protocol's documented SmartAPI-format boundary
+    (DDMMMYYYY).
+
+    Capability note: Kotak has REST market data but NO WebSocket tick
+    client in this codebase (there is no brokers/kotak_ws_client.py), so
+    PROVIDER_CAPABILITIES marks websocket=False and the dashboard reports
+    POLLING for Kotak. The SDK's two-step TOTP+MPIN login auto-runs from
+    KOTAK_TOTP_SECRET/KOTAK_MPIN on first use (see
+    brokers/kotak_client.py), so provider_status() reports UNAVAILABLE only
+    when those credentials are missing."""
+
+    @staticmethod
+    def _to_dash(expiry):
+        """'31JUL2026' | '31-Jul-2026' | '2026-07-31' -> '31-Jul-2026'
+        (brokers.kotak_market_data's native expiry convention)."""
+        if not expiry:
+            return expiry
+        for fmt in ("%d-%b-%Y", "%d%b%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(str(expiry), fmt).strftime("%d-%b-%Y")
+            except ValueError:
+                continue
+        raise ValueError(f"Unsupported expiry format: {expiry!r}")
+
+    @staticmethod
+    def _to_ddmmmyyyy(expiry_dash):
+        """'31-Jul-2026' -> '31JUL2026' (upper-cased, matching the
+        Protocol's SmartAPI convention)."""
+        if not expiry_dash:
+            return expiry_dash
+        return (
+            datetime.strptime(str(expiry_dash), "%d-%b-%Y")
+            .strftime("%d%b%Y")
+            .upper()
+        )
+
+    def list_expiries(self, underlying, exchange="NFO"):
+        from brokers.kotak_market_data import list_expiries as _kk_list_expiries
+
+        return [
+            self._to_ddmmmyyyy(e)
+            for e in _kk_list_expiries(underlying, exchange=exchange)
+        ]
+
+    def get_atm_chain(
+        self, underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"
+    ):
+        from brokers.kotak_market_data import get_atm_chain as _kk_get_atm_chain
+
+        chain = _kk_get_atm_chain(
+            underlying,
+            self._to_dash(expiry_ddmmmyyyy),
+            strikes_around_atm,
+            exchange=exchange,
+        )
+        if chain is None:
+            return None
+        chain = dict(chain)
+        chain["expiry"] = expiry_ddmmmyyyy
+        return chain
+
+    def find_option_token(
+        self, underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"
+    ):
+        from brokers.kotak_market_data import (
+            find_option_token as _kk_find_option_token,
+        )
+
+        return _kk_find_option_token(
+            underlying,
+            self._to_dash(expiry_ddmmmyyyy),
+            strike,
+            opt_type,
+            exchange=exchange,
+        )
+
+    def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
+        from brokers.kotak_market_data import (
+            get_batch_quotes as _kk_get_batch_quotes,
+        )
+
+        return _kk_get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
+
+    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+        from brokers.kotak_market_data import (
+            get_batch_quotes_by_token as _kk_get_batch_quotes_by_token,
+        )
+
+        return _kk_get_batch_quotes_by_token(
+            exchange, symbol_token_pairs, mode=mode
+        )
+
+    def get_spot_quote(self, underlying):
+        from brokers.kotak_market_data import get_spot_quote as _kk_get_spot_quote
+
+        return _kk_get_spot_quote(underlying)
+
+    def get_fno_underlyings(self, force_refresh=False):
+        from brokers.kotak_market_data import (
+            get_fno_underlyings as _kk_get_fno_underlyings,
+        )
+
+        return _kk_get_fno_underlyings(force_refresh=force_refresh)
+
+    def index_tokens(self):
+        from brokers.kotak_market_data import index_tokens as _kk_index_tokens
+
+        return _kk_index_tokens()
+
+
+def _safe_float(val) -> Optional[float]:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+# ── Provider registry + runtime switching ────────────────────────────────
+# Seven selectable market-data sources (see PROVIDER_CAPABILITIES). The
+# `market_data` singleton below is a stable facade that delegates to the
+# CURRENTLY ACTIVE provider, so set_active_provider() can switch sources at
+# runtime without any of the by-name imports elsewhere
+# (smartapi_pipeline_adapter.py, mTerminals_json.py) needing to be
+# re-executed — the one architectural requirement for the Dashboard's
+# DATA SOURCE dropdown to work without a server restart.
 _PROVIDERS = {
     "SMARTAPI": SmartApiMarketData,
     "UPSTOX": UpstoxMarketData,
     "SHOONYA": ShoonyaMarketData,
+    "KITE": KiteMarketData,
+    "BREEZE": BreezeMarketData,
+    "KOTAK": KotakMarketData,
+    "NSE_BSE": NseBseMarketData,
 }
+
+# Provider -> capability flags. `websocket`/`execution` reflect what THIS
+# codebase actually implements (verified against backend/brokers/): Kite,
+# Breeze and Kotak have REST market-data clients but no WebSocket tick
+# client, and NSE/BSE public API has neither. `execution: False` marks the
+# source as read-only — never usable as EXECUTION_BROKER (config.py
+# enforces this). Kotak's capability flags: its SDK supports order routing
+# (place_order) so execution: True is technically true, but no Kotak
+# execution adapter is wired into this codebase yet — keep execution: False
+# until one exists so a user can't select an execution broker that has no
+# order path (fail safe, same reasoning as the NSE_BSE read-only guard).
+PROVIDER_CAPABILITIES: dict[str, dict] = {
+    "SMARTAPI": {"snapshot": True, "websocket": True, "execution": True},
+    "UPSTOX": {"snapshot": True, "websocket": True, "execution": True},
+    "SHOONYA": {"snapshot": True, "websocket": True, "execution": True},
+    "KITE": {"snapshot": True, "websocket": False, "execution": True},
+    "BREEZE": {"snapshot": True, "websocket": False, "execution": True},
+    "KOTAK": {"snapshot": True, "websocket": False, "execution": False},
+    "NSE_BSE": {"snapshot": True, "websocket": False, "execution": False},
+}
+
+# Dashboard display names — one logical "NSE/BSE API" option; the backend
+# resolves the NSE vs BSE adapter from the selected symbol.
+PROVIDER_DISPLAY_NAMES: dict[str, str] = {
+    "SMARTAPI": "ANGEL ONE",
+    "UPSTOX": "UPSTOX",
+    "SHOONYA": "SHOONYA",
+    "KITE": "ZERODHA",
+    "BREEZE": "ICICI DIRECT",
+    "KOTAK": "KOTAK NEO",
+    "NSE_BSE": "NSE/BSE API",
+}
+
+PROVIDER_KEYS = tuple(PROVIDER_CAPABILITIES.keys())
+
+
+def provider_has_credentials(name: str) -> bool:
+    """Whether the given provider has usable credentials configured.
+    NSE/BSE public API needs none (it is the login-free fallback)."""
+    name = name.strip().upper()
+    s = _md_settings
+    if name == "NSE_BSE":
+        return True
+    if name == "SMARTAPI":
+        return bool(s.smartapi_key and s.smartapi_client_code)
+    if name == "UPSTOX":
+        return bool(s.upstox_access_token)
+    if name == "KITE":
+        return bool(s.kite_access_token)
+    if name == "SHOONYA":
+        return bool(s.shoonya_user_id and s.shoonya_password and s.shoonya_totp_secret)
+    if name == "BREEZE":
+        return bool(s.breeze_api_session)
+    if name == "KOTAK":
+        return bool(
+            s.kotak_consumer_key
+            and s.kotak_mobile
+            and s.kotak_ucc
+            and s.kotak_totp_secret
+            and s.kotak_mpin
+        )
+    return False
+
 
 _primary_name = (
     _md_settings.market_data_provider
@@ -627,12 +1243,106 @@ _primary_name = (
 _primary_instance = _PROVIDERS[_primary_name]()
 
 _fallback_name = _md_settings.market_data_fallback_provider
-if _fallback_name and _fallback_name in _PROVIDERS and _fallback_name != _primary_name:
-    market_data: MarketData = FallbackMarketData(
-        _primary_instance,
-        _PROVIDERS[_fallback_name](),
-        primary_name=_primary_name,
-        fallback_name=_fallback_name,
-    )
-else:
-    market_data: MarketData = _primary_instance
+
+
+def _build_instance(name: str):
+    """Build a fresh provider instance for `name`, optionally wrapped for
+    failover by MARKET_DATA_FALLBACK_PROVIDER (re-resolved from settings
+    each time, so a switch also re-evaluates the fallback wrapper)."""
+    primary = _PROVIDERS[name]()
+    if _fallback_name and _fallback_name in _PROVIDERS and _fallback_name != name:
+        return FallbackMarketData(
+            primary,
+            _PROVIDERS[_fallback_name](),
+            primary_name=name,
+            fallback_name=_fallback_name,
+        )
+    return primary
+
+
+# The currently active provider. Initialized from config at import time but
+# switchable at runtime via set_active_provider() (ws_server_live.py's
+# ?dataSource= handler). Kept in module-level state — not on the facade —
+# so get_active_provider()/provider_status() stay cheap and synchronous.
+_active_provider_name = _primary_name
+_active_provider_instance = _build_instance(_primary_name)
+
+
+class _SwitchingMarketData:
+    """Stable facade over the active provider instance. `market_data` binds
+    to THIS object at import time in smartapi_pipeline_adapter.py and
+    mTerminals_json.py; __getattr__ delegates every MarketData method to
+    whichever provider is active, so set_active_provider() swaps the source
+    everywhere without any module re-import."""
+
+    def __getattr__(self, name):
+        return getattr(_active_provider_instance, name)
+
+    def __repr__(self):
+        return f"<SwitchingMarketData active={_active_provider_name!r}>"
+
+
+market_data: MarketData = _SwitchingMarketData()
+
+
+def get_active_provider() -> str:
+    """Key of the currently active market-data provider (e.g. "NSE_BSE",
+    "UPSTOX"). Runtime-switchable — the single source of truth the option
+    chain pipeline and index-quote loops route on, replacing the frozen
+    settings.market_data_provider reads."""
+    return _active_provider_name
+
+
+def set_active_provider(name: str) -> None:
+    """Runtime provider switch. Raises ValueError for an unknown provider
+    key (frontend dropdown values must come from PROVIDER_KEYS)."""
+    global _active_provider_name, _active_provider_instance
+    name = name.strip().upper()
+    if name not in _PROVIDERS:
+        raise ValueError(
+            f"Unknown market-data provider {name!r}. Valid: {sorted(_PROVIDERS)}"
+        )
+    if name == _active_provider_name:
+        return
+    _active_provider_name = name
+    _active_provider_instance = _build_instance(name)
+    logger.info("[market_data] active provider switched to %s", name)
+
+
+def provider_status() -> list[dict]:
+    """Per-provider UI status for the Dashboard's DATA SOURCE picker.
+
+    Each entry: {"id", "label", "status", "active", "capabilities"} where
+    status is one of:
+      LIVE              — broker provider with creds AND a WebSocket feed
+                          client in this codebase (SMARTAPI/UPSTOX/SHOONYA)
+      POLLING           — snapshot/REST-only delivery (NSE/BSE always;
+                          KITE/BREEZE have no WS client). Expected mode, NOT
+                          an error — the dashboard must render it neutrally.
+      UNAVAILABLE       — broker provider with missing/expired credentials
+      SESSION_REQUIRED  — BREEZE's daily session token is not populated (it
+                          has no automated refresh; see .env)
+    """
+    out = []
+    for key in PROVIDER_KEYS:
+        caps = PROVIDER_CAPABILITIES[key]
+        if key == "NSE_BSE":
+            status = "POLLING"
+        elif key == "BREEZE" and not provider_has_credentials(key):
+            status = "SESSION_REQUIRED"
+        elif not provider_has_credentials(key):
+            status = "UNAVAILABLE"
+        elif caps.get("websocket"):
+            status = "LIVE"
+        else:
+            status = "POLLING"
+        out.append(
+            {
+                "id": key,
+                "label": PROVIDER_DISPLAY_NAMES[key],
+                "status": status,
+                "active": key == _active_provider_name,
+                "capabilities": dict(caps),
+            }
+        )
+    return out

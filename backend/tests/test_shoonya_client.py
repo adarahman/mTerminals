@@ -1,4 +1,5 @@
 import importlib
+import json
 
 import pytest
 
@@ -9,10 +10,10 @@ class FakeApi:
         self.place_calls = []
         self.orders = []
         self.positions = []
+        self.session_set = None
 
-    def login(self, **kwargs):
-        self.login_calls.append(kwargs)
-        return {"stat": "Ok", "susertoken": "token"}
+    def set_session(self, userid, password, susertoken):
+        self.session_set = (userid, password, susertoken)
 
     def get_order_book(self):
         return self.orders
@@ -37,6 +38,12 @@ class FakeApi:
         }
 
 
+class _FakeLoginResponse:
+    status_code = 200
+    headers = {"content-type": "application/json"}
+    text = '{"stat": "Ok", "susertoken": "token"}'
+
+
 @pytest.fixture
 def shoonya(monkeypatch):
     module = importlib.import_module("brokers.shoonya_client")
@@ -54,6 +61,19 @@ def shoonya(monkeypatch):
         object.__setattr__(module.settings, name, value)
     api = FakeApi()
     monkeypatch.setattr(module, "_session", module.ShoonyaSession(lambda: api))
+
+    import requests
+
+    recorded = {}
+
+    def fake_post(url, data, timeout=None):
+        recorded["url"] = url
+        recorded["data"] = data
+        return _FakeLoginResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(module, "_last_login_response", recorded, raising=False)
+
     yield module, api
     for name, value in originals.items():
         object.__setattr__(module.settings, name, value)
@@ -62,10 +82,12 @@ def shoonya(monkeypatch):
 def test_login_uses_totp_and_configured_credentials(shoonya):
     module, api = shoonya
     module._session.ensure_session()
-    call = api.login_calls[0]
-    assert call["userid"] == "USER"
-    assert call["vendor_code"] == "VENDOR"
-    assert call["twoFA"].isdigit() and len(call["twoFA"]) == 6
+    payload = json.loads(module._last_login_response["data"][6:])  # strip "jData="
+    assert payload["uid"] == "USER"
+    assert payload["vc"] == "VENDOR"
+    assert payload["factor2"].isdigit() and len(payload["factor2"]) == 6
+    # Successful auth seeds the SDK session so subsequent calls use the token.
+    assert api.session_set == ("USER", "PASS", "token")
 
 
 def test_place_order_translates_shape_and_uses_tag(shoonya):

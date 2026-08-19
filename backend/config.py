@@ -135,6 +135,49 @@ class Settings:
         default_factory=lambda: os.getenv("KITE_ACCESS_TOKEN")
     )
 
+    # -- ICICI Breeze credentials (brokers/breeze_client.py) --------------
+    # Breeze's API session has no TOTP/automated refresh path — it expires
+    # DAILY and must be re-pasted from the ICICI redirect URL into
+    # BREEZE_API_SESSION (see .env's BREEZE section). breeze_api_session
+    # drives both the market-data provider's availability (provider_status
+    # reports SESSION_REQUIRED when empty) and the client session itself.
+    breeze_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("BREEZE_API_KEY")
+    )
+    breeze_api_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("BREEZE_API_SECRET")
+    )
+    breeze_api_session: Optional[str] = field(
+        default_factory=lambda: os.getenv("BREEZE_API_SESSION") or None
+    )
+    breeze_product_type: str = field(
+        default_factory=lambda: os.getenv("BREEZE_PRODUCT_TYPE", "options").strip().lower()
+    )
+
+    # -- Kotak Neo credentials (brokers/kotak_client.py) ------------------
+    # Kotak's NEO Trade API v2 has no long-lived paste-in token (unlike
+    # Upstox/Kite): it uses a two-step TOTP+MPIN login. These fields let
+    # brokers/kotak_client.py auto-login the same way shoonya_client.py
+    # does — KOTAK_TOTP_SECRET is the base32 secret from the user's Kotak
+    # authenticator registration (pyotp generates the rotating TOTP from
+    # it), KOTAK_MPIN is the MPIN for the second step. KOTAK_CONSUMER_KEY
+    # is the trade-API token from the Kotak Neo app/web's "trade api card".
+    kotak_consumer_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("KOTAK_CONSUMER_KEY")
+    )
+    kotak_mobile: Optional[str] = field(
+        default_factory=lambda: os.getenv("KOTAK_MOBILE")
+    )
+    kotak_ucc: Optional[str] = field(
+        default_factory=lambda: os.getenv("KOTAK_UCC")
+    )
+    kotak_totp_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("KOTAK_TOTP_SECRET")
+    )
+    kotak_mpin: Optional[str] = field(
+        default_factory=lambda: os.getenv("KOTAK_MPIN")
+    )
+
     # -- Market-data provider selector -------------------------------------
     # Independent of execution_broker: which feed backs brokers/market_data.py's
     # `market_data` singleton (list_expiries/get_atm_chain/find_option_token/
@@ -241,3 +284,15 @@ class Settings:
 
 
 settings = Settings()
+
+# ── Execution-broker validation ──────────────────────────────────────────
+# NSE/BSE Public API is a READ-ONLY market-data source (see
+# brokers/market_data.py's NseBseMarketData) — it can never route orders.
+# Fail fast at startup rather than letting it silently fall through to a
+# broker adapter and place/read orders against nothing.
+if settings.execution_broker == "NSE_BSE":
+    raise ValueError(
+        "EXECUTION_BROKER=NSE_BSE is invalid: the NSE/BSE Public API is a "
+        "market-data source only and cannot execute orders. Choose a broker "
+        "(SMARTAPI, UPSTOX, KITE, SHOONYA, BREEZE) for execution."
+    )

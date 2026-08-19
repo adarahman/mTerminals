@@ -338,6 +338,11 @@ class EngineResult:
     fut_oi: float = 0.0
     fut_oi_chg: float = 0.0
     fut_oi_chg_pct: float = 0.0
+    # Futures day change / % change vs prev close (df_fut["Change"] /
+    # df_fut["PctChange"]) — for the top-bar FUT pill, which replaces the
+    # old VIX pill slot (see market-context.js).
+    fut_change: float = 0.0
+    fut_chg_pct: float = 0.0
 
     def to_ctx_dict(self) -> dict:
         """Adapter so existing render_*.py functions written for a plain
@@ -382,6 +387,8 @@ class EngineResult:
             "fut_oi": self.fut_oi,
             "fut_oi_chg": self.fut_oi_chg,
             "fut_oi_chg_pct": self.fut_oi_chg_pct,
+            "fut_change": self.fut_change,
+            "fut_chg_pct": self.fut_chg_pct,
         }
 
 
@@ -490,6 +497,30 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     futures_ltp = df_fut["LTP"].iloc[0] if df_fut is not None and not df_fut.empty and "LTP" in df_fut.columns else spot
     basis = futures_ltp - spot
     fut_signal = "Long Buildup" if basis > 0 else "Short Buildup"
+
+    # ── futures day change / % change (top-bar FUT pill) ────────────────
+    # df_fut carries Change/PctChange for both the SmartAPI path
+    # (fetch_futures_wide) and the public NSE path (fetch_nifty_futures).
+    # BSE futures only expose "Change" (NetChange), so PctChange falls back
+    # to computing from change / prev close when absent.
+    fut_change = (
+        float(df_fut["Change"].iloc[0])
+        if df_fut is not None
+        and not df_fut.empty
+        and "Change" in df_fut.columns
+        and df_fut["Change"].iloc[0] is not None
+        else 0.0
+    )
+    fut_chg_pct = (
+        float(df_fut["PctChange"].iloc[0])
+        if df_fut is not None
+        and not df_fut.empty
+        and "PctChange" in df_fut.columns
+        and df_fut["PctChange"].iloc[0] is not None
+        else 0.0
+    )
+    if not fut_chg_pct and fut_change and futures_ltp and futures_ltp != fut_change:
+        fut_chg_pct = round(fut_change / (futures_ltp - fut_change) * 100.0, 2)
 
     # ── futures OI session tracking (Market Regime input) ─────────────────
     # df_fut is None for the extra NEAR/MONTHLY expiry bundles built via
@@ -646,4 +677,5 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
         capital_metrics=capital_metrics,
         market_regime=market_regime,
         fut_oi=fut_oi, fut_oi_chg=fut_oi_chg, fut_oi_chg_pct=fut_oi_chg_pct,
+        fut_change=fut_change, fut_chg_pct=fut_chg_pct,
     )

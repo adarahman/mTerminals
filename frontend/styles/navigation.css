@@ -61,7 +61,24 @@
 
 .idx-pill-chg.na{color:var(--text-tertiary);font-weight:500;}
 
-.idx-pill-vix{border-color:rgba(255,212,59,0.35);}
+.idx-pill-fut{
+  border-color:rgba(255,212,59,0.35);
+  padding:6px 11px;
+  flex-direction:column;
+  align-items:stretch;
+  gap:3px;
+  height:auto;
+  min-width:112px;
+  border-radius:14px;
+  cursor:default;
+}
+.idx-pill-fut:hover{transform:none;}
+.idx-pill-fut-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.idx-pill-fut .idx-pill-val{min-width:0;}
+.idx-pill-fut .idx-pill-fut-meta{justify-content:flex-start;}
+.idx-pill-fut .futures-expiry-select{padding:0 12px 0 0;font-size:var(--fs-2xs);text-align:center;margin-left:auto;background:transparent;border:none;color:var(--text-tertiary);}
+.idx-pill-fut .idx-pill-chg{justify-content:flex-start;font-size:var(--fs-2xs);min-width:0;flex:1;}
+.idx-pill-fut .idx-pill-basis{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:650;color:var(--text-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap;}
 
 /* ── TOP BAR ── */
 
@@ -82,17 +99,8 @@
   background:rgba(22,24,29,0.95);
   box-shadow:0 2px 12px rgba(0,0,0,0.30);
 }
-
-.active-broker-label{
-  color:var(--text-tertiary);
-  font-family:var(--font-display);
-  font-size:8px;
-  font-weight:600;
-  letter-spacing:.06em;
-  line-height:1;
-  text-transform:uppercase;
-  white-space:nowrap;
-}
+.top-bar-left{grid-area:left;}
+.expiry-strip{grid-area:strip;align-self:center;}
 
 /* ── STRATEGY DROPDOWNS ── */
 
@@ -109,18 +117,17 @@
 /* ── EXPIRY DROPDOWN STRIP ── */
 
 .expiry-strip{
-  display:grid;
-  grid-template-columns:78px 1px 160px 1px minmax(150px,1fr) 1px 62px;
-  align-items:center;gap:var(--space-2);
+  display:flex;
+  align-items:center;
+  gap:var(--space-2);
   background:var(--bg-2);
   border:1px solid var(--border);
   border-radius:20px;
   overflow:visible;
   box-sizing:border-box;
-  flex:0 0 500px;
-  width:500px;
   min-height:58px;
   padding:3px 7px 3px 3px;
+  flex-wrap:nowrap;
 }
 
 .expiry-pill{
@@ -151,21 +158,13 @@
 .feed-status-pill[data-status="recovering"],
 .feed-status-pill[data-status="connecting"]{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:var(--warn-dim);}
 .feed-status-pill[data-status="disconnected"]{color:var(--neg);border-color:color-mix(in srgb,var(--neg) 45%,var(--border));background:var(--neg-dim);}
-.feed-status-reason{
-  width:120px;
-  min-height:12px;
-  max-width:120px;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  color:var(--txt3);
-  font-size:10px;
-}
-.feed-status-reason[hidden]{display:block !important;visibility:hidden;}
 
 .dte-val{color:var(--warn);}
-.expiry-value-row{display:flex;align-items:center;gap:5px;white-space:nowrap;}
+.expiry-row{display:flex;align-items:baseline;gap:6px;width:100%;white-space:nowrap;}
+.expiry-row .expiry-pill-label{text-align:left;}
 .expiry-dte{font-family:var(--font-mono);font-size:var(--fs-sm);font-weight:700;color:var(--warn);}
+.expiry-row #expiry-slot{display:inline-flex;min-width:0;}
+.expiry-row #expiry-slot #expirySelect{max-width:150px;overflow:hidden;text-overflow:ellipsis;}
 
 /* Expiry dropdown, relocated from the old horizontal .sec-nav into the
    top-bar's DTE pill slot (see #expirySelect in DashboardPro.html — it's
@@ -262,6 +261,44 @@
   padding:4px 18px 4px 8px;
   background-position:right 8px center;
 }
+
+/* Data-source (broker) dropdown — lives BELOW the feed status pill in
+   the feed-health-pill (see renderTopBarHtml's feed-source-row). Content-
+   sized and centred so it lines up under the centred status pill above;
+   it never fills the whole grid cell edge-to-edge. */
+.data-source-select{max-width:100%;}
+
+.feed-health-pill{min-width:150px;}
+.feed-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;width:100%;white-space:nowrap;}
+.feed-row .expiry-pill-label{text-align:left;}
+.feed-row .data-source-select{text-align:left;width:100%;padding:2px 12px 2px 2px;background-position:right center;}
+.feed-row .data-source-status-pill{text-align:right;}
+
+/* Data-source status readout (POLLING/LIVE/UNAVAILABLE/SESSION_REQUIRED)
+   under the dropdown — the SMALLEST text on the bar, set in the same tiny
+   display-face uppercase style the old execution-broker label used
+   (8px font-display, .06em letterspacing): a micro hint only, not a
+   fenced pill. Status accent color still follows the [data-status] rules
+   below; this override strips the fence and re-sizes the type. */
+.feed-row .data-source-status-pill[data-status]{border:0;background:transparent;padding:0;font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.06em;line-height:1;text-transform:uppercase;white-space:nowrap;}
+
+/* Spot price block — the big price with its change + %chg rendered as
+   small plain text tokens directly below it (reorganized per the top-bar
+   spec; replaces the old inline ▲% badge next to the price). Order is
+   change (points) first, %chg to its right. */
+.spot-block{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
+.spot-change-row{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+.chg-token{font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;}
+.chg-pos{color:var(--pos);}
+.chg-neg{color:var(--neg);}
+
+/* Data-source status pill — POLLING (ZERODHA/ICICI DIRECT/KOTAK NEO/NSE_BSE have no
+   websocket client; the expected mode for them, not an error) gets the
+   info accent; UNAVAILABLE / SESSION_REQUIRED get the negative accent.
+   LIVE reuses the .feed-status-pill[data-status="live"] rule above. */
+.feed-status-pill[data-status="polling"]{color:var(--info);border-color:color-mix(in srgb,var(--info) 45%,var(--border));background:var(--info-dim);}
+.feed-status-pill[data-status="unavailable"],
+.feed-status-pill[data-status="session_required"]{color:var(--neg);border-color:color-mix(in srgb,var(--neg) 45%,var(--border));background:var(--neg-dim);}
 
 .price-source-tag{font-size:var(--fs-xs);font-weight:700;color:var(--text-tertiary);vertical-align:middle;}
 .futures-reference{white-space:nowrap;}

@@ -34,6 +34,7 @@ const patchedRow = deltaStore.state.chain[0];
 
 const checks = [
   ['ticker rows have stable keys', marketContext.includes('data-index-symbol="VIX"') && marketContext.includes('data-index-symbol="${backendSymbol}"')],
+  ['symbol switch encodes once via URLSearchParams', marketContext.includes("params.set('symbol', sym)") && !marketContext.includes("params.set('symbol', encodeURIComponent(")],
   ['routine ticker updates patch fields', marketContext.includes('function patchIndexTicker(d)') && marketContext.includes("value.textContent = fmtI(idx['Last Price'])")],
   ['ticker rebuild is structural only', marketContext.includes("expected.join('|') !== existing.join('|')")],
   ['live renderer avoids ticker outerHTML replacement', renderer.includes('patchIndexTicker(d)') && !renderer.includes('tickerEl.outerHTML = html')],
