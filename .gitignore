@@ -67,3 +67,6 @@ runtime/**
 /kite_access_token copy.py
 /breeze_access_token.py
 /test_connection.py
+
+# Shoonya instrument-master downloads (refreshed manually from api.shoonya.com)
+/*_symbols.txt
