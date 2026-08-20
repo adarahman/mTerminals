@@ -11,7 +11,7 @@ between this module and oi/oi_analysis.py, and only one is a straight
 constant fix.
 
 1. ANNUAL_RISK_FREE_RATE was 0.065 here vs. 0.07 in oi/oi_analysis.py and
-   smartapi_pipeline_adapter.py's own default — kept at 0.07 (the value
+   broker_pipeline.py's own default — kept at 0.07 (the value
    two of the three independent copies already agreed on). Every live
    call site imports this constant from here, so this one change
    propagates everywhere.

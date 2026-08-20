@@ -58,6 +58,21 @@ def test_session_generated_with_configured_credentials(breeze):
     assert call["session_token"] == "SESSION"
 
 
+def test_failed_session_generation_is_not_retried_with_the_same_token(breeze):
+    module, api = breeze
+
+    def fail_session(**kwargs):
+        api.session_calls.append(kwargs)
+        raise RuntimeError("Session key is expired")
+
+    api.generate_session = fail_session
+    with pytest.raises(module.BrokerError, match="Refresh BREEZE_API_SESSION"):
+        module._session.ensure_session()
+    with pytest.raises(module.BrokerError, match="Session key is expired"):
+        module._session.ensure_session()
+    assert len(api.session_calls) == 1
+
+
 def test_resolve_option_contract_returns_synthetic_key(breeze):
     module, _ = breeze
     resolved = module.resolve_option_contract("NIFTY", "28-Aug-2025", 24800, "CE")

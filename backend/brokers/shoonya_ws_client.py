@@ -8,7 +8,7 @@ brokers/upstox_ws_client.py.
 Normalizes every incoming tick into the SAME wire schema those two
 already produce (token, last_traded_price, open_interest,
 volume_trade_for_the_day, closed_price, average_traded_price) so it
-feeds straight into smartapi_feed_adapter.TickAggregator with zero
+feeds straight into tick_pipeline.TickAggregator with zero
 changes to that class — same reasoning upstox_ws_client.py's module
 docstring gives for its own normalization.
 

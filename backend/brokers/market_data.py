@@ -1,8 +1,8 @@
 """Read-side broker interface — market data only.
 
 Scope note: this covers only the 7 functions actually called by
-smartapi_pipeline_adapter.py, mTerminals_json.py, and ws_server_live.py
-today (verified by AST, not grep — smartapi_feed_adapter.py's apparent
+broker_pipeline.py, mTerminals_json.py, and ws_server_live.py
+today (verified by AST, not grep — tick_pipeline.py's apparent
 calls to get_atm_chain/list_expiries turned out to be inside a docstring,
 not real code).
 
@@ -690,7 +690,7 @@ class NseBseMarketData:
 
             return _generate_bse_expiry_series(underlying)
         # NSE: public daily ScripMaster (cached, no broker login needed).
-        from smartapi_pipeline_adapter import get_available_expiries
+        from broker_pipeline import get_available_expiries
 
         return get_available_expiries(underlying, exchange=exchange)
 
@@ -1161,7 +1161,7 @@ def _safe_float(val) -> Optional[float]:
 # `market_data` singleton below is a stable facade that delegates to the
 # CURRENTLY ACTIVE provider, so set_active_provider() can switch sources at
 # runtime without any of the by-name imports elsewhere
-# (smartapi_pipeline_adapter.py, mTerminals_json.py) needing to be
+# (broker_pipeline.py, mTerminals_json.py) needing to be
 # re-executed — the one architectural requirement for the Dashboard's
 # DATA SOURCE dropdown to work without a server restart.
 _PROVIDERS = {
@@ -1272,7 +1272,7 @@ _active_provider_instance = _build_instance(_primary_name)
 
 class _SwitchingMarketData:
     """Stable facade over the active provider instance. `market_data` binds
-    to THIS object at import time in smartapi_pipeline_adapter.py and
+    to THIS object at import time in broker_pipeline.py and
     mTerminals_json.py; __getattr__ delegates every MarketData method to
     whichever provider is active, so set_active_provider() swaps the source
     everywhere without any module re-import."""

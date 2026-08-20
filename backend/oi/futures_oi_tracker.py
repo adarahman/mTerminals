@@ -3,13 +3,13 @@ oi/futures_oi_tracker.py
 -------------------------
 Session-baseline tracker for FUTURES open interest, so callers can get a
 true day-over-day ΔFutOI (not a one-tick delta) the same way
-smartapi_feed_adapter.TickAggregator._session_open_oi does for option-leg
+tick_pipeline.TickAggregator._session_open_oi does for option-leg
 OI. This is the input Market Regime (Price vs Futures OI) needs — engine.py
 previously only had a single point-in-time futures OI snapshot per tick,
 with nothing to diff it against.
 
 Why this isn't just another field on TickAggregator: futures aren't part
-of the option-chain SmartAPI WS subscription (see smartapi_feed_adapter.py's
+of the option-chain SmartAPI WS subscription (see tick_pipeline.py's
 docstring — that class's token_meta is built from get_atm_chain()'s CE/PE/
 INDEX rows only). Futures OI arrives via the separate REST poll
 (smartapi_pipeline_adapter.fetch_futures_wide(), called once per pipeline

@@ -198,7 +198,7 @@ PRICE_SOURCE = "EQ"
 
 # Which monthly futures contract PRICE_SOURCE="FUT" resolves to —
 # "NEAR" (current month, default), "NEXT", or "FAR". See
-# fetch_futures_wide()'s docstring (smartapi_pipeline_adapter.py): this
+# fetch_futures_wide()'s docstring (broker_pipeline.py): this
 # used to silently pass the options chain's own EXPIRY (often weekly)
 # as the futures expiry filter, which only ever matched on the monthly
 # expiry week and returned an empty futures fetch every other week —

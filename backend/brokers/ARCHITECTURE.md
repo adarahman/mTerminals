@@ -47,8 +47,8 @@ not be confused with each other.
 
 ## Compatibility names to avoid in new code
 
-- `upstox_feed_adapter.py` and `smartapi_feed_adapter.py` remain compatible
-  import paths; new code imports `TickAggregator` from `tick_pipeline.py`.
+- `smartapi_feed_adapter.py` remains a compatible import path; new code
+  imports `TickAggregator` from `tick_pipeline.py`.
 - `smartapi_pipeline_adapter.py` remains the compatible implementation path;
   new code imports its broker-neutral API from `broker_pipeline.py`.
 - `market_api.py` is the public NSE/BSE source, not the broker-provider

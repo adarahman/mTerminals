@@ -44,6 +44,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 
 try:
@@ -57,6 +58,21 @@ from brokers.breeze_client import _session, _unwrap, _iso_expiry, BrokerError
 from brokers.breeze_client import resolve_option_contract as _cache_contract
 
 logger = logging.getLogger(__name__)
+
+_WARNING_COOLDOWN_S = 60.0
+_last_warning_at: dict[str, float] = {}
+_warning_lock = threading.Lock()
+
+
+def _warning_once(key: str, message: str, *args) -> None:
+    """Keep a dead daily Breeze session from filling the live-server log."""
+    now = time.monotonic()
+    with _warning_lock:
+        last = _last_warning_at.get(key)
+        if last is not None and now - last < _WARNING_COOLDOWN_S:
+            return
+        _last_warning_at[key] = now
+    logger.warning(message, *args)
 
 # Same physical strike spacing SmartAPI's STRIKE_INTERVALS uses — kept as
 # an independent copy rather than importing brokers.smartapi_client (that
@@ -120,7 +136,13 @@ def resolve_stock_code(underlying: str, exchange: str = "NSE") -> str | None:
     try:
         result = _session.api.get_names(exchange, underlying)
     except Exception as exc:
-        logger.warning("[breeze_market_data] get_names(%s, %s) failed: %s", exchange, underlying, exc)
+        _warning_once(
+            "get_names",
+            "[breeze_market_data] get_names(%s, %s) failed: %s",
+            exchange,
+            underlying,
+            exc,
+        )
         return None
     code = None
     if isinstance(result, dict):
@@ -205,7 +227,12 @@ def get_spot_quote(underlying: str):
         # breeze_connect raises a bare Exception (not BrokerError) on a
         # 503/rate-limit response — see get_batch_quotes()'s identical fix
         # for why the narrower except was missing this case.
-        logger.warning("[breeze_market_data] get_spot_quote(%s) failed: %s", underlying, exc)
+        _warning_once(
+            "get_spot_quote",
+            "[breeze_market_data] get_spot_quote(%s) failed: %s",
+            underlying,
+            exc,
+        )
         return None
     row = rows[0] if isinstance(rows, list) and rows else (rows if isinstance(rows, dict) else None)
     if not row:
@@ -361,7 +388,7 @@ def index_tokens():
     """Shaped like SmartApiMarketData.index_tokens(), but 'token' here is
     Breeze's stock_code (a string), not a numeric SmartAPI instrument
     token — callers that treat this dict as opaque and pass 'token'
-    straight through to get_batch_quotes() (as smartapi_pipeline_adapter.py
+    straight through to get_batch_quotes() (as broker_pipeline.py
     does) still work; callers that assume it's numeric will not."""
     return {
         "NIFTY": {"token": "NIFTY", "exchange": "NSE"},

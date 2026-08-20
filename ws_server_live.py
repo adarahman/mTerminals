@@ -87,7 +87,7 @@ if not _NO_SMARTAPI_REQUESTED:
     from brokers.smartapi_client import INDEX_TOKENS as _SMARTAPI_INDEX_TOKENS
     from brokers.smartapi_history import get_candle_data, get_index_candles
     from brokers.smartapi_ws_client import EXCHANGE_TYPE, SmartTickStream
-    from smartapi_feed_adapter import TickAggregator
+    from tick_pipeline import TickAggregator
 else:
     # Do not even import the broker modules: importing them initializes the
     # SDK and instrument master. Any accidentally reached broker-only path
@@ -426,7 +426,7 @@ _BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
 
 # VIX isn't in INDEX_TOKENS (auto-built from ScripMaster rows where
 # instrumenttype == 'AMXIDX' — VIX doesn't carry that type), so it's
-# pinned manually, same as smartapi_pipeline_adapter.py's _VIX_TOKEN.
+# pinned manually, same as broker_pipeline.py's _VIX_TOKEN.
 # Re-verify against a fresh ScripMaster dump if quotes ever go stale/empty;
 # nothing here will warn you if Angel reassigns the token.
 _VIX_TRADINGSYMBOL = "India VIX"  # SmartAPI's own tradingsymbol string
@@ -1807,13 +1807,13 @@ _bridge_futures_cache = {"quote": None, "fetchedAt": 0.0}
 
 
 def _fetch_bridge_futures_sync():
-    """Blocking — run via asyncio.to_thread. Reuses smartapi_pipeline_adapter's
+    """Blocking — run via asyncio.to_thread. Reuses the broker-neutral
     already-correct REST-based futures LTP (fetch_futures_wide), rather than
     the WebSocket TickAggregator's futLtp/futVwap placeholder fields, which
     are never actually emitted (see the no-op branch in _on_smartapi_message)."""
     try:
         if USE_SMARTAPI:
-            from smartapi_pipeline_adapter import fetch_futures_wide
+            from broker_pipeline import fetch_futures_wide
 
             df = fetch_futures_wide(SYMBOL)
         else:

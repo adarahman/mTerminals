@@ -93,10 +93,19 @@ def _default_api_factory():
 
 
 class BreezeSession:
+    """Lazily authenticate one Breeze SDK client.
+
+    A Breeze session token is static process configuration and expires daily.
+    Retrying ``generate_session`` with the same rejected token for every
+    market-data call only creates request/log storms; cache that terminal
+    failure until the process is restarted with a refreshed token.
+    """
+
     def __init__(self, api_factory=None):
         self._api_factory = api_factory or _default_api_factory
         self._api = None
         self._lock = threading.RLock()
+        self._session_error: BrokerError | None = None
 
     @property
     def api(self):
@@ -107,6 +116,8 @@ class BreezeSession:
         with self._lock:
             if self._api is not None:
                 return self._api
+            if self._session_error is not None:
+                raise self._session_error
             required = {
                 "BREEZE_API_KEY": settings.breeze_api_key,
                 "BREEZE_API_SECRET": settings.breeze_api_secret,
@@ -126,7 +137,11 @@ class BreezeSession:
                     session_token=settings.breeze_api_session,
                 )
             except Exception as exc:
-                raise BrokerError(f"Breeze session generation failed: {exc}") from exc
+                self._session_error = BrokerError(
+                    "Breeze session generation failed: "
+                    f"{exc}. Refresh BREEZE_API_SESSION and restart the service."
+                )
+                raise self._session_error from exc
             self._api = api
             logger.info("[breeze_client] Session generated")
             return api

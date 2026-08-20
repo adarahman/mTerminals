@@ -9,10 +9,9 @@ normalizes every incoming tick into the SAME wire schema
 smartapi_ws_client.py's SmartTickStream already produces (token,
 last_traded_price, open_interest, volume_trade_for_the_day,
 closed_price, average_traded_price). That lets it feed straight into
-smartapi_feed_adapter.TickAggregator with ZERO changes to that class —
-see upstox_feed_adapter.py, which just re-exports TickAggregator as-is
-rather than reimplementing per-strike buffering/DOI/volume-delta logic
-that has nothing broker-specific about it.
+tick_pipeline.TickAggregator with ZERO changes to that class —
+it deliberately reuses the shared per-strike buffering, DOI, and
+volume-delta logic rather than reimplementing it here.
 
 Protobuf decoding is handled internally by the official SDK
 (MarketDataStreamerV3) — this module never touches raw protobuf bytes
