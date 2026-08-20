@@ -121,7 +121,32 @@ def test_config_rejects_nse_bse_as_execution_broker(tmp_path):
     )
     assert result.returncode != 0
     assert "ValueError" in result.stderr
-    assert "market-data source only" in result.stderr
+    assert "market-data-only" in result.stderr
+
+
+@pytest.mark.parametrize("broker", ["KOTAK", "UNKNOWN"])
+def test_config_rejects_non_execution_brokers(tmp_path, broker):
+    """Only brokers with a live order adapter may be selected for execution."""
+    import shutil
+
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    shutil.copy(BACKEND / "config.py", backend / "config.py")
+    shutil.copy(BACKEND / "paths.py", backend / "paths.py")
+
+    env = dict(os.environ)
+    env["EXECUTION_BROKER"] = broker
+    probe = f"import sys; sys.path.insert(0, {str(backend)!r}); import config"
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=env,
+    )
+    assert result.returncode != 0
+    assert "configured execution broker" in result.stderr
 
 
 # ── 3. Symbol -> exchange routing ────────────────────────────────────────
@@ -145,6 +170,48 @@ def test_expiry_dash_normalization():
 def test_nse_bse_needs_no_credentials():
     # The login-free fallback: usable with an empty .env / no broker tokens.
     assert md.provider_has_credentials("NSE_BSE") is True
+
+
+def test_upstox_spot_quote_is_a_module_function_not_an_adapter_method(monkeypatch):
+    """Provider switching must be able to request an Upstox index spot."""
+    from brokers import upstox_client
+
+    requested = []
+
+    def fake_quotes(instrument_key):
+        requested.append(instrument_key)
+        return {
+            instrument_key: {
+                "last_price": 25000.0,
+                "ohlc": {"open": 24900.0, "high": 25100.0, "low": 24850.0, "close": 24950.0},
+            }
+        }
+
+    monkeypatch.setattr(upstox_client, "get_quotes", fake_quotes)
+    quote = upstox_client.get_spot_quote("NIFTY")
+
+    assert requested == [upstox_client.INDEX_KEYS["NIFTY"]]
+    assert quote["last_price"] == 25000.0
+
+
+def test_connection_boundary_normalizes_broker_healthcheck(monkeypatch):
+    from brokers import connection
+
+    monkeypatch.setitem(connection._CHECKS, "TEST", lambda: (False, "service unavailable"))
+    status = connection.check_connection("test")
+
+    assert status.provider == "TEST"
+    assert status.ready is False
+    assert status.error == "service unavailable"
+
+
+def test_execution_adapter_registry_loads_breeze_without_sdk_session():
+    from brokers.connection import get_execution_adapter
+
+    adapter = get_execution_adapter("BREEZE")
+
+    assert adapter.__name__ == "brokers.breeze_client"
+    assert callable(adapter.place_order)
 
 
 # ── 3b. Tolerant symbol-name matching (pick a symbol by full company name) ─

@@ -1066,16 +1066,37 @@ def fetch_all_pills_and_vix_batched():
 
 
 def fetch_vix_smartapi() -> tuple[float | None, float]:
-    """Now reads from _BATCH_CACHE (populated by
-    fetch_all_pills_and_vix_batched()) instead of its own ltpData call."""
+    """Return VIX from the active broker, with public NSE fallback.
+
+    India VIX is not consistently exposed by every broker's instrument
+    universe (notably some polling-only providers). A missing broker row must
+    not turn into the engine's synthetic/default volatility when NSE's public
+    all-indices endpoint is still available, so fall back only for a missing
+    or unusable cached quote.
+    """
     d = _BATCH_CACHE.get(_VIX_TRADINGSYMBOL)
-    if not d:
-        logger.warning("VIX missing from batch cache")
-        return None, 0.0
-    ltp = safe_float(d.get("ltp"))
-    close = safe_float(d.get("close"))
-    chg_pct = round((ltp - close) / close * 100.0, 2) if close else 0.0
-    return (ltp if ltp else None), chg_pct
+    ltp = safe_float(d.get("ltp")) if d else None
+    if ltp:
+        close = safe_float(d.get("close"))
+        chg_pct = round((ltp - close) / close * 100.0, 2) if close else 0.0
+        return ltp, chg_pct
+
+    try:
+        from market_api import get_unified_market_data
+
+        public_vix, public_change, _ = get_unified_market_data()
+        public_vix = safe_float(public_vix)
+        if public_vix:
+            _throttled_warning(
+                "vix:public-fallback",
+                "VIX missing from broker quote; using public NSE VIX fallback",
+            )
+            return public_vix, safe_float(public_change) or 0.0
+    except Exception as exc:
+        _throttled_warning("vix:public-fallback", f"Public NSE VIX fallback failed: {exc}")
+
+    _throttled_warning("vix:missing", "VIX unavailable from broker and public NSE fallback")
+    return None, 0.0
 
 
 def _index_quote_to_ticker_entry(symbol: str, quote: dict | None) -> dict | None:

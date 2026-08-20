@@ -15,9 +15,27 @@ Requires Python ≥3.10.
 
 ## Configuration
 
-Broker credentials are read from environment variables (via `.env`,
-loaded by `brokers/smartapi_client.py` on import). Create a `.env` file
-in the project root:
+Broker credentials and routing are read from `.env` by the centralized
+`config.py`. Start with `.env.brokers.example`, then fill in credentials for
+only the brokers you intend to use. Keep the three routing roles explicit:
+
+```bash
+# Orders and account state: SMARTAPI | UPSTOX | KITE | SHOONYA | BREEZE
+EXECUTION_BROKER=SMARTAPI
+
+# Option-chain snapshots: SMARTAPI | UPSTOX | KITE | SHOONYA | BREEZE | KOTAK | NSE_BSE
+MARKET_DATA_PROVIDER=SMARTAPI
+
+# Fast ticks: SMARTAPI | UPSTOX | SHOONYA (omit when unavailable)
+LIVE_FEED_PROVIDER=SMARTAPI
+```
+
+`NSE_BSE` and `KOTAK` are snapshot providers only in this build and are
+rejected as `EXECUTION_BROKER` values. Kite and Breeze support order routing
+but use polling for market data because this project has no tick-stream client
+for them.
+
+For SmartAPI, add:
 
 ```bash
 SMARTAPI_KEY=your_api_key
@@ -40,6 +58,9 @@ Live execution remains subject to `LIVE_TRADING_ENABLED` and the kill switch.
 
 `.env` is gitignored — never commit real credentials. See `paths.py` for
 other path/cache configuration.
+
+For the execution, REST snapshot, and WebSocket-tick paths—and the canonical
+module to use for each—see [brokers/ARCHITECTURE.md](brokers/ARCHITECTURE.md).
 
 ## Layout
 

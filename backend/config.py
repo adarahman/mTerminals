@@ -286,13 +286,17 @@ class Settings:
 settings = Settings()
 
 # ── Execution-broker validation ──────────────────────────────────────────
-# NSE/BSE Public API is a READ-ONLY market-data source (see
-# brokers/market_data.py's NseBseMarketData) — it can never route orders.
-# Fail fast at startup rather than letting it silently fall through to a
-# broker adapter and place/read orders against nothing.
-if settings.execution_broker == "NSE_BSE":
+# Keep this registry deliberately separate from the market-data registry:
+# KOTAK and NSE/BSE can provide snapshots, but neither has an execution path
+# wired into ws_server_live.py.  Validating the actual order-routing surface
+# at startup prevents a configuration typo (or a data-only provider) from
+# failing much later, after the dashboard has already booted.
+EXECUTION_BROKERS = frozenset({"SMARTAPI", "UPSTOX", "KITE", "SHOONYA", "BREEZE"})
+
+if settings.execution_broker not in EXECUTION_BROKERS:
     raise ValueError(
-        "EXECUTION_BROKER=NSE_BSE is invalid: the NSE/BSE Public API is a "
-        "market-data source only and cannot execute orders. Choose a broker "
-        "(SMARTAPI, UPSTOX, KITE, SHOONYA, BREEZE) for execution."
+        f"EXECUTION_BROKER={settings.execution_broker!r} is invalid. "
+        "Choose a configured execution broker: "
+        + ", ".join(sorted(EXECUTION_BROKERS))
+        + ". NSE_BSE and KOTAK are market-data-only in this build."
     )

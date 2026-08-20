@@ -74,80 +74,16 @@ if not _NO_SMARTAPI_REQUESTED:
         set_active_provider as _md_set_active_provider,
     )
 
-    if _broker_settings.execution_broker == "SHOONYA":
-        from brokers.shoonya_client import (
-            get_funds as smartapi_get_funds,
-        )
-        from brokers.shoonya_client import (
-            get_order_book as smartapi_get_order_book,
-        )
-        from brokers.shoonya_client import (
-            get_positions as smartapi_get_positions,
-        )
-        from brokers.shoonya_client import (
-            place_order as smartapi_place_order,
-        )
-        from brokers.shoonya_client import (
-            resolve_option_contract as _shoonya_resolve_option_contract,
-        )
-    elif _broker_settings.execution_broker == "SMARTAPI":
-        from brokers.smartapi_client import (
-            get_funds as smartapi_get_funds,
-        )
-        from brokers.smartapi_client import (
-            get_order_book as smartapi_get_order_book,
-        )
-        from brokers.smartapi_client import (
-            get_positions as smartapi_get_positions,
-        )
-        from brokers.smartapi_client import (
-            place_order as smartapi_place_order,
-        )
+    from brokers.connection import get_execution_adapter
 
-        _shoonya_resolve_option_contract = None
-    elif _broker_settings.execution_broker == "UPSTOX":
-        from brokers.upstox_execution_adapter import (
-            get_funds as smartapi_get_funds,
-        )
-        from brokers.upstox_execution_adapter import (
-            get_order_book as smartapi_get_order_book,
-        )
-        from brokers.upstox_execution_adapter import (
-            get_positions as smartapi_get_positions,
-        )
-        from brokers.upstox_execution_adapter import (
-            place_order as smartapi_place_order,
-        )
-
-        # Upstox identifies contracts purely by instrument_key (see
-        # upstox_execution_adapter.place_order's docstring) — there's no
-        # tradingsymbol-based lookup to offer here, same reason this is
-        # None on the plain SMARTAPI branch above.
-        _shoonya_resolve_option_contract = None
-    elif _broker_settings.execution_broker == "KITE":
-        from brokers.kite_execution_adapter import (
-            get_funds as smartapi_get_funds,
-        )
-        from brokers.kite_execution_adapter import (
-            get_order_book as smartapi_get_order_book,
-        )
-        from brokers.kite_execution_adapter import (
-            get_positions as smartapi_get_positions,
-        )
-        from brokers.kite_execution_adapter import (
-            place_order as smartapi_place_order,
-        )
-
-        # Kite identifies contracts via exchange + tradingsymbol, resolved
-        # through market_data.find_option_token() same as the plain
-        # SMARTAPI branch — no Kite-specific tsym lookup needed here (see
-        # kite_execution_adapter.place_order's docstring).
-        _shoonya_resolve_option_contract = None
-    else:
-        raise RuntimeError(
-            "EXECUTION_BROKER must be SMARTAPI, SHOONYA, UPSTOX, or KITE, "
-            f"got {_broker_settings.execution_broker!r}"
-        )
+    _execution_adapter = get_execution_adapter(_broker_settings.execution_broker)
+    smartapi_place_order = _execution_adapter.place_order
+    smartapi_get_order_book = _execution_adapter.get_order_book
+    smartapi_get_positions = _execution_adapter.get_positions
+    smartapi_get_funds = _execution_adapter.get_funds
+    _execution_resolve_option_contract = getattr(
+        _execution_adapter, "resolve_option_contract", None
+    )
     from brokers.smartapi_client import INDEX_TOKENS as _SMARTAPI_INDEX_TOKENS
     from brokers.smartapi_history import get_candle_data, get_index_candles
     from brokers.smartapi_ws_client import EXCHANGE_TYPE, SmartTickStream
@@ -194,7 +130,7 @@ else:
     smartapi_get_order_book = _smartapi_disabled
     smartapi_get_positions = _smartapi_disabled
     smartapi_get_funds = _smartapi_disabled
-    _shoonya_resolve_option_contract = None
+    _execution_resolve_option_contract = None
     get_index_candles = _smartapi_disabled
     get_candle_data = _smartapi_disabled
     _SMARTAPI_INDEX_TOKENS = {}
@@ -793,8 +729,8 @@ def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
     exchange = "BFO" if symbol in _BSE_SYMBOLS else "NFO"
 
     if instrument_type in ("CE", "PE"):
-        if _shoonya_resolve_option_contract is not None:
-            return _shoonya_resolve_option_contract(
+        if _execution_resolve_option_contract is not None:
+            return _execution_resolve_option_contract(
                 symbol,
                 expiry,
                 strike,
@@ -1733,6 +1669,8 @@ def _build_algo_status() -> dict:
             if _broker_settings.execution_broker == "UPSTOX"
             else "Zerodha"
             if _broker_settings.execution_broker == "KITE"
+            else "ICICI Direct"
+            if _broker_settings.execution_broker == "BREEZE"
             else "Angel One"
         ),
         "liveTradingEnabled": LIVE_TRADING_ENABLED,

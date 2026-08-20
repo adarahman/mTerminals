@@ -70,7 +70,7 @@ class StructuredFormatter(logging.Formatter):
     """One-line JSON logs with a small, explicit operational field set."""
 
     _SAFE_EXTRA_FIELDS = (
-        "event", "subsystem", "status", "reason", "symbol", "expiry",
+        "event", "subsystem", "provider", "operation", "status", "reason", "symbol", "expiry",
         "connected_clients", "age_seconds", "duration_seconds",
     )
 

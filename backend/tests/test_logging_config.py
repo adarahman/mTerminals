@@ -63,6 +63,20 @@ def test_structured_formatter_emits_json_with_safe_operational_fields_only():
     assert "unsafe_payload" not in payload
 
 
+def test_structured_formatter_includes_uniform_broker_fields():
+    record = logging.LogRecord("brokers.connection", logging.INFO, __file__, 1, "connected", (), None)
+    record.event = "broker.connection"
+    record.subsystem = "broker"
+    record.provider = "SHOONYA"
+    record.operation = "connection"
+    record.status = "ready"
+
+    payload = json.loads(StructuredFormatter().format(record))
+
+    assert payload["provider"] == "SHOONYA"
+    assert payload["operation"] == "connection"
+
+
 def test_health_transition_logging_is_deduplicated(ws_server_live, monkeypatch, caplog):
     module = ws_server_live
     snapshot = {

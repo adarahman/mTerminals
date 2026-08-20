@@ -633,39 +633,34 @@ def get_quotes(instrument_keys) -> dict:
     return payload.get("data", {})
 
 
-def get_spot_quote(self, underlying):
-    from brokers.upstox_client import get_spot_quote as _up_get_spot_quote
+def get_spot_quote(underlying: str) -> Optional[dict]:
+    """Return Upstox's raw full quote for an index or cash underlying.
 
-    quote = _up_get_spot_quote(underlying)
-    if not quote:
+    This is intentionally a module-level broker function, not the
+    ``MarketData.get_spot_quote(self, underlying)`` adapter method. A prior
+    copy/paste left the adapter signature here and then imported this same
+    name recursively; every normal one-argument caller consequently failed
+    before making a quote request. Keeping the raw Upstox shape here also
+    lets ``get_atm_chain`` use ``last_price`` directly.
+    """
+    name = (underlying or "").strip().upper()
+    if not name:
         return None
 
-    ohlc = quote.get("ohlc") or {}
+    instrument_key = index_instrument_key(name)
+    if not instrument_key:
+        equity = find_equity_token(name)
+        instrument_key = (equity or {}).get("instrument_key")
+    if not instrument_key:
+        return None
 
-    ltp = quote.get("last_price")
-    net_change = quote.get("net_change")
-
-    previous_close = None
-
-    # For Upstox live index quotes, ohlc["close"] may equal current LTP.
-    # Previous close is derived from absolute net change.
-    if ltp is not None and net_change is not None:
-        try:
-            previous_close = float(ltp) - float(net_change)
-        except (TypeError, ValueError):
-            previous_close = None
-
-    # Fallback only if net_change is unavailable.
-    if previous_close in (None, 0, 0.0):
-        previous_close = ohlc.get("close") or quote.get("close")
-
-    return {
-        "ltp": ltp,
-        "open": ohlc.get("open") or quote.get("open"),
-        "high": ohlc.get("high") or quote.get("high"),
-        "low": ohlc.get("low") or quote.get("low"),
-        "close": previous_close,
-    }
+    quotes = get_quotes(instrument_key)
+    if not quotes:
+        return None
+    # Upstox normally keys the response by the requested instrument key, but
+    # accepting the first row makes this resilient to its composite-key
+    # formatting differences across quote API versions.
+    return quotes.get(instrument_key) or next(iter(quotes.values()), None)
 
 
 def get_historical_candles(

@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # Volume/Value merge into all_indices (SmartAPI's index ltpData has neither
 # field). Ticker-pill LTP/change values used to piggyback on this same
 # call for free; they're now sourced from SmartAPI directly (see
-# fetch_ticker_payload_smartapi import above) and no longer need df_idx.
+# fetch_ticker_payload import above) and no longer need df_idx.
 #
 # That means df_idx's only remaining consumers — ffmc contributor weights
 # and Volume/Value — don't need per-tick (POLL_SECONDS) freshness the way
@@ -331,7 +331,7 @@ def _canon_symbol(symbol):
     if not USE_SMARTAPI or not raw:
         return raw
     try:
-        from smartapi_pipeline_adapter import _canon_underlying
+        from broker_pipeline import _canon_underlying
 
         return _canon_underlying(raw)
     except Exception:
@@ -341,7 +341,7 @@ def _canon_symbol(symbol):
 def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
     symbol = _canon_symbol(symbol)
     if USE_SMARTAPI:
-        from smartapi_pipeline_adapter import (
+        from broker_pipeline import (
             fetch_option_chain_wide,
             get_available_expiries,
         )
@@ -576,12 +576,12 @@ def main():
 
     try:
         if USE_SMARTAPI:
-            from smartapi_pipeline_adapter import (
+            from broker_pipeline import (
                 fetch_all_pills_and_vix_batched,
                 fetch_futures_wide,
-                fetch_sensex_ticker_smartapi,
-                fetch_ticker_payload_smartapi,
-                fetch_vix_smartapi,
+                fetch_sensex_ticker,
+                fetch_ticker_payload,
+                fetch_vix,
             )
         # ── Fetch chain + futures + all-indices + VIX + ticker pills concurrently ──
         # These five NSE/BSE calls are independent of each other (futures/
@@ -643,11 +643,11 @@ def main():
             # --no-smartapi these futures stay absent and the public
             # NSE/BSE fallback below derives the same display payload.
             fut_ticker = (
-                ex.submit(fetch_ticker_payload_smartapi) if USE_SMARTAPI else None
+                ex.submit(fetch_ticker_payload) if USE_SMARTAPI else None
             )
-            fut_unified = ex.submit(fetch_vix_smartapi) if USE_SMARTAPI else None
+            fut_unified = ex.submit(fetch_vix) if USE_SMARTAPI else None
             fut_sensex = (
-                ex.submit(fetch_sensex_ticker_smartapi) if USE_SMARTAPI else None
+                ex.submit(fetch_sensex_ticker) if USE_SMARTAPI else None
             )
             fut_public_bse_quotes = (
                 {

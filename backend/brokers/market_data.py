@@ -27,6 +27,7 @@ from typing import Optional, Protocol
 logger = logging.getLogger(__name__)
 
 from config import settings as _md_settings
+from brokers.logging import broker_event
 
 
 class MarketData(Protocol):
@@ -289,12 +290,13 @@ class UpstoxMarketData:
         quote = _up_get_spot_quote(underlying)
         if not quote:
             return None
+        ohlc = quote.get("ohlc") or {}
         return {
             "ltp": quote.get("last_price"),
-            "open": quote.get("open"),
-            "high": quote.get("high"),
-            "low": quote.get("low"),
-            "close": quote.get("close"),
+            "open": ohlc.get("open") or quote.get("open"),
+            "high": ohlc.get("high") or quote.get("high"),
+            "low": ohlc.get("low") or quote.get("low"),
+            "close": ohlc.get("close") or quote.get("close"),
         }
 
     def get_fno_underlyings(self, force_refresh=False):
@@ -1313,23 +1315,29 @@ def set_active_provider(name: str) -> bool:
     if name == _active_provider_name:
         return True
 
-    # Shoonya must authenticate BEFORE we commit the provider switch.
-    if name == "SHOONYA":
-        try:
-            from brokers import shoonya_client
-        except ImportError:
-            import shoonya_client
-
-        ok, error = shoonya_client.healthcheck()
-
-        if not ok:
-            logger.warning(
-                "[market_data] SHOONYA unavailable; switch rejected; "
-                "keeping active provider %s: %s",
-                _active_provider_name,
-                error,
-            )
-            return False
+    # Broker authentication is preflighted through one common connection
+    # boundary. It keeps this provider registry independent of each SDK's
+    # login implementation and commits the switch only after readiness is
+    # known (Shoonya currently performs the only such check).
+    from brokers.connection import check_connection
+    connection = check_connection(name)
+    if not connection.ready:
+        broker_event(
+            logger,
+            provider=name,
+            operation="provider_switch",
+            status="rejected",
+            level=logging.WARNING,
+            reason=connection.error,
+        )
+        logger.warning(
+            "[market_data] %s unavailable; switch rejected; "
+            "keeping active provider %s: %s",
+            name,
+            _active_provider_name,
+            connection.error,
+        )
+        return False
 
     # Build the candidate before changing global state.
     candidate = _build_instance(name)
@@ -1337,6 +1345,12 @@ def set_active_provider(name: str) -> bool:
     _active_provider_name = name
     _active_provider_instance = candidate
 
+    broker_event(
+        logger,
+        provider=name,
+        operation="provider_switch",
+        status="active",
+    )
     logger.info("[market_data] active provider switched to %s", name)
     return True
 
