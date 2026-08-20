@@ -633,16 +633,39 @@ def get_quotes(instrument_keys) -> dict:
     return payload.get("data", {})
 
 
-def get_spot_quote(underlying: str) -> Optional[dict]:
-    """LTP-oriented convenience wrapper matching this codebase's
-    get_spot_quote() ergonomics (see market_data.py's MarketData protocol)."""
-    key = index_instrument_key(underlying) or (find_equity_token(underlying) or {}).get(
-        "instrument_key"
-    )
-    if not key:
+def get_spot_quote(self, underlying):
+    from brokers.upstox_client import get_spot_quote as _up_get_spot_quote
+
+    quote = _up_get_spot_quote(underlying)
+    if not quote:
         return None
-    data = get_ltp(key)
-    return next(iter(data.values()), None)
+
+    ohlc = quote.get("ohlc") or {}
+
+    ltp = quote.get("last_price")
+    net_change = quote.get("net_change")
+
+    previous_close = None
+
+    # For Upstox live index quotes, ohlc["close"] may equal current LTP.
+    # Previous close is derived from absolute net change.
+    if ltp is not None and net_change is not None:
+        try:
+            previous_close = float(ltp) - float(net_change)
+        except (TypeError, ValueError):
+            previous_close = None
+
+    # Fallback only if net_change is unavailable.
+    if previous_close in (None, 0, 0.0):
+        previous_close = ohlc.get("close") or quote.get("close")
+
+    return {
+        "ltp": ltp,
+        "open": ohlc.get("open") or quote.get("open"),
+        "high": ohlc.get("high") or quote.get("high"),
+        "low": ohlc.get("low") or quote.get("low"),
+        "close": previous_close,
+    }
 
 
 def get_historical_candles(

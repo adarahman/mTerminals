@@ -70,18 +70,27 @@ _STRIKE_INTERVALS = {
 # Index names Kotak's quotes API expects for spot/index tokens (the docs
 # list these literal display names — NSE indices do NOT take a numeric
 # instrument token). Keyed by the codebase's underlying symbol.
+
 _INDEX_NAMES = {
     "NIFTY": "Nifty 50",
     "BANKNIFTY": "Nifty Bank",
     "FINNIFTY": "Nifty Fin Service",
-    "MIDCPNIFTY": "NIFTY MIDCAP 100",
+    "MIDCPNIFTY": "Nifty Midcap Select",
+    "INDIA VIX": "India VIX",
+}
+
+_BSE_INDEX_NAMES = {
     "SENSEX": "SENSEX",
     "BANKEX": "BANKEX",
 }
-
 # Indices with exchange-segment mapping; everything else is NFO stock
 # derivatives.
-_INDEX_EXCHANGE = {"NSE": "nse_fo", "BFO": "bse_fo", "NFO": "nse_fo"}
+_INDEX_EXCHANGE = {
+    "NSE": "nse_cm",
+    "BSE": "bse_cm",
+    "NFO": "nse_fo",
+    "BFO": "bse_fo",
+}
 
 _FO_CSV_TTL_S = 6 * 3600  # re-download the NFO scrip master at most every 6h
 _FO_CSV_PATH = os.path.join(RUNTIME_DIR, "kotak_cache", "nse_fo.csv")
@@ -117,29 +126,80 @@ def _load_fo_scrips() -> list[dict]:
 
 
 def _download_fo_scrips() -> list[dict]:
-    """Download the NFO scrip-master CSV via the SDK's file-paths endpoint.
-    Returns [] on failure so callers can fall back to whatever they were
-    doing without the master (e.g. an empty chain) rather than crash."""
+    """Download and parse Kotak NFO scrip master."""
     try:
-        url = _session.client.scrip_master(exchange_segment="nse_fo")
+        result = _session.client.scrip_master(exchange_segment="nse_fo")
     except Exception as exc:
-        logger.warning("[kotak_market_data] scrip_master() failed: %s", exc)
-        return []
-    if not isinstance(url, str) or not url.startswith("http"):
         logger.warning(
-            "[kotak_market_data] scrip_master() returned unexpected %r", url
+            "[kotak_market_data] scrip_master() failed: %s", exc
         )
         return []
+
+    url = None
+
+    # Older/alternate SDK behaviour: direct URL.
+    if isinstance(result, str):
+        if result.startswith("http"):
+            url = result
+
+    # Kotak Neo v2: {"filesPaths": [...], "baseFolder": "..."}
+    elif isinstance(result, dict):
+        paths = (
+            result.get("filesPaths")
+            or result.get("filePaths")
+            or []
+        )
+
+        if isinstance(paths, str):
+            paths = [paths]
+
+        if isinstance(paths, list):
+            # Prefer NSE F&O master specifically.
+            for path in paths:
+                if (
+                    isinstance(path, str)
+                    and path.startswith("http")
+                    and "nse_fo" in path.lower()
+                ):
+                    url = path
+                    break
+
+            # If API was already scoped to nse_fo and returned only
+            # one URL, accept it.
+            if url is None and len(paths) == 1:
+                candidate = paths[0]
+                if isinstance(candidate, str) and candidate.startswith("http"):
+                    url = candidate
+
+    if not url:
+        logger.warning(
+            "[kotak_market_data] scrip_master() returned "
+            "unexpected response: %r",
+            result,
+        )
+        return []
+
     try:
         import requests
 
         resp = requests.get(url, timeout=60)
         resp.raise_for_status()
-        return _parse_fo_csv_text(resp.text)
-    except Exception as exc:
-        logger.warning("[kotak_market_data] scrip-master download failed: %s", exc)
-        return []
 
+        rows = _parse_fo_csv_text(resp.text)
+
+        logger.info(
+            "[kotak_market_data] parsed %d NFO option contracts",
+            len(rows),
+        )
+
+        return rows
+
+    except Exception as exc:
+        logger.warning(
+            "[kotak_market_data] scrip-master download failed: %s",
+            exc,
+        )
+        return []
 
 def _write_fo_csv(path: str, rows: list[dict]) -> None:
     headers = sorted({k for row in rows for k in row.keys()})
@@ -150,6 +210,59 @@ def _write_fo_csv(path: str, rows: list[dict]) -> None:
 
 
 def _parse_fo_csv_file(path: str) -> list[dict]:
+    """Read our normalized on-disk cache.
+
+    The downloaded Kotak CSV is parsed by _parse_fo_csv_text().
+    _write_fo_csv() stores the already-normalized representation,
+    therefore cached files must NOT be passed through the raw Kotak
+    parser again.
+    """
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+
+        fields = set(reader.fieldnames or [])
+
+        normalized_fields = {
+            "name",
+            "tradingsymbol",
+            "token",
+            "option_type",
+            "strike",
+            "expiry",
+            "lot_size",
+        }
+
+        # Our normalized disk cache.
+        if normalized_fields.issubset(fields):
+            rows = []
+
+            for raw in reader:
+                try:
+                    rows.append(
+                        {
+                            "name": str(raw["name"]).strip().upper(),
+                            "tradingsymbol": str(
+                                raw["tradingsymbol"]
+                            ).strip().upper(),
+                            "token": str(raw["token"]).strip(),
+                            "option_type": str(
+                                raw["option_type"]
+                            ).strip().upper(),
+                            "strike": int(
+                                round(float(raw["strike"]))
+                            ),
+                            "expiry": str(raw["expiry"]).strip(),
+                            "lot_size": int(
+                                float(raw.get("lot_size") or 0)
+                            ),
+                        }
+                    )
+                except (TypeError, ValueError, KeyError):
+                    continue
+
+            return rows
+
+    # Compatibility with an old/raw cache if one exists.
     with open(path, newline="") as f:
         return _parse_fo_csv_text(f.read())
 
@@ -291,33 +404,66 @@ def _ohlc_val(row, key, alt_key="open"):
 
 
 def _spot_quote(underlying: str) -> dict | None:
-    """Kotak quotes() for the underlying's index token (index names are
-    literals like 'Nifty 50', not numeric tokens). None on failure."""
-    index_name = _INDEX_NAMES.get(underlying.upper())
-    if not index_name:
+    symbol = underlying.upper()
+
+    if symbol in _BSE_INDEX_NAMES:
+        index_token = _BSE_INDEX_NAMES[symbol]
+        segment = "bse_cm"
+    else:
+        index_token = _INDEX_NAMES.get(symbol)
+        segment = "nse_cm"
+
+    if not index_token:
         return None
+
     try:
         result = _session.client.quotes(
             instrument_tokens=[
-                {"instrument_token": index_name, "exchange_segment": "nse_cm"}
+                {
+                    "instrument_token": index_token,
+                    "exchange_segment": segment,
+                }
             ],
             quote_type="all",
         )
     except Exception as exc:
-        logger.warning("[kotak_market_data] index quote %s failed: %s", underlying, exc)
+        logger.warning(
+            "[kotak_market_data] index quote %s failed: %s",
+            underlying,
+            exc,
+        )
         return None
+
     rows = _unwrap_quotes(result)
     if not rows:
         return None
+
     row = rows[0]
+
     return {
-        "ltp": float(row.get("last_traded_price") or 0),
+        "ltp": float(
+            row.get("ltp")
+            or row.get("last_traded_price")
+            or 0
+        ),
         "open": _ohlc_val(row, "open"),
         "high": _ohlc_val(row, "high"),
         "low": _ohlc_val(row, "low"),
         "close": _ohlc_val(row, "close", alt_key=None),
     }
 
+def _quote_token(row) -> str:
+    """Token identifier returned by Kotak quote responses.
+
+    Neo quote responses use exchange_token, while some SDK/API
+    versions may expose instrument_token. Support both.
+    """
+    return str(
+        row.get("exchange_token")
+        or row.get("instrument_token")
+        or row.get("token")
+        or ""
+    ).strip()
 
 def _unwrap_quotes(result):
     """Kotak's quotes() returns the raw JSON body; the payload can be a
@@ -373,8 +519,9 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
         logger.warning("[kotak_market_data] batch quote failed: %s", exc)
         qrows = []
     quote_by_token = {}
+
     for q in qrows:
-        tok = str(q.get("instrument_token") or "")
+        tok = _quote_token(q)
         if tok:
             quote_by_token[tok] = q
 
@@ -387,15 +534,31 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
                 "type": m["option_type"],
                 "tradingsymbol": m["tradingsymbol"],
                 "token": m["token"],
-                "ltp": float(q.get("last_traded_price") or 0),
+                "ltp": float(
+                    q.get("ltp")
+                    or q.get("last_traded_price")
+                    or 0
+                ),
                 "open": _ohlc_val(q, "open"),
                 "high": _ohlc_val(q, "high"),
                 "low": _ohlc_val(q, "low"),
                 "close": _ohlc_val(q, "close", alt_key=None),
-                "oi": float(q.get("open_interest") or 0),
-                "volume": float(q.get("volume") or 0),
+                "oi": float(
+                    q.get("open_int")
+                    or q.get("open_interest")
+                    or 0
+                ),
+                "volume": float(
+                    q.get("last_volume")
+                    or q.get("volume")
+                    or 0
+                ),
                 "net_change": q.get("change"),
-                "pct_change": q.get("net_change_percentage"),
+                "pct_change": (
+                    q.get("per_change")
+                    if q.get("per_change") is not None
+                    else q.get("net_change_percentage")
+                ),
                 "lot_size": m["lot_size"],
             }
         )
@@ -430,7 +593,11 @@ def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
     except Exception as exc:
         logger.warning("[kotak_market_data] batch quotes failed: %s", exc)
         return {}
-    by_token = {str(q.get("instrument_token") or ""): q for q in qrows}
+    by_token = {
+        _quote_token(q): q
+        for q in qrows
+        if _quote_token(q)
+    }
     out = {}
     for symbol, token in symbol_token_pairs:
         q = by_token.get(str(token))
@@ -449,32 +616,52 @@ def get_batch_quotes_by_token(exchange, symbol_token_pairs, mode="FULL"):
 def get_spot_quote(underlying):
     return _spot_quote(underlying)
 
-
 def get_fno_underlyings(force_refresh=False):
-    """Indices + F&O stocks derived from the NFO scrip master. Returns the
-    Protocol's {'indices', 'stocks'} shape; empty lists if the master can't
-    be fetched."""
+    """Indices + F&O stocks derived from the NFO scrip master."""
     del force_refresh
+
     rows = _load_fo_scrips()
+
     if not rows:
-        return {"indices": list(_INDEX_NAMES), "stocks": []}
+        return {
+            "indices": list(_INDEX_NAMES),
+            "stocks": [],
+        }
+
     names = sorted({r["name"] for r in rows})
-    indices = sorted(n for n in names if n in _INDEX_NAMES)
-    stocks = [n for n in names if n not in _INDEX_NAMES]
-    return {"indices": indices or list(_INDEX_NAMES), "stocks": stocks}
+
+    indices = sorted(
+        n for n in names
+        if n in _INDEX_NAMES
+    )
+
+    stocks = [
+        n for n in names
+        if n not in _INDEX_NAMES
+    ]
+
+    return {
+        "indices": indices or list(_INDEX_NAMES),
+        "stocks": stocks,
+    }
 
 
 def index_tokens():
-    """Shaped like SmartApiMarketData.index_tokens(), but 'token' here is
-    Kotak's literal index display name ('Nifty 50'), not a numeric
-    instrument token — the same opaqueness caveat as Breeze's
-    stock_code-based index_tokens(): callers that pass 'token' straight
-    through to get_batch_quotes() (as smartapi_pipeline_adapter.py does)
-    still work."""
-    return {
-        name: {"token": display, "exchange": "NSE"}
-        for name, display in _INDEX_NAMES.items()
-    }
+    out = {}
+
+    for name, token in _INDEX_NAMES.items():
+        out[name] = {
+            "token": token,
+            "exchange": "NSE",
+        }
+
+    for name, token in _BSE_INDEX_NAMES.items():
+        out[name] = {
+            "token": token,
+            "exchange": "BSE",
+        }
+
+    return out
 
 
 class KotakMarketData:

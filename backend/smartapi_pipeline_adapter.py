@@ -1046,15 +1046,21 @@ def fetch_all_pills_and_vix_batched():
         if sym in index_tokens
     ]
     bse_quotes = {}
-    if bse_pairs:
-        bse_by_token = market_data.get_batch_quotes_by_token(
-            "BSE", bse_pairs, mode="FULL"
-        )
-        bse_quotes = {
-            sym: _normalize_batch_quote(bse_by_token[str(token)])
-            for sym, token in bse_pairs
-            if str(token) in bse_by_token
-        }
+
+    for sym, _token in bse_pairs:
+        try:
+            row = market_data.get_spot_quote(sym)
+            row = _normalize_batch_quote(row)
+
+            if row:
+                bse_quotes[sym] = row
+
+        except Exception as exc:
+            logger.warning(
+                "BSE ticker spot quote %s failed: %s",
+                sym,
+                exc,
+            )
 
     _BATCH_CACHE.refill(nse_quotes, bse_quotes)
 

@@ -315,6 +315,21 @@ class ShoonyaSession:
 _session = ShoonyaSession()
 
 
+def healthcheck():
+    """
+    Test whether a usable Shoonya session exists.
+
+    Returns:
+        (True, None) on success
+        (False, error_message) on failure.
+    """
+    try:
+        _session.ensure_session()
+        return True, None
+    except BrokerError as exc:
+        return False, str(exc)
+
+
 def _rows(result):
     if result is None:
         return []

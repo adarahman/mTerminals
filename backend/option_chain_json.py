@@ -276,7 +276,7 @@ def set_runtime_config(cfg: RuntimeConfig) -> None:
         FUTURES_EXPIRY = fexp
 
 
-logger.info("\n=== LIGHTWEIGHT JSON OPTIONS PIPELINE INITIALIZATION ===")
+logger.info("=== LIGHTWEIGHT JSON OPTIONS PIPELINE INITIALIZATION ===")
 logger.info(f"    Exchange: {EXCHANGE} | Symbol: {SYMBOL} | Expiry: {EXPIRY}")
 logger.info(
     f"    Loop    : {'every ' + str(LOOP_INTERVAL) + ' min' if LOOP_INTERVAL > 0 else 'single run'}\n"
@@ -882,7 +882,8 @@ def main():
             price_source=PRICE_SOURCE,
             futures_expiry=FUTURES_EXPIRY,
         )
-        logger.info("\nSUCCESS: JSON Framework updated snapshot successfully.")
+        print()
+        logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 
     except Exception:
         traceback.print_exc()

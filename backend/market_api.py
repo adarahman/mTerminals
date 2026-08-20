@@ -1191,22 +1191,22 @@ if __name__ == "__main__":
     nifty = get_index_from_snapshot(snap_df, "NIFTY 50")
     logger.info(f"  NIFTY 50 last={nifty.get('last')}  chg={nifty.get('percentChange')}%")
 
-    logger.info("\nNSE — India VIX (via get_unified_market_data)")
+    logger.info("NSE — India VIX (via get_unified_market_data)")
     vix, vix_chg, _ = get_unified_market_data()
     logger.info(f"  VIX = {vix}  (chg {vix_chg}%)")
 
-    logger.info("\nNSE — Nifty 50 futures (top 3 rows)")
+    logger.info("NSE — Nifty 50 futures (top 3 rows)")
     fut_df = fetch_nifty_futures("nse50_fut")
     if not fut_df.empty:
         logger.info(fut_df.head(3).to_string(index=False))
 
-    logger.info("\nBSE — SENSEX option chain (top 3 rows)")
+    logger.info("BSE — SENSEX option chain (top 3 rows)")
     bse_df, bse_spot = fetch_bse_json_options("02 Jul 2026", scrip_cd="1")
     if bse_df is not None:
         logger.info(f"  Spot = {bse_spot}")
         logger.info(bse_df.head(3).to_string(index=False))
 
-    logger.info("\nBSE — SENSEX futures")
+    logger.info("BSE — SENSEX futures")
     bse_fut = fetch_bse_futures(scrip_cd="1")  # expiry_str auto-computed
     if bse_fut is not None:
         logger.info(bse_fut.to_string(index=False))

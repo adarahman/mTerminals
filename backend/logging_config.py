@@ -87,9 +87,13 @@ class StructuredFormatter(logging.Formatter):
                 payload[field] = redact_sensitive_text(value) if isinstance(value, str) else value
         if record.exc_info:
             payload["exception"] = redact_sensitive_text(self.formatException(record.exc_info))
-        return json.dumps(payload, separators=(",", ":"), default=str)
-
-
+        return json.dumps(
+            payload,
+            separators=(",", ":"),
+            default=str,
+            ensure_ascii=False,
+        )
+        
 class RedactSensitiveHeaders(logging.Filter):
     """Scrubs live credentials out of log records before they're emitted.
 

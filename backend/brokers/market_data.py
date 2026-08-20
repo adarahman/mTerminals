@@ -1293,20 +1293,52 @@ def get_active_provider() -> str:
     return _active_provider_name
 
 
-def set_active_provider(name: str) -> None:
-    """Runtime provider switch. Raises ValueError for an unknown provider
-    key (frontend dropdown values must come from PROVIDER_KEYS)."""
+def set_active_provider(name: str) -> bool:
+    """Runtime provider switch.
+
+    Returns True when the requested provider becomes active.
+    Returns False when the provider is temporarily unavailable.
+
+    Raises ValueError for an unknown provider key.
+    """
     global _active_provider_name, _active_provider_instance
+
     name = name.strip().upper()
+
     if name not in _PROVIDERS:
         raise ValueError(
             f"Unknown market-data provider {name!r}. Valid: {sorted(_PROVIDERS)}"
         )
+
     if name == _active_provider_name:
-        return
+        return True
+
+    # Shoonya must authenticate BEFORE we commit the provider switch.
+    if name == "SHOONYA":
+        try:
+            from brokers import shoonya_client
+        except ImportError:
+            import shoonya_client
+
+        ok, error = shoonya_client.healthcheck()
+
+        if not ok:
+            logger.warning(
+                "[market_data] SHOONYA unavailable; switch rejected; "
+                "keeping active provider %s: %s",
+                _active_provider_name,
+                error,
+            )
+            return False
+
+    # Build the candidate before changing global state.
+    candidate = _build_instance(name)
+
     _active_provider_name = name
-    _active_provider_instance = _build_instance(name)
+    _active_provider_instance = candidate
+
     logger.info("[market_data] active provider switched to %s", name)
+    return True
 
 
 def provider_status() -> list[dict]:

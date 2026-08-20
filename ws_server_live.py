@@ -442,13 +442,25 @@ _md_label = (
 )
 if DATA_SOURCE == "NSE_BSE":
     _chain_source = "NSE/BSE public REST (polling)"
-    _overlay_state = "NSE/BSE public REST polling (no websocket overlay)"
+    _overlay_state = "no websocket overlay"
+
 elif USE_SMARTAPI:
     _chain_source = f"{_md_label} REST"
-    _overlay_state = f"{_md_label} websocket overlay ENABLED"
+
+    _caps = _MD_PROVIDER_CAPABILITIES.get(DATA_SOURCE, {})
+    _overlay_allowed = (
+        DATA_SOURCE == LIVE_FEED_PROVIDER
+        and bool(_caps.get("websocket"))
+    )
+
+    if _overlay_allowed:
+        _overlay_state = f"{LIVE_FEED_PROVIDER} websocket overlay ENABLED"
+    else:
+        _overlay_state = "no websocket overlay (REST polling)"
+
 else:
     _chain_source = "NSE/BSE public REST (--no-broker)"
-    _overlay_state = f"{_md_label} overlay DISABLED (--no-broker)"
+    _overlay_state = "websocket overlay DISABLED (--no-broker)"
 print(
     f"[feed] chain source: {_chain_source}, "
     f"analytics recompute ceiling={POLL_SECONDS}s floor={MIN_TICK_RECOMPUTE_SECONDS}s "
@@ -2443,7 +2455,7 @@ def _stop_active_broker_feed(provider: str) -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
-def switch_data_source(new_source: str) -> None:
+def switch_data_source(new_source: str) -> bool:
     """Runtime data-source switch — triggered by ws_handler() when a client
     reconnects with ?dataSource=... on the WS URL (the Dashboard's DATA
     SOURCE dropdown). Works WITHOUT a server restart: the next engine_loop
@@ -2484,12 +2496,31 @@ def switch_data_source(new_source: str) -> None:
         f"[data-source] switch requested: {old_source} -> {new_source}", flush=True
     )
 
-    # 1+2. Stop the old broker feed's effect on the payload.
+    # 1. Validate/switch the market-data provider BEFORE touching the
+    # currently-working source.
+    try:
+        switched = _md_set_active_provider(new_source)
+    except Exception as exc:
+        print(
+            f"[data-source] switch to {new_source} failed; "
+            f"remaining on {old_source}: {exc}",
+            flush=True,
+        )
+        return False
+
+    if not switched:
+        print(
+            f"[data-source] {new_source} unavailable; "
+            f"remaining on {old_source}",
+            flush=True,
+        )
+        return False
+
+    # 2. Provider is confirmed usable. Stop the old broker feed.
     _stop_active_broker_feed(old_source)
 
-    # 3. Route the whole pipeline to the new source.
+    # 3. Commit ws_server_live's source state.
     DATA_SOURCE = new_source
-    _md_set_active_provider(new_source)
 
     # 4. Next tick is a FULL baseline from the new source.
     global LAST_PAYLOAD, _LAST_SENT
@@ -2507,7 +2538,9 @@ def switch_data_source(new_source: str) -> None:
 
     # 6. Wake engine_loop immediately.
     _SYMBOL_SWITCH_EVENT.set()
+
     print(f"[data-source] switched to {new_source}", flush=True)
+    return True
 
 
 def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
@@ -3892,29 +3925,11 @@ def fetch_index_quotes_smartapi_sync():
 
 
 async def index_quote_loop():
-    """Keeps INDEX_QUOTES fresh for the ticker strip's non-active symbols
-    (now five: NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX/INDIA VIX) and pushes
-    them to connected clients as {"type": "indexQuotes", "payload": {...}}
-    — dashboard.js's generic message handler already merges any
-    unrecognized `type` as `_wsState[type] = payload` (see
-    updateDashboard()), which is exactly the d.indexQuotes shape
-    renderIndexTicker() reads. The active SYMBOL is skipped here since its
-    quote already rides along on every regular tick. VIX is never the
-    active SYMBOL, so it's always fetched.
-
-    Runs on its own --index-quote-seconds cadence (default 20s, independent
-    of --poll-seconds). Tries the SmartAPI batched path first (two
-    getMarketData calls total — one NSE, one BSE — well under Angel's
-    per-second cap; see fetch_index_quotes_smartapi_sync()'s docstring for
-    why this is safe unlike the 2026-07-17 per-symbol ltpData incident),
-    and falls back to market_api's NSE/BSE scrape for any symbol SmartAPI
-    didn't return — covering --no-smartapi mode, a dropped/expired
-    SmartAPI session, or a single symbol missing from the batch response.
-    Neither path touches option_chain_json's globals, so unlike the old
-    fetch_index_quote_sync() this loop needs no _PIPELINE_LOCK or
-    serialization against the primary tick. A single slow/failed symbol
-    only skips that symbol's pill for this pass; it doesn't stall the
-    others or the primary tick.
+    """Periodic index quote updates — see its comment above.
+    Pushes {"type": "indexQuotes", "payload": {...}} the same way
+    index_quote_loop()'s dashboard.js's generic handler lands this at
+    wsState.indexQuotes for free, which paper-trading.js's ptComputeIndex
+    quotes reads once Live mode is on.
     """
     if not USE_INDEX_QUOTES:
         return
@@ -3926,28 +3941,33 @@ async def index_quote_loop():
     while True:
         updates = {}
 
-        if USE_SMARTAPI:
-            smartapi_quotes = await asyncio.to_thread(fetch_index_quotes_smartapi_sync)
-            for sym in others:
-                quote = smartapi_quotes.get(sym)
-                if quote is not None:
-                    updates[sym] = quote
+        for sym in others:
+            try:
+                raw = await asyncio.to_thread(
+                    market_data.get_spot_quote,
+                    sym,
+                )
 
-        missing = [s for s in others if s not in updates]
-        missing_nse = [s for s in missing if s not in _BSE_SYMBOLS]
-        missing_bse = [s for s in missing if s in _BSE_SYMBOLS]
+                if raw and raw.get("ltp") is not None:
+                    ltp = float(raw["ltp"])
 
-        if missing_nse:
-            nse_quotes = await asyncio.to_thread(fetch_nse_index_quotes_sync)
-            for sym in missing_nse:
-                quote = nse_quotes.get(sym)
-                if quote is not None:
-                    updates[sym] = quote
+                    close = raw.get("close")
+                    chg_pct = None
 
-        for sym in missing_bse:
-            quote = await asyncio.to_thread(fetch_bse_index_quote_sync, sym)
-            if quote is not None:
-                updates[sym] = quote
+                    if close not in (None, 0, 0.0):
+                        close = float(close)
+                        chg_pct = ((ltp - close) / close) * 100.0
+
+                    updates[sym] = {
+                        "spot": ltp,
+                        "spotChgPct": chg_pct,
+                    }
+
+            except Exception as exc:
+                print(
+                    f"[index-quote] {sym} broker quote failed: {exc}",
+                    flush=True,
+                )
 
         if updates:
             INDEX_QUOTES.update(updates)
@@ -4990,28 +5010,41 @@ async def main():
     # heartbeat) for its full duration. Same discipline as offloading
     # compute_diff() in engine_loop(): anything blocking goes through a
     # thread, never runs inline on the loop.
-    if USE_SMARTAPI:
+    if USE_SMARTAPI and _feed_allowed(LIVE_FEED_PROVIDER):
+
         if LIVE_FEED_PROVIDER == "UPSTOX":
             _create_background_task(
                 asyncio.to_thread(start_upstox_feed, loop),
                 "upstox_startup",
             )
+
         elif LIVE_FEED_PROVIDER == "SHOONYA":
             _create_background_task(
                 asyncio.to_thread(start_shoonya_feed, loop),
                 "shoonya_startup",
             )
-        else:
+
+        elif LIVE_FEED_PROVIDER == "SMARTAPI":
             _create_background_task(
                 asyncio.to_thread(start_smartapi_feed, loop),
                 "smartapi_startup",
             )
+
     else:
-        print(
-            "[broker] authenticated services disabled (--no-broker) — no broker login, "
-            "account/order REST call, or websocket connection; public daily ScripMaster allowed",
-            flush=True,
-        )
+        if USE_SMARTAPI:
+            print(
+                f"[feed] websocket overlay not started "
+                f"(data source={DATA_SOURCE}, "
+                f"feed provider={LIVE_FEED_PROVIDER})",
+                flush=True,
+            )
+        else:
+            print(
+                "[broker] authenticated services disabled (--no-broker) — "
+                "no broker login, account/order REST call, or websocket connection; "
+                "public daily ScripMaster allowed",
+                flush=True,
+            )
 
     try:
         _create_background_task(index_quote_loop(), "index_quote_loop")

@@ -1518,10 +1518,10 @@ if __name__ == "__main__":
     logger.info(" ".join(str(_x) for _x in ("Feed token:", _session.feed_token,)))
 
     funds = get_funds()
-    logger.info(" ".join(str(_x) for _x in ("\nAccount funds:", funds,)))
+    logger.info(" ".join(str(_x) for _x in ("Account funds:", funds,)))
 
     nifty = get_index_quote("NIFTY")
-    logger.info(" ".join(str(_x) for _x in ("\nNIFTY quote:", nifty,)))
+    logger.info(" ".join(str(_x) for _x in ("NIFTY quote:", nifty,)))
 
     sensex = get_index_quote("SENSEX")
     logger.info(" ".join(str(_x) for _x in ("SENSEX quote:", sensex,)))
