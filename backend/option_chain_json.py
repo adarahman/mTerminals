@@ -166,10 +166,10 @@ NO_VIRTUAL_OI = _args.no_virtual_oi
 # How many strikes each side of ATM the engine computes Greeks/OI-velocity/
 # signal analytics for. Standalone default is 10; a long-lived host
 # (ws_server_live.py) repoints this via set_runtime_config() below, based on
-# its own --no-smartapi / --strikes-each-side. Both call sites below must
+# its own public-only mode / --strikes-each-side. Both call sites below must
 # read this module-level name at call time (not bake in a literal default)
 # or that override is a no-op — which was the bug: strikes stayed pinned at
-# 10 even under --no-smartapi, where 50 was intended.
+# 10 in public-only mode, where 50 was intended.
 STRIKES_EACH_SIDE = 15
 
 # Underlying price source fed into df["Spot"] (and downstream into every
@@ -207,20 +207,28 @@ PRICE_SOURCE = "EQ"
 FUTURES_EXPIRY = "NEAR"
 
 # Whether the base option-chain fetch itself uses SmartAPI REST or falls
-# back to market_api.py's NSE/BSE-native REST. Standalone default is True;
-# a long-lived host repoints this via set_runtime_config() below, based on
-# --no-smartapi. Previously --no-smartapi only disabled the websocket
+# back to market_api.py's NSE/BSE-native REST. Standalone default is read
+# from BROKER_SERVICES_ENABLED; a long-lived host can repoint this via
+# set_runtime_config(). Previously public-only mode only disabled the websocket
 # overlay and index_quote_loop's batched ticker quotes — _fetch_and_parse()
 # below still called fetch_option_chain_wide() (SmartAPI REST)
 # unconditionally every POLL_SECONDS tick from startup, which is what
-# tripped Angel's getMarketData rate limit even with --no-smartapi set.
+# tripped Angel's getMarketData rate limit even in public-only mode.
 # This flag closes that gap.
 # NOTE: SmartAPI is enabled by default unless the user explicitly
-# disables it via CLI/env. MARKET_DATA_PROVIDER selects the REST quote
+# disables it with BROKER_SERVICES_ENABLED=false. MARKET_DATA_PROVIDER selects the REST quote
 # adapter, not whether the authenticated SmartAPI chain pipeline is on.
 # This keeps Upstox/Shoonya websocket provider selection independent from
 # the SmartAPI REST chain path.
-USE_SMARTAPI = os.environ.get("MTERMINALS_NO_SMARTAPI") != "1"
+try:
+    from config import settings as _broker_settings
+except ImportError:  # pragma: no cover - standalone legacy invocation
+    _broker_settings = None
+USE_SMARTAPI = (
+    _broker_settings.broker_services_enabled
+    if _broker_settings is not None
+    else True
+)
 
 
 def set_runtime_config(cfg: RuntimeConfig) -> None:
@@ -294,7 +302,7 @@ def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
     *_BuyQty/*_SellQty) — this fills the gap. PctChgOI/pChange/BuyQty/
     SellQty aren't available from this BSE endpoint at all, so they're
     zeroed rather than guessed; anything downstream reading those fields
-    for SENSEX/BANKEX under --no-smartapi will see 0, not real data.
+    for SENSEX/BANKEX in public-only mode will see 0, not real data.
     """
     scrip_cd = BSE_INDEX_SCRIP_CODES.get(symbol.upper())
     if not scrip_cd:
@@ -326,7 +334,7 @@ def _canon_symbol(symbol):
     column, _day_open_oi()/NSE-anchor keys, LOT_SIZES lookups and
     build_engine_result()'s own symbol filter must all agree or the OI /
     ChgOI / lot-size scaling silently diverge. Idempotent for tickers.
-    No-op (returns the raw upper symbol) in no-smartapi mode."""
+    No-op (returns the raw upper symbol) in public-only mode."""
     raw = (symbol or "").strip().upper()
     if not USE_SMARTAPI or not raw:
         return raw
@@ -374,7 +382,7 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
         expiry_dates = _generate_bse_expiry_series(symbol)
         return df, spot, expiry_dates
     else:
-        # When using NSE API (no-smartapi mode), get expiries from NSE itself
+        # When using NSE API (public-only mode), get expiries from NSE itself
         # instead of SmartAPI ScripMaster to avoid format mismatches
         if USE_SMARTAPI:
             from brokers.market_data import get_active_provider
@@ -640,7 +648,7 @@ def main():
             if fut_batch is not None:
                 fut_batch.result()
             # In broker mode, ticker/VIX/SENSEX use SmartAPI. Under
-            # --no-smartapi these futures stay absent and the public
+            # In public-only mode these futures stay absent and the public
             # NSE/BSE fallback below derives the same display payload.
             fut_ticker = (
                 ex.submit(fetch_ticker_payload) if USE_SMARTAPI else None

@@ -105,8 +105,6 @@ def main(argv=None):
     preflight.add_argument("--runtime-dir")
     preflight.add_argument("--host", default="127.0.0.1")
     preflight.add_argument("--http-port", type=int, default=5500)
-    preflight.add_argument("--no-broker", action="store_true")
-    preflight.add_argument("--no-smartapi", action="store_true", help=argparse.SUPPRESS)
     preflight.add_argument("--skip-port-check", action="store_true")
     smoke = commands.add_parser("smoke")
     smoke.add_argument("--base-url", default="http://127.0.0.1:5500")
@@ -114,9 +112,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "preflight":
         load_deployment_environment()
+        broker_services_enabled = os.getenv(
+            "BROKER_SERVICES_ENABLED", "true"
+        ).strip().lower() in {"1", "true", "yes", "on"}
         result = validate_environment(
             runtime_dir=args.runtime_dir,
-            require_smartapi=not (args.no_broker or args.no_smartapi),
+            require_smartapi=broker_services_enabled,
         )
         if not args.skip_port_check:
             error = check_port_available(args.host, args.http_port)

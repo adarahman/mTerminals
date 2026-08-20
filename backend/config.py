@@ -34,6 +34,14 @@ from paths import BACKEND_DIR, PROJECT_ROOT, RUNTIME_DIR
 
 logger = logging.getLogger(__name__)
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a strict, human-editable boolean environment setting."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 # .env location has been ambiguous across this codebase's own history:
 # brokers/smartapi_client.py's dirname(dirname(abspath(__file__))) math
 # actually resolved to backend/.env, but its own comment claimed the
@@ -66,6 +74,14 @@ else:
 
 @dataclass(frozen=True)
 class Settings:
+    # -- Broker service mode ----------------------------------------------
+    # The single switch for a deliberately public-data-only deployment.
+    # It belongs in configuration rather than server CLI flags so launch
+    # behavior is reproducible and not tied to a particular broker name.
+    broker_services_enabled: bool = field(
+        default_factory=lambda: _env_bool("BROKER_SERVICES_ENABLED", True)
+    )
+
     # -- Live execution broker -------------------------------------------
     # Market data remains on SmartAPI for now; this selector controls the
     # account/order adapter only. Keeping the default preserves existing

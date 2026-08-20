@@ -842,7 +842,12 @@ from oi.footprint_score import (
     compute_footprint_score, rank_footprint_strikes, compute_capital_concentration,
 )
 
-if os.environ.get("MTERMINALS_NO_SMARTAPI") == "1":
+try:
+    from config import settings as _broker_settings
+except ImportError:
+    _broker_settings = None
+
+if _broker_settings is not None and not _broker_settings.broker_services_enabled:
     market_data = None
 else:
     try:
@@ -904,7 +909,7 @@ def _get_fno_symbols():
     reason, so the dropdown never ends up empty."""
     if market_data is None:
         try:
-            # --no-smartapi disables authenticated broker services, not the
+            # Public-only mode disables authenticated broker services, not the
             # public daily ScripMaster. Keep the complete dropdown available
             # without constructing or logging in a SmartAPI session.
             from brokers.smartapi_instruments import get_fno_underlyings

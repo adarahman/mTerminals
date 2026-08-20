@@ -8,7 +8,8 @@
 ## Before starting production
 
 Run `.venv/bin/python backend/operational_readiness.py preflight` before every
-restart. For an intentional REST-only start, add `--no-broker`. The command
+restart. For an intentional REST-only start, set `BROKER_SERVICES_ENABLED=false`
+in the deployment configuration. The command
 fails if required credentials are absent, runtime storage is not writable, or
 the HTTP port is occupied. It warns when live trading is enabled.
 

@@ -11,11 +11,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize("flag", ["--no-broker", "--no-smartapi"])
-def test_broker_free_mode_does_not_import_broker_client_or_adapter(flag):
+def test_public_only_mode_does_not_import_broker_client_or_adapter():
     probe = (
-        'import sys; '
-        f'sys.argv=["ws_server_live.py","{flag}"]; '
+        'import os, sys; '
+        'os.environ["BROKER_SERVICES_ENABLED"]="false"; '
         'import ws_server_live as server; '
         'assert server.USE_SMARTAPI is False; '
         'assert "brokers.smartapi_client" not in sys.modules; '

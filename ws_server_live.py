@@ -28,11 +28,10 @@ from nse_eod_fetch import fetch_all_eod, is_trading_day
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
 
 # option_chain_json.py parses sys.argv at import time — hide our own argv
-# from it so it doesn't choke on ws_server_live's --symbol/--poll-seconds flags.
+# from it so it doesn't choke on ws_server_live's server-only arguments.
 _real_argv = sys.argv
-if "--no-broker" in _real_argv or "--no-smartapi" in _real_argv:
-    os.environ["MTERMINALS_NO_SMARTAPI"] = "1"
 sys.argv = [_real_argv[0]]
+from config import settings as _broker_settings  # noqa: E402
 import market_api  # noqa: E402  (lightweight ticker-strip quotes; no argv parsing, doesn't need hiding)
 import mTerminals_json  # noqa: E402
 import option_chain_json  # noqa: E402
@@ -41,14 +40,15 @@ sys.argv = _real_argv  # restore for our own argparse below
 
 from operational_metrics import OperationalMetrics  # noqa: E402
 from pipeline_config import RuntimeConfig  # noqa: E402
+from live_feed_state import merge_live_feed_update  # noqa: E402
+from ws_payload import compute_diff, json_default as _json_default  # noqa: E402
 
 logger = logging.getLogger("mterminals.server")
 
 from paper_trading import LOT_SIZES as PT_LOT_SIZES
 from paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 
-_NO_SMARTAPI_REQUESTED = "--no-broker" in _real_argv or "--no-smartapi" in _real_argv
-from config import settings as _broker_settings
+BROKER_SERVICES_ENABLED = _broker_settings.broker_services_enabled
 
 # Which broker's WEBSOCKET tick feed overlays fast leg-level ticks onto the
 # slower NSE/BSE-polled chain — independent of execution_broker (orders) and
@@ -60,10 +60,10 @@ LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
 
 
 def _smartapi_disabled(*_args, **_kwargs):
-    raise RuntimeError("Broker services are disabled by --no-broker")
+    raise RuntimeError("Broker services are disabled by configuration")
 
 
-if not _NO_SMARTAPI_REQUESTED:
+if BROKER_SERVICES_ENABLED:
     from brokers.market_data import market_data
     from brokers.market_data import (
         PROVIDER_CAPABILITIES as _MD_PROVIDER_CAPABILITIES,
@@ -93,7 +93,7 @@ else:
     # SDK and instrument master. Any accidentally reached broker-only path
     # fails closed instead of silently logging in.
     #
-    # --no-broker: NSE/BSE public API is the only data source. The broker
+    # Public-only mode: NSE/BSE public API is the only data source. The broker
     # adapter registry still gets imported lazily by the pipeline (see
     # option_chain_json._fetch_and_parse), but ws_server_live's own helpers
     # must exist for the DATA SOURCE dropdown/reporting in this mode too.
@@ -226,21 +226,12 @@ _parser.add_argument(
     help="Disable the NIFTY/BANKNIFTY/MIDCPNIFTY/SENSEX ticker-strip background fetch",
 )
 _parser.add_argument(
-    "--no-broker",
-    action="store_true",
-    help="Disable authenticated broker traffic, including login, account data, "
-    "REST quotes, futures and websocket overlay; use NSE/BSE public REST "
-    "polling only. The unauthenticated daily ScripMaster remains available "
-    "for instrument metadata and lot sizes.",
-)
-_parser.add_argument("--no-smartapi", action="store_true", help=argparse.SUPPRESS)
-_parser.add_argument(
     "--strikes-each-side",
     type=int,
     default=None,
     help="Override how many strikes each side of ATM option_chain_json computes "
     "Greeks/OI-velocity/signal analytics for (engine's n_strikes_each_side). "
-    "Defaults to 50 under --no-broker (REST-only chains have no fast overlay "
+    "Defaults to 50 with BROKER_SERVICES_ENABLED=false (REST-only chains have no fast overlay "
     "to compensate, so the analytics pane needs the wider engine-side window "
     "up front) and 10 with the live broker overlay enabled (matches the "
     "feed adapter's own strikes_around_atm default). Pass this explicitly "
@@ -314,7 +305,7 @@ USE_INDEX_QUOTES = not ARGS.no_index_quotes
 INDEX_QUOTE_SECONDS = ARGS.index_quote_seconds
 FUNDS_POLL_SECONDS = ARGS.funds_poll_seconds
 PORTFOLIO_POLL_SECONDS = ARGS.portfolio_poll_seconds
-USE_SMARTAPI = not (ARGS.no_broker or ARGS.no_smartapi)
+USE_SMARTAPI = BROKER_SERVICES_ENABLED
 STRIKES_EACH_SIDE = (
     ARGS.strikes_each_side
     if ARGS.strikes_each_side is not None
@@ -337,7 +328,7 @@ def _resolve_default_data_source() -> str:
     token in .env doesn't silently strand the dashboard on the public
     NSE/BSE API and "break" a previously-working broker setup. NSE/BSE is
     only the default when NO broker has credentials at all — the true
-    login-free case (fresh install, or --no-broker forces it explicitly
+    login-free case (fresh install, or BROKER_SERVICES_ENABLED=false forces it explicitly
     regardless)."""
     configured = _broker_settings.market_data_provider
     if configured in _MD_PROVIDER_KEYS and _md_provider_has_credentials(configured):
@@ -358,7 +349,7 @@ def _resolve_default_data_source() -> str:
 # chain pipeline, index-quote loops, and payload all route consistently.
 DATA_SOURCE = _resolve_default_data_source()
 if not USE_SMARTAPI:
-    DATA_SOURCE = "NSE_BSE"  # --no-broker: public NSE/BSE is the only source
+    DATA_SOURCE = "NSE_BSE"  # public-only mode: NSE/BSE is the only source
 _md_set_active_provider(DATA_SOURCE)
 
 _md_label = (
@@ -395,8 +386,8 @@ elif USE_SMARTAPI:
         _overlay_state = "no websocket overlay (REST polling)"
 
 else:
-    _chain_source = "NSE/BSE public REST (--no-broker)"
-    _overlay_state = "websocket overlay DISABLED (--no-broker)"
+    _chain_source = "NSE/BSE public REST (public-only mode)"
+    _overlay_state = "websocket overlay DISABLED (public-only mode)"
 print(
     f"[feed] chain source: {_chain_source}, "
     f"analytics recompute ceiling={POLL_SECONDS}s floor={MIN_TICK_RECOMPUTE_SECONDS}s "
@@ -410,7 +401,7 @@ print(
     + (
         ""
         if USE_SMARTAPI
-        else " (inactive — --no-broker, falls back to --poll-seconds cadence)"
+        else " (inactive — public-only mode, falls back to --poll-seconds cadence)"
     ),
     flush=True,
 )
@@ -480,7 +471,7 @@ _LAST_KNOWN_LEG_PRICES: dict[str, float] = {}
 # Throttle for the fast-path portfolio broadcast fired from
 # _smartapi_sync_and_broadcast (see PORTFOLIO_POLL_SECONDS) — separate from
 # engine_loop()'s own POLL_SECONDS-paced broadcast, which still runs
-# unconditionally as a slower fallback (covers --no-smartapi mode and any
+# unconditionally as a slower fallback (covers public-only mode and any
 # gap while the SmartAPI feed is (re)connecting).
 _LAST_PORTFOLIO_BROADCAST_TS = 0.0
 EOD_TRIGGER_TIME = dtime(15, 45)  # run shortly after NSE cash market close (15:30)
@@ -805,70 +796,6 @@ async def _publish_pipeline_status(status, reason="", elapsed=None):
     current = (status, reason)
     if current != previous:
         await broadcast({"type": "pipelineStatus", "payload": dict(_PIPELINE_STATUS)})
-
-
-def _json_default(obj):
-    """orjson doesn't natively handle numpy scalars — coerce them to native Python types."""
-    if isinstance(obj, np.generic):  # covers float64, int64, bool_, etc.
-        return obj.item()
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    raise TypeError(f"Type is not JSON serializable: {type(obj)}")
-
-
-def compute_diff(old, new, key_field="strike"):
-    """Recursively diff `new` against `old`. Returns only changed data, or None if identical.
-    For lists of dicts, matches items by `key_field` if present, else replaces the whole list."""
-    if old == new:
-        return None
-
-    if isinstance(new, dict) and isinstance(old, dict):
-        out = {}
-        for k, v in new.items():
-            if k not in old:
-                out[k] = v
-            else:
-                d = compute_diff(old[k], v, key_field)
-                if d is not None:
-                    out[k] = d
-        removed = [k for k in old if k not in new]
-        if removed:
-            out["_removed"] = removed
-        return out if out else None
-
-    if isinstance(new, list) and isinstance(old, list):
-        if new and isinstance(new[0], dict) and key_field in new[0]:
-            old_by_key = {
-                row.get(key_field): row for row in old if isinstance(row, dict)
-            }
-            changed_rows = []
-            for row in new:
-                k = row.get(key_field)
-                old_row = old_by_key.get(k)
-                if old_row is None:
-                    changed_rows.append(row)
-                elif old_row != row:
-                    row_diff = compute_diff(old_row, row, key_field)
-                    if isinstance(row_diff, dict):
-                        # The client patches keyed rows in place, so send only
-                        # changed fields plus identity instead of the entire
-                        # strike row (Greeks/evidence rows are comparatively
-                        # wide). `_removed` is applied client-side too.
-                        changed_rows.append({key_field: k, **row_diff})
-                    else:
-                        changed_rows.append(row)
-            new_keys = {row.get(key_field) for row in new}
-            removed_keys = [k for k in old_by_key if k not in new_keys]
-            if not changed_rows and not removed_keys:
-                return None
-            result = {"_keyed": True, "_key_field": key_field, "changed": changed_rows}
-            if removed_keys:
-                result["_removed_keys"] = removed_keys
-            return result
-        else:
-            return new  # unkeyed list, replace wholesale if different
-
-    return new  # scalars or type mismatch
 
 
 def _background_task_done(task: asyncio.Task, task_name: str):
@@ -1662,7 +1589,7 @@ def _build_algo_status() -> dict:
     return {
         "broker": (
             "Public Data"
-            if _NO_SMARTAPI_REQUESTED
+            if not BROKER_SERVICES_ENABLED
             else "Shoonya"
             if _broker_settings.execution_broker == "SHOONYA"
             else "Upstox"
@@ -2322,12 +2249,41 @@ def switch_symbol(new_symbol, new_expiry=None):
     _LAST_SENT = None
     _SYMBOL_SWITCH_EVENT.set()
     if USE_SMARTAPI:
-        if LIVE_FEED_PROVIDER == "UPSTOX":
-            restart_upstox_feed(new_symbol, new_expiry)
-        elif LIVE_FEED_PROVIDER == "SHOONYA":
-            restart_shoonya_feed(new_symbol, new_expiry)
-        else:
-            restart_smartapi_feed(new_symbol, new_expiry)
+        _restart_live_feed(LIVE_FEED_PROVIDER, new_symbol, new_expiry)
+
+
+def _restart_live_feed(provider: str, symbol: str, expiry=None) -> bool:
+    """Schedule the active provider's existing feed for a symbol switch.
+
+    Socket lifecycle remains provider-native, but every orchestration call
+    site uses this broker-neutral dispatch rather than duplicating a
+    provider branch.
+    """
+    restart = {
+        "SMARTAPI": restart_smartapi_feed,
+        "UPSTOX": restart_upstox_feed,
+        "SHOONYA": restart_shoonya_feed,
+    }.get((provider or "").upper())
+    if restart is None:
+        return False
+    restart(symbol, expiry)
+    return True
+
+
+def _start_live_feed(provider: str, loop) -> bool:
+    """Offload the configured provider's blocking feed startup."""
+    start = {
+        "SMARTAPI": start_smartapi_feed,
+        "UPSTOX": start_upstox_feed,
+        "SHOONYA": start_shoonya_feed,
+    }.get((provider or "").upper())
+    if start is None:
+        return False
+    _create_background_task(
+        asyncio.to_thread(start, loop),
+        f"{provider.lower()}_startup",
+    )
+    return True
 
 
 def _feed_allowed(feed_provider: str) -> bool:
@@ -2467,12 +2423,7 @@ def switch_data_source(new_source: str) -> bool:
 
     # 5. Start the new provider's feed if it has one.
     if _MD_PROVIDER_CAPABILITIES.get(new_source, {}).get("websocket"):
-        if new_source == "UPSTOX":
-            restart_upstox_feed(SYMBOL, EXPIRY)
-        elif new_source == "SHOONYA":
-            restart_shoonya_feed(SYMBOL, EXPIRY)
-        else:
-            restart_smartapi_feed(SYMBOL, EXPIRY)
+        _restart_live_feed(new_source, SYMBOL, EXPIRY)
 
     # 6. Wake engine_loop immediately.
     _SYMBOL_SWITCH_EVENT.set()
@@ -2481,45 +2432,19 @@ def switch_data_source(new_source: str) -> bool:
     return True
 
 
-def _apply_smartapi_rows_to_chain_list(chain_rows, changed_rows):
-    """Merges changed_rows (list of {"strike":.., "ceLTP":.., "peOI":.., ...},
-    only the fields that actually ticked) into chain_rows (the full row list
-    from LAST_PAYLOAD/_LAST_SENT) in place, matching by "strike". Rows for
-    strikes not present in chain_rows are ignored — SmartAPI's ATM radius
-    and the NSE pipeline's n_strikes_each_side aren't guaranteed identical,
-    so a tick for a strike outside the currently-rendered range has nothing
-    to merge into and is silently dropped (the client never sees it anyway,
-    since it's not in the rendered chain)."""
-    if not chain_rows:
+async def _sync_live_feed_and_broadcast(provider, message, matches_expiry_fn):
+    """Apply a normalized provider tick only while that provider is active."""
+    if not _feed_allowed(provider):
         return
-    by_strike = {row.get("strike"): row for row in chain_rows if isinstance(row, dict)}
-    for changed in changed_rows:
-        target = by_strike.get(changed.get("strike"))
-        if target is None:
-            continue
-        for k, v in changed.items():
-            if k != "strike":
-                target[k] = v
-        # Note: no per-row net_oi/net_oi_chg to recompute here — the
-        # frontend (chain-views.js) derives totalCeOi/totalPeOi/pcr itself
-        # each render, straight from ceOI/peOI across the whole chain
-        # array, same as it does for volVel. ceOI/ceDOI/ceVol/ceVolChg
-        # being correctly set above (by TickAggregator) is sufficient.
+    async with _MARKET_STREAM_LOCK:
+        await _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn)
 
 
 async def _smartapi_sync_and_broadcast(message):
-    """Serialize SmartAPI mutations with engine full/delta computation.
-
-    Gated on _feed_allowed("SMARTAPI") so a runtime DATA SOURCE switch
-    away from SMARTAPI stops its ticks from reaching clients or merging
-    into LAST_PAYLOAD/_LAST_SENT (acceptance: no cross-provider
-    contamination)."""
-    if not _feed_allowed("SMARTAPI"):
-        return
-    async with _MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(
-            message, _smartapi_feed_matches_displayed_expiry
-        )
+    """Compatibility callback for SmartAPI's normalized tick stream."""
+    await _sync_live_feed_and_broadcast(
+        "SMARTAPI", message, _smartapi_feed_matches_displayed_expiry
+    )
 
 
 async def _upstox_sync_and_broadcast(message):
@@ -2531,12 +2456,9 @@ async def _upstox_sync_and_broadcast(message):
     LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
     serializes either way. Gated on _feed_allowed("UPSTOX") too, same
     reason as the SmartAPI gate above."""
-    if not _feed_allowed("UPSTOX"):
-        return
-    async with _MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(
-            message, _upstox_feed_matches_displayed_expiry
-        )
+    await _sync_live_feed_and_broadcast(
+        "UPSTOX", message, _upstox_feed_matches_displayed_expiry
+    )
 
 
 async def _shoonya_sync_and_broadcast(message):
@@ -2548,12 +2470,9 @@ async def _shoonya_sync_and_broadcast(message):
     LAST_PAYLOAD/_LAST_SENT concurrently — _MARKET_STREAM_LOCK still
     serializes either way. Gated on _feed_allowed("SHOONYA") too, same
     reason as the SmartAPI gate above."""
-    if not _feed_allowed("SHOONYA"):
-        return
-    async with _MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(
-            message, _shoonya_feed_matches_displayed_expiry
-        )
+    await _sync_live_feed_and_broadcast(
+        "SHOONYA", message, _shoonya_feed_matches_displayed_expiry
+    )
 
 
 async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
@@ -2588,61 +2507,9 @@ async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
     global LAST_PAYLOAD_AT
     feed_update_applied = False
     try:
-        payload = message.get("payload") if isinstance(message, dict) else None
-        chain_delta = (
-            (payload or {}).get("chain") if isinstance(payload, dict) else None
+        message, feed_update_applied = merge_live_feed_update(
+            message, LAST_PAYLOAD, _LAST_SENT, matches_expiry_fn
         )
-        if isinstance(chain_delta, dict) and chain_delta.get("_keyed"):
-            changed_rows = chain_delta.get("changed") or []
-            current_expiry = (LAST_PAYLOAD or {}).get("expiry")
-            if changed_rows and matches_expiry_fn(current_expiry):
-                feed_update_applied = True
-                if isinstance(LAST_PAYLOAD, dict):
-                    _apply_smartapi_rows_to_chain_list(
-                        LAST_PAYLOAD.get("chain"), changed_rows
-                    )
-                if isinstance(_LAST_SENT, dict):
-                    _apply_smartapi_rows_to_chain_list(
-                        _LAST_SENT.get("chain"), changed_rows
-                    )
-            elif changed_rows:
-                # Mismatch: this stale-expiry chain delta must not reach
-                # clients at all. Broadcast a copy of the message with
-                # "chain" removed from its payload, rather than mutating
-                # the original message in place — TickAggregator (the
-                # caller) may hold onto/reuse the dict internally, and this
-                # function has no visibility into that.
-                stripped_payload = {k: v for k, v in payload.items() if k != "chain"}
-                message = {**message, "payload": stripped_payload}
-
-        # Spot isn't tied to any expiry (unlike the chain rows above), so no
-        # expiry-match gate is needed here — just carry it into both
-        # snapshots directly so a newly-connecting client's initial "full"
-        # payload reflects the latest SmartAPI-streamed spot rather than
-        # whatever run_pipeline_once() last polled.
-        if isinstance(payload, dict) and "spot" in payload:
-            feed_update_applied = True
-            for snapshot in (LAST_PAYLOAD, _LAST_SENT):
-                if isinstance(snapshot, dict):
-                    snapshot["spot"] = payload["spot"]
-                    if "spotChange" in payload:
-                        snapshot["spotChange"] = payload["spotChange"]
-                    if "spotChgPct" in payload:
-                        snapshot["spotChgPct"] = payload["spotChgPct"]
-
-            # Futures-derived VWAP, basis-adjusted into spot's price frame —
-            # see the "future vwap differs from spot" fix. PLACEHOLDER field
-            # names (futLtp/futVwap/futVolume) — rename once TickAggregator
-            # actually emits these for a "FUT"-tagged tick; until then this
-            # branch is simply never true and is a no-op.
-            if "futLtp" in payload and "futVwap" in payload:
-                basis = payload["futLtp"] - payload["spot"]
-                spot_vwap = payload["futVwap"] - basis
-                for snapshot in (LAST_PAYLOAD, _LAST_SENT):
-                    if isinstance(snapshot, dict):
-                        snapshot["spotVwap"] = spot_vwap
-                        if "futVolume" in payload:
-                            snapshot["spotVolume"] = payload["futVolume"]
     except Exception as e:
         # Sync is a best-effort consistency improvement, not required for
         # the tick to reach clients — never let a sync bug block broadcast.
@@ -4287,7 +4154,7 @@ async def engine_loop():
         remaining = POLL_SECONDS - (time.monotonic() - tick_start)
         if remaining > 0:
             # POLL_SECONDS is a CEILING: fires anyway if nothing happens
-            # (quiet market, --no-smartapi, or this symbol has no SmartAPI
+            # (quiet market, public-only mode, or this symbol has no SmartAPI
             # feed — spot/OI stay on the old REST-poll cadence in that
             # case). MIN_TICK_RECOMPUTE_SECONDS is a FLOOR: even with
             # ticks flooding in continuously (every ~0.25s during market
@@ -4697,7 +4564,7 @@ async def history_handler(request):
     instrument = (request.query.get("instrument") or "EQ").strip().upper()
     expiry = (request.query.get("expiry") or "").strip().upper()
 
-    if _NO_SMARTAPI_REQUESTED:
+    if not BROKER_SERVICES_ENABLED:
         # Public first-load bootstrap is cash/index only. In particular, do
         # not disguise EQ candles as NEAR/NEXT/FAR futures history.
         from brokers.public_history import fetch_public_history
@@ -4949,24 +4816,7 @@ async def main():
     # compute_diff() in engine_loop(): anything blocking goes through a
     # thread, never runs inline on the loop.
     if USE_SMARTAPI and _feed_allowed(LIVE_FEED_PROVIDER):
-
-        if LIVE_FEED_PROVIDER == "UPSTOX":
-            _create_background_task(
-                asyncio.to_thread(start_upstox_feed, loop),
-                "upstox_startup",
-            )
-
-        elif LIVE_FEED_PROVIDER == "SHOONYA":
-            _create_background_task(
-                asyncio.to_thread(start_shoonya_feed, loop),
-                "shoonya_startup",
-            )
-
-        elif LIVE_FEED_PROVIDER == "SMARTAPI":
-            _create_background_task(
-                asyncio.to_thread(start_smartapi_feed, loop),
-                "smartapi_startup",
-            )
+        _start_live_feed(LIVE_FEED_PROVIDER, loop)
 
     else:
         if USE_SMARTAPI:
@@ -4978,7 +4828,7 @@ async def main():
             )
         else:
             print(
-                "[broker] authenticated services disabled (--no-broker) — "
+                "[broker] authenticated services disabled (BROKER_SERVICES_ENABLED=false) — "
                 "no broker login, account/order REST call, or websocket connection; "
                 "public daily ScripMaster allowed",
                 flush=True,
