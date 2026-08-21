@@ -32,6 +32,16 @@ from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
 _real_argv = sys.argv
 sys.argv = [_real_argv[0]]
 from config import settings as _broker_settings  # noqa: E402
+from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
+from server.health import HealthInputs, build_snapshot as _build_server_health_snapshot, log_transition as _log_server_health_transition  # noqa: E402
+from server import feed_lifecycle as _feed_lifecycle  # noqa: E402
+from server.feed_expiry import matches_displayed_expiry as _matches_displayed_expiry  # noqa: E402
+from server.feeds.shoonya import (
+    FeedState as _ShoonyaFeedState,
+    resolve_chain_tokens as _resolve_shoonya_feed_tokens,
+    start_new_feed as _start_shoonya_feed_new,
+    switch_existing_feed as _switch_shoonya_feed_existing,
+)  # noqa: E402
 import market_api  # noqa: E402  (lightweight ticker-strip quotes; no argv parsing, doesn't need hiding)
 import mTerminals_json  # noqa: E402
 import option_chain_json  # noqa: E402
@@ -374,10 +384,9 @@ if DATA_SOURCE == "NSE_BSE":
 elif USE_SMARTAPI:
     _chain_source = f"{_md_label} REST"
 
-    _caps = _MD_PROVIDER_CAPABILITIES.get(DATA_SOURCE, {})
     _overlay_allowed = (
         DATA_SOURCE == LIVE_FEED_PROVIDER
-        and bool(_caps.get("websocket"))
+        and _provider_supports_websocket(DATA_SOURCE)
     )
 
     if _overlay_allowed:
@@ -2259,31 +2268,22 @@ def _restart_live_feed(provider: str, symbol: str, expiry=None) -> bool:
     site uses this broker-neutral dispatch rather than duplicating a
     provider branch.
     """
-    restart = {
+    return _feed_lifecycle.restart(provider, symbol, expiry, {
         "SMARTAPI": restart_smartapi_feed,
         "UPSTOX": restart_upstox_feed,
         "SHOONYA": restart_shoonya_feed,
-    }.get((provider or "").upper())
-    if restart is None:
-        return False
-    restart(symbol, expiry)
-    return True
+    })
 
 
 def _start_live_feed(provider: str, loop) -> bool:
     """Offload the configured provider's blocking feed startup."""
-    start = {
+    return _feed_lifecycle.start(provider, loop, {
         "SMARTAPI": start_smartapi_feed,
         "UPSTOX": start_upstox_feed,
         "SHOONYA": start_shoonya_feed,
-    }.get((provider or "").upper())
-    if start is None:
-        return False
-    _create_background_task(
-        asyncio.to_thread(start, loop),
-        f"{provider.lower()}_startup",
-    )
-    return True
+    }, lambda start_callback, start_loop, task_name: _create_background_task(
+        asyncio.to_thread(start_callback, start_loop), task_name
+    ))
 
 
 def _feed_allowed(feed_provider: str) -> bool:
@@ -2297,8 +2297,9 @@ def _feed_allowed(feed_provider: str) -> bool:
     contaminate the new provider's baseline (acceptance: no cross-provider
     data mixing), and switching away from a broker feed effectively stops
     it without a restart."""
-    caps = _MD_PROVIDER_CAPABILITIES.get(DATA_SOURCE, {})
-    return DATA_SOURCE == feed_provider and bool(caps.get("websocket"))
+    return _feed_lifecycle.is_allowed(
+        feed_provider, DATA_SOURCE, _provider_supports_websocket
+    )
 
 
 def _stop_active_broker_feed(provider: str) -> None:
@@ -2422,7 +2423,7 @@ def switch_data_source(new_source: str) -> bool:
     _LAST_SENT = None
 
     # 5. Start the new provider's feed if it has one.
-    if _MD_PROVIDER_CAPABILITIES.get(new_source, {}).get("websocket"):
+    if _provider_supports_websocket(new_source):
         _restart_live_feed(new_source, SYMBOL, EXPIRY)
 
     # 6. Wake engine_loop immediately.
@@ -2619,11 +2620,9 @@ def _smartapi_feed_matches_displayed_expiry(payload_expiry_str):
     NEAR/MONTHLY tab being the active view). Merging ticks for the wrong
     expiry into the displayed chain would silently show the wrong
     contract's prices, so this gate must pass before any state merge."""
-    if not _smartapi_current_expiry or not payload_expiry_str:
-        return False
-    a = _parse_any_expiry(_smartapi_current_expiry)
-    b = _parse_any_expiry(payload_expiry_str)
-    return a is not None and a == b
+    return _matches_displayed_expiry(
+        _smartapi_current_expiry, payload_expiry_str, _parse_any_expiry
+    )
 
 
 def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
@@ -2802,11 +2801,9 @@ def _upstox_feed_matches_displayed_expiry(payload_expiry_str):
     currently-displayed chain), gated on _upstox_current_expiry instead.
     _parse_any_expiry() accepts Upstox's ISO expiry format alongside
     SmartAPI's (see its docstring)."""
-    if not _upstox_current_expiry or not payload_expiry_str:
-        return False
-    a = _parse_any_expiry(_upstox_current_expiry)
-    b = _parse_any_expiry(payload_expiry_str)
-    return a is not None and a == b
+    return _matches_displayed_expiry(
+        _upstox_current_expiry, payload_expiry_str, _parse_any_expiry
+    )
 
 
 def _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
@@ -3030,17 +3027,37 @@ _shoonya_current_expiry = (
 _shoonya_switch_lock = threading.RLock()
 
 
+def _shoonya_feed_state():
+    """Snapshot the legacy module globals for the extracted feed service."""
+    return _ShoonyaFeedState(
+        stream=_shoonya_stream,
+        aggregator=_shoonya_aggregator,
+        loop=_shoonya_loop,
+        instruments=_shoonya_instruments,
+        current_expiry=_shoonya_current_expiry,
+    )
+
+
+def _store_shoonya_feed_state(state):
+    """Reflect extracted service state back into the legacy globals."""
+    global _shoonya_stream, _shoonya_aggregator, _shoonya_loop
+    global _shoonya_instruments, _shoonya_current_expiry
+    _shoonya_stream = state.stream
+    _shoonya_aggregator = state.aggregator
+    _shoonya_loop = state.loop
+    _shoonya_instruments = state.instruments
+    _shoonya_current_expiry = state.current_expiry
+
+
 def _shoonya_feed_matches_displayed_expiry(payload_expiry_str):
     """Shoonya analog of _smartapi_feed_matches_displayed_expiry() /
     _upstox_feed_matches_displayed_expiry() above — same purpose, gated
     on _shoonya_current_expiry instead. _parse_any_expiry() accepts
     Shoonya's 'DD-Mon-YYYY' format alongside SmartAPI's/Upstox's (see
     that helper's docstring)."""
-    if not _shoonya_current_expiry or not payload_expiry_str:
-        return False
-    a = _parse_any_expiry(_shoonya_current_expiry)
-    b = _parse_any_expiry(payload_expiry_str)
-    return a is not None and a == b
+    return _matches_displayed_expiry(
+        _shoonya_current_expiry, payload_expiry_str, _parse_any_expiry
+    )
 
 
 def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
@@ -3057,80 +3074,20 @@ def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None
     ShoonyaTickStream.subscribe() expects and what its ticks report back
     as `token` after stripping the exchange prefix — see
     _shoonya_sync_and_broadcast() below for the strip)."""
-    from brokers.shoonya_market_data import get_atm_chain as _sh_get_atm_chain
-    from brokers.shoonya_market_data import index_tokens as _sh_index_tokens
-    from brokers.shoonya_market_data import list_expiries as _sh_list_expiries
-
-    exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
-
-    expiries = _sh_list_expiries(target_symbol, exchange=exchange)
-    if not expiries:
-        print(
-            f"[shoonya] No expiries found for {target_symbol}, skipping feed",
-            flush=True,
-        )
-        return None
-
-    if expiry:
-        target_date = _parse_any_expiry(expiry)
-        resolved_expiry = next(
-            (e for e in expiries if _parse_any_expiry(e) == target_date), None
-        )
-        if resolved_expiry is None:
-            print(
-                f"[shoonya] Requested expiry '{expiry}' not available for "
-                f"{target_symbol} (have: {expiries}) — falling back to nearest",
-                flush=True,
-            )
-            resolved_expiry = expiries[0]
-    else:
-        resolved_expiry = expiries[0]
-
-    chain = _sh_get_atm_chain(
-        target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange
+    return _resolve_shoonya_feed_tokens(
+        target_symbol,
+        strikes_around_atm,
+        expiry,
+        lambda symbol: symbol in _BSE_SYMBOLS,
+        _parse_any_expiry,
+        lambda message: print(message, flush=True),
     )
-    if not chain:
-        print(
-            f"[shoonya] Could not build ATM chain for {target_symbol}, skipping feed",
-            flush=True,
-        )
-        return None
-
-    instrument_meta = {
-        f"{exchange}|{row['token']}": {
-            "strike": row["strike"],
-            "option_type": row["type"],
-        }
-        for row in chain["rows"]
-    }
-
-    # Underlying's own index instrument, so spot streams at tick rate
-    # instead of only updating via the slower REST poll — same reasoning
-    # _resolve_chain_tokens()'s INDEX_TOKENS lookup gives for SmartAPI.
-    index_info = _sh_index_tokens().get(target_symbol)
-    index_instrument = None
-    if index_info is None or not index_info.get("token"):
-        print(
-            f"[shoonya] No index token resolved for {target_symbol} — "
-            f"spot will only update via the slower REST poll, not Shoonya",
-            flush=True,
-        )
-    else:
-        index_instrument = f"{index_info['exchange']}|{index_info['token']}"
-        # Tagged "INDEX" — same convention TickAggregator.on_tick() already
-        # understands for SmartAPI's/Upstox's index token.
-        instrument_meta[index_instrument] = {"strike": None, "option_type": "INDEX"}
-
-    return instrument_meta, resolved_expiry, index_instrument
 
 
 def start_shoonya_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
     """Shoonya analog of start_smartapi_feed()/start_upstox_feed() below —
     same lifecycle and locking discipline (see start_smartapi_feed()'s
     docstring for the exact race _shoonya_switch_lock closes)."""
-    global _shoonya_stream, _shoonya_aggregator, _shoonya_loop
-    global _shoonya_instruments, _shoonya_current_expiry
-
     from brokers.shoonya_ws_client import ShoonyaTickStream
 
     with _shoonya_switch_lock:
@@ -3142,43 +3099,16 @@ def start_shoonya_feed(loop, underlying=None, strikes_around_atm=10, expiry=None
             )
             _switch_shoonya_symbol_blocking(target_symbol, strikes_around_atm, expiry)
             return
-
-        _shoonya_loop = loop
         target_symbol = (underlying or SYMBOL).upper()
-
-        resolved = _resolve_shoonya_chain_tokens(
-            target_symbol, strikes_around_atm, expiry
+        state = _shoonya_feed_state()
+        _start_shoonya_feed_new(
+            state, loop, target_symbol, strikes_around_atm, expiry,
+            _resolve_shoonya_chain_tokens, TickAggregator,
+            _shoonya_sync_and_broadcast, _TICK_ACTIVITY_EVENT,
+            ShoonyaTickStream, threading.Thread, time.sleep,
+            lambda message: print(message, flush=True),
         )
-        if resolved is None:
-            return
-        instrument_meta, resolved_expiry, index_instrument = resolved
-
-        _shoonya_aggregator = TickAggregator(
-            instrument_meta,
-            loop,
-            _shoonya_sync_and_broadcast,
-            tick_event=_TICK_ACTIVITY_EVENT,
-        )
-        _shoonya_aggregator.start()
-
-        _shoonya_stream = ShoonyaTickStream(on_tick=_shoonya_aggregator.on_tick)
-        _shoonya_stream.connect()
-        threading.Thread(
-            target=_shoonya_stream.run_forever_with_reconnect, daemon=True
-        ).start()
-        time.sleep(2)  # let the WS connection establish before subscribing
-
-        instruments = list(instrument_meta.keys())
-        _shoonya_stream.subscribe(instruments)
-        _shoonya_instruments = instruments
-        _shoonya_current_expiry = resolved_expiry
-
-        option_count = len(instruments) - (1 if index_instrument else 0)
-        print(
-            f"[shoonya] Streaming {option_count} {target_symbol} option legs"
-            f"{' + spot' if index_instrument else ''} (expiry {resolved_expiry})",
-            flush=True,
-        )
+        _store_shoonya_feed_state(state)
 
 
 def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
@@ -3186,8 +3116,6 @@ def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=No
     _switch_upstox_symbol_blocking() above — reuses the existing WS
     connection, no socket close/reopen. Guarded by _shoonya_switch_lock so
     two rapid switches can't interleave their unsubscribe/subscribe calls."""
-    global _shoonya_instruments, _shoonya_current_expiry
-
     with _shoonya_switch_lock:
         if _shoonya_stream is None or _shoonya_aggregator is None:
             # Feed never started at boot (LIVE_FEED_PROVIDER pointed
@@ -3200,33 +3128,13 @@ def _switch_shoonya_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=No
                 )
             return
 
-        resolved = _resolve_shoonya_chain_tokens(
-            new_symbol.upper(), strikes_around_atm, expiry
+        state = _shoonya_feed_state()
+        _switch_shoonya_feed_existing(
+            state, new_symbol.upper(), strikes_around_atm, expiry,
+            _resolve_shoonya_chain_tokens,
+            lambda message: print(message, flush=True),
         )
-        if resolved is None:
-            return
-        new_instrument_meta, new_expiry, new_index_instrument = resolved
-        new_instruments = list(new_instrument_meta.keys())
-
-        if _shoonya_instruments:
-            try:
-                _shoonya_stream.unsubscribe(_shoonya_instruments)
-            except Exception as e:
-                print(
-                    f"[shoonya] Unsubscribe failed (continuing anyway): {e}", flush=True
-                )
-
-        _shoonya_aggregator.update_token_meta(new_instrument_meta)
-        _shoonya_stream.subscribe(new_instruments)
-
-        _shoonya_instruments = new_instruments
-        _shoonya_current_expiry = new_expiry
-        option_count = len(new_instruments) - (1 if new_index_instrument else 0)
-        print(
-            f"[shoonya] Switched stream to {option_count} {new_symbol.upper()} option legs"
-            f"{' + spot' if new_index_instrument else ''} (expiry {new_expiry})",
-            flush=True,
-        )
+        _store_shoonya_feed_state(state)
 
 
 def restart_shoonya_feed(new_symbol, new_expiry=None):
@@ -4640,31 +4548,6 @@ def _build_health_snapshot(now=None):
     session, however, a missing or old canonical payload makes the service
     degraded even when the HTTP and WebSocket listeners are reachable.
     """
-    now = now or datetime.now().astimezone()
-    if now.tzinfo is None:
-        now = now.astimezone()
-    session = _market_session_status(now)
-    payload_age = None
-    if LAST_PAYLOAD_AT is not None:
-        payload_age = max(0.0, (now - LAST_PAYLOAD_AT).total_seconds())
-
-    stale_after = max(12.0, float(POLL_SECONDS) * 2.5)
-    if (LAST_PAYLOAD is None or LAST_PAYLOAD_AT is None) and session == "OPEN":
-        feed_status = "STARTING"
-        feed_reason = "No canonical market snapshot has been produced yet"
-    elif LAST_PAYLOAD is None or LAST_PAYLOAD_AT is None:
-        feed_status = "IDLE"
-        feed_reason = f"Market session is {session.lower().replace('_', ' ')}; no live snapshot expected"
-    elif session == "OPEN" and payload_age > stale_after:
-        feed_status = "STALE"
-        feed_reason = f"Canonical market snapshot is {payload_age:.1f}s old"
-    elif session == "OPEN":
-        feed_status = "LIVE"
-        feed_reason = ""
-    else:
-        feed_status = "IDLE"
-        feed_reason = f"Market session is {session.lower().replace('_', ' ')}"
-
     smartapi_connected = False
     upstox_connected = False
     shoonya_connected = False
@@ -4680,72 +4563,34 @@ def _build_health_snapshot(now=None):
         connected_event = getattr(_smartapi_stream, "_connected", None)
         smartapi_connected = bool(connected_event and connected_event.is_set())
 
-    degraded = feed_status in {"STARTING", "STALE"}
-    reasons = [feed_reason] if degraded and feed_reason else []
-    pipeline_delayed = _PIPELINE_STATUS.get("status") == "DELAYED"
-    if pipeline_delayed:
-        degraded = True
-        reasons.append(
-            _PIPELINE_STATUS.get("reason") or "Analytics pipeline is delayed"
-        )
-    return {
-        "status": "degraded" if degraded else "ok",
-        "service": "mterminals",
-        "timestamp": now.isoformat(),
-        "uptimeSeconds": max(0.0, (now - PROCESS_STARTED_AT).total_seconds()),
-        "reasons": reasons,
-        "http": {"status": "ok"},
-        "websocket": {
-            "status": "ok",
-            "connectedClients": len(CONNECTED),
-        },
-        "marketFeed": {
-            "status": feed_status,
-            "reason": feed_reason,
-            "marketSession": session,
-            "symbol": SYMBOL,
-            "expiry": EXPIRY,
-            "lastPayloadAt": LAST_PAYLOAD_AT.isoformat() if LAST_PAYLOAD_AT else None,
-            "ageSeconds": round(payload_age, 3) if payload_age is not None else None,
-            "staleAfterSeconds": stale_after,
-            "smartapiEnabled": USE_SMARTAPI,
-            "smartapiConnected": smartapi_connected,
-            "dataSource": DATA_SOURCE,
-            "liveFeedProvider": (
-                LIVE_FEED_PROVIDER if USE_SMARTAPI and _feed_allowed(DATA_SOURCE) else None
-            ),
-            "upstoxConnected": upstox_connected,
-            "shoonyaConnected": shoonya_connected,
-        },
-        "analyticsPipeline": dict(_PIPELINE_STATUS),
-    }
+    return _build_server_health_snapshot(
+        HealthInputs(
+            process_started_at=PROCESS_STARTED_AT,
+            market_session_status=_market_session_status,
+            poll_seconds=POLL_SECONDS,
+            last_payload=LAST_PAYLOAD,
+            last_payload_at=LAST_PAYLOAD_AT,
+            connected_clients=len(CONNECTED),
+            symbol=SYMBOL,
+            expiry=EXPIRY,
+            broker_services_enabled=USE_SMARTAPI,
+            data_source=DATA_SOURCE,
+            live_feed_provider=LIVE_FEED_PROVIDER,
+            live_feed_active=USE_SMARTAPI and _feed_allowed(DATA_SOURCE),
+            pipeline_status=_PIPELINE_STATUS,
+            smartapi_connected=smartapi_connected,
+            upstox_connected=upstox_connected,
+            shoonya_connected=shoonya_connected,
+        ),
+        now=now,
+    )
 
 
 def _log_health_transition(snapshot):
     """Log health changes once; repeated health polls remain quiet."""
     global _LAST_HEALTH_LOG_STATE
-    feed = snapshot.get("marketFeed") or {}
-    reasons = tuple(snapshot.get("reasons") or ())
-    state = (snapshot.get("status"), feed.get("status"), reasons)
-    if state == _LAST_HEALTH_LOG_STATE:
-        return
-    _LAST_HEALTH_LOG_STATE = state
-    METRICS.observe_health_transition(feed.get("status"))
-    log = logger.warning if snapshot.get("status") == "degraded" else logger.info
-    log(
-        "service health transition",
-        extra={
-            "event": "health.transition",
-            "subsystem": "market_feed",
-            "status": snapshot.get("status"),
-            "reason": "; ".join(reasons) or feed.get("reason") or "",
-            "symbol": feed.get("symbol"),
-            "expiry": feed.get("expiry"),
-            "connected_clients": (snapshot.get("websocket") or {}).get(
-                "connectedClients"
-            ),
-            "age_seconds": feed.get("ageSeconds"),
-        },
+    _LAST_HEALTH_LOG_STATE = _log_server_health_transition(
+        snapshot, _LAST_HEALTH_LOG_STATE, METRICS, logger
     )
 
 

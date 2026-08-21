@@ -76,7 +76,6 @@ class ChainView {
     this.pcrVisible = false;
     this.selStrike = null;
     this.chainTableOpen = false;
-    this.chainGreeksVisible = false;
     this.selectedExpiry = null;
     this.expiryViewCache = {};
     // Last spot value actually rendered — compared against the incoming

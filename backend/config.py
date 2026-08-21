@@ -32,6 +32,18 @@ from dotenv import load_dotenv
 
 from paths import BACKEND_DIR, PROJECT_ROOT, RUNTIME_DIR
 
+try:  # ws_server_live adds backend/ to sys.path; package tests may not.
+    from brokers.provider_registry import EXECUTION_PROVIDER_KEYS
+except ModuleNotFoundError:  # pragma: no cover - depends on launch style
+    try:
+        from backend.brokers.provider_registry import EXECUTION_PROVIDER_KEYS
+    except ModuleNotFoundError:
+        # Keep config.py portable for deployment preflight and isolated tests
+        # that intentionally copy only configuration dependencies.
+        EXECUTION_PROVIDER_KEYS = frozenset(
+            {"SMARTAPI", "UPSTOX", "KITE", "SHOONYA", "BREEZE"}
+        )
+
 logger = logging.getLogger(__name__)
 
 
@@ -307,7 +319,7 @@ settings = Settings()
 # wired into ws_server_live.py.  Validating the actual order-routing surface
 # at startup prevents a configuration typo (or a data-only provider) from
 # failing much later, after the dashboard has already booted.
-EXECUTION_BROKERS = frozenset({"SMARTAPI", "UPSTOX", "KITE", "SHOONYA", "BREEZE"})
+EXECUTION_BROKERS = EXECUTION_PROVIDER_KEYS
 
 if settings.execution_broker not in EXECUTION_BROKERS:
     raise ValueError(

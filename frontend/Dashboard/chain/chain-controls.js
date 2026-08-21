@@ -29,13 +29,15 @@ function toggleOptionChainSnapshot(button) {
   return false;
 }
 
-function toggleOptionChainGreeks(button) {
-  const table = document.getElementById('option-chain-table');
-  const visible = button.getAttribute('aria-pressed') !== 'true';
-  button.setAttribute('aria-pressed', String(visible));
-  button.classList.toggle('active', visible);
-  table && table.querySelectorAll('.oc-ledger-greeks').forEach((row) => {
-    row.hidden = !visible;
+function setOptionChainLedgerView(view, button) {
+  const allowed = new Set(['positioning', 'activity', 'greeks', 'all']);
+  if (!allowed.has(view)) return;
+  const table = document.querySelector('#option-chain-table .oc-ledger-table');
+  if (table) table.dataset.view = view;
+  document.querySelectorAll('[data-chain-view]').forEach((control) => {
+    const selected = control.dataset.chainView === view;
+    control.classList.toggle('active', selected);
+    control.setAttribute('aria-pressed', String(selected));
   });
-  if (typeof app !== 'undefined' && app.chain) app.chain.chainGreeksVisible = visible;
+  if (typeof app !== 'undefined' && app.chain) app.chain.chainLedgerView = view;
 }

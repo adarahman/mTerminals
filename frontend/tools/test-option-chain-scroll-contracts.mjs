@@ -20,7 +20,7 @@ const checks = [
   ['expanded ledger keeps its physical scroll container across ticks', renderer.includes('Never replace the physical scroll container')],
   ['expanded ledger rows stay mounted while idle values tick', renderer.includes('_patchExpandedLedgerRows') && renderer.includes('cell.innerHTML = freshCell.innerHTML') && !renderer.includes("copyInner('.oc-ledger-table tbody')")],
   ['expanded ledger uses normal page scrolling', styles.includes('.oc-native-scroll{') && styles.includes('overflow-y:visible') && styles.includes('max-height:none')],
-  ['modal ledger fits screen without horizontal scrolling', styles.includes('table-layout:fixed') && styles.includes('.option-chain-modal-body .oc-native-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}') && !styles.includes('min-width:1320px')],
+  ['modal ledger keeps focused metrics views compact and scrolls All', styles.includes('table-layout:fixed') && styles.includes('.option-chain-modal-body .oc-native-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}') && styles.includes('.oc-ledger-table[data-view="greeks"] .oc-metric:not(.greeks){display:none;}') && styles.includes('.oc-native-scroll:has(.oc-ledger-table[data-view="all"]){overflow-x:auto;}') && styles.includes('.oc-ledger-table[data-view="all"]{min-width:1380px;}')],
   ['option chain uses the shared full-screen modal', modalManager.includes('openOptionChainModal()') && modalManager.includes("this._openModal(modal, () => this.closeOptionChainModal())")],
 ];
 

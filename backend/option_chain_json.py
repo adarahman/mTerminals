@@ -379,6 +379,30 @@ def _fetch_and_parse(symbol, expiry, exchange, strict_expiry=False):
                     f"NSE-fallback BFO chain fetch empty for {symbol} {expiry}"
                 )
         spot = df["Spot"].iloc[0] if "Spot" in df.columns else 0.0
+        # A BSE option-chain response can contain valid strikes while its
+        # embedded underlying field is blank/stale. Do not discard that
+        # usable chain just because the response omitted Spot: recover the
+        # current BSE index quote and stamp it into the normalized frame.
+        try:
+            valid_spot = pd.notna(spot) and float(spot) > 0
+        except (TypeError, ValueError):
+            valid_spot = False
+        if not valid_spot:
+            quote = fetch_bse_index_quote(symbol)
+            recovered = quote.get("Last Price") if quote else None
+            try:
+                recovered = float(recovered)
+            except (TypeError, ValueError):
+                recovered = 0.0
+            if recovered > 0:
+                df = df.copy()
+                df["Spot"] = recovered
+                spot = recovered
+                logger.warning(
+                    "[BSE] recovered missing chain spot for %s from index quote: %s",
+                    symbol,
+                    recovered,
+                )
         expiry_dates = _generate_bse_expiry_series(symbol)
         return df, spot, expiry_dates
     else:

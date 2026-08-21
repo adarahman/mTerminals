@@ -45,6 +45,17 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
 
 logger = logging.getLogger(__name__)
 
+# Breeze uses different identifiers for some BSE cash indices and their BFO
+# derivatives. The official SDK's BFO SENSEX examples use BSESEN, not the
+# cash quote code SENSEX.
+_BFO_DERIVATIVE_STOCK_CODES = {"SENSEX": "BSESEN"}
+
+
+def derivative_stock_code(symbol: str, exchange: str = "NFO") -> str:
+    """Translate a dashboard underlying to Breeze's F&O stock code."""
+    symbol = (symbol or "").strip().upper()
+    return _BFO_DERIVATIVE_STOCK_CODES.get(symbol, symbol) if exchange.upper() == "BFO" else symbol
+
 
 class BrokerError(RuntimeError):
     pass
@@ -106,6 +117,11 @@ class BreezeSession:
         self._api = None
         self._lock = threading.RLock()
         self._session_error: BrokerError | None = None
+        # Keep the credentials that produced the current client.  A Breeze
+        # session expires daily and operators commonly refresh it in the
+        # running process' settings during recovery; do not keep serving the
+        # old terminal error after that value has changed.
+        self._credentials: tuple[str | None, str | None, str | None] | None = None
 
     @property
     def api(self):
@@ -114,6 +130,15 @@ class BreezeSession:
 
     def ensure_session(self):
         with self._lock:
+            credentials = (
+                settings.breeze_api_key,
+                settings.breeze_api_secret,
+                settings.breeze_api_session,
+            )
+            if self._credentials != credentials:
+                self._api = None
+                self._session_error = None
+                self._credentials = credentials
             if self._api is not None:
                 return self._api
             if self._session_error is not None:
@@ -146,8 +171,24 @@ class BreezeSession:
             logger.info("[breeze_client] Session generated")
             return api
 
+    def reset(self) -> None:
+        """Forget the current SDK client and authenticate again on next use."""
+        with self._lock:
+            self._api = None
+            self._session_error = None
+            self._credentials = None
+
 
 _session = BreezeSession()
+
+
+def healthcheck() -> tuple[bool, str | None]:
+    """Verify that the configured ICICI session can serve requests now."""
+    try:
+        _session.ensure_session()
+    except Exception as exc:
+        return False, str(exc)
+    return True, None
 
 # resolve_option_contract() -> place_order() handoff cache. See module
 # docstring. Not persisted across process restarts, same lifetime as the
@@ -194,8 +235,11 @@ def resolve_option_contract(symbol, expiry, strike, option_type, exchange="NFO")
     from NSE-style underlyings should map through
     breeze_market_data.py's stock-code cache first.
     """
-    del exchange  # Breeze infers NFO for all F&O contracts; kept for signature parity.
+    exchange_code = (exchange or "NFO").upper()
+    if exchange_code not in {"NFO", "BFO"}:
+        return None
     try:
+        symbol = derivative_stock_code(symbol, exchange_code)
         expiry_iso = _iso_expiry(expiry)
         strike_float = float(strike)
     except (TypeError, ValueError):
@@ -207,13 +251,13 @@ def resolve_option_contract(symbol, expiry, strike, option_type, exchange="NFO")
     with _CONTRACT_CACHE_LOCK:
         _CONTRACT_CACHE[key] = {
             "stock_code": symbol,
-            "exchange_code": "NFO",
+            "exchange_code": exchange_code,
             "expiry_date": expiry_iso,
             "strike_price": strike_text,
             "right": right,
             "product": "options",
         }
-    return "NFO", key, ""
+    return exchange_code, key, ""
 
 
 def place_order(tradingsymbol, symboltoken, exchange, transaction_type,

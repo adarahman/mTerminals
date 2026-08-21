@@ -70,6 +70,11 @@ ChainView.prototype.renderDataSourceOptions = function(sources, active) {
 };
 
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
+  const activeSymbol = d.symbol || 'NIFTY';
+  // `symbolName` is resolved from the instrument master by the payload
+  // builder. Do not maintain a partial browser-side company-name table.
+  const symbolName = d.symbolName || d.companyName || d.displayName
+    || activeSymbol;
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
@@ -125,8 +130,10 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            F&O universe (d.fnoSymbols — every NSE/BSE underlying with live
            F&O contracts, grouped Indices/Stocks) plus whatever custom
            symbol is currently active if it isn't already in that list. -->
-      <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(d.symbol||'NIFTY', d.fnoSymbols)}</select>
-      <span class="price-source-tag" title="EQ is the fixed option-pricing and decision reference">EQ</span>
+      <div class="active-symbol-pill" title="${escapeHtml(symbolName)}">
+        <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols)}</select>
+        <span class="symbol-name">${escapeHtml(symbolName)}</span>
+      </div>
       <span class="spot-block">
         <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
         ${d.spotChgPct!==undefined?`
@@ -767,7 +774,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 ChainView.prototype.buildChainSummaryHtml = function(d) {
   const chain = getFilteredChain(d);
   const tableOpen = this.chainTableOpen === true;
-  const greeksVisible = this.chainGreeksVisible === true;
+  const ledgerView = this.chainLedgerView || 'positioning';
   const greeksByStrike = new Map((d.greeks || []).map(g => [Number(g.strike), g]));
   const structureOi = {};
   chain.forEach(r => {
@@ -798,6 +805,10 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const signedFmt = (v) => (v>0?'+':'') + fmtCrLK(v);
   // signColor()'s default neutral is already --text-primary, matching the
   // reference mockup's "0 stays bold/white, not greyed out" behavior.
+  // PCR movement is a ratio delta, not an OI quantity. Formatting it with
+  // fmtCrLK rounded almost every meaningful move to 0, since that formatter
+  // intentionally has no decimal precision below one thousand contracts.
+  const signedPcrDelta = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtN(Math.abs(v), 3)}`;
 
   // ── Positioning summary ─────────────────────────────────────────
   // D-04 owns aggregate positioning only. Intraday OI/capital FLOW has
@@ -843,7 +854,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
     <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
       aria-expanded="${tableOpen}" aria-controls="option-chain-table">
       <span class="oi-snap-heading nav-card-header-label">
-        <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--neg)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pos)"/></svg>
+        <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--ce)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pe)"/></svg>
         Option Chain Snapshot
       </span>
       <span class="oi-snap-badge">${rngLabel}</span>
@@ -860,10 +871,8 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
           </div>
           <div class="oi-snap-title">OI Summary</div>
-        </div>
-        <div class="oi-snap-primary">
-          <span><small>Net OI · PE−CE</small><strong style="color:${signColor(netOi)}">${signedFmt(netOi)}</strong></span>
-          <span class="oi-snap-primary-pcr"><small>Range PCR · ${rngTag}</small><strong>${fmtN(pcr,2)}</strong></span>
+          <span class="oi-snap-head-net"><small>Net OI · PE−CE</small><strong style="color:${signColor(netOi)}">${signedFmt(netOi)}</strong></span>
+          <span class="oi-snap-head-pcr"><small>Range PCR · ${rngTag}</small><strong>${fmtN(pcr,2)}</strong></span>
         </div>
         <div class="oi-snap-sides" aria-label="Call and put open interest totals">
           <span class="ce"><small>CE OI</small><strong>${fmtCrLK(totalCe)}</strong></span>
@@ -884,11 +893,11 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
           </div>
           <div class="oi-snap-title">Chg OI Summary</div>
-          <button type="button" class="oi-snap-chart-link" onclick="event.stopPropagation();openOIDashboardModal()" aria-label="Open OI Flow chart">OI Flow chart ↗</button>
-        </div>
-        <div class="oi-snap-primary">
-          <span><small>Full-day Net ΔOI · PE−CE</small><strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong></span>
-          <span class="oi-snap-primary-pcr"><small>Range PCR Δ</small><strong>${signedFmt(pcrShift)}</strong></span>
+          <button type="button" class="oi-snap-chart-link" onclick="event.stopPropagation();openOIDashboardModal()" aria-label="Open OI Flow chart" title="Open OI Flow chart">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+          </button>
+          <span class="oi-snap-head-net"><small>Net ΔOI · PE−CE</small><strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong></span>
+          <span class="oi-snap-head-pcr"><small>Range PCR Δ</small><strong>${signedPcrDelta(pcrShift)}</strong></span>
         </div>
         <div class="oi-snap-sides" aria-label="Call and put change in open interest totals">
           <span class="ce"><small>CE ΔOI</small><strong>${signedFmt(totalCeChg)}</strong></span>
@@ -906,43 +915,48 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
     <div class="oc-native-chain" id="option-chain-table" ${tableOpen?'':'hidden'}>
       <div class="oc-native-scroll">
-        <table class="oc-ledger-table" aria-label="Option Chain ledger by strike">
+        <table class="oc-ledger-table" data-view="${ledgerView}" aria-label="Option Chain ledger by strike">
           <colgroup>
-            <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-ltp"><col class="c-ltp">
-            <col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-sig"><col class="c-foot"><col class="c-struct">
+            <col class="c-ltp"><col class="c-ltp"><col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-sig">
+            <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-delta"><col class="c-gamma"><col class="c-theta"><col class="c-vega"><col class="c-foot"><col class="c-struct">
           </colgroup>
           <thead>
             <tr>
-              <th>IV <small>PE / CE</small></th>
-              <th>Volume <small>PE / CE</small></th>
-              <th>Premium ₹ <small>PE / CE</small></th>
               <th class="ce">CE LTP <small>change</small></th>
               <th class="pe">PE LTP <small>change</small></th>
               <th class="strike">Strike <small>PCR</small></th>
-              <th>Open Int <small>PE / CE</small></th>
-              <th>Chg OI <small>PE / CE</small></th>
-              <th>Signal <small>composite</small></th>
-              <th>Footprint <small>0–100</small></th>
-              <th>Structure <small>strike</small></th>
+              <th class="oc-metric positioning">Open Int <small>PE / CE</small></th>
+              <th class="oc-metric positioning">Chg OI <small>PE / CE</small></th>
+              <th class="oc-metric positioning">Signal <small>composite</small></th>
+              <th class="oc-metric activity">IV <small>PE / CE</small></th>
+              <th class="oc-metric activity">Volume <small>PE / CE</small></th>
+              <th class="oc-metric activity">Premium ₹ <small>PE / CE</small></th>
+              <th class="oc-metric greeks">Delta <small>PE / CE</small></th>
+              <th class="oc-metric greeks">Gamma <small>PE / CE</small></th>
+              <th class="oc-metric greeks">Theta <small>PE / CE</small></th>
+              <th class="oc-metric greeks">Vega <small>PE / CE</small></th>
+              <th class="oc-metric advanced">Footprint <small>0–100</small></th>
+              <th class="oc-metric advanced">Structure <small>strike</small></th>
             </tr>
           </thead>
           <tbody>
-            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
-              <td><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
-              <td><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
-              <td><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
+            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; const oiWinner=(Number(r.peOI)||0)===(Number(r.ceOI)||0)?'':((Number(r.peOI)||0)>(Number(r.ceOI)||0)?'pe':'ce'); const chgWinner=Math.abs(Number(r.peChgOI)||0)===Math.abs(Number(r.ceChgOI)||0)?'':(Math.abs(Number(r.peChgOI)||0)>Math.abs(Number(r.ceChgOI)||0)?'pe':'ce'); return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
               <td class="ltp ce"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button></td>
               <td class="ltp pe"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button></td>
               <td class="strike"><button type="button" onclick="event.stopPropagation();openOptionChainAtStrike(${Number(r.strike)})" aria-label="Open Strike Detail for ${fmtI(r.strike)}"><strong>${fmtI(r.strike)}</strong><small>PCR ${r.ceOI?fmtN((r.peOI||0)/r.ceOI,2):'—'}</small></button></td>
-              <td><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peOI)}</span><span class="ce">${fmtCrLK(r.ceOI)}</span></div></td>
-              <td><div class="oc-ledger-stack"><span class="pe ${r.peChgOI>=0?'up':'down'}">${signedFmt(r.peChgOI)}</span><span class="ce ${r.ceChgOI>=0?'up':'down'}">${signedFmt(r.ceChgOI)}</span></div></td>
-              <td class="signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
-              <td class="footprint"><strong>${r.footprintScore==null?'—':fmtN(r.footprintScore,0)}</strong></td>
-              <td class="structure"${structureStyle} title="${escapeHtml(structureText)}">${escapeHtml(structureText)}</td>
-            </tr><tr class="oc-ledger-greeks" ${greeksVisible?'':'hidden'}><td colspan="11">
-              <div><b class="ce">CE</b> Δ ${fmtN(g.cDelta,3)} · Γ ${fmtN(g.cGamma,5)} · Θ ${fmtN(g.cTheta,2)} · Vega ${fmtN(g.cVega,2)}</div>
-              <div><b class="pe">PE</b> Δ ${fmtN(g.pDelta,3)} · Γ ${fmtN(g.pGamma,5)} · Θ ${fmtN(g.pTheta,2)} · Vega ${fmtN(g.pVega,2)}</div>
-            </td></tr>`; }).join('')}
+              <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${oiWinner==='pe'?'dominant':''}">${fmtCrLK(r.peOI)}</span><span class="side-value ce ${oiWinner==='ce'?'dominant':''}">${fmtCrLK(r.ceOI)}</span></div></td>
+              <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${chgWinner==='pe'?'dominant':''}">${signedFmt(r.peChgOI)}</span><span class="side-value ce ${chgWinner==='ce'?'dominant':''}">${signedFmt(r.ceChgOI)}</span></div></td>
+              <td class="oc-metric positioning signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
+              <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
+              <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
+              <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
+              <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pDelta,3)}</span><span class="ce">${fmtN(g.cDelta,3)}</span></div></td>
+              <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pGamma,5)}</span><span class="ce">${fmtN(g.cGamma,5)}</span></div></td>
+              <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pTheta,2)}</span><span class="ce">${fmtN(g.cTheta,2)}</span></div></td>
+              <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pVega,2)}</span><span class="ce">${fmtN(g.cVega,2)}</span></div></td>
+              <td class="oc-metric advanced footprint"><strong>${r.footprintScore==null?'—':fmtN(r.footprintScore,0)}</strong></td>
+              <td class="oc-metric advanced structure"${structureStyle} title="${escapeHtml(structureText)}">${escapeHtml(structureText)}</td>
+            </tr>`; }).join('')}
           </tbody>
         </table>
       </div>

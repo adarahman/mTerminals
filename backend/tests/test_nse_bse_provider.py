@@ -194,6 +194,19 @@ def test_upstox_spot_quote_is_a_module_function_not_an_adapter_method(monkeypatc
     assert quote["last_price"] == 25000.0
 
 
+def test_upstox_spot_quote_never_substitutes_a_different_index(monkeypatch):
+    """A failed SENSEX key must not be rendered with a NIFTY quote."""
+    from brokers import upstox_client
+
+    monkeypatch.setattr(
+        upstox_client,
+        "get_quotes",
+        lambda _key: {upstox_client.INDEX_KEYS["NIFTY"]: {"last_price": 24229.55}},
+    )
+
+    assert upstox_client.get_spot_quote("SENSEX") is None
+
+
 def test_connection_boundary_normalizes_broker_healthcheck(monkeypatch):
     from brokers import connection
 
@@ -593,6 +606,22 @@ def test_default_data_source_nse_bse_when_no_broker_has_creds(
     assert ws_server_live._resolve_default_data_source() == "NSE_BSE"
 
 
+def test_breeze_requires_all_connection_credentials(monkeypatch):
+    """A token alone cannot create a Breeze session or serve a price."""
+    originals = {
+        name: getattr(md._md_settings, name)
+        for name in ("breeze_api_key", "breeze_api_secret", "breeze_api_session")
+    }
+    try:
+        object.__setattr__(md._md_settings, "breeze_api_key", "KEY")
+        object.__setattr__(md._md_settings, "breeze_api_secret", None)
+        object.__setattr__(md._md_settings, "breeze_api_session", "SESSION")
+        assert md.provider_has_credentials("BREEZE") is False
+    finally:
+        for name, value in originals.items():
+            object.__setattr__(md._md_settings, name, value)
+
+
 # ── 11. Unknown provider keys rejected ───────────────────────────────────
 def test_set_active_provider_rejects_unknown():
     with pytest.raises(ValueError):
@@ -619,12 +648,14 @@ class _FakeChainMD:
                     "tradingsymbol": "NIFTY26JUL24000CE", "token": "1",
                     "lot_size": 75,
                     "ltp": 120.0, "oi": 1000.0, "volume": 500,
+                    "net_change": 4.5, "pct_change": 3.9,
                 },
                 {
                     "strike": 24000, "type": "PE",
                     "tradingsymbol": "NIFTY26JUL24000PE", "token": "2",
                     "lot_size": 75,
                     "ltp": 80.0, "oi": 2000.0, "volume": 300,
+                    "net_change": -2.25, "pct_change": -2.74,
                 },
             ],
         }
@@ -662,6 +693,8 @@ def test_chain_pipeline_routes_by_active_provider(monkeypatch):
     # the shared path normalizes to lots via _lot_size("NIFTY") == 75.
     assert float(row["CE_LTP"]) == 121.0
     assert float(row["CE_OI"]) == pytest.approx(1001.0 / 75)
+    assert float(row["CE_Change"]) == 5.0
+    assert float(row["CE_pChange"]) == 4.0
 
 
 def test_chain_pipeline_canonicalizes_full_name_underlying(monkeypatch):

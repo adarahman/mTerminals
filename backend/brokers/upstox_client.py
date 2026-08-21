@@ -378,6 +378,51 @@ def _row_expiry_date(row: dict) -> Optional[str]:
 # 20h-cached) instrument dump so it survives the same refresh window; cheap
 # to rebuild and never blocks a broker session.
 _COMPANY_NAME_TO_TICKER_CACHE: Optional[dict] = None
+_TICKER_TO_COMPANY_NAME_CACHE: dict[str, str] = {}
+
+
+def get_company_name_for_ticker(ticker: str) -> Optional[str]:
+    """Return the exchange-master display name for an equity ticker.
+
+    The F&O master used for contract resolution commonly exposes only the
+    short underlying (``INFY``). Upstox's public EQ master carries both that
+    ticker and the legal display name (``Infosys Limited``), which is the
+    right source for the dashboard's secondary symbol label.
+    """
+    key = (ticker or "").strip().upper()
+    if not key:
+        return None
+    if key in _TICKER_TO_COMPANY_NAME_CACHE:
+        return _TICKER_TO_COMPANY_NAME_CACHE[key] or None
+
+    display_name = None
+    prefix_candidates = {}
+    for scope in ("NSE", "BSE"):
+        try:
+            rows = _load_instrument_dump(scope)
+        except Exception:
+            continue
+        for row in rows:
+            row_ticker = (_row_symbol(row) or "").strip().upper()
+            name = (row.get("name") or "").strip()
+            if row_ticker == key and name and name.upper() != key:
+                display_name = name
+                break
+            # A few broker masters publish a shortened underlying while the
+            # exchange EQ master uses the full ticker (e.g. ICICI vs
+            # ICICIBANK). Accept this only if it resolves to one ticker.
+            if row_ticker and (row_ticker.startswith(key) or key.startswith(row_ticker)) and name:
+                prefix_candidates.setdefault(row_ticker, name)
+        if display_name:
+            break
+
+    if not display_name and len(prefix_candidates) == 1:
+        candidate_name = next(iter(prefix_candidates.values()))
+        if candidate_name.upper() != key:
+            display_name = candidate_name
+
+    _TICKER_TO_COMPANY_NAME_CACHE[key] = display_name or ""
+    return display_name
 
 
 def _build_company_name_to_ticker() -> dict:
@@ -657,10 +702,19 @@ def get_spot_quote(underlying: str) -> Optional[dict]:
     quotes = get_quotes(instrument_key)
     if not quotes:
         return None
-    # Upstox normally keys the response by the requested instrument key, but
-    # accepting the first row makes this resilient to its composite-key
-    # formatting differences across quote API versions.
-    return quotes.get(instrument_key) or next(iter(quotes.values()), None)
+    # Upstox can vary the separator used in its response key, but never use
+    # an arbitrary first row as a fallback: doing so can label a NIFTY quote
+    # as SENSEX after a broker/symbol switch. Return no quote when the
+    # requested instrument cannot be identified; the normal provider
+    # fallback path may then recover it without presenting false data.
+    if quotes.get(instrument_key):
+        return quotes[instrument_key]
+    normalized_key = instrument_key.replace("|", ":").upper()
+    for response_key, quote in quotes.items():
+        quote_key = str(quote.get("instrument_key") or response_key).replace("|", ":").upper()
+        if quote_key == normalized_key:
+            return quote
+    return None
 
 
 def get_historical_candles(

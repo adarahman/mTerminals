@@ -14,6 +14,7 @@ from types import ModuleType
 from typing import Callable, Optional
 
 from brokers.logging import broker_event
+from brokers.provider_registry import normalize_provider
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ def _adapter_healthcheck(module_name: str) -> Callable[[], tuple[bool, Optional[
 # account login.
 _CHECKS: dict[str, Callable[[], tuple[bool, Optional[str]]]] = {
     "SHOONYA": _adapter_healthcheck("brokers.shoonya_client"),
+    "BREEZE": _adapter_healthcheck("brokers.breeze_client"),
 }
 
 # One canonical execution route per broker.  Market-data modules stay in
@@ -65,7 +67,7 @@ def get_execution_adapter(provider: str) -> ModuleType:
     all must expose the same order/account operations. This removes provider
     branches from server startup and makes adding a broker a registry change.
     """
-    name = (provider or "").strip().upper()
+    name = normalize_provider(provider)
     module_name = EXECUTION_ADAPTERS.get(name)
     if not module_name:
         raise ValueError(
@@ -85,7 +87,7 @@ def check_connection(provider: str) -> ConnectionStatus:
     account session to preflight. This keeps a market-data source switch from
     unnecessarily requiring execution credentials.
     """
-    name = (provider or "").strip().upper()
+    name = normalize_provider(provider)
     check = _CHECKS.get(name)
     if check is None:
         return ConnectionStatus(provider=name, ready=True)

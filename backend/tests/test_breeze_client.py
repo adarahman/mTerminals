@@ -73,6 +73,40 @@ def test_failed_session_generation_is_not_retried_with_the_same_token(breeze):
     assert len(api.session_calls) == 1
 
 
+def test_session_recovers_when_daily_session_token_changes(breeze):
+    """A fresh token must clear the cached failure without a process restart."""
+    module, api = breeze
+
+    def fail_session(**kwargs):
+        api.session_calls.append(kwargs)
+        raise RuntimeError("Session key is expired")
+
+    api.generate_session = fail_session
+    with pytest.raises(module.BrokerError):
+        module._session.ensure_session()
+
+    def succeed_session(**kwargs):
+        api.session_calls.append(kwargs)
+
+    api.generate_session = succeed_session
+    object.__setattr__(module.settings, "breeze_api_session", "FRESH_SESSION")
+    assert module._session.ensure_session() is api
+    assert api.session_calls[-1]["session_token"] == "FRESH_SESSION"
+
+
+def test_healthcheck_reports_missing_or_failed_session(breeze):
+    module, api = breeze
+    object.__setattr__(module.settings, "breeze_api_session", None)
+    ready, error = module.healthcheck()
+    assert ready is False
+    assert "BREEZE_API_SESSION" in error
+
+    object.__setattr__(module.settings, "breeze_api_session", "SESSION")
+    ready, error = module.healthcheck()
+    assert ready is True
+    assert error is None
+
+
 def test_resolve_option_contract_returns_synthetic_key(breeze):
     module, _ = breeze
     resolved = module.resolve_option_contract("NIFTY", "28-Aug-2025", 24800, "CE")
@@ -82,6 +116,15 @@ def test_resolve_option_contract_returns_synthetic_key(breeze):
     assert cached["expiry_date"] == "2025-08-28T06:00:00.000Z"
     assert cached["strike_price"] == "24800"
     assert cached["right"] == "Call"
+
+
+def test_resolve_sensex_option_preserves_bfo_exchange(breeze):
+    module, _ = breeze
+    resolved = module.resolve_option_contract("SENSEX", "28-Aug-2025", 80000, "PE", "BFO")
+    assert resolved == ("BFO", "SENSEX28AUG2580000PE", "")
+    cached = module._CONTRACT_CACHE[resolved[1]]
+    assert cached["exchange_code"] == "BFO"
+    assert cached["stock_code"] == "BSESEN"
 
 
 def test_place_order_requires_prior_resolution(breeze):

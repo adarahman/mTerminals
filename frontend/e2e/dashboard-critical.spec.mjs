@@ -153,9 +153,10 @@ test('Option Chain Snapshot header opens and closes the native chain table', asy
   await expect(table).toBeVisible();
   await expect(table.getByRole('columnheader', { name: /CE LTP/ })).toBeVisible();
   await expect(table.getByRole('columnheader', { name: /PE LTP/ })).toBeVisible();
-  await expect(table.getByRole('columnheader', { name: /Footprint/ })).toBeVisible();
-  await table.locator('.oc-ledger-tools').getByRole('button', { name: /Greeks/ }).click();
-  await expect(table.locator('.oc-ledger-greeks').first()).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: /Signal/ })).toBeVisible();
+  await page.locator('#option-chain-modal [data-chain-view="greeks"]').click();
+  await expect(table.getByRole('columnheader', { name: /Delta/ })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: /Vega/ })).toBeVisible();
   await table.locator('.oc-ledger-row td.ltp.ce button').first().click();
   await expect(page.locator('#pt-quick-popover')).toBeVisible();
   await page.locator('#pt-quick-popover .pt-qp-close').click();

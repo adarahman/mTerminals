@@ -470,9 +470,32 @@ def fetch_option_chain_wide(
                 if spot and ltp
                 else 0.0
             )
+            # Snapshot providers (including Kotak Neo) already expose the
+            # option's day change / previous close with their live quote.
+            # This used to be discarded by assigning None below, so the UI
+            # rendered every CE/PE LTP change as zero despite a fresh LTP.
+            # Prefer the provider's signed change; derive it from close only
+            # when the broker omits that field.
+            raw_change = row.get("net_change")
+            previous_close = safe_float(row.get("close"))
+            change = (
+                safe_float(raw_change)
+                if raw_change is not None
+                else round(ltp - previous_close, 2)
+                if previous_close
+                else 0.0
+            )
+            raw_pct_change = row.get("pct_change")
+            pct_change = (
+                safe_float(raw_pct_change)
+                if raw_pct_change is not None
+                else round((change / previous_close) * 100.0, 2)
+                if previous_close
+                else 0.0
+            )
             rec[f"{side}_LTP"] = ltp
-            rec[f"{side}_Change"] = None
-            rec[f"{side}_pChange"] = None
+            rec[f"{side}_Change"] = change
+            rec[f"{side}_pChange"] = pct_change
             rec[f"{side}_BidQty"] = None
             rec[f"{side}_BidPrice"] = None
             rec[f"{side}_AskQty"] = None
@@ -821,7 +844,19 @@ def fetch_futures_wide(
             ]
         )
 
-    if provider in ("SHOONYA", "KITE", "BREEZE", "KOTAK", "NSE_BSE"):
+    if provider == "KOTAK":
+        # Prefer Neo's own BFO/NFO quote for futures. This is required for
+        # SENSEX where the public BSE futures table may have rows but omit
+        # LTP; retain the public path as a safe fallback.
+        from brokers.kotak_market_data import get_futures_quote
+        from market_api import fetch_public_futures
+
+        quote = get_futures_quote(underlying, which=which)
+        if quote:
+            return pd.DataFrame([quote])
+        return fetch_public_futures(underlying, which=which)
+
+    if provider in ("SHOONYA", "KITE", "BREEZE", "NSE_BSE"):
         # These providers have no broker-native FUTIDX resolution wired into
         # the pipeline — Shoonya's precedent already routes futures to the
         # public NSE/BSE endpoints (market_api.fetch_public_futures), and

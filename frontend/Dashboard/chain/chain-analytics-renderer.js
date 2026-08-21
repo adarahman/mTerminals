@@ -135,6 +135,7 @@ ChainView.prototype.renderIvSurfaceModal = function() {
 
 ChainView.prototype._rerenderChainPanels = function() {
   if(!_data) return;
+  if(app.modal && typeof app.modal._updateOptionChainContext === 'function') app.modal._updateOptionChainContext();
 
   const chain          = getFilteredChain(_data);
   const chainStrikeSet = new Set(chain.map(r=>r.strike)); // still needed below (vol/OI velocity totals)

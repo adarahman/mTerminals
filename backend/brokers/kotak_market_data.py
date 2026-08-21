@@ -92,43 +92,53 @@ _INDEX_EXCHANGE = {
     "BFO": "bse_fo",
 }
 
-_FO_CSV_TTL_S = 6 * 3600  # re-download the NFO scrip master at most every 6h
-_FO_CSV_PATH = os.path.join(RUNTIME_DIR, "kotak_cache", "nse_fo.csv")
+_FO_CSV_TTL_S = 6 * 3600  # re-download each F&O scrip master at most every 6h
+_FO_CACHE_DIR = os.path.join(RUNTIME_DIR, "kotak_cache")
 _fo_cache_lock = None  # lazy-initialized below (RUNTIME_DIR may not exist yet)
 
 
-def _load_fo_scrips() -> list[dict]:
-    """The full NFO scrip-master CSV as a list of dicts, disk-cached for
+def _fo_segment(underlying: str) -> str:
+    return "bse_fo" if underlying.upper() in _BSE_INDEX_NAMES else "nse_fo"
+
+
+def _fo_cache_path(segment: str) -> str:
+    return os.path.join(_FO_CACHE_DIR, f"{segment}.csv")
+
+
+def _load_fo_scrips(segment: str = "nse_fo") -> list[dict]:
+    """The requested NFO/BFO scrip-master CSV, disk-cached for
     _FO_CSV_TTL_S. Returns [] on any failure — callers must treat an
     empty result as "cannot resolve contracts right now", not retry the
     download in a tight loop (the cache TTL already paces refetch)."""
+    segment = segment.lower()
+    cache_path = _fo_cache_path(segment)
     global _fo_cache_lock
     if _fo_cache_lock is None:
         _fo_cache_lock = __import__("threading").Lock()
     with _fo_cache_lock:
         if (
-            os.path.isfile(_FO_CSV_PATH)
-            and (time.time() - os.path.getmtime(_FO_CSV_PATH)) < _FO_CSV_TTL_S
+            os.path.isfile(cache_path)
+            and (time.time() - os.path.getmtime(cache_path)) < _FO_CSV_TTL_S
         ):
             try:
-                return _parse_fo_csv_file(_FO_CSV_PATH)
+                return _parse_fo_csv_file(cache_path)
             except Exception as exc:
                 logger.warning("[kotak_market_data] cached scrip-master parse failed: %s", exc)
 
-        rows = _download_fo_scrips()
+        rows = _download_fo_scrips(segment)
         if rows:
             try:
-                os.makedirs(os.path.dirname(_FO_CSV_PATH), exist_ok=True)
-                _write_fo_csv(_FO_CSV_PATH, rows)
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                _write_fo_csv(cache_path, rows)
             except OSError as exc:
                 logger.warning("[kotak_market_data] could not cache scrip master: %s", exc)
         return rows
 
 
-def _download_fo_scrips() -> list[dict]:
-    """Download and parse Kotak NFO scrip master."""
+def _download_fo_scrips(segment: str = "nse_fo") -> list[dict]:
+    """Download and parse the requested Kotak NFO/BFO scrip master."""
     try:
-        result = _session.client.scrip_master(exchange_segment="nse_fo")
+        result = _session.client.scrip_master(exchange_segment=segment)
     except Exception as exc:
         logger.warning(
             "[kotak_market_data] scrip_master() failed: %s", exc
@@ -159,7 +169,7 @@ def _download_fo_scrips() -> list[dict]:
                 if (
                     isinstance(path, str)
                     and path.startswith("http")
-                    and "nse_fo" in path.lower()
+                    and segment in path.lower()
                 ):
                     url = path
                     break
@@ -188,8 +198,7 @@ def _download_fo_scrips() -> list[dict]:
         rows = _parse_fo_csv_text(resp.text)
 
         logger.info(
-            "[kotak_market_data] parsed %d NFO option contracts",
-            len(rows),
+            "[kotak_market_data] parsed %d %s option contracts", len(rows), segment,
         )
 
         return rows
@@ -248,6 +257,9 @@ def _parse_fo_csv_file(path: str) -> list[dict]:
                             "option_type": str(
                                 raw["option_type"]
                             ).strip().upper(),
+                            "instrument_type": str(
+                                raw.get("instrument_type") or ""
+                            ).strip().upper(),
                             "strike": int(
                                 round(float(raw["strike"]))
                             ),
@@ -268,41 +280,162 @@ def _parse_fo_csv_file(path: str) -> list[dict]:
 
 
 def _parse_fo_csv_text(text: str) -> list[dict]:
-    reader = csv.DictReader(StringIO(text))
+    # Kotak currently serves NFO as comma-separated CSV, but BFO masters
+    # have also been observed as pipe/tab-delimited files. Do not let a
+    # one-column DictReader silently turn a healthy BFO download into zero
+    # contracts. Semicolon is intentionally excluded: it is part of
+    # Kotak's literal `dStrikePrice;` field name, not a record delimiter.
+    try:
+        dialect = csv.Sniffer().sniff(text[:8192], delimiters=",|\t")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(StringIO(text), dialect=dialect)
     rows = []
+    raw_count = 0
+    option_type_counts: dict[str, int] = {}
+
+    def field(raw, *names):
+        # Kotak's BFO master does not always use the byte-for-byte header
+        # spelling of its NFO master (notably dStrikePrice vs
+        # dStrikePrice;). Normalize headers before selecting an alias.
+        normalized = {
+            str(key).lstrip("\ufeff").strip().rstrip(";").lower(): value
+            for key, value in raw.items()
+            if key
+        }
+        for name in names:
+            value = normalized.get(name.rstrip(";").lower())
+            if value not in (None, ""):
+                return value
+        return None
+
     for raw in reader:
         if not raw:
             continue
-        inst_type = (raw.get("pInstType") or "").strip()
-        if inst_type not in ("OPTIDX", "OPTSTK"):
-            continue  # futures/other rows are not option-chain material
-        opt_type = (raw.get("pOptionType") or "").strip().upper()
-        if opt_type not in ("CE", "PE"):
+        raw_count += 1
+        inst_type = str(field(raw, "pInstType", "instrument_type") or "").strip().upper()
+        if inst_type not in ("OPTIDX", "OPTSTK", "FUTIDX", "FUTSTK"):
+            # Kotak's BFO master leaves pInstType blank for many otherwise
+            # valid derivative rows. Its trading symbol remains authoritative
+            # (e.g. SENSEX26AUG76800CE / SENSEX26AUGFUT).
+            symbol_hint = str(field(raw, "pTrdSymbol", "trading_symbol") or "").strip().upper()
+            if symbol_hint.endswith(("CE", "PE")):
+                inst_type = "OPTIDX"
+            elif symbol_hint.endswith("FUT"):
+                inst_type = "FUTIDX"
+            else:
+                continue
+        opt_type = str(field(raw, "pOptionType", "option_type") or "").strip().upper()
+        if not opt_type:
+            symbol_hint = str(field(raw, "pTrdSymbol", "trading_symbol") or "").strip().upper()
+            if symbol_hint.endswith(("CE", "PE")):
+                opt_type = symbol_hint[-2:]
+            elif symbol_hint.endswith("FUT"):
+                opt_type = "FUT"
+        option_type_counts[opt_type] = option_type_counts.get(opt_type, 0) + 1
+        is_future = inst_type in ("FUTIDX", "FUTSTK")
+        if not is_future and opt_type not in ("CE", "PE"):
             continue
         try:
-            strike_paise = float(raw.get("dStrikePrice;") or 0)
+            strike_paise = float(
+                str(field(raw, "dStrikePrice", "strike_price", "strike") or "0").replace(",", "")
+            )
         except (TypeError, ValueError):
             continue
         try:
-            lot_size = int(float(raw.get("lLotSize") or 0))
+            lot_size = int(float(field(raw, "lLotSize", "lot_size") or 0))
         except (TypeError, ValueError):
             lot_size = 0
         try:
-            exp_raw = int(float(raw.get("pExpiryDate") or 0))
+            exp_raw = int(float(field(raw, "pExpiryDate", "expiry_date") or 0))
         except (TypeError, ValueError):
             continue
         rows.append(
             {
-                "name": (raw.get("pSymbolName") or "").strip().upper(),
-                "tradingsymbol": (raw.get("pTrdSymbol") or "").strip().upper(),
-                "token": (raw.get("pSymbol") or "").strip(),
-                "option_type": opt_type,
+                "name": str(field(raw, "pSymbolName", "symbol_name", "underlying") or "").strip().upper(),
+                "tradingsymbol": str(field(raw, "pTrdSymbol", "trading_symbol") or "").strip().upper(),
+                "token": str(field(raw, "pSymbol", "symbol", "token") or "").strip(),
+                "option_type": "FUT" if is_future else opt_type,
+                "instrument_type": inst_type,
                 "strike": round(strike_paise / 100.0),
                 "expiry": _unix_to_iso(exp_raw),
                 "lot_size": lot_size,
             }
         )
+    if raw_count and not rows:
+        logger.warning(
+            "[kotak_market_data] no option contracts parsed from %d rows; "
+            "instrument types/options seen=%s; headers=%s",
+            raw_count,
+            option_type_counts,
+            list(reader.fieldnames or []),
+        )
     return rows
+
+
+def _normalize_scrip_row(raw: dict) -> dict | None:
+    """Normalize one official SDK search_scrip() result."""
+    if not isinstance(raw, dict):
+        return None
+    def field(*names):
+        normalized = {
+            str(key).lstrip("\ufeff").strip().rstrip(";").lower(): value
+            for key, value in raw.items() if key
+        }
+        return next((normalized.get(name.rstrip(";").lower()) for name in names
+                     if normalized.get(name.rstrip(";").lower()) not in (None, "")), None)
+    inst_type = str(field("pInstType", "instrument_type") or "").upper()
+    option_type = str(field("pOptionType", "option_type") or "").upper()
+    symbol_hint = str(field("pTrdSymbol", "trading_symbol") or "").upper()
+    if not inst_type:
+        if symbol_hint.endswith(("CE", "PE")):
+            inst_type = "OPTIDX"
+        elif symbol_hint.endswith("FUT"):
+            inst_type = "FUTIDX"
+    if not option_type:
+        if symbol_hint.endswith(("CE", "PE")):
+            option_type = symbol_hint[-2:]
+        elif symbol_hint.endswith("FUT"):
+            option_type = "FUT"
+    is_future = inst_type in {"FUTIDX", "FUTSTK"}
+    if not is_future and option_type not in {"CE", "PE"}:
+        return None
+    try:
+        expiry = _unix_to_iso(int(float(field("pExpiryDate", "expiry_date") or 0)))
+        strike = round(float(field("dStrikePrice", "strike_price", "strike") or 0) / 100.0)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "name": str(field("pSymbolName", "symbol_name", "underlying") or "").upper(),
+        "tradingsymbol": str(field("pTrdSymbol", "trading_symbol") or "").upper(),
+        "token": str(field("pSymbol", "symbol", "token") or ""),
+        "option_type": "FUT" if is_future else option_type,
+        "instrument_type": inst_type,
+        "strike": strike,
+        "expiry": expiry,
+        "lot_size": int(float(field("lLotSize", "lot_size") or 0)),
+    }
+
+
+def _contracts_for(underlying: str) -> list[dict]:
+    """Use Neo's own segment-aware search/cache before manual CSV parsing."""
+    segment = _fo_segment(underlying)
+    try:
+        result = _session.client.search_scrip(
+            exchange_segment=segment,
+            symbol=underlying.upper(),
+            expiry="",
+            option_type="CE,PE,FUT",
+            strike_price="",
+            ignore_50multiple=False,
+        )
+        raw_rows = result if isinstance(result, list) else (result or {}).get("data", [])
+        rows = [row for item in raw_rows if (row := _normalize_scrip_row(item))]
+        if rows:
+            return rows
+    except Exception as exc:
+        logger.info("[kotak_market_data] search_scrip(%s, %s) unavailable: %s", segment, underlying, exc)
+    return [row for row in _load_fo_scrips(segment) if row.get("name") == underlying.upper()]
 
 
 def _unix_to_iso(epoch_seconds: int) -> str:
@@ -348,7 +481,7 @@ def list_expiries(underlying: str, exchange: str = "NFO") -> list:
     derived from the NFO scrip master. Returns [] if the master can't be
     fetched (callers already treat that as "no expiries right now")."""
     del exchange  # Kotak resolves the segment from the underlying itself
-    rows = _load_fo_scrips()
+    rows = _contracts_for(underlying)
     if not rows:
         return []
     matches = [r for r in rows if r["name"] == underlying.upper() and r["option_type"] == "CE"]
@@ -365,7 +498,7 @@ def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="
     """{'tradingsymbol', 'token'} for one contract via the scrip master, or
     None if unresolved."""
     del exchange
-    rows = _load_fo_scrips()
+    rows = _contracts_for(underlying)
     if not rows:
         return None
     target_exp = _parse_expiry_date(expiry_ddmmmyyyy)
@@ -497,7 +630,8 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
     strikes = {atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)}
 
-    rows = _load_fo_scrips()
+    segment = _fo_segment(underlying)
+    rows = _contracts_for(underlying)
     if not rows:
         return None
     target_exp = _parse_expiry_date(expiry_ddmmmyyyy)
@@ -511,7 +645,7 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
         return None
 
     # Batch-quote all CE+PE tokens in one quotes() call.
-    tokens = [{"instrument_token": m["token"], "exchange_segment": "nse_fo"} for m in matches]
+    tokens = [{"instrument_token": m["token"], "exchange_segment": segment} for m in matches]
     try:
         qresult = _session.client.quotes(instrument_tokens=tokens, quote_type="all")
         qrows = _unwrap_quotes(qresult)
@@ -553,7 +687,14 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
                     or q.get("volume")
                     or 0
                 ),
-                "net_change": q.get("change"),
+                # Neo response shapes vary by SDK version: v2 commonly
+                # uses `change`, while others expose `net_change`. Preserve
+                # an explicit zero rather than treating it as missing.
+                "net_change": (
+                    q.get("net_change")
+                    if q.get("net_change") is not None
+                    else q.get("change")
+                ),
                 "pct_change": (
                     q.get("per_change")
                     if q.get("per_change") is not None
@@ -615,6 +756,69 @@ def get_batch_quotes_by_token(exchange, symbol_token_pairs, mode="FULL"):
 
 def get_spot_quote(underlying):
     return _spot_quote(underlying)
+
+
+def get_futures_quote(underlying: str, which: str = "NEAR") -> dict | None:
+    """Resolve and quote one Kotak F&O future for an underlying.
+
+    This is especially important for SENSEX/BANKEX: BSE's public futures
+    table can omit the last-traded price even though Kotak's BFO quote feed
+    has it. Returns the standard futures row shape used by broker_pipeline.
+    """
+    segment = _fo_segment(underlying)
+    today = datetime.now().date()
+    contracts = []
+    for row in _contracts_for(underlying):
+        if row.get("name") != underlying.upper() or row.get("option_type") != "FUT":
+            continue
+        expiry = _parse_expiry_date(row.get("expiry"))
+        if expiry:
+            contracts.append((expiry, row))
+    contracts = [(expiry, row) for expiry, row in contracts if expiry >= today] or contracts
+    if not contracts:
+        return None
+    contracts.sort(key=lambda item: item[0])
+    slot = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get((which or "NEAR").upper(), 0)
+    expiry, contract = contracts[min(slot, len(contracts) - 1)]
+    try:
+        result = _session.client.quotes(
+            instrument_tokens=[
+                {"instrument_token": contract["token"], "exchange_segment": segment}
+            ],
+            quote_type="all",
+        )
+        qrows = _unwrap_quotes(result)
+    except Exception as exc:
+        logger.warning("[kotak_market_data] future quote failed for %s: %s", underlying, exc)
+        return None
+    quote = next((q for q in qrows if _quote_token(q) == str(contract["token"])), None)
+    if not quote:
+        return None
+    ltp = quote.get("ltp") if quote.get("ltp") is not None else quote.get("last_traded_price")
+    try:
+        ltp = float(ltp)
+    except (TypeError, ValueError):
+        return None
+    if ltp <= 0:
+        return None
+    spot_quote = _spot_quote(underlying)
+    spot = spot_quote.get("ltp") if spot_quote else None
+    return {
+        "Contract": contract["tradingsymbol"],
+        "Underlying": underlying.upper(),
+        "Expiry": expiry.strftime("%d-%b-%Y"),
+        "LTP": ltp,
+        "Change": quote.get("net_change", quote.get("change")),
+        "PctChange": quote.get("per_change", quote.get("net_change_percentage")),
+        "Open": _ohlc_val(quote, "open"),
+        "High": _ohlc_val(quote, "high"),
+        "Low": _ohlc_val(quote, "low"),
+        "PrevClose": _ohlc_val(quote, "close", alt_key=None),
+        "Volume": quote.get("last_volume", quote.get("volume")),
+        "OI": quote.get("open_int", quote.get("open_interest")),
+        "Spot": spot,
+        "Basis": round(ltp - spot, 2) if spot else None,
+    }
 
 def get_fno_underlyings(force_refresh=False):
     """Indices + F&O stocks derived from the NFO scrip master."""
@@ -685,6 +889,9 @@ class KotakMarketData:
 
     def get_spot_quote(self, underlying):
         return get_spot_quote(underlying)
+
+    def get_futures_quote(self, underlying, which="NEAR"):
+        return get_futures_quote(underlying, which=which)
 
     def get_fno_underlyings(self, force_refresh=False):
         return get_fno_underlyings(force_refresh=force_refresh)

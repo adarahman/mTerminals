@@ -55,6 +55,9 @@ _COMMON_UNDERLYING_ALIASES = {
     "KOTAK MAHINDRA BANK LTD": "KOTAKBANK",
     "WIPRO LTD": "WIPRO",
     "WIPRO LIMITED": "WIPRO",
+    "ADANI ENERGY SOLUTION LTD": "ADANIENSOL",
+    "ADANI ENERGY SOLUTIONS LTD": "ADANIENSOL",
+    "ADANI ENERGY SOLUTIONS LIMITED": "ADANIENSOL",
     # Truncated/garbled master names still reach this point un-condensable by
     # the prefix heuristic (e.g. a copy-pasted full name that lost its middle
     # tokens). Map the recognizable leading fragment to the exchange ticker.

@@ -211,6 +211,25 @@
   min-width:0;
 }
 
+/* Active underlying mirrors the bordered, two-line FUT reference pill:
+   the editable symbol remains first, while its instrument reference is a
+   deliberately quiet micro-label underneath. */
+.active-symbol-pill{
+  display:inline-grid;grid-template-rows:auto auto;align-content:center;justify-items:start;gap:2px;width:fit-content;height:58px;box-sizing:border-box;
+  padding:5px 10px;border:2px solid rgba(255,212,59,0.35);border-radius:14px;
+  background:var(--bg-1);box-shadow:0 2px 8px rgba(0,0,0,0.16);flex:0 0 auto;
+}
+.active-symbol-pill .symbol-select{
+  width:clamp(132px,12vw,188px);min-width:0;padding:0 16px 0 0;border:0;border-radius:0;
+  background-color:transparent;box-shadow:none;background-position:right center;
+  font-size:var(--fs-lg);line-height:1.15;
+}
+.active-symbol-pill .symbol-name{
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--font-display);font-size:8px;font-weight:600;
+  letter-spacing:.04em;line-height:1.1;color:var(--text-tertiary);
+}
+
 .symbol{font-family:var(--font-display);font-size:var(--fs-base);font-weight:700;color:var(--text-tertiary);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;}
 
 /* .symbol is also reused on the top-bar's symbol <select> (picking a

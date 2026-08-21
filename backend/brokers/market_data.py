@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 from config import settings as _md_settings
 from brokers.logging import broker_event
+from brokers.provider_registry import (
+    PROVIDER_KEYS,
+    normalize_provider,
+    provider_capabilities,
+    provider_display_names,
+)
 
 
 class MarketData(Protocol):
@@ -1184,35 +1190,17 @@ _PROVIDERS = {
 # execution adapter is wired into this codebase yet — keep execution: False
 # until one exists so a user can't select an execution broker that has no
 # order path (fail safe, same reasoning as the NSE_BSE read-only guard).
-PROVIDER_CAPABILITIES: dict[str, dict] = {
-    "SMARTAPI": {"snapshot": True, "websocket": True, "execution": True},
-    "UPSTOX": {"snapshot": True, "websocket": True, "execution": True},
-    "SHOONYA": {"snapshot": True, "websocket": True, "execution": True},
-    "KITE": {"snapshot": True, "websocket": False, "execution": True},
-    "BREEZE": {"snapshot": True, "websocket": False, "execution": True},
-    "KOTAK": {"snapshot": True, "websocket": False, "execution": False},
-    "NSE_BSE": {"snapshot": True, "websocket": False, "execution": False},
-}
+PROVIDER_CAPABILITIES: dict[str, dict] = provider_capabilities()
 
 # Dashboard display names — one logical "NSE/BSE API" option; the backend
 # resolves the NSE vs BSE adapter from the selected symbol.
-PROVIDER_DISPLAY_NAMES: dict[str, str] = {
-    "SMARTAPI": "ANGEL ONE",
-    "UPSTOX": "UPSTOX",
-    "SHOONYA": "SHOONYA",
-    "KITE": "ZERODHA",
-    "BREEZE": "ICICI DIRECT",
-    "KOTAK": "KOTAK NEO",
-    "NSE_BSE": "NSE/BSE API",
-}
-
-PROVIDER_KEYS = tuple(PROVIDER_CAPABILITIES.keys())
+PROVIDER_DISPLAY_NAMES: dict[str, str] = provider_display_names()
 
 
 def provider_has_credentials(name: str) -> bool:
     """Whether the given provider has usable credentials configured.
     NSE/BSE public API needs none (it is the login-free fallback)."""
-    name = name.strip().upper()
+    name = normalize_provider(name)
     s = _md_settings
     if name == "NSE_BSE":
         return True
@@ -1225,7 +1213,7 @@ def provider_has_credentials(name: str) -> bool:
     if name == "SHOONYA":
         return bool(s.shoonya_user_id and s.shoonya_password and s.shoonya_totp_secret)
     if name == "BREEZE":
-        return bool(s.breeze_api_session)
+        return bool(s.breeze_api_key and s.breeze_api_secret and s.breeze_api_session)
     if name == "KOTAK":
         return bool(
             s.kotak_consumer_key

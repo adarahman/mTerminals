@@ -102,9 +102,15 @@
       <div class="oc-modal-id">
         <button id="option-chain-modal-close" class="oc-modal-back" onclick="closeOptionChainModal()" aria-label="Close Option Chain">←</button>
         <span class="oc-modal-title">📊 Option Chain</span>
+        <span id="option-chain-modal-context" class="option-chain-modal-context" aria-live="polite"></span>
       </div>
       <div class="option-chain-modal-range" aria-label="Option chain ATM strike range">
-        <button id="option-chain-greeks-toggle" type="button" class="option-chain-greeks-toggle" onclick="toggleOptionChainGreeks(this)" aria-pressed="false">▸ Greeks</button>
+        <div class="option-chain-view-tabs" role="group" aria-label="Option chain metrics shown">
+          <button type="button" class="option-chain-view-toggle active" data-chain-view="positioning" onclick="setOptionChainLedgerView('positioning',this)" aria-pressed="true">Positioning</button>
+          <button type="button" class="option-chain-view-toggle" data-chain-view="activity" onclick="setOptionChainLedgerView('activity',this)" aria-pressed="false">Activity</button>
+          <button type="button" class="option-chain-view-toggle" data-chain-view="greeks" onclick="setOptionChainLedgerView('greeks',this)" aria-pressed="false">Greeks</button>
+          <button type="button" class="option-chain-view-toggle" data-chain-view="all" onclick="setOptionChainLedgerView('all',this)" aria-pressed="false">All</button>
+        </div>
         <span>ATM Range</span>
         <div class="tab-group" id="range-tabs-chain" data-range-tabs></div>
       </div>

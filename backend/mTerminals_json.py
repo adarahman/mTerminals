@@ -902,30 +902,64 @@ def _get_cached_fii_dii_bias():
 
 def _get_fno_symbols():
     """{"indices": [...], "stocks": [...]} for the top-bar symbol picker —
-    every underlying currently carrying live F&O contracts, sourced from
-    the ScripMaster via MarketData.get_fno_underlyings() (see
-    brokers/market_data.py for caching/refresh details). Falls back to
-    just the known indices if that lookup isn't available for any
-    reason, so the dropdown never ends up empty."""
-    if market_data is None:
+    every underlying currently carrying live F&O contracts. This must not
+    depend on the selected quote broker: ICICI Breeze, for example, exposes
+    only its small index set and would otherwise hide all F&O stocks from the
+    picker. The public ScripMaster is broker-neutral and needs no session.
+    """
+    try:
+        from brokers.smartapi_instruments import get_fno_underlyings
+        symbols = get_fno_underlyings()
+        if symbols.get("indices") or symbols.get("stocks"):
+            return symbols
+    except Exception as e:
+        logger.warning(f"[_get_fno_symbols] Public ScripMaster universe lookup failed: {e}")
+    # A provider-specific result is better than an empty picker if the public
+    # master is temporarily unavailable; the final fallback preserves the
+    # core indices on a cold/offline start.
+    if market_data is not None:
         try:
-            # Public-only mode disables authenticated broker services, not the
-            # public daily ScripMaster. Keep the complete dropdown available
-            # without constructing or logging in a SmartAPI session.
-            from brokers.smartapi_instruments import get_fno_underlyings
-            symbols = get_fno_underlyings()
+            symbols = market_data.get_fno_underlyings()
             if symbols.get("indices") or symbols.get("stocks"):
                 return symbols
         except Exception as e:
-            logger.warning(
-                f"[_get_fno_symbols] Public ScripMaster universe lookup failed: {e}"
-            )
-        return _FNO_SYMBOLS_FALLBACK
+            logger.warning(f"[_get_fno_symbols] Provider F&O universe lookup failed: {e}")
+    return _FNO_SYMBOLS_FALLBACK
+
+
+_SYMBOL_DISPLAY_NAME_CACHE = {}
+
+
+def _get_symbol_display_name(symbol):
+    """Resolve the compact dashboard ticker to its master display name.
+
+    This is cached by ticker, so a live payload never re-scans the public
+    instrument master after the initial lookup.
+    """
+    key = str(symbol or "").strip().upper()
+    if not key:
+        return ""
+    if key in _SYMBOL_DISPLAY_NAME_CACHE:
+        return _SYMBOL_DISPLAY_NAME_CACHE[key]
     try:
-        return market_data.get_fno_underlyings()
-    except Exception as e:
-        logger.warning(f"[_get_fno_symbols] F&O underlying list lookup failed: {e}")
-        return _FNO_SYMBOLS_FALLBACK
+        from brokers.upstox_client import get_company_name_for_ticker
+        name = get_company_name_for_ticker(key)
+    except Exception:
+        name = None
+    # Some broker masters expose only the short ticker. Reuse the canonical
+    # local alias set in reverse for those known cases instead of repeating a
+    # second display-name list in the browser.
+    if not name:
+        try:
+            from brokers.symbol_names import _COMMON_UNDERLYING_ALIASES
+            name = next((label for label, ticker in _COMMON_UNDERLYING_ALIASES.items()
+                         if ticker == key), None)
+        except Exception:
+            name = None
+    if isinstance(name, str) and name.isupper():
+        name = name.title()
+    _SYMBOL_DISPLAY_NAME_CACHE[key] = name or key
+    return _SYMBOL_DISPLAY_NAME_CACHE[key]
 
 
 def _active_data_source() -> str:
@@ -1402,6 +1436,7 @@ def export_dashboard_json(
             },
         },
         "symbol":        str(SYMBOL),
+        "symbolName":    _get_symbol_display_name(SYMBOL),
         "spot":          spot,
         "spotChange":    _r(ctx_dict.get("spot_change",  0), 2),
         "spotChgPct":    _r(ctx_dict.get("spot_chg_pct", 0), 2),

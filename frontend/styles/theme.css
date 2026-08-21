@@ -36,8 +36,12 @@
      declared, so those bars were silently falling back to inherited
      text color. Use this pair anywhere CE vs PE needs to be told apart
      WITHOUT implying bullish/bearish. */
-  --ce:        #4C8DFF;  --ce-dim:   rgba(76,141,255,0.14);
-  --pe:        #FF9F43;  --pe-dim:   rgba(255,159,67,0.14);
+  /* Match the dense option-chain ledger: blue for CE and purple for PE.
+     These remain identity colors only; use --pos/--neg for price direction. */
+  /* Saturated CE blue on a near-black surface so it reads as a distinct
+     option side rather than fading into a second blue background. */
+  --ce:        #3B82F6;  --ce-dim:   rgba(5,10,22,0.86);
+  --pe:        #C084FC;  --pe-dim:   rgba(192,132,252,0.16);
 
   /* ── Radius scale ── */
   --radius:    8px;   /* default/base radius — most common value, predates the sm/md/lg scale below */

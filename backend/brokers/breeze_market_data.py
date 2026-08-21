@@ -54,7 +54,7 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
     from backend.config import settings
     from backend.paths import RUNTIME_DIR
 
-from brokers.breeze_client import _session, _unwrap, _iso_expiry, BrokerError
+from brokers.breeze_client import _session, _unwrap, _iso_expiry, BrokerError, derivative_stock_code
 from brokers.breeze_client import resolve_option_contract as _cache_contract
 
 logger = logging.getLogger(__name__)
@@ -95,9 +95,69 @@ _INDEX_STOCK_CODES = {
     "BANKNIFTY": "CNXBAN", "FINNIFTY": "NIFFIN", "MIDCPNIFTY": "NIFMCP",
 }
 
+_BSE_DERIVATIVE_UNDERLYINGS = {"SENSEX", "BANKEX"}
+
+
+def _derivatives_exchange(underlying: str, requested: str = "NFO") -> str:
+    """Select the F&O segment from the underlying, not the default argument."""
+    if underlying.upper() in _BSE_DERIVATIVE_UNDERLYINGS:
+        return "BFO"
+    return (requested or "NFO").upper()
+
+
+def _derivative_stock_code(underlying: str, exchange: str) -> str | None:
+    """Resolve Breeze's F&O-specific code (BSESEN for SENSEX BFO)."""
+    return derivative_stock_code(underlying, exchange) if exchange == "BFO" else resolve_stock_code(underlying, "NSE")
+
+
+def _public_bse_spot_quote(underlying: str):
+    """Fallback only for a BSE index's underlying price.
+
+    Breeze's BSE cash quote can intermittently return a non-JSON rate-limit
+    page. The BFO option-chain request remains Breeze-native; this supplies
+    only the spot needed to select its ATM strikes.
+    """
+    if underlying.upper() not in _BSE_DERIVATIVE_UNDERLYINGS:
+        return None
+    try:
+        from market_api import fetch_bse_index_quote
+
+        row = fetch_bse_index_quote(underlying.upper())
+        ltp = _number((row or {}).get("Last Price"))
+        if ltp is None:
+            return None
+        return {
+            "ltp": ltp,
+            "open": _number(row.get("Open")),
+            "high": _number(row.get("High")),
+            "low": _number(row.get("Low")),
+            "close": _number(row.get("Prev Close")),
+        }
+    except Exception as exc:
+        _warning_once(
+            f"public_bse_spot:{underlying}",
+            "[breeze_market_data] BSE spot fallback for %s failed: %s",
+            underlying,
+            exc,
+        )
+        return None
+
 _STOCK_CODE_CACHE_PATH = os.path.join(RUNTIME_DIR, "breeze_cache", "stock_codes.json")
 _stock_code_cache_lock = threading.Lock()
 _stock_code_cache: dict | None = None
+
+
+def _number(value):
+    """Return a finite number from a Breeze field, or None when unavailable.
+
+    Treating an omitted LTP as zero creates a believable but dangerously wrong
+    quote in the dashboard and paper-order pricing path.
+    """
+    try:
+        number = float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
 
 
 def _load_stock_code_cache() -> dict:
@@ -143,7 +203,7 @@ def resolve_stock_code(underlying: str, exchange: str = "NSE") -> str | None:
             underlying,
             exc,
         )
-        return None
+        return _public_bse_spot_quote(underlying)
     code = None
     if isinstance(result, dict):
         code = result.get("isec_stock_code") or result.get("stock_code")
@@ -213,7 +273,7 @@ def list_expiries(underlying: str, exchange: str = "NFO") -> list:
 
 
 def get_spot_quote(underlying: str):
-    exchange = "BSE" if underlying.upper() == "SENSEX" else "NSE"
+    exchange = "BSE" if underlying.upper() in _BSE_DERIVATIVE_UNDERLYINGS else "NSE"
     stock_code = resolve_stock_code(underlying, exchange)
     if not stock_code:
         return None
@@ -236,13 +296,21 @@ def get_spot_quote(underlying: str):
         return None
     row = rows[0] if isinstance(rows, list) and rows else (rows if isinstance(rows, dict) else None)
     if not row:
-        return None
+        return _public_bse_spot_quote(underlying)
+    ltp = _number(row.get("ltp"))
+    if ltp is None:
+        _warning_once(
+            f"get_spot_quote:missing_ltp:{underlying}",
+            "[breeze_market_data] get_spot_quote(%s) returned no valid LTP",
+            underlying,
+        )
+        return _public_bse_spot_quote(underlying)
     return {
-        "ltp": float(row.get("ltp") or 0),
-        "open": float(row.get("open") or 0),
-        "high": float(row.get("high") or 0),
-        "low": float(row.get("low") or 0),
-        "close": float(row.get("previous_close") or 0),
+        "ltp": ltp,
+        "open": _number(row.get("open")),
+        "high": _number(row.get("high")),
+        "low": _number(row.get("low")),
+        "close": _number(row.get("previous_close")),
     }
 
 
@@ -252,7 +320,7 @@ def _round_to_strike(price, underlying):
 
 
 def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange="NFO"):
-    del exchange
+    derivatives_exchange = _derivatives_exchange(underlying, exchange)
     quote = get_spot_quote(underlying)
     if not quote:
         logger.warning("[breeze_market_data] could not fetch spot for %s", underlying)
@@ -262,7 +330,7 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
     strikes = {atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)}
 
-    stock_code = resolve_stock_code(underlying, "BSE" if underlying.upper() == "SENSEX" else "NSE")
+    stock_code = _derivative_stock_code(underlying, derivatives_exchange)
     if not stock_code:
         return None
     expiry_iso = _iso_expiry(expiry_ddmmmyyyy)
@@ -271,11 +339,11 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     for right, opt_type in (("call", "CE"), ("put", "PE")):
         try:
             result = _session.api.get_option_chain_quotes(
-                stock_code=stock_code, exchange_code="NFO", product_type="options",
+                stock_code=stock_code, exchange_code=derivatives_exchange, product_type="options",
                 expiry_date=expiry_iso, right=right, strike_price="",
             )
             chain_rows = _unwrap(result, "get_option_chain_quotes") or []
-        except BrokerError as exc:
+        except Exception as exc:
             logger.warning(
                 "[breeze_market_data] get_option_chain_quotes(%s, %s, %s) failed: %s",
                 underlying, expiry_ddmmmyyyy, right, exc,
@@ -288,22 +356,24 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
                 continue
             if strike_val not in strikes:
                 continue
-            contract = _cache_contract(stock_code, expiry_ddmmmyyyy, strike_val, opt_type, "NFO")
+            contract = _cache_contract(
+                stock_code, expiry_ddmmmyyyy, strike_val, opt_type, derivatives_exchange
+            )
             _, tradingsymbol, token = contract if contract else (None, None, None)
             rows.append({
                 "strike": strike_val,
                 "type": opt_type,
                 "tradingsymbol": tradingsymbol,
                 "token": token,
-                "ltp": float(row.get("ltp") or 0),
-                "open": float(row.get("open") or 0),
-                "high": float(row.get("high") or 0),
-                "low": float(row.get("low") or 0),
-                "close": float(row.get("previous_close") or 0),
-                "oi": float(row.get("open_interest") or 0),
-                "volume": float(row.get("total_quantity_traded") or 0),
+                "ltp": _number(row.get("ltp")),
+                "open": _number(row.get("open")),
+                "high": _number(row.get("high")),
+                "low": _number(row.get("low")),
+                "close": _number(row.get("previous_close")),
+                "oi": _number(row.get("open_interest")),
+                "volume": _number(row.get("total_quantity_traded")),
                 "net_change": None,
-                "pct_change": float(row.get("ltp_percent_change") or 0),
+                "pct_change": _number(row.get("ltp_percent_change")),
             })
 
     if not rows:
@@ -319,11 +389,18 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
 
 
 def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
-    del exchange
-    stock_code = resolve_stock_code(underlying, "BSE" if underlying.upper() == "SENSEX" else "NSE")
+    stock_code = _derivative_stock_code(
+        underlying, _derivatives_exchange(underlying, exchange)
+    )
     if not stock_code:
         return None
-    contract = _cache_contract(stock_code, expiry_ddmmmyyyy, strike, opt_type, "NFO")
+    contract = _cache_contract(
+        stock_code,
+        expiry_ddmmmyyyy,
+        strike,
+        opt_type,
+        _derivatives_exchange(underlying, exchange),
+    )
     if not contract:
         return None
     _, tradingsymbol, token = contract
@@ -347,7 +424,7 @@ def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
             continue
         try:
             result = _session.api.get_quotes(
-                stock_code=contract["stock_code"], exchange_code=exchange,
+                stock_code=contract["stock_code"], exchange_code=contract["exchange_code"],
                 expiry_date=contract["expiry_date"], product_type=contract["product"],
                 right=contract["right"], strike_price=contract["strike_price"],
             )
