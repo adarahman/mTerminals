@@ -43,13 +43,24 @@ from server.market_history_api import (
 from server.index_quotes import IndexQuoteFetcher  # noqa: E402
 from server.health_api import build_health_snapshot as _build_health_response, health_handler as _health_response, metrics_handler as _metrics_response  # noqa: E402
 from server.websocket_clients import WebSocketClientHub  # noqa: E402
+from server.feeds.smartapi import (
+    FeedState as _SmartApiFeedState,
+    resolve_chain_tokens as _resolve_smartapi_feed_tokens,
+    start_new_feed as _start_smartapi_feed_new,
+    switch_existing_feed as _switch_smartapi_feed_existing,
+)  # noqa: E402
 from server.feeds.shoonya import (
     FeedState as _ShoonyaFeedState,
     resolve_chain_tokens as _resolve_shoonya_feed_tokens,
     start_new_feed as _start_shoonya_feed_new,
     switch_existing_feed as _switch_shoonya_feed_existing,
 )  # noqa: E402
-from server.feeds.upstox import resolve_chain_tokens as _resolve_upstox_feed_tokens  # noqa: E402
+from server.feeds.upstox import (
+    FeedState as _UpstoxFeedState,
+    resolve_chain_tokens as _resolve_upstox_feed_tokens,
+    start_new_feed as _start_upstox_feed_new,
+    switch_existing_feed as _switch_upstox_feed_existing,
+)  # noqa: E402
 import market_api  # noqa: E402  (lightweight ticker-strip quotes; no argv parsing, doesn't need hiding)
 import mTerminals_json  # noqa: E402
 import option_chain_json  # noqa: E402
@@ -2180,129 +2191,16 @@ def _smartapi_feed_matches_displayed_expiry(payload_expiry_str):
 
 
 def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
-    """Blocking REST calls — resolves the ATM chain for target_symbol and
-    returns (exchange, token_meta, expiry_ddmmmyyyy) or None if it couldn't
-    be built. The expiry is returned (not just used internally) so callers
-    can track exactly which expiry the SmartAPI feed is streaming — this
-    matters because list_expiries()[0] here is resolved independently of
-    option_chain_json's own EXPIRY global, and the two are NOT guaranteed
-    to agree (e.g. if the dashboard is showing a NEAR/MONTHLY tab rather
-    than the nearest expiry). Merging SmartAPI ticks into the wrong
-    expiry's displayed rows would silently corrupt the chain, so tracking
-    this lets sync logic verify a match before merging (see
-    _sync_smartapi_row_into_payload below).
-
-    `expiry` (optional): a specific expiry to resolve to, accepted in
-    EITHER SmartAPI's format ('31JUL2026') or option_chain_json's format
-    ('31-Jul-2026') — matched via _parse_any_expiry() so callers (the
-    dashboard's expiry dropdown, ws_handler's ?expiry= query param) don't
-    need to know which format list_expiries() itself uses. Falls back to
-    the nearest expiry (expiries[0]) if omitted, or if the requested
-    expiry isn't actually available for this symbol."""
-    exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
-
-    expiries = market_data.list_expiries(target_symbol, exchange=exchange)
-    if not expiries:
-        print(
-            f"[smartapi] No expiries found for {target_symbol}, skipping feed",
-            flush=True,
-        )
-        return None
-
-    if expiry:
-        target_date = _parse_any_expiry(expiry)
-        resolved_expiry = next(
-            (e for e in expiries if _parse_any_expiry(e) == target_date), None
-        )
-        if resolved_expiry is None:
-            print(
-                f"[smartapi] Requested expiry '{expiry}' not available for "
-                f"{target_symbol} (have: {expiries}) — falling back to nearest",
-                flush=True,
-            )
-            resolved_expiry = expiries[0]
-    else:
-        resolved_expiry = expiries[0]
-
-    chain = market_data.get_atm_chain(
-        target_symbol, resolved_expiry, strikes_around_atm, exchange=exchange
+    return _resolve_smartapi_feed_tokens(
+        target_symbol,
+        strikes_around_atm,
+        expiry,
+        market_data=market_data,
+        is_bse=lambda symbol: symbol in _BSE_SYMBOLS,
+        parse_expiry=_parse_any_expiry,
+        resolve_futures=_resolve_futures_token,
+        report=lambda message: print(message, flush=True),
     )
-    if not chain:
-        print(
-            f"[smartapi] Could not build ATM chain for {target_symbol}, skipping feed",
-            flush=True,
-        )
-        return None
-
-    token_meta = {}
-    skipped = 0
-    for row in chain["rows"] or []:
-        tok = row.get("token") or row.get("instrument_key")
-        if not tok:
-            skipped += 1
-            continue
-        token_meta[str(tok)] = {"strike": row.get("strike"), "option_type": row.get("type")}
-    if skipped and not token_meta:
-        print(
-            f"[smartapi] No broker tokens resolved for {target_symbol} {resolved_expiry} "
-            f"(provider returned {skipped} token-less rows) — live feed disabled, "
-            "falling back to REST poll",
-            flush=True,
-        )
-
-    # Also resolve the underlying's own token so the SmartAPI feed can
-    # stream spot at the same tick rate as the option legs, instead of spot
-    # only ever coming from run_pipeline_once()'s slower NSE/BSE REST poll
-    # (POLL_SECONDS). INDEX_TOKENS is keyed by underlying symbol and holds
-    # its OWN {"token":.., "exchange": "NSE"|"BSE"} — not just a bare token
-    # — since the index lives on the cash exchange, not NFO/BFO like the
-    # option legs above. None if this symbol has no entry there yet, in
-    # which case spot just keeps falling back to the REST poll as it does
-    # today.
-    index_info = market_data.index_tokens().get(target_symbol)
-    index_token = None
-    index_exchange_type = None
-    if index_info is None:
-        print(
-            f"[index-quote] No INDEX_TOKENS entry for {target_symbol} — "
-            f"spot will only update via the slower REST poll, not the live feed",
-            flush=True,
-        )
-    else:
-        index_token = index_info["token"]
-        # INDEX_TOKENS' exchange is "NSE"/"BSE" (cash market); EXCHANGE_TYPE's
-        # keys for cash market are "NSE_CM"/"BSE_CM" — NOT the same strings
-        # as the "NSE"/"BSE" used elsewhere for option_chain_json.EXCHANGE.
-        index_exchange_type = index_info["exchange"] + "_CM"
-        # Tagged "INDEX" (not "CE"/"PE") so TickAggregator.on_tick() routes
-        # it to the spot buffer instead of trying to treat it as an option
-        # leg keyed by strike.
-        token_meta[str(index_token)] = {"strike": None, "option_type": "INDEX"}
-
-    # Current-month futures token — subscribed alongside the index token
-    # SPECIFICALLY so the chart can show a real VWAP/volume: SmartAPI's
-    # index token doesn't reliably populate average_traded_price/volume
-    # (OHLC comes back 0 for pure index tokens — indices aren't traded
-    # instruments), but the futures contract genuinely trades and carries
-    # both fields. Tagged "FUT" (not "INDEX"/"CE"/"PE") — REQUIRES
-    # TickAggregator.on_tick() to actually understand this tag before any
-    # tick for it does anything; see _resolve_futures_token()'s docstring.
-    futures_token, futures_exchange_type = _resolve_futures_token(
-        target_symbol, exchange
-    )
-    if futures_token:
-        token_meta[str(futures_token)] = {"strike": None, "option_type": "FUT"}
-
-    return (
-        exchange,
-        token_meta,
-        resolved_expiry,
-        index_token,
-        index_exchange_type,
-        futures_token,
-        futures_exchange_type,
-    )
-
 
 def _resolve_futures_token(target_symbol, exchange):
     """Resolves target_symbol's current-month futures (exchange, token) for
@@ -2349,6 +2247,28 @@ _upstox_current_expiry = None  # ISO 'YYYY-MM-DD' expiry the Upstox feed is stre
 _upstox_switch_lock = threading.RLock()
 
 
+def _upstox_feed_state():
+    """Snapshot compatibility globals for the extracted Upstox service."""
+    return _UpstoxFeedState(
+        stream=_upstox_stream,
+        aggregator=_upstox_aggregator,
+        loop=_upstox_loop,
+        instruments=_upstox_keys,
+        current_expiry=_upstox_current_expiry,
+    )
+
+
+def _store_upstox_feed_state(state):
+    """Reflect extracted service state back into legacy test seams."""
+    global _upstox_stream, _upstox_aggregator, _upstox_loop
+    global _upstox_keys, _upstox_current_expiry
+    _upstox_stream = state.stream
+    _upstox_aggregator = state.aggregator
+    _upstox_loop = state.loop
+    _upstox_keys = state.instruments
+    _upstox_current_expiry = state.current_expiry
+
+
 def _upstox_feed_matches_displayed_expiry(payload_expiry_str):
     """Upstox analog of _smartapi_feed_matches_displayed_expiry() above —
     same purpose (don't merge a stale-expiry tick delta into the
@@ -2370,110 +2290,61 @@ def _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry=None)
 
 
 def start_upstox_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
-    """Upstox analog of start_smartapi_feed() below — same lifecycle and
-    locking discipline (see that function's docstring for the exact race
-    _upstox_switch_lock closes). Imports UpstoxTickStream lazily, here and
-    only here, so booting with LIVE_FEED_PROVIDER left at its SMARTAPI
-    default never requires upstox-python-sdk to be installed."""
-    global _upstox_stream, _upstox_aggregator, _upstox_loop
-    global _upstox_keys, _upstox_current_expiry
-
+    """Start one persistent Upstox feed, or switch the existing socket."""
     from brokers.upstox_ws_client import UpstoxTickStream
 
     with _upstox_switch_lock:
+        target_symbol = (underlying or SYMBOL).upper()
         if _upstox_stream is not None:
-            target_symbol = (underlying or SYMBOL).upper()
             print(
                 f"[upstox] Feed already running, switching to {target_symbol} instead of starting a new one",
                 flush=True,
             )
-            _switch_upstox_symbol_blocking(target_symbol, strikes_around_atm, expiry)
+            _switch_upstox_symbol_blocking(
+                target_symbol, strikes_around_atm, expiry
+            )
             return
 
-        _upstox_loop = loop
-        target_symbol = (underlying or SYMBOL).upper()
-
-        resolved = _resolve_upstox_chain_tokens(
-            target_symbol, strikes_around_atm, expiry
-        )
-        if resolved is None:
-            return
-        token_meta, resolved_expiry, index_key = resolved
-
-        _upstox_aggregator = TickAggregator(
-            token_meta,
+        state = _upstox_feed_state()
+        _start_upstox_feed_new(
+            state,
             loop,
+            target_symbol,
+            strikes_around_atm,
+            expiry,
+            _resolve_upstox_chain_tokens,
+            TickAggregator,
             _upstox_sync_and_broadcast,
-            tick_event=_TICK_ACTIVITY_EVENT,
+            _TICK_ACTIVITY_EVENT,
+            UpstoxTickStream,
+            threading.Thread,
+            time.sleep,
+            lambda message: print(message, flush=True),
         )
-        _upstox_aggregator.start()
-
-        _upstox_stream = UpstoxTickStream(
-            on_tick=_upstox_aggregator.on_tick, mode="full"
-        )
-        _upstox_stream.connect()
-        threading.Thread(
-            target=_upstox_stream.run_forever_with_reconnect, daemon=True
-        ).start()
-        time.sleep(2)  # let the WS connection establish before subscribing
-
-        keys = list(token_meta.keys())
-        _upstox_stream.subscribe(keys)
-        _upstox_keys = keys
-        _upstox_current_expiry = resolved_expiry
-
-        option_count = len(keys) - (1 if index_key else 0)
-        print(
-            f"[upstox] Streaming {option_count} {target_symbol} option legs"
-            f"{' + spot' if index_key else ''} (expiry {resolved_expiry})",
-            flush=True,
-        )
+        _store_upstox_feed_state(state)
 
 
-def _switch_upstox_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
-    """Upstox analog of _switch_smartapi_symbol_blocking() below — reuses
-    the existing WS connection, no socket close/reopen. Guarded by
-    _upstox_switch_lock so two rapid switches can't interleave their
-    unsubscribe/subscribe calls (same reasoning as the SmartAPI version)."""
-    global _upstox_keys, _upstox_current_expiry
-
+def _switch_upstox_symbol_blocking(
+    new_symbol, strikes_around_atm=10, expiry=None
+):
+    """Switch subscriptions on the existing Upstox socket."""
     with _upstox_switch_lock:
         if _upstox_stream is None or _upstox_aggregator is None:
-            # Feed never started at boot (LIVE_FEED_PROVIDER pointed
-            # elsewhere) — start it now on whatever loop we have rather
-            # than silently no-op'ing the switch.
             loop = _upstox_loop if _upstox_loop is not None else _MAIN_LOOP
             if loop is not None:
                 start_upstox_feed(loop, new_symbol, strikes_around_atm, expiry)
             return
 
-        resolved = _resolve_upstox_chain_tokens(
-            new_symbol.upper(), strikes_around_atm, expiry
+        state = _upstox_feed_state()
+        _switch_upstox_feed_existing(
+            state,
+            new_symbol.upper(),
+            strikes_around_atm,
+            expiry,
+            _resolve_upstox_chain_tokens,
+            lambda message: print(message, flush=True),
         )
-        if resolved is None:
-            return
-        new_token_meta, new_expiry, new_index_key = resolved
-        new_keys = list(new_token_meta.keys())
-
-        if _upstox_keys:
-            try:
-                _upstox_stream.unsubscribe(_upstox_keys)
-            except Exception as e:
-                print(
-                    f"[upstox] Unsubscribe failed (continuing anyway): {e}", flush=True
-                )
-
-        _upstox_aggregator.update_token_meta(new_token_meta)
-        _upstox_stream.subscribe(new_keys)
-
-        _upstox_keys = new_keys
-        _upstox_current_expiry = new_expiry
-        option_count = len(new_keys) - (1 if new_index_key else 0)
-        print(
-            f"[upstox] Switched stream to {option_count} {new_symbol.upper()} option legs"
-            f"{' + spot' if new_index_key else ''} (expiry {new_expiry})",
-            flush=True,
-        )
+        _store_upstox_feed_state(state)
 
 
 def restart_upstox_feed(new_symbol, new_expiry=None):
@@ -2631,216 +2502,84 @@ def restart_shoonya_feed(new_symbol, new_expiry=None):
     ).start()
 
 
-def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
-    """Starts the ONE persistent SmartAPI WS connection for the life of the
-    server process, and does the initial subscription for `underlying`
-    (defaults to SYMBOL). Later symbol switches reuse this same connection
-    via switch_smartapi_symbol() instead of reconnecting — Angel One's WS
-    appears to allow only one active connection per feed session, so
-    closing/reopening on every switch is both slower and riskier than just
-    unsubscribing the old tokens and subscribing the new ones.
+def _smartapi_feed_state():
+    return _SmartApiFeedState(
+        stream=_smartapi_stream,
+        aggregator=_smartapi_aggregator,
+        loop=_smartapi_loop,
+        exchange=_smartapi_exchange,
+        tokens=_smartapi_tokens,
+        current_expiry=_smartapi_current_expiry,
+        index_token=_smartapi_index_token,
+        index_exchange=_smartapi_index_exchange,
+        futures_token=_smartapi_futures_token,
+        futures_exchange=_smartapi_futures_exchange,
+    )
 
-    `expiry` (optional): passed straight through to _resolve_chain_tokens()
-    — see its docstring for accepted formats and fallback behavior.
 
-    Guarded by _smartapi_switch_lock (reentrant) for its full duration —
-    without this, the initial startup call (backgrounded via
-    asyncio.to_thread) could run concurrently with a switch's fallback call
-    into this same function if a client connects and switches symbols
-    before startup finishes, creating two independent WS connections. See
-    the lock's own docstring for the exact failure mode this closes."""
+def _store_smartapi_feed_state(state):
     global _smartapi_stream, _smartapi_aggregator, _smartapi_loop
     global _smartapi_exchange, _smartapi_tokens, _smartapi_current_expiry
     global _smartapi_index_token, _smartapi_index_exchange
     global _smartapi_futures_token, _smartapi_futures_exchange
+    _smartapi_stream = state.stream
+    _smartapi_aggregator = state.aggregator
+    _smartapi_loop = state.loop
+    _smartapi_exchange = state.exchange
+    _smartapi_tokens = state.tokens
+    _smartapi_current_expiry = state.current_expiry
+    _smartapi_index_token = state.index_token
+    _smartapi_index_exchange = state.index_exchange
+    _smartapi_futures_token = state.futures_token
+    _smartapi_futures_exchange = state.futures_exchange
 
+
+def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10, expiry=None):
+    """Start one persistent SmartAPI feed, or switch its subscriptions."""
     with _smartapi_switch_lock:
+        target_symbol = (underlying or SYMBOL).upper()
         if _smartapi_stream is not None:
-            # A feed is already running (this call lost the race, or is a
-            # redundant fallback invocation from a switch that arrived
-            # after startup actually finished) — switch symbol on the
-            # EXISTING connection instead of creating a second one.
-            target_symbol = (underlying or SYMBOL).upper()
-            print(
-                f"[smartapi] Feed already running, switching to {target_symbol} instead of starting a new one",
-                flush=True,
-            )
             _switch_smartapi_symbol_blocking(target_symbol, strikes_around_atm, expiry)
             return
-
-        _smartapi_loop = loop
-        target_symbol = (underlying or SYMBOL).upper()
-
-        resolved = _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry)
-        if resolved is None:
-            return
-        (
-            exchange,
-            token_meta,
-            expiry,
-            index_token,
-            index_exchange_type,
-            futures_token,
-            futures_exchange_type,
-        ) = resolved
-
-        _smartapi_aggregator = TickAggregator(
-            token_meta,
+        state = _smartapi_feed_state()
+        _start_smartapi_feed_new(
+            state,
             loop,
-            _smartapi_sync_and_broadcast,
+            target_symbol,
+            strikes_around_atm,
+            expiry,
+            resolve=_resolve_chain_tokens,
+            aggregator_factory=TickAggregator,
+            callback=_smartapi_sync_and_broadcast,
             tick_event=_TICK_ACTIVITY_EVENT,
+            stream_factory=SmartTickStream,
+            exchange_types=EXCHANGE_TYPE,
+            spawn_thread=threading.Thread,
+            wait=time.sleep,
+            report=lambda message: print(message, flush=True),
         )
-        _smartapi_aggregator.start()
-
-        _smartapi_stream = SmartTickStream(on_tick=_smartapi_aggregator.on_tick, mode=3)
-        _smartapi_stream.connect()
-        threading.Thread(
-            target=_smartapi_stream.run_forever_with_reconnect, daemon=True
-        ).start()
-        time.sleep(2)  # let the WS connection establish before subscribing
-
-        # Option legs subscribe under the F&O exchange (NFO/BFO) as before.
-        # Futures token (if resolved) also lives under NFO/BFO, same as the
-        # option legs — folded into this same subscribe call rather than a
-        # separate one, since it's the same exchange type either way.
-        option_tokens = [
-            t
-            for t in token_meta.keys()
-            if t not in (str(index_token), str(futures_token))
-        ]
-        fo_tokens = option_tokens + ([str(futures_token)] if futures_token else [])
-        _smartapi_stream.subscribe(EXCHANGE_TYPE[exchange], fo_tokens)
-        _smartapi_exchange = exchange
-        _smartapi_tokens = fo_tokens
-        _smartapi_futures_token = str(futures_token) if futures_token else None
-        _smartapi_futures_exchange = exchange if futures_token else None
-
-        # The index token lives on its own cash exchange (NSE_CM/BSE_CM per
-        # INDEX_TOKENS, not NFO/BFO) — a separate subscribe call. Tracked
-        # separately from _smartapi_tokens/_smartapi_exchange so a later
-        # unsubscribe (on symbol switch) targets the right exchange for
-        # each rather than unsubscribing the index token under NFO/BFO,
-        # which would silently no-op or error against AngelOne.
-        if index_token:
-            _smartapi_stream.subscribe(
-                EXCHANGE_TYPE[index_exchange_type], [str(index_token)]
-            )
-            _smartapi_index_token = str(index_token)
-            _smartapi_index_exchange = index_exchange_type
-        else:
-            _smartapi_index_token = None
-            _smartapi_index_exchange = None
-
-        _smartapi_current_expiry = expiry
-        print(
-            f"[smartapi] Streaming {len(option_tokens)} {target_symbol} option legs"
-            f"{' + spot' if index_token else ''}{' + futures VWAP' if futures_token else ''} (expiry {expiry})",
-            flush=True,
-        )
+        _store_smartapi_feed_state(state)
 
 
 def _switch_smartapi_symbol_blocking(new_symbol, strikes_around_atm=10, expiry=None):
-    """Runs on its own thread (see restart_smartapi_feed) since
-    _resolve_chain_tokens() makes blocking REST calls. Reuses the existing
-    WS connection: unsubscribes the old symbol's tokens, swaps the
-    aggregator's mapping, subscribes the new symbol's tokens. No socket
-    close/reopen, so no reconnect race and no multi-second gap needed.
-
-    `expiry` (optional): passed straight through to _resolve_chain_tokens()
-    — lets an expiry-only switch (same symbol, different expiry) re-point
-    the feed too, not just a symbol change.
-
-    Guarded by _smartapi_switch_lock so two rapid switches can't interleave
-    their unsubscribe/subscribe calls or stomp on _smartapi_tokens/
-    _smartapi_exchange concurrently — see the lock's definition above for
-    the failure mode this prevents."""
-    global _smartapi_exchange, _smartapi_tokens, _smartapi_current_expiry
-    global _smartapi_index_token, _smartapi_index_exchange
-    global _smartapi_futures_token, _smartapi_futures_exchange
-
+    """Switch subscriptions while preserving the SmartAPI socket."""
     with _smartapi_switch_lock:
         if _smartapi_stream is None or _smartapi_aggregator is None:
-            # No feed running yet (e.g. switch happened before startup finished
-            # initializing it, or this provider was never booted because
-            # LIVE_FEED_PROVIDER pointed elsewhere) — fall back to a full
-            # start on whatever loop we have (main loop last-resort).
             loop = _smartapi_loop if _smartapi_loop is not None else _MAIN_LOOP
             if loop is not None:
-                start_smartapi_feed(
-                    loop, new_symbol, strikes_around_atm, expiry
-                )
+                start_smartapi_feed(loop, new_symbol, strikes_around_atm, expiry)
             return
-
-        resolved = _resolve_chain_tokens(new_symbol.upper(), strikes_around_atm, expiry)
-        if resolved is None:
-            return
-        (
-            new_exchange,
-            new_token_meta,
-            new_expiry,
-            new_index_token,
-            new_index_exchange_type,
-            new_futures_token,
-            new_futures_exchange_type,
-        ) = resolved
-        new_option_tokens = [
-            t
-            for t in new_token_meta.keys()
-            if t not in (str(new_index_token), str(new_futures_token))
-        ]
-        new_fo_tokens = new_option_tokens + (
-            [str(new_futures_token)] if new_futures_token else []
+        state = _smartapi_feed_state()
+        _switch_smartapi_feed_existing(
+            state,
+            new_symbol.upper(),
+            strikes_around_atm,
+            expiry,
+            resolve=_resolve_chain_tokens,
+            exchange_types=EXCHANGE_TYPE,
+            report=lambda message: print(message, flush=True),
         )
-
-        if _smartapi_tokens and _smartapi_exchange:
-            try:
-                _smartapi_stream.unsubscribe(
-                    EXCHANGE_TYPE[_smartapi_exchange], _smartapi_tokens
-                )
-            except Exception as e:
-                print(
-                    f"[smartapi] Unsubscribe failed (continuing anyway): {e}",
-                    flush=True,
-                )
-
-        # Index token was subscribed under a DIFFERENT exchange type
-        # (NSE_CM/BSE_CM, not NFO/BFO) — must be unsubscribed under that
-        # same exchange, or AngelOne silently ignores/errors the call.
-        if _smartapi_index_token and _smartapi_index_exchange:
-            try:
-                _smartapi_stream.unsubscribe(
-                    EXCHANGE_TYPE[_smartapi_index_exchange], [_smartapi_index_token]
-                )
-            except Exception as e:
-                print(
-                    f"[smartapi] Index unsubscribe failed (continuing anyway): {e}",
-                    flush=True,
-                )
-
-        _smartapi_aggregator.update_token_meta(new_token_meta)
-        _smartapi_stream.subscribe(EXCHANGE_TYPE[new_exchange], new_fo_tokens)
-
-        if new_index_token:
-            _smartapi_stream.subscribe(
-                EXCHANGE_TYPE[new_index_exchange_type], [str(new_index_token)]
-            )
-            _smartapi_index_token = str(new_index_token)
-            _smartapi_index_exchange = new_index_exchange_type
-        else:
-            _smartapi_index_token = None
-            _smartapi_index_exchange = None
-
-        _smartapi_futures_token = str(new_futures_token) if new_futures_token else None
-        _smartapi_futures_exchange = new_exchange if new_futures_token else None
-        _smartapi_exchange = new_exchange
-        _smartapi_tokens = new_fo_tokens
-        _smartapi_current_expiry = new_expiry
-        print(
-            f"[smartapi] Switched stream to {len(new_option_tokens)} {new_symbol.upper()} option legs"
-            f"{' + spot' if new_index_token else ''}{' + futures VWAP' if new_futures_token else ''} (expiry {new_expiry})",
-            flush=True,
-        )
-
+        _store_smartapi_feed_state(state)
 
 def restart_smartapi_feed(new_symbol, new_expiry=None):
     """Call this from switch_symbol(). Fire-and-forget: hands the actual
