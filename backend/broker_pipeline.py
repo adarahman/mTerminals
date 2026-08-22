@@ -545,9 +545,11 @@ def fetch_option_chain_wide(
                 "tradingsymbol": symbol,
             }
 
-    if not strike_lookup:
-        logger.warning(f"no contracts resolved for {underlying} {expiry_dash}")
-        return pd.DataFrame()
+        if opt_type and strike_val in strikes:
+            strike_lookup[(strike_val, opt_type)] = {
+                "token": row["token"],
+                "tradingsymbol": symbol,
+            }
 
     pairs = [(info["tradingsymbol"], info["token"]) for info in strike_lookup.values()]
     quotes = market_data.get_batch_quotes(
@@ -627,6 +629,19 @@ def fetch_option_chain_wide(
         rec[f"{side}_AskPrice"] = sell0.get("price")
         rec[f"{side}_BuyQty"] = q.get("totBuyQuan")
         rec[f"{side}_SellQty"] = q.get("totSellQuan")
+
+    if not by_strike:
+        sample = (
+            list(quotes.keys())[:5]
+            if isinstance(quotes, dict)
+            else f"<{type(quotes).__name__}>"
+        )
+        logger.warning(
+            f"0/{len(strike_lookup)} resolved contracts got quotes for "
+            f"{underlying} {expiry_dash} (exchange={exchange}) — "
+            f"returning empty chain frame. quotes keys sample={sample!r}"
+        )
+        return pd.DataFrame()
 
     return (
         pd.DataFrame(list(by_strike.values()))
