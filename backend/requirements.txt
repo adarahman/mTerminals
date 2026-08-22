@@ -36,4 +36,4 @@ smartapi-python>=1.4
 
 # Upstox execution and market data is optional. Requires official SDK:
 # pip install upstox-python-sdk
-upstox-python-sdk>=2.0
+upstox-python-sdk>=2.29.0
