@@ -47,18 +47,21 @@ from server.feeds.smartapi import (
     FeedState as _SmartApiFeedState,
     resolve_chain_tokens as _resolve_smartapi_feed_tokens,
     start_new_feed as _start_smartapi_feed_new,
+    stop_feed as _stop_smartapi_feed,
     switch_existing_feed as _switch_smartapi_feed_existing,
 )  # noqa: E402
 from server.feeds.shoonya import (
     FeedState as _ShoonyaFeedState,
     resolve_chain_tokens as _resolve_shoonya_feed_tokens,
     start_new_feed as _start_shoonya_feed_new,
+    stop_feed as _stop_shoonya_feed,
     switch_existing_feed as _switch_shoonya_feed_existing,
 )  # noqa: E402
 from server.feeds.upstox import (
     FeedState as _UpstoxFeedState,
     resolve_chain_tokens as _resolve_upstox_feed_tokens,
     start_new_feed as _start_upstox_feed_new,
+    stop_feed as _stop_upstox_feed,
     switch_existing_feed as _switch_upstox_feed_existing,
 )  # noqa: E402
 import market_api  # noqa: E402  (lightweight ticker-strip quotes; no argv parsing, doesn't need hiding)
@@ -1867,52 +1870,49 @@ def _feed_allowed(feed_provider: str) -> bool:
     )
 
 
-def _stop_active_broker_feed(provider: str) -> None:
-    """Best-effort unsubscribe of the given broker feed's tokens so a
-    provider switched away from stops consuming feed bandwidth. Fire-and-
-    forget (daemon thread) — the real "stop" from the payload's point of
-    view is _feed_allowed()'s broadcast gate, which takes effect
-    synchronously on the next tick. Each feed's own switch lock serializes
-    against any in-flight symbol-switch thread."""
-    def _run():
-        global _smartapi_tokens, _upstox_keys, _shoonya_instruments
-        if provider == "SMARTAPI":
-            with _smartapi_switch_lock:
-                if _smartapi_stream is not None:
-                    if _smartapi_tokens and _smartapi_exchange:
-                        try:
-                            _smartapi_stream.unsubscribe(
-                                EXCHANGE_TYPE[_smartapi_exchange], _smartapi_tokens
-                            )
-                        except Exception:
-                            pass
-                    if _smartapi_index_token and _smartapi_index_exchange:
-                        try:
-                            _smartapi_stream.unsubscribe(
-                                EXCHANGE_TYPE[_smartapi_index_exchange],
-                                [_smartapi_index_token],
-                            )
-                        except Exception:
-                            pass
-                    _smartapi_tokens = None
-        elif provider == "UPSTOX":
-            with _upstox_switch_lock:
-                if _upstox_stream is not None and _upstox_keys:
-                    try:
-                        _upstox_stream.unsubscribe(_upstox_keys)
-                    except Exception:
-                        pass
-                    _upstox_keys = None
-        elif provider == "SHOONYA":
-            with _shoonya_switch_lock:
-                if _shoonya_stream is not None and _shoonya_instruments:
-                    try:
-                        _shoonya_stream.unsubscribe(_shoonya_instruments)
-                    except Exception:
-                        pass
-                    _shoonya_instruments = None
+def _stop_smartapi_feed_blocking() -> None:
+    """Unsubscribe SmartAPI safely while preserving compatibility globals."""
+    with _smartapi_switch_lock:
+        state = _smartapi_feed_state()
+        _stop_smartapi_feed(
+            state,
+            exchange_types=EXCHANGE_TYPE,
+            report=lambda message: logger.warning(message),
+        )
+        _store_smartapi_feed_state(state)
 
-    threading.Thread(target=_run, daemon=True).start()
+
+def _stop_upstox_feed_blocking() -> None:
+    """Unsubscribe Upstox safely while preserving compatibility globals."""
+    with _upstox_switch_lock:
+        state = _upstox_feed_state()
+        _stop_upstox_feed(state, report=lambda message: logger.warning(message))
+        _store_upstox_feed_state(state)
+
+
+def _stop_shoonya_feed_blocking() -> None:
+    """Unsubscribe Shoonya safely while preserving compatibility globals."""
+    with _shoonya_switch_lock:
+        state = _shoonya_feed_state()
+        _stop_shoonya_feed(state, report=lambda message: logger.warning(message))
+        _store_shoonya_feed_state(state)
+
+
+def _stop_active_broker_feed(provider: str) -> bool:
+    """Schedule best-effort cleanup when deactivating a streaming provider.
+
+    The synchronous :func:`_feed_allowed` gate remains authoritative for
+    stopping payloads; this cleanup releases broker subscription bandwidth.
+    """
+    return _feed_lifecycle.stop(
+        provider,
+        {
+            "SMARTAPI": _stop_smartapi_feed_blocking,
+            "UPSTOX": _stop_upstox_feed_blocking,
+            "SHOONYA": _stop_shoonya_feed_blocking,
+        },
+        lambda callback: threading.Thread(target=callback, daemon=True).start(),
+    )
 
 
 def switch_data_source(new_source: str) -> bool:

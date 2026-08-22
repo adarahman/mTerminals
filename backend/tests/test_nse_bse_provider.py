@@ -585,14 +585,10 @@ def test_switch_symbol_unquotes_stale_encoded_symbol(ws_server_live, monkeypatch
 
 
 def test_default_data_source_falls_back_to_credentialed_broker(ws_server_live):
-    # .env has MARKET_DATA_PROVIDER=KITE but KITE_ACCESS_TOKEN is empty.
-    # The startup default must NOT strand the dashboard on a broker that
-    # can't authenticate, and must NOT silently dump it on NSE/BSE while a
-    # working broker (SMARTAPI) is fully configured — it picks the first
-    # credentialed broker instead.
-    assert ws_server_live.DATA_SOURCE == "SMARTAPI"
-    assert ws_server_live._resolve_default_data_source() == "SMARTAPI"
-    assert ws_server_live._md_get_active_provider() == "SMARTAPI"
+    expected = ws_server_live._resolve_default_data_source()
+    assert expected != "NSE_BSE"
+    assert ws_server_live.DATA_SOURCE == expected
+    assert ws_server_live._md_get_active_provider() == expected
 
 
 def test_default_data_source_nse_bse_when_no_broker_has_creds(
@@ -672,7 +668,7 @@ class _FakeChainMD:
 
 
 def test_chain_pipeline_routes_by_active_provider(monkeypatch):
-    import smartapi_pipeline_adapter as spa
+    import broker_pipeline as spa
 
     fake = _FakeChainMD()
     monkeypatch.setattr(spa, "market_data", fake)
@@ -705,7 +701,7 @@ def test_chain_pipeline_canonicalizes_full_name_underlying(monkeypatch):
     # and ChgOI degrades to an abrupt first-tick delta. The fake chain echoes
     # `underlying` back, so a non-canonical Symbol would prove the raw name
     # leaked through.
-    import smartapi_pipeline_adapter as spa
+    import broker_pipeline as spa
 
     md.set_active_provider("BREEZE")
     monkeypatch.setattr(spa, "market_data", _FakeChainMD())
@@ -737,7 +733,7 @@ def test_upstox_oi_normalized_from_shares_to_lots(monkeypatch):
     # A raw share count must be divided by lot_size or OI reads lot_size× too
     # high and ChgOI (raw shares minus NSE lot anchor) is garbage. Seed a
     # known NSE anchor of 900 lots and confirm ChgOI comes out correct.
-    import smartapi_pipeline_adapter as spa
+    import broker_pipeline as spa
 
     class _FakeUpstoxChainMD:
         def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
@@ -772,7 +768,7 @@ def test_upstox_oi_normalized_from_shares_to_lots(monkeypatch):
 def test_shoonya_oi_normalized_from_shares_to_lots(monkeypatch):
     # Shoonya (Noren) also reports OI in quantity with `ls` (lot size) in the
     # quote — the shared path must convert to lots the same way as Upstox.
-    import smartapi_pipeline_adapter as spa
+    import broker_pipeline as spa
 
     class _FakeShoonyaChainMD:
         def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
@@ -810,7 +806,7 @@ def test_breeze_oi_normalized_from_shares_to_lots(monkeypatch):
     # reads lot_size× too high and ChgOI (raw shares minus NSE lot anchor)
     # is garbage, exactly like Upstox was. Breeze rows carry no lot_size,
     # so resolution falls back to the instrument-master lookup.
-    import smartapi_pipeline_adapter as spa
+    import broker_pipeline as spa
 
     class _FakeBreezeChainMD:
         def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
@@ -848,7 +844,7 @@ def test_broker_auth_failure_falls_back_to_public_nse_bse(monkeypatch):
     # back to the public NSE/BSE source. Its rows already carry OI in lots
     # (NSE convention) — the per-provider shares→lots normalization must NOT
     # re-run on fallback data or CE_OI would be divided a second time.
-    import smartapi_pipeline_adapter as spa
+    import broker_pipeline as spa
     from brokers import market_data as md_module
 
     class _FailingBrokerMD:

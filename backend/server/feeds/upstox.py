@@ -154,3 +154,16 @@ def switch_existing_feed(
         f"{' + spot' if index_key else ''} (expiry {resolved_expiry})"
     )
     return True
+
+
+def stop_feed(state: FeedState, *, report: Callable[[str], None]) -> bool:
+    """Best-effort unsubscribe of the current Upstox instruments."""
+    if state.stream is None or not state.instruments:
+        return False
+    try:
+        state.stream.unsubscribe(state.instruments)
+    except Exception as exc:  # noqa: BLE001 - SDK cleanup must not block switching
+        report(f"[upstox] Unsubscribe failed during shutdown: {exc}")
+    finally:
+        state.instruments = None
+    return True

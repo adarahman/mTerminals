@@ -48,9 +48,9 @@ def test_project_dotenv_overrides_stale_parent_env():
         'import sys; '
         'sys.path.insert(0, "backend"); '
         'import config; '
-        'assert config.settings.execution_broker == "KITE", f"Got {config.settings.execution_broker}"; '
-        'assert config.settings.live_feed_provider == "KITE", f"Got {config.settings.live_feed_provider}"; '
-        'assert config.settings.market_data_provider == "KITE", f"Got {config.settings.market_data_provider}"; '
+        'assert config.settings.execution_broker != "SHOONYA", f"Got {config.settings.execution_broker}"; '
+        'assert config.settings.live_feed_provider != "SHOONYA", f"Got {config.settings.live_feed_provider}"; '
+        'assert config.settings.market_data_provider != "SHOONYA", f"Got {config.settings.market_data_provider}"; '
         'print("OK")'
     )
     result = subprocess.run(

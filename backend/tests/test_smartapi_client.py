@@ -137,10 +137,11 @@ def test_call_rate_limited_result_dict_retries_then_succeeds(session):
 
 
 def test_call_rate_limited_exhausts_retries_returns_status_false(session):
+    from brokers.smartapi_client import _RATE_LIMIT_MAX_RETRIES
     always_rate_limited = Exception("too many requests")
     # 1 initial attempt (in call()) + _RATE_LIMIT_MAX_RETRIES attempts in
     # _retry_after_rate_limit — all rate-limited, all give up eventually.
-    total_attempts = 1 + 3
+    total_attempts = 1 + _RATE_LIMIT_MAX_RETRIES
     session.mock_api.someMethod.side_effect = [always_rate_limited] * total_attempts
     result = session.call("someMethod")
     assert result["status"] is False

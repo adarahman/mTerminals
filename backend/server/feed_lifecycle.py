@@ -50,3 +50,16 @@ def is_allowed(
         normalize_provider(provider) == normalize_provider(active_data_source)
         and supports_websocket(active_data_source)
     )
+
+
+def stop(
+    provider: str | None,
+    callbacks: Mapping[str, Callable[[], Any]],
+    schedule: Callable[[Callable[[], Any]], Any],
+) -> bool:
+    """Schedule best-effort cleanup for a provider's active subscriptions."""
+    callback = callbacks.get(normalize_provider(provider))
+    if callback is None:
+        return False
+    schedule(callback)
+    return True

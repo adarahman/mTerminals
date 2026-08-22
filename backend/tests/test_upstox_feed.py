@@ -113,3 +113,20 @@ def test_lifecycle_reuses_one_socket_for_subscription_switch():
     assert state.current_expiry == "2026-09-04"
     assert ("unsubscribe", ["NSE_FO|100"]) in events
     assert ("subscribe", ["NSE_FO|101"]) in events
+
+
+def test_stop_feed_unsubscribes_and_clears_instruments():
+    from server.feeds.upstox import stop_feed
+
+    events = []
+
+    class StopStream:
+        def unsubscribe(self, instruments):
+            events.append(list(instruments))
+
+    state = FeedState(
+        stream=StopStream(), instruments=["NSE_FO|100", "NSE_INDEX|Nifty 50"]
+    )
+    assert stop_feed(state, report=lambda _message: None)
+    assert events == [["NSE_FO|100", "NSE_INDEX|Nifty 50"]]
+    assert state.instruments is None

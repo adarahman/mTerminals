@@ -121,7 +121,7 @@ def test_resolve_option_contract_returns_synthetic_key(breeze):
 def test_resolve_sensex_option_preserves_bfo_exchange(breeze):
     module, _ = breeze
     resolved = module.resolve_option_contract("SENSEX", "28-Aug-2025", 80000, "PE", "BFO")
-    assert resolved == ("BFO", "SENSEX28AUG2580000PE", "")
+    assert resolved == ("BFO", "BSESEN28AUG2580000PE", "")
     cached = module._CONTRACT_CACHE[resolved[1]]
     assert cached["exchange_code"] == "BFO"
     assert cached["stock_code"] == "BSESEN"

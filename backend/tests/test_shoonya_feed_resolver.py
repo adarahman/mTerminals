@@ -81,3 +81,18 @@ def test_lifecycle_reuses_one_socket_for_subscription_switch():
     assert state.current_expiry == "04-Sep-2026"
     assert ("unsubscribe", ["NFO|100"]) in events
     assert ("subscribe", ["NFO|101"]) in events
+
+
+def test_stop_feed_unsubscribes_and_clears_instruments():
+    from server.feeds.shoonya import FeedState, stop_feed
+
+    calls = []
+
+    class Stream:
+        def unsubscribe(self, instruments):
+            calls.append(list(instruments))
+
+    state = FeedState(stream=Stream(), instruments=["NFO|101", "NSE|26000"])
+    assert stop_feed(state, report=lambda _message: None)
+    assert calls == [["NFO|101", "NSE|26000"]]
+    assert state.instruments is None

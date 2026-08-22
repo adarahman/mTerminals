@@ -232,3 +232,31 @@ def switch_existing_feed(
         f"{' + futures VWAP' if futures_token else ''} (expiry {resolved_expiry})"
     )
     return True
+
+
+def stop_feed(
+    state: FeedState,
+    *,
+    exchange_types: dict,
+    report: Callable[[str], None],
+) -> bool:
+    """Best-effort unsubscribe of SmartAPI derivative and index tokens."""
+    if state.stream is None:
+        return False
+    attempted = False
+    if state.tokens and state.exchange:
+        attempted = True
+        try:
+            state.stream.unsubscribe(exchange_types[state.exchange], state.tokens)
+        except Exception as exc:  # noqa: BLE001 - SDK cleanup must not block switching
+            report(f"[smartapi] Derivative unsubscribe failed during shutdown: {exc}")
+    if state.index_token and state.index_exchange:
+        attempted = True
+        try:
+            state.stream.unsubscribe(
+                exchange_types[state.index_exchange], [state.index_token]
+            )
+        except Exception as exc:  # noqa: BLE001 - SDK cleanup must not block switching
+            report(f"[smartapi] Index unsubscribe failed during shutdown: {exc}")
+    state.tokens = None
+    return attempted

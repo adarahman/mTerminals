@@ -79,3 +79,20 @@ def test_lifecycle_switches_exchange_scoped_subscriptions_on_one_socket():
     assert ("subscribe", 2, ["102"]) in stream.calls
     assert ("subscribe", 1, ["26001"]) in stream.calls
     assert state.current_expiry == "28AUG2026"
+
+
+def test_stop_feed_unsubscribes_all_exchange_scoped_tokens():
+    from server.feeds.smartapi import stop_feed
+
+    stream = Stream()
+    state = FeedState(
+        stream=stream, exchange="NFO", tokens=["101", "102"],
+        index_token="26000", index_exchange="NSE_CM",
+    )
+    assert stop_feed(
+        state, exchange_types={"NFO": 2, "NSE_CM": 1},
+        report=lambda _message: None,
+    )
+    assert ("unsubscribe", 2, ["101", "102"]) in stream.calls
+    assert ("unsubscribe", 1, ["26000"]) in stream.calls
+    assert state.tokens is None
