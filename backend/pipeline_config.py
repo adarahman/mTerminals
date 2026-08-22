@@ -42,13 +42,13 @@ class RuntimeConfig:
     no_virtual_oi: Optional[bool] = None
     strikes_each_side: Optional[int] = None
     use_smartapi: Optional[bool] = None
-    # "EQ" (default — NSE option-chain response's own underlyingValue,
-    # cash-market index quote) or "FUT" (near-month futures LTP, already
+    # "AUTO" (default — use the live cash/index quote when the option-chain
+    # underlying is stale, otherwise EQ; near close, fall back to futures),
+    # "EQ" (force the option-chain underlyingValue), or "FUT" (force the
+    # near-month futures LTP, already
     # fetched every tick via fetch_futures_wide for df_fut — see
     # option_chain_json.py's PRICE_SOURCE docstring for why EQ goes stale
     # near the 3:15-3:30 close window and FUT doesn't).
-    price_source: Optional[str] = None
-    
     price_source: Optional[str] = None
     # Near-month futures expiry to use when price_source="FUT" (or when
     # fetch_futures_wide needs an explicit expiry rather than resolving

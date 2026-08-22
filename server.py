@@ -149,7 +149,7 @@ SYMBOL = ARGS.symbol.strip().upper()
 # (see option_chain_json.py's PRICE_SOURCE docstring for the 3:15-3:30
 # EQ-goes-stale rationale). Legacy ?priceSource= URLs are accepted but no
 # longer alter analytics.
-PRICE_SOURCE = "EQ"
+PRICE_SOURCE = "AUTO"
 # Manual futures-expiry selector — "NEAR" (default), "NEXT", or "FAR".
 # Switched via ?futuresExpiry= on the WS URL (see ws_handler) and read
 # fresh into RuntimeConfig every tick by run_pipeline_once().
@@ -1922,9 +1922,9 @@ async def _collect_pipeline_payload(tick_start: float):
             elapsed,
         )
         overlay_state = (
-            f"{_md_label} websocket overlay remains active"
-            if USE_SMARTAPI
-            else f"public REST polling will retry; {_md_label} remains disabled"
+            f"{LIVE_FEED_PROVIDER} websocket overlay remains active"
+            if USE_SMARTAPI and _feed_allowed(LIVE_FEED_PROVIDER)
+            else f"{DATA_SOURCE} REST polling will retry"
         )
         print(f"[pipeline] DELAYED after {elapsed:.2f}s — {overlay_state}", flush=True)
         return None
@@ -2289,18 +2289,27 @@ async def ws_handler(request):
                 flush=True,
             )
 
-    # Legacy priceSource URLs no longer alter analytics: EQ is the fixed
-    # option-pricing/decision reference; FUT is displayed separately.
+    # ?priceSource= controls the analytics reference. AUTO is the safe default:
+    # use live cash/index when NSE EQ is stale, otherwise EQ, and use futures
+    # near/after the close when no live cash quote is available.
     requested_price_source = request.query.get("priceSource")
-    if requested_price_source and requested_price_source.strip().upper() not in (
-        "EQ",
-        "FUT",
-    ):
-        print(
-            f"[ws] ignoring invalid ?priceSource={requested_price_source!r} (must be EQ or FUT)",
-            flush=True,
-        )
-    PRICE_SOURCE = "EQ"
+    if requested_price_source:
+        requested_price_source = requested_price_source.strip().upper()
+        if requested_price_source in ("AUTO", "EQ", "FUT"):
+            if requested_price_source != PRICE_SOURCE:
+                print(
+                    f"[ws] price source switch requested: {PRICE_SOURCE} -> {requested_price_source}",
+                    flush=True,
+                )
+                PRICE_SOURCE = requested_price_source
+                _LAST_SENT = None
+                _SYMBOL_SWITCH_EVENT.set()
+        else:
+            print(
+                f"[ws] ignoring invalid ?priceSource={requested_price_source!r} "
+                "(must be AUTO, EQ or FUT)",
+                flush=True,
+            )
 
     # ?futuresExpiry= — NEAR/NEXT/FAR futures reference selector.
     futures_reference_switched = False
