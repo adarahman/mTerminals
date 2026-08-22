@@ -158,3 +158,18 @@ class KotakSession:
 
 
 _session = KotakSession()
+
+
+def healthcheck() -> tuple[bool, str | None]:
+    """Test whether a usable Kotak session exists.
+
+    Same contract as shoonya_client.healthcheck(): (True, None) on success,
+    (False, error_message) on failure. Registered in
+    brokers.connection._CHECKS so check_connection("KOTAK") reflects real
+    session state instead of the previous always-ready default.
+    """
+    try:
+        _session.ensure_session()
+        return True, None
+    except BrokerError as exc:
+        return False, str(exc)

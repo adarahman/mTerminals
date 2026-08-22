@@ -196,6 +196,24 @@ class KiteSession:
 
 
 _session = KiteSession()
+
+
+def healthcheck() -> tuple[bool, str | None]:
+    """Test whether a usable Kite session exists.
+
+    Same (True, None)/(False, error) contract as shoonya_client/
+    breeze_client/smartapi_client/kotak_client.healthcheck(), so
+    brokers.connection.check_connection("KITE") reflects real token
+    state instead of the previous always-ready default. Kite has no
+    headless re-login (see KiteSession docstring), so this is a token-
+    presence check, not a login attempt — that matches what
+    ensure_session() itself does here.
+    """
+    try:
+        _session.ensure_session()
+        return True, None
+    except KiteError as exc:
+        return False, str(exc)
 set_session_token = _session.set_session_token
 login_url = _session.login_url
 generate_session = _session.generate_session

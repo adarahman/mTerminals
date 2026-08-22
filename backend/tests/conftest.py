@@ -1,15 +1,16 @@
 """Shared pytest fixtures.
 
-Notably: makes ws_server_live.py importable at all. Before this fixture
-existed, importing that module in a test process did three things no CI
-box (and no offline dev machine) can rely on:
+Notably: makes server.py (formerly ws_server_live.py) importable at all.
+Before this fixture existed, importing that module in a test process did
+three things no CI box (and no offline dev machine) can rely on:
 
   1. Parsed sys.argv with its own argparse.ArgumentParser — pytest's own
      CLI args (-k foo, -x, etc.) would blow it up.
   2. Ran brokers/smartapi_client.py's `INDEX_TOKENS = _build_index_tokens()`
      at import time, which downloads Angel One's ScripMaster over the
      network with NO test seam — a real HTTP call as a side effect of
-     `import ws_server_live`, that raises if the network is unavailable
+     `import server` (the module was renamed from ws_server_live.py),
+     that raises if the network is unavailable
      (or blocked, as it is in this sandbox) and there's no local cache yet.
   3. Wrote a live paper_trading.db / ScripMaster cache file into whatever
      the current working directory happened to be, via paths.py's
@@ -93,14 +94,34 @@ def ws_server_live(tmp_path_factory):
 
     os.environ["RUNTIME_DIR"] = str(runtime_dir)
     os.environ.pop("LIVE_TRADING_ENABLED", None)  # module reads this once at import; keep it off
-    sys.argv = ["ws_server_live.py"]
+    sys.argv = ["server.py"]
     for p in (PROJECT_ROOT, BACKEND_DIR):
         if p not in sys.path:
             sys.path.insert(0, p)
     os.chdir(str(runtime_dir))
 
     try:
-        import ws_server_live as module
+        # NOTE: this can't be a plain `import server`. The top-level entry
+        # point (server.py, PROJECT_ROOT) and the extracted-subsystem
+        # package (backend/server/, containing broker_services.py etc.)
+        # now share the name "server" since the ws_server_live.py ->
+        # server.py rename. server.py itself does `from server import
+        # broker_services` expecting the PACKAGE — that only resolves
+        # correctly as long as sys.modules["server"] isn't already
+        # claimed by the entry script. Running `python server.py`
+        # directly is fine (it's registered under "__main__", never
+        # "server"), but `import server` here would register the entry
+        # script itself under "server" and break its own internal
+        # `from server import broker_services` with a circular-import
+        # ImportError. Loading it under a distinct module name sidesteps
+        # that collision without touching server.py.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "mterminals_server_entry", os.path.join(PROJECT_ROOT, "server.py")
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
         yield module
     finally:
         sys.argv = old_argv

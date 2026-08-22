@@ -297,6 +297,25 @@ class UpstoxSession:
 _session = UpstoxSession()
 
 
+def healthcheck() -> tuple[bool, str | None]:
+    """Test whether a usable Upstox access token is set.
+
+    Same (True, None)/(False, error) contract as shoonya_client/
+    breeze_client/smartapi_client/kotak_client/kite_client.healthcheck(),
+    so brokers.connection.check_connection("UPSTOX") reflects real
+    token state instead of the previous always-ready default. Upstox
+    has no headless re-login (see UpstoxSession docstring), so this is
+    a token-presence check, not a login attempt — accessing
+    .access_token raises UpstoxError when unset without making any
+    network call.
+    """
+    try:
+        _session.access_token  # noqa: B018 - property access is the check
+        return True, None
+    except UpstoxError as exc:
+        return False, str(exc)
+
+
 # ── Instrument master (bulk download + local cache, unauthenticated) ──────
 
 
