@@ -744,146 +744,160 @@ def fetch_futures_wide(
     returning an empty DataFrame the rest of the month. Leave expiry_dash
     None and use `which` (NEAR/NEXT/FAR) to pick a monthly slot by
     relative position instead — see option_chain_json.py's FUTURES_EXPIRY.
+
+    Routing: the `which`-based path (the only one any real caller uses —
+    grep-verified against option_chain_json.py/server/bridge.py) goes
+    through MarketData.get_futures_quote(), the shared, provider-neutral
+    FUT abstraction in brokers/market_data.py — see that module for the
+    per-provider resolution/fallback rules (which providers have native
+    FUTIDX resolution vs. fall back to the NSE/BSE public API, and how
+    that fallback is flagged via the quote's "FutSource" field rather
+    than being silent).
+
+    The exact-date (expiry_dash) path only ever worked for SmartAPI/
+    Upstox even before this refactor — Kotak/Shoonya/Kite/Breeze/NSE_BSE
+    all silently ignored expiry_dash and used `which` instead. No current
+    caller passes expiry_dash at all, so this is kept as a narrow legacy
+    path (SmartAPI/Upstox only) rather than migrated into the shared
+    abstraction, which doesn't take an exact-date parameter.
     """
-    from brokers.market_data import get_active_provider
+    if expiry_dash:
+        from brokers.market_data import get_active_provider
 
-    provider = get_active_provider()
+        provider = get_active_provider()
+        if provider == "SMARTAPI":
+            return _fetch_futures_exact_date_smartapi(underlying, expiry_dash, exchange)
+        if provider == "UPSTOX":
+            return _fetch_futures_exact_date_upstox(underlying, expiry_dash, exchange)
+        logger.warning(
+            "[fetch_futures_wide] expiry_dash=%r requested but %s has no exact-date "
+            "FUT resolution — falling back to which=%r instead of silently ignoring it",
+            expiry_dash,
+            provider,
+            which,
+        )
 
-    if provider == "UPSTOX":
-        from brokers.upstox_client import _load_instrument_dump
+    quote = market_data.get_futures_quote(underlying, which=which)
+    if not quote:
+        return pd.DataFrame()
+    return pd.DataFrame([quote])
 
-        scope = "BSE" if exchange.upper() in ("BFO", "BSE") else "NSE"
-        data = _load_instrument_dump(scope)
-        underlying_u = underlying.upper()
-        from brokers.upstox_client import _canonical_name as _up_canonical
 
-        name_u = _up_canonical(underlying, data) or underlying_u
+def _fetch_futures_exact_date_upstox(
+    underlying: str, expiry_dash: str, exchange: str = "NFO"
+) -> pd.DataFrame:
+    """Legacy exact-date FUT lookup for Upstox. No real caller today
+    (see fetch_futures_wide's docstring) — kept only so a future exact-
+    date caller doesn't silently regress to which-based resolution."""
+    from brokers.upstox_client import _load_instrument_dump
 
-        def _parse_expiry(row):
-            raw = row.get("expiry")
-            if raw in (None, "", 0):
+    scope = "BSE" if exchange.upper() in ("BFO", "BSE") else "NSE"
+    data = _load_instrument_dump(scope)
+    underlying_u = underlying.upper()
+    from brokers.upstox_client import _canonical_name as _up_canonical
+
+    name_u = _up_canonical(underlying, data) or underlying_u
+
+    def _parse_expiry(row):
+        raw = row.get("expiry")
+        if raw in (None, "", 0):
+            return None
+        if isinstance(raw, (int, float)):
+            try:
+                return datetime.utcfromtimestamp(raw / 1000)
+            except (OverflowError, OSError, ValueError):
                 return None
-            if isinstance(raw, (int, float)):
+        try:
+            return datetime.strptime(str(raw), "%Y-%m-%d")
+        except ValueError:
+            try:
+                return datetime.strptime(str(raw), "%d-%b-%Y")
+            except ValueError:
                 try:
-                    return datetime.utcfromtimestamp(raw / 1000)
-                except (OverflowError, OSError, ValueError):
+                    return datetime.strptime(str(raw), "%d%b%Y")
+                except ValueError:
                     return None
-            try:
-                return datetime.strptime(str(raw), "%Y-%m-%d")
-            except ValueError:
-                try:
-                    return datetime.strptime(str(raw), "%d-%b-%Y")
-                except ValueError:
-                    try:
-                        return datetime.strptime(str(raw), "%d%b%Y")
-                    except ValueError:
-                        return None
 
-        cands = [
-            row
-            for row in data
-            if row.get("instrument_type") == "FUT"
-            and (row.get("name") or "").upper() == name_u
-        ]
-        cands = [(row, _parse_expiry(row)) for row in cands]
-        cands = [(row, exp) for row, exp in cands if exp is not None]
-        if not cands:
-            return pd.DataFrame()
-        cands.sort(key=lambda pair: pair[1])
+    cands = [
+        row
+        for row in data
+        if row.get("instrument_type") == "FUT"
+        and (row.get("name") or "").upper() == name_u
+    ]
+    cands = [(row, _parse_expiry(row)) for row in cands]
+    cands = [(row, exp) for row, exp in cands if exp is not None]
+    if not cands:
+        return pd.DataFrame()
+    cands.sort(key=lambda pair: pair[1])
 
-        if expiry_dash:
+    try:
+        target = datetime.strptime(expiry_dash, "%d-%b-%Y")
+    except ValueError:
+        try:
+            target = datetime.strptime(expiry_dash, "%d%b%Y")
+        except ValueError:
             try:
-                target = datetime.strptime(expiry_dash, "%d-%b-%Y")
+                target = datetime.strptime(expiry_dash, "%Y-%m-%d")
             except ValueError:
-                try:
-                    target = datetime.strptime(expiry_dash, "%d%b%Y")
-                except ValueError:
-                    try:
-                        target = datetime.strptime(expiry_dash, "%Y-%m-%d")
-                    except ValueError:
-                        return pd.DataFrame()
-            matches = [row for row, exp in cands if exp.date() == target.date()]
-            if not matches:
                 return pd.DataFrame()
-            fut = matches[0]
-        else:
-            today = datetime.combine(date.today(), datetime.min.time())
-            live = [(row, exp) for row, exp in cands if exp >= today] or cands
-            idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
-            idx = min(idx, len(live) - 1)
-            fut = live[idx][0]
+    matches = [row for row, exp in cands if exp.date() == target.date()]
+    if not matches:
+        return pd.DataFrame()
+    fut = matches[0]
 
-        quotes = market_data.get_batch_quotes(
-            exchange,
-            [(fut.get("trading_symbol"), fut.get("instrument_key"))],
-            mode="FULL",
-        )
-        q = quotes.get(fut.get("trading_symbol")) if quotes else None
-        if not q:
-            return pd.DataFrame()
+    quotes = market_data.get_batch_quotes(
+        exchange,
+        [(fut.get("trading_symbol"), fut.get("instrument_key"))],
+        mode="FULL",
+    )
+    q = quotes.get(fut.get("trading_symbol")) if quotes else None
+    if not q:
+        return pd.DataFrame()
 
-        spot_quote = market_data.get_spot_quote(underlying)
-        spot = spot_quote["ltp"] if spot_quote else 0.0
-        ltp = safe_float(q.get("last_price"))
-        prev_close = safe_float(q.get("close"))
-        change = q.get("net_change")
-        pct = q.get("percent_change")
-        if pct is None and prev_close:
-            pct = round(((ltp - prev_close) / prev_close) * 100.0, 2)
+    spot_quote = market_data.get_spot_quote(underlying)
+    spot = spot_quote["ltp"] if spot_quote else 0.0
+    ltp = safe_float(q.get("last_price"))
+    prev_close = safe_float(q.get("close"))
+    change = q.get("net_change")
+    pct = q.get("percent_change")
+    if pct is None and prev_close:
+        pct = round(((ltp - prev_close) / prev_close) * 100.0, 2)
 
-        exp_raw = fut.get("expiry")
-        if isinstance(exp_raw, (int, float)):
-            exp_str = datetime.utcfromtimestamp(exp_raw / 1000).strftime("%d-%b-%Y")
-        else:
-            exp_str = str(exp_raw)
+    exp_raw = fut.get("expiry")
+    if isinstance(exp_raw, (int, float)):
+        exp_str = datetime.utcfromtimestamp(exp_raw / 1000).strftime("%d-%b-%Y")
+    else:
+        exp_str = str(exp_raw)
 
-        return pd.DataFrame(
-            [
-                {
-                    "Contract": fut.get("trading_symbol"),
-                    "Underlying": underlying,
-                    "Expiry": exp_str,
-                    "LTP": ltp,
-                    "Change": change,
-                    "PctChange": pct,
-                    "Open": q.get("open"),
-                    "High": q.get("high"),
-                    "Low": q.get("low"),
-                    "PrevClose": prev_close,
-                    "Volume": q.get("volume"),
-                    "Turnover": None,
-                    "OI": q.get("oi"),
-                    "Spot": spot,
-                    "Basis": round(ltp - spot, 2) if spot else None,
-                }
-            ]
-        )
+    return pd.DataFrame(
+        [
+            {
+                "Contract": fut.get("trading_symbol"),
+                "Underlying": underlying,
+                "Expiry": exp_str,
+                "LTP": ltp,
+                "Change": change,
+                "PctChange": pct,
+                "Open": q.get("open"),
+                "High": q.get("high"),
+                "Low": q.get("low"),
+                "PrevClose": prev_close,
+                "Volume": q.get("volume"),
+                "Turnover": None,
+                "OI": q.get("oi"),
+                "Spot": spot,
+                "Basis": round(ltp - spot, 2) if spot else None,
+            }
+        ]
+    )
 
-    if provider == "KOTAK":
-        # Prefer Neo's own BFO/NFO quote for futures. This is required for
-        # SENSEX where the public BSE futures table may have rows but omit
-        # LTP; retain the public path as a safe fallback.
-        from brokers.kotak_market_data import get_futures_quote
-        from market_api import fetch_public_futures
 
-        quote = get_futures_quote(underlying, which=which)
-        if quote:
-            return pd.DataFrame([quote])
-        return fetch_public_futures(underlying, which=which)
-
-    if provider in ("SHOONYA", "KITE", "BREEZE", "NSE_BSE"):
-        # These providers have no broker-native FUTIDX resolution wired into
-        # the pipeline — Shoonya's precedent already routes futures to the
-        # public NSE/BSE endpoints (market_api.fetch_public_futures), and
-        # Kite/Breeze/Kotak inherit the same behavior rather than
-        # re-implementing per-broker futures contract lookup. NSE_BSE never
-        # actually reaches here (option_chain_json.main() uses
-        # fetch_public_futures directly in its public-API path), but is
-        # listed for completeness.
-        from market_api import fetch_public_futures
-
-        return fetch_public_futures(underlying, which=which)
-
+def _fetch_futures_exact_date_smartapi(
+    underlying: str, expiry_dash: str, exchange: str = "NFO"
+) -> pd.DataFrame:
+    """Legacy exact-date FUT lookup for SmartAPI. No real caller today
+    (see fetch_futures_wide's docstring) — kept only so a future exact-
+    date caller doesn't silently regress to which-based resolution."""
     from brokers.smartapi_instruments import _FNO_FUT_TYPES
 
     def _parse_expiry(row):
@@ -906,18 +920,11 @@ def fetch_futures_wide(
     if not cands:
         return pd.DataFrame()
     cands.sort(key=lambda pair: pair[1])
-    if expiry_dash:
-        target = _to_smartapi_expiry(expiry_dash)
-        matches = [row for row, _exp in cands if row["expiry"] == target]
-        if not matches:
-            return pd.DataFrame()
-        fut = matches[0]
-    else:
-        today = datetime.combine(date.today(), datetime.min.time())
-        live = [(row, exp) for row, exp in cands if exp >= today] or cands
-        idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
-        idx = min(idx, len(live) - 1)
-        fut = live[idx][0]
+    target = _to_smartapi_expiry(expiry_dash)
+    matches = [row for row, _exp in cands if row["expiry"] == target]
+    if not matches:
+        return pd.DataFrame()
+    fut = matches[0]
 
     quotes = market_data.get_batch_quotes(
         exchange, [(fut.get("symbol"), fut.get("token"))], mode="FULL"

@@ -21,7 +21,7 @@ satisfying MarketData and swap the `market_data` instance below.
 
 import logging
 import time
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,26 @@ class MarketData(Protocol):
         """LTP + OHLC for one underlying, or None."""
         ...
 
+    def get_futures_quote(self, underlying: str, which: str = "NEAR") -> Optional[dict]:
+        """One normalized FUT quote (same row shape broker_pipeline's
+        fetch_futures_wide() has always returned: Contract/Underlying/
+        Expiry/LTP/Change/PctChange/Open/High/Low/PrevClose/Volume/OI/
+        Spot/Basis), or None if unresolved.
+
+        which: NEAR / NEXT / FAR — 1st/2nd/3rd soonest listed monthly
+        contract.
+
+        Always includes 'FutSource', the provider that actually supplied
+        this quote. This is NOT guaranteed to equal the active EQ
+        provider: Shoonya/Kite/Breeze have no broker-native FUTIDX
+        resolution in this codebase and always answer from the NSE/BSE
+        public API (FutSource="NSE_BSE"); Kotak answers natively but
+        falls back the same way when its own resolution comes back
+        empty (e.g. SENSEX gaps). This flag exists specifically so a
+        caller can detect and surface an EQ/FUT source mismatch instead
+        of it being silent — compare against get_active_provider()."""
+        ...
+
     def get_fno_underlyings(self, force_refresh: bool = False) -> dict:
         """{'indices': [...], 'stocks': [...]}, alphabetically sorted."""
         ...
@@ -87,6 +107,25 @@ class MarketData(Protocol):
     def index_tokens(self) -> dict:
         """Read-only. {'NIFTY': {'token': ..., 'exchange': 'NSE'}, ...}."""
         ...
+
+
+def _public_futures_quote(underlying: str, which: str = "NEAR") -> Optional[dict]:
+    """Shared NSE/BSE public-API futures fallback.
+
+    Used directly by providers with no broker-native FUTIDX resolution in
+    this codebase (Shoonya/Kite/Breeze/NSE_BSE), and as an explicit
+    fallback by providers whose own resolution can come back empty
+    (Kotak — see KotakMarketData.get_futures_quote). Always stamps
+    FutSource="NSE_BSE" so this is never a silent EQ/FUT provider split —
+    see MarketData.get_futures_quote's docstring."""
+    from market_api import fetch_public_futures
+
+    frame = fetch_public_futures(underlying, which=which)
+    if frame is None or frame.empty:
+        return None
+    row = frame.iloc[0].to_dict()
+    row["FutSource"] = "NSE_BSE"
+    return row
 
 
 class SmartApiMarketData:
@@ -134,6 +173,50 @@ class SmartApiMarketData:
         from brokers.smartapi_client import get_spot_quote as _get_spot_quote
 
         return _get_spot_quote(underlying)
+
+    def get_futures_quote(self, underlying, which="NEAR"):
+        # Lazy import: broker_pipeline imports `market_data` at module
+        # level, so importing it back at module level here would be
+        # circular. _get_futures_contract is the same scrip-master FUTIDX
+        # resolver fetch_futures_wide() already used inline for this
+        # provider — reused here rather than duplicated a second time.
+        from broker_pipeline import _get_futures_contract, _from_smartapi_expiry
+
+        fut = _get_futures_contract(underlying, exchange="NFO", which=which)
+        if not fut:
+            return None
+        quotes = self.get_batch_quotes(
+            "NFO", [(fut.get("symbol"), fut.get("token"))], mode="FULL"
+        )
+        q = quotes.get(fut.get("symbol")) if quotes else None
+        if not q:
+            return None
+        ltp = _safe_float(q.get("ltp"))
+        prev_close = _safe_float(q.get("close"))
+        change = _safe_float(q.get("netChange"))
+        pct = _safe_float(q.get("percentChange"))
+        if not pct and prev_close and ltp:
+            pct = round(((ltp - prev_close) / prev_close) * 100.0, 2)
+        spot_quote = self.get_spot_quote(underlying)
+        spot = spot_quote["ltp"] if spot_quote else 0.0
+        return {
+            "Contract": fut.get("symbol"),
+            "Underlying": underlying,
+            "Expiry": _from_smartapi_expiry(fut["expiry"]),
+            "LTP": ltp,
+            "Change": change,
+            "PctChange": pct,
+            "Open": _safe_float(q.get("open")),
+            "High": _safe_float(q.get("high")),
+            "Low": _safe_float(q.get("low")),
+            "PrevClose": prev_close,
+            "Volume": q.get("volume"),
+            "Turnover": None,
+            "OI": q.get("oi"),
+            "Spot": spot,
+            "Basis": round(ltp - spot, 2) if spot and ltp else None,
+            "FutSource": "SMARTAPI",
+        }
 
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.smartapi_client import get_fno_underlyings as _get_fno_underlyings
@@ -305,6 +388,96 @@ class UpstoxMarketData:
             "close": ohlc.get("close") or quote.get("close"),
         }
 
+    def get_futures_quote(self, underlying, which="NEAR"):
+        from brokers.upstox_client import _load_instrument_dump, _canonical_name as _up_canonical
+
+        # Routed off the underlying (resolve_exchange_for_symbol), not the
+        # exchange="NFO" default param broker_pipeline.fetch_futures_wide()'s
+        # old Upstox branch keyed off — that always evaluated to "NSE" since
+        # no real caller passes exchange="BFO"/"BSE", so SENSEX/BANKEX via
+        # Upstox would have looked up futures against the wrong instrument
+        # dump. Fixed here rather than carried forward.
+        exchange_scope = resolve_exchange_for_symbol(underlying)
+        data = _load_instrument_dump(exchange_scope)
+        underlying_u = underlying.upper()
+        name_u = _up_canonical(underlying, data) or underlying_u
+
+        def _parse_expiry(row):
+            raw = row.get("expiry")
+            if raw in (None, "", 0):
+                return None
+            if isinstance(raw, (int, float)):
+                try:
+                    return datetime.utcfromtimestamp(raw / 1000)
+                except (OverflowError, OSError, ValueError):
+                    return None
+            for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d%b%Y"):
+                try:
+                    return datetime.strptime(str(raw), fmt)
+                except ValueError:
+                    continue
+            return None
+
+        cands = [
+            row
+            for row in data
+            if row.get("instrument_type") == "FUT"
+            and (row.get("name") or "").upper() == name_u
+        ]
+        cands = [(row, _parse_expiry(row)) for row in cands]
+        cands = [(row, exp) for row, exp in cands if exp is not None]
+        if not cands:
+            return None
+        cands.sort(key=lambda pair: pair[1])
+        today = datetime.combine(date.today(), datetime.min.time())
+        live = [(row, exp) for row, exp in cands if exp >= today] or cands
+        idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
+        idx = min(idx, len(live) - 1)
+        fut, exp = live[idx]
+
+        quotes = self.get_batch_quotes(
+            exchange_scope,
+            [(fut.get("trading_symbol"), fut.get("instrument_key"))],
+            mode="FULL",
+        )
+        q = quotes.get(fut.get("trading_symbol")) if quotes else None
+        if not q:
+            return None
+
+        spot_quote = self.get_spot_quote(underlying)
+        spot = spot_quote["ltp"] if spot_quote else 0.0
+        ltp = _safe_float(q.get("last_price"))
+        prev_close = _safe_float(q.get("close"))
+        change = q.get("net_change")
+        pct = q.get("percent_change")
+        if pct is None and prev_close and ltp:
+            pct = round(((ltp - prev_close) / prev_close) * 100.0, 2)
+
+        exp_raw = fut.get("expiry")
+        if isinstance(exp_raw, (int, float)):
+            exp_str = datetime.utcfromtimestamp(exp_raw / 1000).strftime("%d-%b-%Y")
+        else:
+            exp_str = str(exp_raw)
+
+        return {
+            "Contract": fut.get("trading_symbol"),
+            "Underlying": underlying,
+            "Expiry": exp_str,
+            "LTP": ltp,
+            "Change": change,
+            "PctChange": pct,
+            "Open": q.get("open"),
+            "High": q.get("high"),
+            "Low": q.get("low"),
+            "PrevClose": prev_close,
+            "Volume": q.get("volume"),
+            "Turnover": None,
+            "OI": q.get("oi"),
+            "Spot": spot,
+            "Basis": round(ltp - spot, 2) if spot and ltp else None,
+            "FutSource": "UPSTOX",
+        }
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.upstox_client import INDEX_KEYS, _load_instrument_dump
 
@@ -440,6 +613,12 @@ class ShoonyaMarketData:
 
         return _sh_get_spot_quote(underlying)
 
+    def get_futures_quote(self, underlying, which="NEAR"):
+        # No broker-native FUTIDX resolution wired into this codebase for
+        # Shoonya — always answers from the NSE/BSE public API, explicitly
+        # flagged via FutSource so this is never a silent EQ/FUT split.
+        return _public_futures_quote(underlying, which=which)
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.shoonya_market_data import (
             get_fno_underlyings as _sh_get_fno_underlyings,
@@ -506,6 +685,7 @@ class FallbackMarketData:
         "get_atm_chain",
         "find_option_token",
         "get_spot_quote",
+        "get_futures_quote",
         "get_fno_underlyings",
     )
 
@@ -598,6 +778,9 @@ class FallbackMarketData:
 
     def get_spot_quote(self, underlying):
         return self._call("get_spot_quote", underlying)
+
+    def get_futures_quote(self, underlying, which="NEAR"):
+        return self._call("get_futures_quote", underlying, which=which)
 
     def get_fno_underlyings(self, force_refresh=False):
         return self._call("get_fno_underlyings", force_refresh=force_refresh)
@@ -819,6 +1002,11 @@ class NseBseMarketData:
             "close": _safe_float(row.get("previousClose")),
         }
 
+    def get_futures_quote(self, underlying, which="NEAR"):
+        # This provider IS the NSE/BSE public API, so FutSource="NSE_BSE"
+        # here reflects the actual source rather than flagging a fallback.
+        return _public_futures_quote(underlying, which=which)
+
     def get_fno_underlyings(self, force_refresh=False):
         # Public ScripMaster universe — no broker login required.
         from brokers.smartapi_instruments import (
@@ -907,6 +1095,12 @@ class KiteMarketData:
         from brokers.kite_client import get_spot_quote as _k_get_spot_quote
 
         return _k_get_spot_quote(underlying)
+
+    def get_futures_quote(self, underlying, which="NEAR"):
+        # No broker-native FUTIDX resolution wired into this codebase for
+        # Kite — always answers from the NSE/BSE public API, explicitly
+        # flagged via FutSource so this is never a silent EQ/FUT split.
+        return _public_futures_quote(underlying, which=which)
 
     def get_fno_underlyings(self, force_refresh=False):
         # Public ScripMaster universe (same source kite_client's instrument
@@ -1027,6 +1221,12 @@ class BreezeMarketData:
 
         return _bz_get_spot_quote(underlying)
 
+    def get_futures_quote(self, underlying, which="NEAR"):
+        # No broker-native FUTIDX resolution wired into this codebase for
+        # Breeze — always answers from the NSE/BSE public API, explicitly
+        # flagged via FutSource so this is never a silent EQ/FUT split.
+        return _public_futures_quote(underlying, which=which)
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.breeze_market_data import (
             get_fno_underlyings as _bz_get_fno_underlyings,
@@ -1141,6 +1341,22 @@ class KotakMarketData:
         from brokers.kotak_market_data import get_spot_quote as _kk_get_spot_quote
 
         return _kk_get_spot_quote(underlying)
+
+    def get_futures_quote(self, underlying, which="NEAR"):
+        # Kotak's own SDK resolves and quotes FUTIDX/FUTSTK natively (this
+        # is the one non-SmartAPI provider that does) — especially
+        # important for SENSEX/BANKEX, where the public BSE futures table
+        # can have rows but omit LTP. Falls back to the NSE/BSE public API,
+        # explicitly flagged via FutSource, only when Kotak's own
+        # resolution comes back empty — never silently.
+        from brokers.kotak_market_data import get_futures_quote as _kk_get_futures_quote
+
+        quote = _kk_get_futures_quote(underlying, which=which)
+        if quote:
+            quote = dict(quote)
+            quote["FutSource"] = "KOTAK"
+            return quote
+        return _public_futures_quote(underlying, which=which)
 
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.kotak_market_data import (

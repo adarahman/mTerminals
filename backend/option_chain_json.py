@@ -524,7 +524,19 @@ def _select_runtime_spot(df, spot, df_fut, all_indices):
     available, it is the best freshness check against NSE's option-chain
     underlyingValue. A material mismatch means the NSE field is stale. If no
     live cash quote exists, AUTO falls back to futures during the final cash
-    session window. EQ/FUT remain explicit force modes.
+    session window — and ONLY that window (15:15-15:30 on an actual trading
+    day). EQ/FUT remain explicit force modes.
+
+    Bug fixed here: the FUT fallback used to be `now.time() >= dtime(15,15)`
+    with no upper bound and no trading-day check, so once past 15:15 it
+    stayed true for the rest of the day, every evening, and every non-
+    trading day (weekends/holidays) indefinitely — not just the narrow
+    close window the docstring describes. Combined with live_cash
+    legitimately being 0 whenever no live feed is connected (market
+    closed), AUTO would then permanently select FUT any time the
+    dashboard was viewed outside 9:15-15:15, showing the same futures
+    price in both the main spot readout and the FUT ticker pill with no
+    way to self-correct until a live feed reconnected.
     """
     source = PRICE_SOURCE.strip().upper()
     eq = float(spot or 0.0)
@@ -555,6 +567,8 @@ def _select_runtime_spot(df, spot, df_fut, all_indices):
                 return value
         return 0.0
 
+    from nse_eod_fetch import is_trading_day as _is_trading_day
+
     live_cash = _live_index_quote(SYMBOL) if USE_SMARTAPI else 0.0
     fut_ltp = _futures_ltp(df_fut)
     selected = eq
@@ -571,7 +585,11 @@ def _select_runtime_spot(df, spot, df_fut, all_indices):
             selected, used = live_cash, "LIVE_EQ"
         elif live_cash > 0 and eq <= 0:
             selected, used = live_cash, "LIVE_EQ"
-        elif datetime.now().time() >= dtime(15, 15) and fut_ltp > 0:
+        elif (
+            dtime(15, 15) <= datetime.now().time() <= dtime(15, 30)
+            and _is_trading_day(datetime.now())
+            and fut_ltp > 0
+        ):
             selected, used = fut_ltp, "FUT"
 
     if selected <= 0:

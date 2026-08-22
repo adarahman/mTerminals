@@ -960,7 +960,8 @@ async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
     feed_update_applied = False
     try:
         message, feed_update_applied = merge_live_feed_update(
-            message, LAST_PAYLOAD, _LAST_SENT, matches_expiry_fn
+            message, LAST_PAYLOAD, _LAST_SENT, matches_expiry_fn,
+            price_source=PRICE_SOURCE,
         )
     except Exception as e:
         # Sync is best-effort consistency — never let a sync bug block the
