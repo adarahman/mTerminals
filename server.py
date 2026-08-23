@@ -104,6 +104,13 @@ from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker  # noqa
 from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
 from server.cli_args import build_arg_parser  # noqa: E402
 from server.feed_manager import BrokerFeedManager  # noqa: E402
+from server.background_loops import (  # noqa: E402
+    AlgoStatusLoop,
+    FundsPoller,
+    IndexQuoteLoop,
+    NodeRelay,
+    ReconciliationLoop,
+)
 from server.order_gateway import (  # noqa: E402
     LiveOrderGateway,
     parse_order_intent,
@@ -294,7 +301,6 @@ _PIPELINE_STATUS = {
     "elapsedSeconds": None,
 }
 METRICS = OperationalMetrics(started_at=PROCESS_STARTED_AT)
-_NODE_SESSION = None
 # Most recent real-account funds snapshot — handed to newly-connected
 # clients the same way LAST_PAYLOAD/INDEX_QUOTES are, so the top-bar Fund
 # pill doesn't sit at "n/a" until the next poll. Cleared by
@@ -1655,181 +1661,101 @@ async def _broadcast_reconciliation_alert(result, source: str):
 
 
 # ── background pollers ───────────────────────────────────────────────────
-async def index_quote_loop():
-    """Periodic ticker-strip quotes for the non-active indices. Pushes
-    {"type":"indexQuotes",...}; dashboard.js's generic handler lands it at
-    wsState.indexQuotes, which paper-trading.js reads once Live mode is on."""
-    if not USE_INDEX_QUOTES:
-        return
-    while True:
-        # Recomputed EVERY cycle: switch_symbol() can change the active
-        # SYMBOL mid-loop, and a list captured once would keep the OLD
-        # exclusion forever — redundantly fetching the new active symbol
-        # while never refreshing the old active one. (VIX is never the
-        # active SYMBOL, so it's always included.)
-        others = [s for s in INDEX_TICKER_SYMBOLS if s != SYMBOL]
-        updates = {}
-        for sym in others:
-            try:
-                raw = await asyncio.to_thread(market_data.get_spot_quote, sym)
-                if raw and raw.get("ltp") is not None:
-                    ltp = float(raw["ltp"])
-                    close = raw.get("close")
-                    chg_pct = None
-                    if close not in (None, 0, 0.0):
-                        close = float(close)
-                        chg_pct = ((ltp - close) / close) * 100.0
-                    updates[sym] = {"spot": ltp, "spotChgPct": chg_pct}
-            except Exception as exc:
-                print(f"[index-quote] {sym} broker quote failed: {exc}", flush=True)
-        if updates:
-            INDEX_QUOTES.update(updates)
-            await broadcast({"type": "indexQuotes", "payload": updates})
-            for sym, quote in updates.items():
-                print(
-                    f"[index-quote] {sym} spot={quote.get('spot')} "
-                    f"chg%={quote.get('spotChgPct')}",
-                    flush=True,
-                )
-        await asyncio.sleep(INDEX_QUOTE_SECONDS)
-
-
-_funds_task = None  # the running funds poll task, or None when stopped
-
-
-async def _funds_poll_body():
-    """One polling cycle, repeated until cancelled by stop_funds_polling().
-    Pushes {"type":"funds",...}; dashboard.js's generic handler lands it at
-    wsState.funds, which paper-trading.js reads once Live mode is on.
-
-    Deliberately NOT gated on LIVE_TRADING_ENABLED — that flag guards real
-    ORDERS (restart-only by design), but reading account balance moves no
-    money and carries no execution risk. Gating it the same way would mean
-    a full server restart just to see your own funds. start/stop are driven
-    by the {"type":"toggle_live_mode"} WS message instead — flipping the
-    dashboard's LIVE pill controls this over the live socket, no restart,
-    same pattern as switch_symbol()."""
+def _set_last_funds(value):
     global LAST_FUNDS
-    while True:
-        try:
-            # get_funds() makes a real blocking HTTP call (and may trigger a
-            # re-login) — offload like every other blocking call here, never
-            # inline on the event loop.
-            funds = await asyncio.to_thread(smartapi_get_funds)
-            LAST_FUNDS = funds
-            await broadcast({"type": "funds", "payload": funds})
-            print(
-                f"[funds] available={funds.get('available_margin')} "
-                f"utilised={funds.get('utilised_margin')}",
-                flush=True,
-            )
-        except Exception as e:
-            # A failed poll (session hiccup, rate limit, network blip) never
-            # takes down the loop — the frontend keeps showing the last good
-            # value (or "n/a") until the next cycle succeeds.
-            print(
-                f"[funds] poll failed (will retry in {FUNDS_POLL_SECONDS}s): {e}",
-                flush=True,
-            )
-        await asyncio.sleep(FUNDS_POLL_SECONDS)
+    LAST_FUNDS = value
+
+
+def _set_last_live_positions(value):
+    global LAST_LIVE_POSITIONS
+    LAST_LIVE_POSITIONS = value
+
+
+def _set_last_algo_status(value):
+    global LAST_ALGO_STATUS
+    LAST_ALGO_STATUS = value
+
+
+# Pushes {"type":"indexQuotes",...}; dashboard.js's generic handler lands it
+# at wsState.indexQuotes, which paper-trading.js reads once Live mode is on.
+# (VIX is never the active SYMBOL, so it's always included in "others".)
+_INDEX_QUOTE_LOOP = IndexQuoteLoop(
+    enabled=USE_INDEX_QUOTES,
+    symbols=INDEX_TICKER_SYMBOLS,
+    active_symbol=lambda: SYMBOL,
+    get_spot_quote=market_data.get_spot_quote,
+    broadcast=broadcast,
+    index_quotes=INDEX_QUOTES,
+    poll_seconds=INDEX_QUOTE_SECONDS,
+    report=_print_log,
+)
+
+
+async def index_quote_loop():
+    await _INDEX_QUOTE_LOOP.run()
+
+
+# Pushes {"type":"funds",...}; dashboard.js's generic handler lands it at
+# wsState.funds, which paper-trading.js reads once Live mode is on.
+_FUNDS_POLLER = FundsPoller(
+    get_funds=smartapi_get_funds,
+    broadcast=broadcast,
+    set_last_funds=_set_last_funds,
+    poll_seconds=FUNDS_POLL_SECONDS,
+    spawn_task=_create_background_task,
+    report=_print_log,
+)
 
 
 def start_funds_polling():
-    """Idempotent — a second toggle-on while already running is a no-op,
-    not a duplicate poller."""
-    global _funds_task
-    if _funds_task is not None and not _funds_task.done():
-        return
-    print("[funds] starting funds polling (live mode toggled on)", flush=True)
-    _funds_task = _create_background_task(_funds_poll_body(), "funds_poll")
+    _FUNDS_POLLER.start()
 
 
 def stop_funds_polling():
-    global _funds_task, LAST_FUNDS
-    if _funds_task is not None:
-        _funds_task.cancel()
-        _funds_task = None
-        print("[funds] stopped funds polling (live mode toggled off)", flush=True)
-    # Clear LAST_FUNDS too, not just stop broadcasting — a client that
-    # reconnects while polling is off must not be handed a possibly-stale
-    # real-money figure in the handshake snapshot.
-    LAST_FUNDS = None
+    _FUNDS_POLLER.stop()
+
+
+# Gated on LIVE_TRADING_ENABLED at the main()/task-creation call site (with
+# live trading off there's nothing real to reconcile), but NOT tied to the
+# Live-mode UI toggle — silent drift happens whether or not anyone
+# currently has the pill on.
+_RECONCILIATION_LOOP = ReconciliationLoop(
+    get_order_book=smartapi_get_order_book,
+    get_positions=smartapi_get_positions,
+    reconciler=_POSITION_RECONCILER,
+    lot_sizes=PT_LOT_SIZES,
+    set_last_positions=_set_last_live_positions,
+    broadcast_alert=lambda result, source: _broadcast_reconciliation_alert(
+        result, source=source
+    ),
+    poll_seconds=POSITION_RECONCILE_SECONDS,
+    report=_print_log,
+)
 
 
 async def reconcile_loop():
-    """Periodic position reconciliation — the real safety net for drift
-    unrelated to this app's own order flow (a position closed manually in
-    the broker app, a fill that landed without this process seeing it).
-    Gated on LIVE_TRADING_ENABLED (with live trading off there's nothing
-    real to reconcile), but NOT tied to the Live-mode UI toggle — silent
-    drift happens whether or not anyone currently has the pill on."""
-    global LAST_LIVE_POSITIONS
-    while True:
-        try:
-            orders = await asyncio.to_thread(smartapi_get_order_book)
-            positions = await asyncio.to_thread(smartapi_get_positions)
-            LAST_LIVE_POSITIONS = positions
-            result = _POSITION_RECONCILER.check(orders, positions, PT_LOT_SIZES)
-            if result.clean:
-                print("[position_reconciler] periodic check: clean", flush=True)
-            else:
-                print(
-                    f"[position_reconciler] periodic check: "
-                    f"{len(result.mismatches)} mismatch(es), "
-                    f"{len(result.unparseable_symbols)} unparseable",
-                    flush=True,
-                )
-                await _broadcast_reconciliation_alert(result, source="periodic")
-        except Exception as e:
-            # Same defensive posture as every other periodic loop — skip
-            # this cycle, never take down the loop.
-            print(
-                f"[position_reconciler] periodic check failed "
-                f"(will retry in {POSITION_RECONCILE_SECONDS}s): {e}",
-                flush=True,
-            )
-        await asyncio.sleep(POSITION_RECONCILE_SECONDS)
+    await _RECONCILIATION_LOOP.run()
+
+
+_ALGO_STATUS_LOOP = AlgoStatusLoop(
+    build_status=lambda: _build_algo_status(),
+    broadcast=broadcast,
+    set_last_status=_set_last_algo_status,
+    poll_seconds=ALGO_STATUS_POLL_SECONDS,
+    report=_print_log,
+)
 
 
 async def algo_status_loop():
-    """Periodic algoStatus broadcast. Runs unconditionally (not gated on
-    LIVE_TRADING_ENABLED) so the panel always shows an accurate picture —
-    including confirming live trading/auto-execution are OFF, not just
-    when they're armed."""
-    global LAST_ALGO_STATUS
-    while True:
-        try:
-            LAST_ALGO_STATUS = _build_algo_status()
-            await broadcast({"type": "algoStatus", "payload": LAST_ALGO_STATUS})
-        except Exception as e:
-            print(
-                f"[algo-status] poll failed (will retry in {ALGO_STATUS_POLL_SECONDS}s): {e}",
-                flush=True,
-            )
-        await asyncio.sleep(ALGO_STATUS_POLL_SECONDS)
+    await _ALGO_STATUS_LOOP.run()
 
 
 # ── node relay ───────────────────────────────────────────────────────────
-async def _get_node_session():
-    global _NODE_SESSION
-    if _NODE_SESSION is None or _NODE_SESSION.closed:
-        _NODE_SESSION = aiohttp.ClientSession()
-    return _NODE_SESSION
+_NODE_RELAY = NodeRelay(enabled=USE_RELAY, report=_print_log)
 
 
 async def _post_to_node(payload: dict):
-    if not USE_RELAY:
-        return
-    try:
-        session = await _get_node_session()
-        async with session.post(
-            "http://localhost:4000/api/broadcast",
-            json=payload,
-            timeout=aiohttp.ClientTimeout(total=2),
-        ) as resp:
-            await resp.read()
-    except Exception as e:
-        print(f"[node-relay] failed: {e}")
+    await _NODE_RELAY.post(payload)
 
 
 # ── engine loop ──────────────────────────────────────────────────────────
@@ -2547,8 +2473,7 @@ async def main():
             task.cancel()
         if background_tasks:
             await asyncio.gather(*background_tasks, return_exceptions=True)
-        if _NODE_SESSION is not None and not _NODE_SESSION.closed:
-            await _NODE_SESSION.close()
+        await _NODE_RELAY.close()
         # oi_analysis.py buffers OI history in memory and flushes to disk
         # periodically — force a final write so a clean shutdown (Ctrl+C,
         # restart) never loses up to a minute of unflushed history.
