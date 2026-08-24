@@ -1,4 +1,4 @@
-"""Unit tests for paper_trading.py.
+"""Unit tests for execution.paper_trading.
 
 Includes explicit regression coverage for two bugs found and fixed during
 code review:
@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from paper_trading import PaperTradingEngine, _instrument_key
+from execution.paper_trading import PaperTradingEngine, _instrument_key
 
 
 @pytest.fixture

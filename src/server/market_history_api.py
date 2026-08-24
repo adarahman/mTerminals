@@ -137,7 +137,7 @@ class MarketHistoryApi:
 
     async def lot_sizes(self, _request):
         try:
-            from brokers.smartapi_instruments import get_all_lot_sizes
+            from brokers.smartapi.instruments import get_all_lot_sizes
             return web.json_response(await asyncio.to_thread(get_all_lot_sizes))
         except Exception as exc:
             print(f"[http] /api/lot-sizes failed: {exc}", flush=True)

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import market_api
+from market.providers import nse_bse_client as market_api
 
 
 def test_public_nse_futures_selects_requested_contract_without_broker(monkeypatch):
@@ -32,13 +32,19 @@ def test_public_stock_futures_filters_underlying(monkeypatch):
 
 
 def test_futures_reference_never_replaces_option_spot():
-    source = (Path(__file__).resolve().parents[1] / "option_chain_json.py").read_text()
-    assert 'spot = fut_ltp' not in source
-    assert 'never replace df["Spot"]' in source
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "application"
+        / "option_chain_runtime.py"
+    ).read_text()
+    assert 'if used != "EQ":' in source
+    assert 'df["Spot"] = selected' in source
 
 
 def test_futures_switch_skips_stale_socket_handoff():
-    source = (Path(__file__).resolve().parents[2] / "ws_server_live.py").read_text()
-    assert "futures_reference_switched = True" in source
-    assert "LAST_PAYLOAD is not None and not futures_reference_switched" in source
-    assert "_LAST_SENT = None" in source
+    server_dir = Path(__file__).resolve().parents[1] / "server"
+    query_source = (server_dir / "websocket_query.py").read_text()
+    websocket_source = (server_dir / "websocket.py").read_text()
+    assert "futures_switched = True" in query_source
+    assert "not query_result.futures_reference_switched" in websocket_source
+    assert "self._invalidate_market_baseline()" in query_source

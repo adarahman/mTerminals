@@ -18,7 +18,6 @@ does not import from here and is not affected by this move.
 from __future__ import annotations
 
 from decision.types import T
-from mTerminals_json import fmt_k as _fmt_k
 from oi.pricing import (
     ANNUAL_RISK_FREE_RATE,
     _MIN_T_YEARS,
@@ -32,6 +31,20 @@ __all__ = [
     "_score_strategies",
     "_build_scenario_pnl",
 ]
+
+
+def _fmt_k(value):
+    """Compact strategy payoff values without depending on a presenter."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "--"
+    magnitude = abs(value)
+    if magnitude >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if magnitude >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    return f"{value:.0f}"
 
 
 def _build_strategies(spot: float, atm: float, step: int, dte: int,

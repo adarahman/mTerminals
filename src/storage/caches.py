@@ -141,16 +141,12 @@ class MemoCache:
 
 
 class TickScopedDict:
-    """Dict meant to be cleared and refilled once per engine tick, then
-    read multiple times before the next tick."""
+    """Dict meant to be cleared and refilled once per engine tick."""
 
     def __init__(self):
-        self._store: dict = {}
+        self._store = {}
 
     def refill(self, *sources):
-        """Clears the cache, then updates it from each dict in `sources`
-        (later sources win on key collision) — same order of operations
-        as the old _BATCH_CACHE.clear()/.update()/.update() call site."""
         self._store.clear()
         for src in sources:
             self._store.update(src)
@@ -158,6 +154,10 @@ class TickScopedDict:
     def get(self, key, default=None):
         return self._store.get(key, default)
 
+
+# Shared tick-scoped market quote cache.
+# Replaces smartapi_pipeline_adapter._BATCH_CACHE
+_BATCH_CACHE = TickScopedDict()
 
 class RollingWindow:
     """Time-windowed (timestamp, value) deque, pruned on every append."""

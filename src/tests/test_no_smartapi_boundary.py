@@ -15,9 +15,9 @@ def test_public_only_mode_does_not_import_broker_client_or_adapter():
     probe = (
         'import os, sys; '
         'os.environ["BROKER_SERVICES_ENABLED"]="false"; '
-        'import ws_server_live as server; '
+        'import run_server as server; '
         'assert server.USE_SMARTAPI is False; '
-        'assert "brokers.smartapi_client" not in sys.modules; '
+        'assert "brokers.smartapi.client" not in sys.modules; '
         'assert "smartapi_pipeline_adapter" not in sys.modules'
     )
     result = subprocess.run(
@@ -46,7 +46,7 @@ def test_project_dotenv_overrides_stale_parent_env():
     # a token is pasted; see ws_server_live._resolve_default_data_source()).
     probe = (
         'import sys; '
-        'sys.path.insert(0, "backend"); '
+        'sys.path.insert(0, "src"); '
         'import config; '
         'assert config.settings.execution_broker != "SHOONYA", f"Got {config.settings.execution_broker}"; '
         'assert config.settings.live_feed_provider != "SHOONYA", f"Got {config.settings.live_feed_provider}"; '

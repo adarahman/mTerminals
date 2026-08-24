@@ -5,7 +5,7 @@ trading engine.
 
 Nothing here talks to a real broker: `smartapi_place_order` /
 `smartapi_get_positions` (the names ws_server_live.py binds
-brokers.smartapi_client.place_order / get_positions to) are monkeypatched
+brokers.smartapi.client.place_order / get_positions to) are monkeypatched
 per test, same for `_resolve_live_order_token` where a test isn't
 specifically exercising resolution itself. See conftest.py's
 `ws_server_live` fixture for how the module is made importable at all

@@ -1,0 +1,31 @@
+# src/server/runtime_state.py
+
+import asyncio
+
+MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+LAST_FUNDS = None
+LAST_LIVE_POSITIONS = None
+LAST_ALGO_STATUS = None
+
+INDEX_QUOTES = {}
+
+NODE_RELAY = None
+
+LAST_PAYLOAD = None
+LAST_PAYLOAD_AT = None
+LAST_SENT = None
+
+BASELINE_SEQ = 0
+BASELINE_ID = None
+
+PROCESS_STARTED_AT = None
+LAST_HEALTH_LOG_STATE = None
+
+PIPELINE_TASK = None
+PIPELINE_STATUS = {}
+
+LAST_PORTFOLIO_BROADCAST_TS = 0.0
+EOD_DONE_DATE = None
+LAST_SESSION_DATE = None

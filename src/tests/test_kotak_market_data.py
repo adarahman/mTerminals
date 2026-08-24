@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 def test_sensex_chain_uses_bse_fo_scrip_master_and_quotes(monkeypatch):
     """SENSEX must never be looked up in Kotak's NSE F&O master."""
-    from brokers import kotak_market_data as kotak
+    from brokers.kotak import market_data as kotak
 
     calls = []
     rows = [
@@ -41,7 +41,7 @@ def test_sensex_chain_uses_bse_fo_scrip_master_and_quotes(monkeypatch):
 
 
 def test_bfo_pipe_delimited_scrip_master_is_parsed():
-    from brokers import kotak_market_data as kotak
+    from brokers.kotak import market_data as kotak
 
     text = (
         "pSymbol|pSymbolName|pTrdSymbol|pInstType|pOptionType|pExpiryDate|"
@@ -57,7 +57,7 @@ def test_bfo_pipe_delimited_scrip_master_is_parsed():
 
 
 def test_bfo_blank_metadata_is_inferred_from_trading_symbol():
-    from brokers import kotak_market_data as kotak
+    from brokers.kotak import market_data as kotak
 
     text = (
         "pSymbol,pSymbolName,pTrdSymbol,pInstType,pOptionType,pExpiryDate,dStrikePrice;,lLotSize\n"

@@ -16,7 +16,7 @@ from oi.pricing import (
     DIVIDEND_YIELD,
     bs_greeks_vectorized,
 )
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 from storage.caches import DirtyFrameStore
 
 logger = logging.getLogger(__name__)

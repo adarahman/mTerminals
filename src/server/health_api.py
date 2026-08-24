@@ -4,6 +4,31 @@ from aiohttp import web
 
 from server.health import HealthInputs, build_snapshot
 
+from brokers.connection import check_connection
+
+_BROKER_PROVIDERS = [
+    "KOTAK",
+    "UPSTOX",
+    "KITE",
+    "BREEZE",
+    "SHOONYA",
+    "SMARTAPI",
+]
+
+
+async def broker_health(request):
+    providers = {}
+
+    for provider in _BROKER_PROVIDERS:
+        status = check_connection(provider)
+
+        providers[provider] = status.as_dict()
+
+    return web.json_response(
+        {
+            "providers": providers
+        }
+    )
 
 def build_health_snapshot(state, market_session_status, now=None):
     """Construct the health contract from one coordinator state snapshot."""

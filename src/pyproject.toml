@@ -47,15 +47,15 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
-    "decision*", "oi*", "risk*", "brokers*", "storage*", "strategy*",
-    "ml*", "analytics*", "backtest*",
+    "analytics*", "application*", "backtest*", "brokers*", "core*",
+    "decision*", "execution*", "infrastructure*", "market*", "ml*", "oi*",
+    "risk*", "server*", "storage*", "strategy*",
 ]
 
 [tool.setuptools]
 py-modules = [
-    "engine", "paths", "pipeline_config", "expiry_manager", "lot_sizes",
-    "market_api", "mTerminals_json", "option_chain_json", "paper_trading",
-    "nse_eod_fetch", "index_contributors",
+    "paths",
+    "nse_eod_fetch",
     "diag_lotsize", "smartapi_feed_adapter", "smartapi_pipeline_adapter",
     "operational_metrics", "operational_readiness",
 ]

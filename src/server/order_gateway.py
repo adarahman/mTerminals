@@ -33,6 +33,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from market.instruments import instrument_from_execution_resolution
 from risk.account_guard import pnl_from_positions, projected_open_lots_from_positions
 
 
@@ -307,7 +308,23 @@ class LiveOrderGateway:
             await broadcast_portfolio(current_prices)
             return {"status": "rejected", "reason": reason}
 
-        exchange, tradingsymbol, symboltoken = resolved
+        try:
+            instrument = instrument_from_execution_resolution(
+                intent.symbol,
+                intent.instrument_type,
+                intent.expiry,
+                intent.strike,
+                resolved,
+            )
+        except ValueError as exc:
+            reason = f"invalid instrument resolution: {exc}"
+            self._log(f"[live-trading] REJECTED: {reason}")
+            await broadcast_portfolio(current_prices)
+            return {"status": "rejected", "reason": reason}
+
+        exchange = instrument.exchange.value
+        tradingsymbol = instrument.trading_symbol
+        symboltoken = instrument.token
         # Valid key guaranteed here — unknown symbols were rejected above.
         quantity = qty_lots * self._lot_sizes[symbol]
         transaction_type = "BUY" if side == "BUY" else "SELL"

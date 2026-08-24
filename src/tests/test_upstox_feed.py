@@ -13,7 +13,7 @@ def _parse(value):
 
 
 def test_resolver_builds_option_and_index_subscriptions(monkeypatch):
-    import brokers.upstox_client as source
+    import brokers.upstox.client as source
 
     monkeypatch.setattr(
         source, "list_expiries", lambda *_args, **_kwargs: ["2026-08-28"]

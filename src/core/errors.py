@@ -7,6 +7,31 @@ Adapters translate external failures
 into these domain exceptions.
 """
 
+__all__ = [
+    "MTerminalsError",
+    "BrokerError",
+    "AuthenticationError",
+    "BrokerConnectionError",
+    "OrderRejectedError",
+    "MarketDataError",
+    "MarketClosedError",
+    "DataUnavailableError",
+    "QuoteUnavailableError",
+    "PricingError",
+    "InstrumentError",
+    "InstrumentNotFoundError",
+    "InvalidInstrumentError",
+    "OrderError",
+    "InvalidOrderError",
+    "OrderNotFoundError",
+    "RiskError",
+    "RiskLimitExceededError",
+    "PositionLimitExceededError",
+    "StrategyError",
+    "DecisionError",
+    "LowConfidenceDecisionError",
+]
+
 
 # ============================================================
 # BASE

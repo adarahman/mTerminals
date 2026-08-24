@@ -70,6 +70,11 @@ class BrokerFeedManager:
     def current_expiry(self) -> Optional[str]:
         return getattr(self._snapshot(), "current_expiry", None)
 
+    @property
+    def aggregator(self):
+        """Current normalized tick aggregator, if this feed has started."""
+        return getattr(self._snapshot(), "aggregator", None)
+
     # ── lifecycle ────────────────────────────────────────────────────
     def start(self, loop, underlying: str = None, strikes_around_atm: int = 10, expiry=None) -> None:
         """Start one persistent feed, or switch the running socket."""

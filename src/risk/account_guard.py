@@ -59,7 +59,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 
 logger = logging.getLogger(__name__)
 

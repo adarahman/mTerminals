@@ -11,8 +11,7 @@ Export names are the same surface the old inline block in ws_server_live
 exposed; the coordinator aliases them back to their historical underscored
 names so existing test seams keep working.
 """
-
-from config import settings as broker_settings
+from infrastructure.config import settings as broker_settings
 
 BROKER_SERVICES_ENABLED = broker_settings.broker_services_enabled
 
@@ -22,7 +21,7 @@ def _disabled(*_args, **_kwargs):
 
 
 if BROKER_SERVICES_ENABLED:
-    from brokers.market_data import (  # noqa: F401
+    from brokers.market_data_registry import (  # noqa: F401
         market_data,
         PROVIDER_CAPABILITIES as MD_PROVIDER_CAPABILITIES,
         PROVIDER_KEYS as MD_PROVIDER_KEYS,
@@ -39,10 +38,10 @@ if BROKER_SERVICES_ENABLED:
     smartapi_get_positions = _execution_adapter.get_positions
     smartapi_get_funds = _execution_adapter.get_funds
     resolve_option_contract = getattr(_execution_adapter, "resolve_option_contract", None)
-    from brokers.smartapi_client import INDEX_TOKENS as SMARTAPI_INDEX_TOKENS  # noqa: F401
-    from brokers.smartapi_history import get_candle_data, get_index_candles  # noqa: F401
-    from brokers.smartapi_ws_client import EXCHANGE_TYPE, SmartTickStream  # noqa: F401
-    from tick_pipeline import TickAggregator  # noqa: F401
+    from brokers.smartapi.client import INDEX_TOKENS as SMARTAPI_INDEX_TOKENS  # noqa: F401
+    from brokers.smartapi.history import get_candle_data, get_index_candles  # noqa: F401
+    from brokers.smartapi.websocket import EXCHANGE_TYPE, SmartTickStream  # noqa: F401
+    from market.quotes.tick_aggregator import TickAggregator  # noqa: F401
 else:
     # Public-only mode: NSE/BSE public API is the only data source. Any
     # accidentally reached broker-only path raises instead of logging in.
@@ -61,9 +60,15 @@ else:
         return name
 
     def md_provider_status():
-        from brokers.market_data import provider_status as _ps
-
-        return _ps()
+        return [
+            {
+                "id": "NSE_BSE",
+                "label": "NSE/BSE API",
+                "status": "POLLING",
+                "active": True,
+                "capabilities": dict(MD_PROVIDER_CAPABILITIES["NSE_BSE"]),
+            }
+        ]
 
     class _DisabledMarketData:
         index_tokens = staticmethod(lambda: {})

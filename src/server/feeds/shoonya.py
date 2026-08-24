@@ -31,9 +31,9 @@ def resolve_chain_tokens(
     ``None``.  Server state and socket lifecycle intentionally stay outside
     this resolver, making it safe to reuse during start and symbol switches.
     """
-    from brokers.shoonya_market_data import get_atm_chain
-    from brokers.shoonya_market_data import index_tokens
-    from brokers.shoonya_market_data import list_expiries
+    from brokers.shoonya.market_data import get_atm_chain
+    from brokers.shoonya.market_data import index_tokens
+    from brokers.shoonya.market_data import list_expiries
 
     target_symbol = target_symbol.upper()
     exchange = "BFO" if is_bse_underlying(target_symbol) else "NFO"

@@ -3,7 +3,7 @@ WebSocket reconnect layer that run_forever_with_reconnect() and
 _handle_open()'s subscription-replay exist to make unattended.
 
 These never open a real WebSocket: SmartWebSocketV2 is monkeypatched to
-a MagicMock class, and the shared brokers.smartapi_client._session
+a MagicMock class, and the shared brokers.smartapi.client._session
 singleton has its private auth/feed-token/session-object fields poked
 directly so connect() doesn't try to actually log in.
 """

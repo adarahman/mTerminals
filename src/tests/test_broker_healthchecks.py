@@ -48,7 +48,7 @@ def test_smartapi_healthcheck_reports_ready_session(smartapi_modules, monkeypatc
 
 @pytest.fixture
 def kotak(monkeypatch):
-    module = importlib.import_module("brokers.kotak_client")
+    module = importlib.import_module("brokers.kotak.client")
     values = {
         "kotak_consumer_key": "KEY",
         "kotak_mobile": "9999999999",
@@ -106,7 +106,7 @@ def test_kotak_healthcheck_reports_ready_session(kotak, monkeypatch):
 
 @pytest.fixture
 def kite(monkeypatch):
-    module = importlib.import_module("brokers.kite_client")
+    module = importlib.import_module("brokers.kite.client")
     monkeypatch.setattr(module, "_session", module.KiteSession())
     return module
 
@@ -135,7 +135,7 @@ def test_kite_healthcheck_reports_ready_with_token(kite, monkeypatch):
 
 @pytest.fixture
 def upstox(monkeypatch):
-    module = importlib.import_module("brokers.upstox_client")
+    module = importlib.import_module("brokers.upstox.client")
     monkeypatch.setattr(module, "_session", module.UpstoxSession(access_token=None))
     return module
 

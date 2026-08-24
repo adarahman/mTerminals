@@ -31,7 +31,8 @@ this one.
 
 from __future__ import annotations
 
-from decision.types import T, ActiveSignal, DecisionResult
+from core.domain import ActiveSignal, DecisionResult
+from decision.types import T
 from decision.signal_builder import (
     score_pcr, score_engine_bias, score_futures, score_vix, score_iv_crush,
     score_max_pain, score_oi_velocity, score_walls, score_smart_money,

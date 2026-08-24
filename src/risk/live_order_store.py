@@ -6,7 +6,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 
 
 DB_PATH = os.path.join(CACHE_DIR, "live_order_idempotency.db")

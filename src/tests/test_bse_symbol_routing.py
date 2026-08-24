@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import date, timedelta
 
-import market_api
+from market.providers import nse_bse_client as market_api
 
 
 def test_bse_public_codes_match_exchange_underlying_ids():

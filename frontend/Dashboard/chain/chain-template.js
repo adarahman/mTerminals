@@ -65,7 +65,20 @@ ChainView.prototype.renderDataSourceOptions = function(sources, active) {
   return sources.map(s => {
     const id = s.id;
     const label = s.label || id;
-    return `<option value="${id}"${s.active?' selected':''} title="Status: ${escapeHtml(s.status||'')}">${escapeHtml(label)}</option>`;
+    const status = String(s.status || "").toUpperCase();
+
+const icon =
+    status === "AVAILABLE" ? "🟢" :
+    status === "AUTH_FAILED" || status === "SESSION_EXPIRED" ? "🟡" :
+    status === "API_UNAVAILABLE" ? "🔴" :
+    "⚪";
+
+const display =
+    status === "AVAILABLE"
+        ? `${icon} ${label}`
+        : `${icon} ${label} (${status.replaceAll("_"," ").toLowerCase()})`;
+
+return `<option value="${id}"${s.active?' selected':''} title="Status: ${escapeHtml(status)}">${escapeHtml(display)}</option>`;
   }).join('');
 };
 

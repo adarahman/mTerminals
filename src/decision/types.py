@@ -1,14 +1,13 @@
-"""Shared thresholds and output dataclasses for the decision/ package.
+"""Decision thresholds and compatibility exports.
 
 Extracted from decision_engine.py so signal_builder.py, confidence.py, and
 strategy_selection.py can import T / ActiveSignal / DecisionResult without
-reaching into decision_engine.py itself. Pure move — no field, default, or
-threshold changes.
+reaching into decision_engine.py itself. Output contracts now live in
+``core.domain`` while these imports remain compatible.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, List
+from core.domain import ActiveSignal, DecisionResult
 
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -54,113 +53,4 @@ class T:
     IV_CRUSH_MAX_AGE_SECONDS = 900  # prune history older than this
 
 
-# ── Signal priority order (lower = shown first) ───────────────────────────────
-_SEVERITY_ORDER = {"warn": 0, "ok": 1, "info": 2}
-
-
-# ── Output types ──────────────────────────────────────────────────────────────
-
-@dataclass
-class ActiveSignal:
-    text:     str
-    severity: str = "info"     # "ok" | "info" | "warn"
-    priority: int = 99         # lower surfaces first
-    signal_id: str = ""        # stable semantic identity across live ticks
-
-
-@dataclass
-class DecisionResult:
-    # The decision is a point-in-time interpretation of one exported market
-    # state.  These fields let consumers prove which state they are showing
-    # and fail closed when that evidence is incomplete or old.
-    decision_timestamp: str = ""
-    state_version:       str = ""
-    stale:               bool = False
-    degraded:            bool = False
-    evidence_coverage:   int = 0
-    missing_inputs:      List[str] = field(default_factory=list)
-    contributors:        List[dict] = field(default_factory=list)
-
-    # ── Headline block ────────────────────────────────────────────────────────
-    bias:           str = "NEUTRAL"   # BULLISH | BEARISH | NEUTRAL — direction always
-                                       # from the weighted composite. See conflict_flag
-                                       # for sub-signal disagreement (no longer folded
-                                       # into bias itself — direction is preserved).
-    bias_strength:  str = "WEAK"      # WEAK | MODERATE | STRONG — forced WEAK on conflict
-    confidence:     int = 0           # 0–95
-    conflict_flag:  bool = False       # True when sub-signals disagree
-
-    # ── Action block ──────────────────────────────────────────────────────────
-    action:             str          = ""
-    action_type:        str          = "WAIT"
-    suggested_strike:   Optional[int]= None
-
-    # ── Strategy block ────────────────────────────────────────────────────────
-    suggested_strategy: str  = ""
-    auto_strategy:      dict = field(default_factory=dict)
-    # Whether the auto_strategy above should be presented as execute-ready.
-    # _suggest_strategy() always returns *a* strategy (even under WAIT, it
-    # picks the range-appropriate one, e.g. Iron Condor when NEUTRAL) — that
-    # part is correct. What was missing is a flag tying the Execute button's
-    # state back to the same WAIT/conflict/confidence read shown in the
-    # headline block, so the two panels can't visually disagree.
-    execute_recommended: bool = True
-    strategy_caution:    str  = ""   # human-readable reason(s) when False
-
-    # ── Supporting info ───────────────────────────────────────────────────────
-    active_signals:  List[ActiveSignal] = field(default_factory=list)
-    verdicts:        dict = field(default_factory=dict)
-    oi_annotations:  dict = field(default_factory=dict)
-    trade_grade:     str = ""
-    risk_warning:    str = ""
-    important_levels: dict = field(default_factory=dict)
-
-    # ── Score debug (strip in prod if desired) ────────────────────────────────
-    _debug: dict = field(default_factory=dict)
-
-    def to_dict(self) -> dict:
-        ordered = sorted(self.active_signals,
-                         key=lambda s: (_SEVERITY_ORDER.get(s.severity, 9), s.priority))
-        # One semantic signal can be discovered by more than one scoring
-        # path. Keep the highest-ranked occurrence while preserving distinct
-        # strikes/sides through their explicit signal_id values.
-        sigs = []
-        seen = set()
-        for signal in ordered:
-            identity = signal.signal_id or signal.text
-            if identity in seen:
-                continue
-            seen.add(identity)
-            sigs.append(signal)
-        return {
-            "decisionTimestamp": self.decision_timestamp,
-            "stateVersion":      self.state_version,
-            "stale":             self.stale,
-            "degraded":          self.degraded,
-            "evidenceCoverage":  self.evidence_coverage,
-            "missingInputs":     self.missing_inputs,
-            "contributors":      self.contributors,
-            "bias":              self.bias,
-            "biasStrength":      self.bias_strength,
-            "confidence":        self.confidence,
-            "conflictFlag":      self.conflict_flag,
-            "action":            self.action,
-            "actionType":        self.action_type,
-            "suggestedStrike":   self.suggested_strike,
-            "suggestedStrategy": self.suggested_strategy,
-            "executeRecommended": self.execute_recommended,
-            "strategyCaution":    self.strategy_caution,
-            "activeSignals":     [{"id": s.signal_id or s.text,
-                                    "text": s.text,
-                                    "severity": s.severity,
-                                    "priority": s.priority,
-                                    "observedAt": self.decision_timestamp}
-                                  for s in sigs],
-            "verdicts":          self.verdicts,
-            "oiAnnotations":     self.oi_annotations,
-            "tradeGrade":        self.trade_grade,
-            "riskWarning":       self.risk_warning,
-            "importantLevels":   self.important_levels,
-            "autoStrategy":      self.auto_strategy,
-            "_debug":            self._debug,
-        }
+__all__ = ["T", "ActiveSignal", "DecisionResult"]

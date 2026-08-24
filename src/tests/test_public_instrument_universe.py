@@ -1,4 +1,4 @@
-from brokers.smartapi_instruments import InstrumentResolver
+from brokers.smartapi.instruments import InstrumentResolver
 
 
 def test_public_master_splits_full_fno_universe_by_future_type(tmp_path):

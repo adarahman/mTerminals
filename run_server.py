@@ -4,11 +4,11 @@ Wires the extracted subsystems (server.feeds.*, server.feed_manager,
 server.order_gateway, server.broker_services, ...) into the running process:
 the dashboard WebSocket, the analytics pipeline loop, background pollers,
 and HTTP handlers. This file owns the process-wide runtime state
-(SYMBOL/EXPIRY/DATA_SOURCE, the canonical payload snapshots) and the
+(market selection state, the canonical payload snapshots) and the
 orchestration between subsystems; the mechanics live in server/*.
 
-Import-order note: option_chain_json parses sys.argv at import time, so the
-imports below are split around a temporary argv hide.
+The canonical option-chain runtime is import-safe and receives explicit
+configuration from the application layer.
 """
 
 import asyncio
@@ -24,7 +24,6 @@ import uuid
 from datetime import datetime
 from datetime import time as dtime
 from pathlib import Path
-from urllib.parse import unquote
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "backend"))
@@ -32,13 +31,8 @@ sys.path.insert(0, str(SCRIPT_DIR / "backend"))
 import aiohttp
 import orjson
 from aiohttp import web
+from server import runtime_state
 
-# ── argv-hidden import window ────────────────────────────────────────────
-# option_chain_json parses sys.argv at import time — hide our own
-# server-only arguments from it (and everything imported alongside it) so
-# it doesn't choke on them.
-_real_argv = sys.argv
-sys.argv = [_real_argv[0]]
 from config import settings as _broker_settings  # noqa: E402
 from server import broker_services  # noqa: E402  (imports config + brokers.*)
 from server.health import log_transition as _log_server_health_transition  # noqa: E402
@@ -51,12 +45,37 @@ from server.market_history_api import (  # noqa: E402
     no_cache_middleware as history_no_cache_middleware,
 )
 from server.index_quotes import IndexQuoteFetcher  # noqa: E402
-from server.health_api import (  # noqa: E402
+from application.runtime import (  # noqa: E402
+    ApplicationLifecycle,
+    build_background_jobs,
+)
+from application.market_service import (  # noqa: E402
+    AnalyticsPipelineRunner,
+    CanonicalPayloadPublisher,
+    DailyMarketScheduler,
+    DataSourceSwitcher,
+    LiveFeedAggregatorRegistry,
+    MarketEngineCycle,
+    MarketPipelineService,
+    MarketTickPacer,
+    OiBaselineSynchronizer,
+    PipelineRuntimeConfigurator,
+    SerializedPipelineExecutor,
+    SymbolSwitcher,
+)
+from server.routes import HttpRouteHandlers, ServerRoutes  # noqa: E402
+from server.health_api import (
     build_health_snapshot as _build_health_response,
     health_handler as _health_response,
     metrics_handler as _metrics_response,
+    broker_health,
 )
+
 from server.websocket_clients import WebSocketClientHub  # noqa: E402
+from server.websocket import DashboardWebSocketHandler  # noqa: E402
+from server.websocket_handshake import WebSocketHandshakeSender  # noqa: E402
+from server.websocket_messages import WebSocketMessageRouter  # noqa: E402
+from server.websocket_query import WebSocketQueryController  # noqa: E402
 from server.feeds.smartapi import (  # noqa: E402
     FeedState as _SmartApiFeedState,
     resolve_chain_tokens as _resolve_smartapi_feed_tokens,
@@ -78,18 +97,23 @@ from server.feeds.upstox import (  # noqa: E402
     stop_feed as _stop_upstox_feed,
     switch_existing_feed as _switch_upstox_feed_existing,
 )
-import market_api  # noqa: E402  (lightweight ticker-strip quotes; no argv parsing)
-import mTerminals_json  # noqa: E402
-import option_chain_json  # noqa: E402
-
-sys.argv = _real_argv  # restore for anything that inspects argv later
+from market.providers import nse_bse_client as market_api  # noqa: E402
+from application import dashboard_serializer  # noqa: E402
+from application import option_chain_runtime  # noqa: E402
 
 from operational_metrics import OperationalMetrics  # noqa: E402
-from pipeline_config import RuntimeConfig  # noqa: E402
-from live_feed_state import merge_live_feed_update  # noqa: E402
-from ws_payload import compute_diff, json_default as _json_default  # noqa: E402
-from paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
-from paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
+from application.selection_state import MarketSelectionState  # noqa: E402
+from analytics.option_chain_pipeline import OptionChainPipeline  # noqa: E402
+from brokers.expiry_adapter import BrokerExpiryAdapter  # noqa: E402
+from brokers.option_chain_adapter import BrokerOptionChainAdapter  # noqa: E402
+from market.option_chain.runtime_adapters import BrokerMarketAdapters  # noqa: E402
+from infrastructure.payload_capture import PayloadExportCapture  # noqa: E402
+from server.live_feed_state import merge_live_feed_update  # noqa: E402
+from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
+from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
+from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
+from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
+from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
 from risk.account_guard import (  # noqa: E402
     LiveAccountRiskGuard,
     open_lots_from_positions,
@@ -116,8 +140,33 @@ from server.order_gateway import (  # noqa: E402
     parse_order_intent,
     validate_order_intent,
 )
+from brokers.connection import check_connection
+async def broker_health_handler(request):
+    providers = [
+        "KOTAK",
+        "UPSTOX",
+        "KITE",
+        "BREEZE",
+        "SHOONYA",
+        "SMARTAPI",
+    ]
+
+    result = {}
+
+    for provider in providers:
+        status = check_connection(provider)
+        result[provider] = {
+            "status": status.status.value,
+            "ready": status.ready,
+            "error": status.error,
+        }
+
+    return web.json_response({
+        "providers": result
+    })
 
 logger = logging.getLogger("mterminals.server")
+configure_lot_size_resolver(_smartapi_lot_size)
 
 # Broker SDK surface (see server/broker_services.py). Aliased back to the
 # historical underscored names so existing test seams keep working.
@@ -150,18 +199,18 @@ LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
 
 ARGS = build_arg_parser().parse_args()
 
-SYMBOL = ARGS.symbol.strip().upper()
+_initial_symbol = ARGS.symbol.strip().upper()
 # Manual price-source selector — "EQ" (default, cash-market spot) is the
 # fixed option-pricing/decision reference; "FUT" is displayed separately
 # (see option_chain_json.py's PRICE_SOURCE docstring for the 3:15-3:30
 # EQ-goes-stale rationale). Legacy ?priceSource= URLs are accepted but no
 # longer alter analytics.
-PRICE_SOURCE = "AUTO"
+_initial_price_source = "AUTO"
 # Manual futures-expiry selector — "NEAR" (default), "NEXT", or "FAR".
 # Switched via ?futuresExpiry= on the WS URL (see ws_handler) and read
 # fresh into RuntimeConfig every tick by run_pipeline_once().
-FUTURES_EXPIRY = "NEAR"
-EXPIRY = ARGS.expiry
+_initial_futures_expiry = "NEAR"
+_initial_expiry = ARGS.expiry
 POLL_SECONDS = ARGS.poll_seconds
 PIPELINE_TIMEOUT_SECONDS = max(1.0, ARGS.pipeline_timeout_seconds)
 MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
@@ -179,12 +228,6 @@ STRIKES_EACH_SIDE = (
     ARGS.strikes_each_side
     if ARGS.strikes_each_side is not None
     else (15 if USE_SMARTAPI else 50)
-)
-option_chain_json.set_runtime_config(
-    RuntimeConfig(
-        strikes_each_side=STRIKES_EACH_SIDE,
-        use_smartapi=USE_SMARTAPI,
-    )
 )
 
 # Label maps — single source of truth for both startup banners and the
@@ -230,18 +273,29 @@ def _resolve_default_data_source() -> str:
 # Process-wide, same as SYMBOL/EXPIRY; also pushed into brokers.market_data's
 # runtime facade so the chain pipeline, index-quote loops, and payload all
 # route consistently.
-DATA_SOURCE = _resolve_default_data_source()
+_initial_data_source = _resolve_default_data_source()
 if not USE_SMARTAPI:
-    DATA_SOURCE = "NSE_BSE"  # public-only mode: NSE/BSE is the only source
-_md_set_active_provider(DATA_SOURCE)
+    _initial_data_source = "NSE_BSE"
+_md_set_active_provider(_initial_data_source)
 
-_md_label = _DATA_SOURCE_LABELS.get(DATA_SOURCE, "SmartAPI")
-if DATA_SOURCE == "NSE_BSE":
+MARKET_SELECTION = MarketSelectionState(
+    symbol=_initial_symbol,
+    expiry=_initial_expiry,
+    data_source=_initial_data_source,
+    price_source=_initial_price_source,
+    futures_expiry=_initial_futures_expiry,
+)
+
+_md_label = _DATA_SOURCE_LABELS.get(MARKET_SELECTION.data_source, "SmartAPI")
+if MARKET_SELECTION.data_source == "NSE_BSE":
     _chain_source = "NSE/BSE public REST (polling)"
     _overlay_state = "no websocket overlay"
 elif USE_SMARTAPI:
     _chain_source = f"{_md_label} REST"
-    if DATA_SOURCE == LIVE_FEED_PROVIDER and _provider_supports_websocket(DATA_SOURCE):
+    if (
+        MARKET_SELECTION.data_source == LIVE_FEED_PROVIDER
+        and _provider_supports_websocket(MARKET_SELECTION.data_source)
+    ):
         _overlay_state = f"{LIVE_FEED_PROVIDER} websocket overlay ENABLED"
     else:
         _overlay_state = "no websocket overlay (REST polling)"
@@ -291,8 +345,10 @@ _BASELINE_SEQ = 0
 _BASELINE_ID = None
 PROCESS_STARTED_AT = datetime.now().astimezone()
 _LAST_HEALTH_LOG_STATE = None
-_BACKGROUND_TASKS: set = set()
-_PIPELINE_TASK = None
+# Compatibility aliases retained during the runtime-state migration. Tests,
+# diagnostics, and older extensions still inspect these names directly.
+_BACKGROUND_TASKS = runtime_state.BACKGROUND_TASKS
+_MAIN_LOOP = runtime_state.MAIN_LOOP
 _PIPELINE_STATUS = {
     "status": "STARTING",
     "reason": "Analytics pipeline has not completed yet",
@@ -306,7 +362,7 @@ METRICS = OperationalMetrics(started_at=PROCESS_STARTED_AT)
 # pill doesn't sit at "n/a" until the next poll. Cleared by
 # stop_funds_polling() so a reconnect while polling is stopped is never
 # handed a stale real-money figure.
-LAST_FUNDS = None
+runtime_state.LAST_FUNDS = None
 
 # Paper trading — single engine instance for the whole process, backed by
 # SQLite (paper_trading.db) so positions/orders survive a restart. All
@@ -329,8 +385,6 @@ _LAST_PORTFOLIO_BROADCAST_TS = 0.0
 EOD_TRIGGER_TIME = dtime(15, 45)  # shortly after NSE cash close (15:30)
 MARKET_OPEN_TIME = dtime(9, 15)
 MARKET_CLOSE_TIME = dtime(15, 30)
-_EOD_DONE_DATE = None  # which date's EOD job already ran
-_LAST_SESSION_DATE = None  # which date's OI session baseline is active
 
 
 def _market_session_status(now: datetime) -> str:
@@ -394,7 +448,7 @@ POSITION_RECONCILE_SECONDS = int(os.environ.get("POSITION_RECONCILE_SECONDS", "1
 # is supervisory/status info and _ACCOUNT_GUARD.get_status() does a SQLite
 # read per call, so it runs on its own slow loop.
 ALGO_STATUS_POLL_SECONDS = int(os.environ.get("ALGO_STATUS_POLL_SECONDS", "5"))
-LAST_ALGO_STATUS = None
+runtime_state.LAST_ALGO_STATUS = None
 # Most recent non-clean PositionReconciler.check(), broadcast as
 # reconciliationAlert and handed to new connections so a dashboard opened
 # after a mismatch still sees it.
@@ -404,7 +458,7 @@ LAST_RECONCILIATION_ALERT = None
 # instead of making its own broker call every 5s; the pre-trade exposure
 # check still fetches fresh. None until live trading is enabled and the
 # first reconcile cycle has completed.
-LAST_LIVE_POSITIONS = None
+runtime_state.LAST_LIVE_POSITIONS = None
 
 # ── WebSocket origin allowlist ──────────────────────────────────────────
 # Browsers do NOT apply same-origin restrictions to WebSocket handshakes,
@@ -453,12 +507,10 @@ def _origin_allowed(request) -> bool:
     return origin in ALLOWED_ORIGINS
 
 
-# option_chain_json keeps its runtime config as plain module globals mutated
-# before each main() call. Both the primary tick and any other pipeline call
-# run via asyncio.to_thread, so every pipeline call must hold this lock for
-# its full duration or two symbols' runs would stomp on each other's globals.
-_PIPELINE_LOCK = asyncio.Lock()
-INDEX_QUOTES = {}  # {"BANKNIFTY": {"spot":.., "spotChgPct":..}, ...}
+# Analytics passes are serialized with provider switches so one pass observes
+# one stable provider identity from request planning through final export.
+_PIPELINE_EXECUTOR = SerializedPipelineExecutor()
+runtime_state.INDEX_QUOTES = {}  # {"BANKNIFTY": {"spot":.., "spotChgPct":..}, ...}
 _SYMBOL_SWITCH_EVENT = asyncio.Event()
 # Set (thread-safely) by TickAggregator's flush loop on every real tick
 # flush. engine_loop() waits on this OR _SYMBOL_SWITCH_EVENT, bounded by
@@ -473,30 +525,23 @@ _MARKET_STREAM_LOCK = asyncio.Lock()
 # Real-export capture seam: run_pipeline_once() reads the dashboard payload
 # back out of mTerminals_json's own export, so the pipeline and the WS
 # stream share one serialization path.
-_REAL_EXPORT = mTerminals_json.export_dashboard_json
-_CAPTURED = {}
+def _load_exported_dashboard_payload():
+    with open("mTerminals.json") as exported:
+        return json.load(exported)
 
 
-def _capturing_export(*args, **kwargs):
-    kwargs["out_path"] = "mTerminals.json"
-    result = _REAL_EXPORT(*args, **kwargs)
-    if result is None:
-        try:
-            with open("mTerminals.json") as f:
-                result = json.load(f)
-        except Exception:
-            pass
-    _CAPTURED["payload"] = result
-    return result
-
-
-mTerminals_json.export_dashboard_json = _capturing_export
+_PAYLOAD_EXPORT_CAPTURE = PayloadExportCapture(
+    exporter=dashboard_serializer.export_dashboard_json,
+    fallback_loader=_load_exported_dashboard_payload,
+    export_overrides={"out_path": "mTerminals.json"},
+)
+dashboard_serializer.export_dashboard_json = _PAYLOAD_EXPORT_CAPTURE.export
 
 
 # ── task plumbing ────────────────────────────────────────────────────────
 def _background_task_done(task: asyncio.Task, task_name: str):
     """Retain detached tasks and surface unexpected subsystem exits."""
-    _BACKGROUND_TASKS.discard(task)
+    runtime_state.BACKGROUND_TASKS.discard(task)
     if task.cancelled():
         return
     exc = task.exception()
@@ -516,7 +561,7 @@ def _background_task_done(task: asyncio.Task, task_name: str):
 
 def _create_background_task(awaitable, task_name: str) -> asyncio.Task:
     task = asyncio.create_task(awaitable, name=task_name)
-    _BACKGROUND_TASKS.add(task)
+    runtime_state.BACKGROUND_TASKS.add(task)
     task.add_done_callback(lambda done: _background_task_done(done, task_name))
     return task
 
@@ -556,8 +601,7 @@ def _flow_task_done(task: asyncio.Task):
 # ── pipeline plumbing ────────────────────────────────────────────────────
 async def _run_pipeline_locked():
     """Run exactly one blocking pipeline pass without permitting overlap."""
-    async with _PIPELINE_LOCK:
-        return await asyncio.to_thread(run_pipeline_once)
+    return await _PIPELINE_EXECUTOR.run_blocking(run_pipeline_once)
 
 
 async def _publish_pipeline_status(status, reason="", elapsed=None):
@@ -599,17 +643,27 @@ async def broadcast(message):
 
 # Dashboard-relay protocol and its independent cache/poll loop live in
 # server.bridge. The live coordinator supplies only current process state.
+def _fetch_bridge_futures(symbol, which, use_smartapi):
+    """Composition seam for the bridge's legacy/public futures sources."""
+    if use_smartapi:
+        from application.broker_market_pipeline import fetch_futures_wide
+
+        return fetch_futures_wide(symbol, which=which)
+    return market_api.fetch_public_futures(symbol, which)
+
+
 _BRIDGE = DashboardBridge(
     state=lambda: {
-        "symbol": SYMBOL,
-        "futures_expiry": FUTURES_EXPIRY,
+        "symbol": MARKET_SELECTION.symbol,
+        "futures_expiry": MARKET_SELECTION.futures_expiry,
         "use_smartapi": USE_SMARTAPI,
         "last_payload": LAST_PAYLOAD,
-        "index_quotes": INDEX_QUOTES,
+        "index_quotes": runtime_state.INDEX_QUOTES,
     },
     origin_allowed=_origin_allowed,
     json_default=_json_default,
     market_api=market_api,
+    futures_fetcher=_fetch_bridge_futures,
 )
 BRIDGE_CONNECTED = _BRIDGE.clients
 
@@ -626,7 +680,24 @@ async def bridge_loop():
     await _BRIDGE.run()
 
 
-def _configure_pipeline_globals(
+def _resolve_default_pipeline_expiry(symbol):
+    """Keep legacy exchange-calendar access at the composition boundary."""
+    if symbol in _BSE_SYMBOLS:
+        return option_chain_runtime.BSE_EXPIRY_DEFAULT.get(
+            symbol, option_chain_runtime._nearest_Thursday
+        )()
+    return option_chain_runtime._nearest_Tuesday()
+
+
+_PIPELINE_RUNTIME_CONFIGURATOR = PipelineRuntimeConfigurator(
+    data_source=lambda: MARKET_SELECTION.data_source,
+    activate_provider=_md_set_active_provider,
+    resolve_default_expiry=_resolve_default_pipeline_expiry,
+    apply_config=lambda config: None,
+)
+
+
+def _build_pipeline_runtime_config(
     symbol,
     expiry=None,
     no_extra_chains=None,
@@ -635,64 +706,88 @@ def _configure_pipeline_globals(
     price_source=None,
     futures_expiry=None,
 ):
-    """Point option_chain_json's runtime config at `symbol` via
-    set_runtime_config() (see pipeline_config.py). Used only by
-    run_pipeline_once() for the primary --symbol's full run — the ticker
-    strip no longer goes through option_chain_json at all.
-
-    Re-pushes the RUNTIME data source into option_chain_json's use_smartapi
-    gate and brokers.market_data's active-provider facade, so a ?dataSource=
-    switch takes effect on the very next pass. No longer pokes `exchange` —
-    option_chain_json.main() recomputes it locally from SYMBOL (see
-    pipeline_config.py's docstring); the local below only picks the right
-    EXPIRY fallback (BSE vs NSE nearest-expiry rule)."""
-    _md_set_active_provider(DATA_SOURCE)
-    exchange = "BSE" if symbol in _BSE_SYMBOLS else "NSE"
-    resolved_expiry = expiry or (
-        option_chain_json.BSE_EXPIRY_DEFAULT.get(
-            symbol, option_chain_json._nearest_Thursday
-        )()
-        if exchange == "BSE"
-        else option_chain_json._nearest_Tuesday()
-    )
-    option_chain_json.set_runtime_config(
-        RuntimeConfig(
-            symbol=symbol,
-            expiry=resolved_expiry,
-            no_extra_chains=no_extra_chains,
-            strict_expiry=strict_expiry,
-            no_virtual_oi=no_virtual_oi,
-            price_source=price_source,
-            futures_expiry=futures_expiry,
-            use_smartapi=(DATA_SOURCE != "NSE_BSE"),
-        )
+    """Build the complete configuration passed to one analytics run."""
+    return _PIPELINE_RUNTIME_CONFIGURATOR.configure(
+        symbol=symbol,
+        expiry=expiry,
+        no_extra_chains=no_extra_chains,
+        strict_expiry=strict_expiry,
+        no_virtual_oi=no_virtual_oi,
+        price_source=price_source,
+        futures_expiry=futures_expiry,
+        strikes_each_side=STRIKES_EACH_SIDE,
     )
 
 
-def run_pipeline_once():
-    _configure_pipeline_globals(
-        SYMBOL,
-        EXPIRY,
+def _build_broker_market_adapters():
+    from application.broker_market_pipeline import (
+        _canon_underlying,
+        fetch_all_pills_and_vix_batched,
+        fetch_futures_wide,
+        fetch_option_chain_wide,
+        fetch_sensex_ticker,
+        fetch_ticker_payload,
+        fetch_vix,
+        get_available_expiries,
+    )
+
+    chain = BrokerOptionChainAdapter(
+        fetch_chain=fetch_option_chain_wide,
+        canonicalize_symbol=_canon_underlying,
+    )
+    expiries = BrokerExpiryAdapter(fallback=get_available_expiries)
+    return BrokerMarketAdapters(
+        canonicalize_symbol=chain.canonicalize,
+        fetch_chain=chain.fetch,
+        list_expiries=expiries.list_expiries,
+        fetch_futures=lambda symbol, exchange, which: fetch_futures_wide(
+            symbol, None, exchange=exchange, which=which
+        ),
+        warm_batch=fetch_all_pills_and_vix_batched,
+        fetch_ticker_payload=fetch_ticker_payload,
+        fetch_vix=fetch_vix,
+        fetch_sensex_quote=fetch_sensex_ticker,
+    )
+
+
+_BROKER_MARKET_ADAPTERS = (
+    _build_broker_market_adapters() if USE_SMARTAPI else None
+)
+_OPTION_CHAIN_PIPELINE = OptionChainPipeline(
+    implementation=lambda config: option_chain_runtime.main(
+        config,
+        broker_adapters=_BROKER_MARKET_ADAPTERS,
+        export_dashboard=dashboard_serializer.export_dashboard_json,
+    ),
+)
+
+
+_ANALYTICS_PIPELINE_RUNNER = AnalyticsPipelineRunner(
+    configure=lambda: _build_pipeline_runtime_config(
+        MARKET_SELECTION.symbol,
+        MARKET_SELECTION.expiry,
         no_extra_chains=not ARGS.extra_chains,
         strict_expiry=ARGS.strict_expiry,
         no_virtual_oi=ARGS.no_virtual_oi,
-        price_source=PRICE_SOURCE,
-        futures_expiry=FUTURES_EXPIRY,
-    )
-    _CAPTURED.clear()
-    try:
-        option_chain_json.main()
-    except Exception as e:
-        print(f"[pipeline] FAILED: {e}")
-        return None
-    return _CAPTURED.get("payload")
+        price_source=MARKET_SELECTION.price_source,
+        futures_expiry=MARKET_SELECTION.futures_expiry,
+    ),
+    clear_capture=_PAYLOAD_EXPORT_CAPTURE.clear,
+    invoke=_OPTION_CHAIN_PIPELINE.run,
+    captured_payload=lambda: _PAYLOAD_EXPORT_CAPTURE.payload,
+)
+
+
+def run_pipeline_once():
+    """Compatibility seam for application analytics invocation."""
+    return _ANALYTICS_PIPELINE_RUNNER.run_once()
 
 
 def _index_quote_fetcher():
     """Build from the current provider seam (also keeps runtime switches live)."""
     return IndexQuoteFetcher(
         state=lambda: {
-            "data_source": DATA_SOURCE,
+            "data_source": MARKET_SELECTION.data_source,
             "vix_symbol": _VIX_TRADINGSYMBOL,
             "vix_token": _VIX_TOKEN,
         },
@@ -716,9 +811,8 @@ def fetch_index_quotes_smartapi_sync():
 # ── Live feed state (per provider, legacy module-global seams) ───────────
 # Tests and the health snapshot read these directly; BrokerFeedManager only
 # touches them via the snapshot/store pairs below.
-_MAIN_LOOP = None  # the asyncio loop main() runs on; lets a runtime switch
-# to a provider whose feed was never started at boot start that feed on the
-# live loop instead of silently doing nothing.
+# The asyncio loop main() runs on lets a runtime switch to a provider whose
+# feed was never started at boot and start that feed on the live loop.
 
 _smartapi_stream = None
 _smartapi_aggregator = None
@@ -833,7 +927,7 @@ def _parse_any_expiry(expiry_str):
 def _matches_current_feed_expiry(current_expiry, payload_expiry_str):
     """True only if the expiry the feed is streaming is the SAME expiry the
     dashboard is displaying right now. The feed's own expiry is picked
-    independently of option_chain_json's EXPIRY global and they aren't
+    independently of the application runtime's selected expiry and they aren't
     guaranteed to agree (NEAR/MONTHLY tab active, etc.); merging ticks for
     the wrong expiry would silently show the wrong contract's prices, so
     this gate must pass before any state merge."""
@@ -967,7 +1061,7 @@ async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
     try:
         message, feed_update_applied = merge_live_feed_update(
             message, LAST_PAYLOAD, _LAST_SENT, matches_expiry_fn,
-            price_source=PRICE_SOURCE,
+            price_source=MARKET_SELECTION.price_source,
         )
     except Exception as e:
         # Sync is best-effort consistency — never let a sync bug block the
@@ -1039,7 +1133,7 @@ def _smartapi_feed_stop(state):
 
 
 def _upstox_feed_start(state, loop, symbol, strikes_around_atm, expiry):
-    from brokers.upstox_ws_client import UpstoxTickStream
+    from brokers.upstox.websocket import UpstoxTickStream
 
     _start_upstox_feed_new(
         state,
@@ -1074,7 +1168,7 @@ def _upstox_feed_stop(state):
 
 
 def _shoonya_feed_start(state, loop, symbol, strikes_around_atm, expiry):
-    from brokers.shoonya_ws_client import ShoonyaTickStream
+    from brokers.shoonya.websocket import ShoonyaTickStream
 
     _start_shoonya_feed_new(
         state,
@@ -1116,7 +1210,7 @@ _FEEDS = {
         start=start,
         switch=switch,
         stop=stop,
-        default_symbol=lambda: SYMBOL,
+        default_symbol=lambda: MARKET_SELECTION.symbol,
         main_loop=lambda: _MAIN_LOOP,
         log=_print_log,
     )
@@ -1231,7 +1325,9 @@ def _feed_allowed(feed_provider: str) -> bool:
     this BEFORE touching LAST_PAYLOAD/_LAST_SENT, so a feed left running
     after a switch can't contaminate the new provider's baseline."""
     return _feed_lifecycle.is_allowed(
-        feed_provider, DATA_SOURCE, _provider_supports_websocket
+        feed_provider,
+        MARKET_SELECTION.data_source,
+        _provider_supports_websocket,
     )
 
 
@@ -1246,92 +1342,54 @@ def _stop_active_broker_feed(provider: str) -> bool:
     )
 
 
-def switch_symbol(new_symbol, new_expiry=None):
-    """Runtime symbol switch — triggered by ws_handler() on ?symbol=/?expiry=
-    (dashboard.js switchActiveIndex()). Changes what the NEXT engine_loop
-    tick fetches; fetches nothing itself.
-
-    EXPIRY resets to None (auto-resolve) unless given, since the old
-    symbol's expiry string is almost never valid for the new one.
-    LAST_PAYLOAD/_LAST_SENT are cleared so the next tick is a "full"
-    broadcast (diffing two symbols' payloads is just the new payload with
-    extra work) and a mid-switch client never gets handed the OLD symbol's
-    snapshot. Pokes _SYMBOL_SWITCH_EVENT so engine_loop wakes immediately
-    instead of finishing out its --poll-seconds sleep.
-
-    Process-wide, not per-client: one engine loop backs all of CONNECTED,
-    so one browser tab switching symbols switches it for all of them."""
-    global SYMBOL, EXPIRY, LAST_PAYLOAD, _LAST_SENT
-    # Defensive normalization: a stale/cached frontend can send the symbol
-    # still percent-encoded (aiohttp decodes once, leaving e.g.
-    # "ZYDUS%20LIFESCIENCES%20LTD"); undo that so the engine never probes a
-    # literal "%20" symbol. No-op for clean input.
-    new_symbol = unquote(new_symbol).strip().upper()
-    if new_symbol == SYMBOL and (new_expiry is None or new_expiry == EXPIRY):
-        return  # already on this symbol+expiry
-    print(f"[ws] symbol switch requested: {SYMBOL} -> {new_symbol}", flush=True)
-    SYMBOL = new_symbol
-    EXPIRY = new_expiry
+def _commit_symbol_selection(new_symbol, new_expiry):
+    global LAST_PAYLOAD, _LAST_SENT
+    MARKET_SELECTION.select_symbol(new_symbol, new_expiry)
     LAST_PAYLOAD = None
     _LAST_SENT = None
-    _SYMBOL_SWITCH_EVENT.set()
-    if USE_SMARTAPI:
-        _restart_live_feed(LIVE_FEED_PROVIDER, new_symbol, new_expiry)
+
+
+_SYMBOL_SWITCHER = SymbolSwitcher(
+    current_symbol=lambda: MARKET_SELECTION.symbol,
+    current_expiry=lambda: MARKET_SELECTION.expiry,
+    commit_selection=_commit_symbol_selection,
+    signal_refresh=_SYMBOL_SWITCH_EVENT.set,
+    live_feed_enabled=lambda: USE_SMARTAPI,
+    live_feed_provider=lambda: LIVE_FEED_PROVIDER,
+    restart_feed=_restart_live_feed,
+)
+
+
+def switch_symbol(new_symbol, new_expiry=None):
+    """Compatibility seam for application-owned symbol switching."""
+    return _SYMBOL_SWITCHER.switch(new_symbol, new_expiry)
+
+
+def _commit_data_source(new_source):
+    global LAST_PAYLOAD, _LAST_SENT
+    MARKET_SELECTION.select_data_source(new_source)
+    LAST_PAYLOAD = None
+    _LAST_SENT = None
+
+
+_DATA_SOURCE_SWITCHER = DataSourceSwitcher(
+    valid_sources=lambda: _MD_PROVIDER_KEYS,
+    current_source=lambda: MARKET_SELECTION.data_source,
+    execution_gate=_PIPELINE_EXECUTOR,
+    activate_provider=_md_set_active_provider,
+    stop_feed=_stop_active_broker_feed,
+    commit_source=_commit_data_source,
+    supports_websocket=_provider_supports_websocket,
+    restart_feed=_restart_live_feed,
+    current_symbol=lambda: MARKET_SELECTION.symbol,
+    current_expiry=lambda: MARKET_SELECTION.expiry,
+    signal_refresh=_SYMBOL_SWITCH_EVENT.set,
+)
 
 
 async def switch_data_source(new_source: str):
-    """(docstring unchanged, plus:) The provider-facade flip below is
-    serialized under _PIPELINE_LOCK — the same lock _run_pipeline_locked()
-    holds for a full pass. A pass reads the active provider twice (expiry
-    resolution at entry, batch quotes inside fetch_option_chain_wide);
-    flipping the facade between those reads mixes two providers' identity
-    spaces (SmartAPI tokens → Upstox 400 UDAPI1087, or zero matched
-    quotes → empty chain frame → KeyError 'StrikePrice'). Worst case the
-    switching client's handshake waits out one pass."""
-    global DATA_SOURCE, LAST_PAYLOAD, _LAST_SENT
-    new_source = (new_source or "").strip().upper()
-    if new_source not in _MD_PROVIDER_KEYS:
-        print(
-            f"[data-source] rejecting invalid data source {new_source!r} "
-            f"(valid: {sorted(_MD_PROVIDER_KEYS)})",
-            flush=True,
-        )
-        raise ValueError(
-            f"Unknown data source {new_source!r}. Valid: {sorted(_MD_PROVIDER_KEYS)}"
-        )
-    if new_source == DATA_SOURCE:
-        return  # already on this source, nothing to do
-    old_source = DATA_SOURCE
-    print(f"[data-source] switch requested: {old_source} -> {new_source}", flush=True)
-
-    # Serialized against in-flight pipeline passes (see docstring).
-    try:
-        async with _PIPELINE_LOCK:
-            switched = _md_set_active_provider(new_source)
-    except Exception as exc:
-        print(
-            f"[data-source] switch to {new_source} failed; "
-            f"remaining on {old_source}: {exc}",
-            flush=True,
-        )
-        return False
-    if not switched:
-        print(
-            f"[data-source] {new_source} unavailable; remaining on {old_source}",
-            flush=True,
-        )
-        return False
-
-    # Everything below touches no pipeline-visible state ordering.
-    _stop_active_broker_feed(old_source)
-    DATA_SOURCE = new_source
-    LAST_PAYLOAD = None
-    _LAST_SENT = None
-    if _provider_supports_websocket(new_source):
-        _restart_live_feed(new_source, SYMBOL, EXPIRY)
-    _SYMBOL_SWITCH_EVENT.set()
-    print(f"[data-source] switched to {new_source}", flush=True)
-    return True
+    """Compatibility seam for application-owned provider switching."""
+    return await _DATA_SOURCE_SWITCHER.switch(new_source)
 
 
 # ── paper-trading pricing ────────────────────────────────────────────────
@@ -1592,13 +1650,13 @@ def _build_algo_status() -> dict:
     this never mutates guard/executor state."""
     guard_status = _ACCOUNT_GUARD.get_status()
     # current_open_lots pairs with guard_status's max_open_lots so the panel
-    # can show "current / limit". Sourced from LAST_LIVE_POSITIONS (the
+    # can show "current / limit". Sourced from if runtime_state.LAST_LIVE_POSITIONS (the
     # reconcile loop's periodic fetch) — this is a status display, not the
     # pre-trade exposure check (which still fetches fresh).
     try:
         guard_status["current_open_lots"] = (
-            open_lots_from_positions(LAST_LIVE_POSITIONS, PT_LOT_SIZES)
-            if LAST_LIVE_POSITIONS is not None
+            open_lots_from_positions(runtime_state.LAST_LIVE_POSITIONS, PT_LOT_SIZES)
+            if runtime_state.LAST_LIVE_POSITIONS is not None
             else None
         )
     except Exception as e:
@@ -1608,7 +1666,7 @@ def _build_algo_status() -> dict:
         )
         guard_status["current_open_lots"] = None
 
-    exec_status = _AUTO_EXECUTOR.get_status(SYMBOL)
+    exec_status = _AUTO_EXECUTOR.get_status(MARKET_SELECTION.symbol)
     exec_status["history"] = _AUTO_EXECUTOR.get_history()[:30]
 
     return {
@@ -1625,7 +1683,7 @@ def _build_algo_status() -> dict:
         "maxOrdersPerMinute": LIVE_MAX_ORDERS_PER_MINUTE,
         "accountGuard": guard_status,
         "autoExecutor": exec_status,
-        "symbol": SYMBOL,
+        "symbol": MARKET_SELECTION.symbol,
     }
 
 
@@ -1662,18 +1720,15 @@ async def _broadcast_reconciliation_alert(result, source: str):
 
 # ── background pollers ───────────────────────────────────────────────────
 def _set_last_funds(value):
-    global LAST_FUNDS
-    LAST_FUNDS = value
+    runtime_state.LAST_FUNDS = value
 
 
 def _set_last_live_positions(value):
-    global LAST_LIVE_POSITIONS
-    LAST_LIVE_POSITIONS = value
+    runtime_state.LAST_LIVE_POSITIONS = value
 
 
 def _set_last_algo_status(value):
-    global LAST_ALGO_STATUS
-    LAST_ALGO_STATUS = value
+    runtime_state.LAST_ALGO_STATUS = value
 
 
 # Pushes {"type":"indexQuotes",...}; dashboard.js's generic handler lands it
@@ -1682,10 +1737,10 @@ def _set_last_algo_status(value):
 _INDEX_QUOTE_LOOP = IndexQuoteLoop(
     enabled=USE_INDEX_QUOTES,
     symbols=INDEX_TICKER_SYMBOLS,
-    active_symbol=lambda: SYMBOL,
+    active_symbol=lambda: MARKET_SELECTION.symbol,
     get_spot_quote=market_data.get_spot_quote,
     broadcast=broadcast,
-    index_quotes=INDEX_QUOTES,
+    index_quotes=runtime_state.INDEX_QUOTES,
     poll_seconds=INDEX_QUOTE_SECONDS,
     report=_print_log,
 )
@@ -1751,565 +1806,282 @@ async def algo_status_loop():
 
 
 # ── node relay ───────────────────────────────────────────────────────────
-_NODE_RELAY = NodeRelay(enabled=USE_RELAY, report=_print_log)
+runtime_state.NODE_RELAY = NodeRelay(
+    enabled=USE_RELAY,
+    report=_print_log,
+)
+_NODE_RELAY = runtime_state.NODE_RELAY
 
 
 async def _post_to_node(payload: dict):
-    await _NODE_RELAY.post(payload)
-
+    await runtime_state.NODE_RELAY.post(payload)
 
 # ── engine loop ──────────────────────────────────────────────────────────
+_LIVE_FEED_AGGREGATORS = LiveFeedAggregatorRegistry(managers=lambda: _FEEDS)
+
+
 def _live_aggregators() -> dict:
-    """Non-None per-provider tick aggregators, keyed by log tag."""
-    aggregators = {}
-    for tag, manager in (
-        ("smartapi", _FEEDS["SMARTAPI"]),
-        ("upstox", _FEEDS["UPSTOX"]),
-        ("shoonya", _FEEDS["SHOONYA"]),
-    ):
-        aggregator = manager._snapshot().aggregator
-        if aggregator is not None:
-            aggregators[tag] = aggregator
-    return aggregators
+    """Compatibility seam for active application feed aggregators."""
+    return _LIVE_FEED_AGGREGATORS.active()
 
 
-def _reset_daily_sessions(now: datetime):
-    """New trading day → reset OI session baselines so yesterday's
-    session-open OI doesn't leak into today's changeinOpenInterest. Same
-    per-day-flag pattern as the EOD job."""
-    global _LAST_SESSION_DATE
-    if _LAST_SESSION_DATE == now.date():
-        return
-    _LAST_SESSION_DATE = now.date()
-    for tag, aggregator in _live_aggregators().items():
-        aggregator.reset_session()
-        print(
-            f"[{tag}] Reset OI session baseline for new trading day {now.date()}",
-            flush=True,
-        )
-    # Futures OI session baseline (Market Regime input) — a separate tracker
-    # from the option-chain aggregators (see oi/futures_oi_tracker.py's
-    # class docstring for why).
-    _get_futures_oi_tracker().reset_session()
-    print(
-        f"[futures_oi] Reset futures OI session baseline for new trading day {now.date()}",
-        flush=True,
-    )
-
-
-def _maybe_trigger_eod(now: datetime):
-    """Fire the once-per-trading-day EOD fetch (participant OI) and the
-    cash-market FII/DII flow fetch — separate tasks/callbacks so one NSE
-    endpoint's failure isn't conflated with the other's reporting."""
-    global _EOD_DONE_DATE
-    if not (
-        is_trading_day(now)
-        and now.time() >= EOD_TRIGGER_TIME
-        and _EOD_DONE_DATE != now.date()
-    ):
-        return
-    # Date flag set BEFORE awaiting, so a slow fetch can't double-fire.
-    _EOD_DONE_DATE = now.date()
-    print(f"[eod] triggering EOD fetch for {now.date()}", flush=True)
-    eod_task = asyncio.create_task(
-        asyncio.to_thread(fetch_all_eod, now, True)  # save=True
-    )
+def _schedule_eod_jobs(now):
+    eod_task = asyncio.create_task(asyncio.to_thread(fetch_all_eod, now, True))
     eod_task.add_done_callback(_eod_task_done)
     flow_task = asyncio.create_task(asyncio.to_thread(record_today_flow))
     flow_task.add_done_callback(_flow_task_done)
 
 
-async def _collect_pipeline_payload(tick_start: float):
-    """Await the in-flight pipeline pass, shielded, and publish status.
+_DAILY_MARKET_SCHEDULER = DailyMarketScheduler(
+    option_aggregators=_LIVE_FEED_AGGREGATORS.active,
+    reset_futures_session=lambda: _get_futures_oi_tracker().reset_session(),
+    is_trading_day=is_trading_day,
+    eod_trigger_time=EOD_TRIGGER_TIME,
+    schedule_eod_jobs=_schedule_eod_jobs,
+)
 
-    shield() matters: a timeout must not cancel to_thread's worker, which
-    can't be stopped safely and may be updating the pipeline's module-level
-    runtime configuration. On timeout the task is RETAINED and collected on
-    a later loop instead of starting an overlapping REST pass."""
-    global _PIPELINE_TASK
-    if _PIPELINE_TASK is None:
-        _PIPELINE_STATUS["startedAt"] = datetime.now().astimezone().isoformat()
-        _PIPELINE_TASK = asyncio.create_task(_run_pipeline_locked())
-    try:
-        payload = await asyncio.wait_for(
-            asyncio.shield(_PIPELINE_TASK), timeout=PIPELINE_TIMEOUT_SECONDS
+
+def _reset_daily_sessions(now: datetime):
+    """Compatibility seam for application daily-session maintenance."""
+    _DAILY_MARKET_SCHEDULER.reset_sessions(now)
+
+
+def _maybe_trigger_eod(now: datetime):
+    """Compatibility seam for application EOD scheduling."""
+    _DAILY_MARKET_SCHEDULER.trigger_eod(now)
+
+
+def _pipeline_delayed_reason(timeout_seconds):
+    if USE_SMARTAPI:
+        return (
+            f"REST analytics pass exceeded {timeout_seconds:g}s; "
+            "live prices continue via WebSocket"
         )
-        _PIPELINE_TASK = None
-        await _publish_pipeline_status("LIVE")
-        return payload
-    except asyncio.TimeoutError:
-        elapsed = time.monotonic() - tick_start
-        await _publish_pipeline_status(
-            "DELAYED",
-            (
-                f"REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; live prices continue via WebSocket"
-                if USE_SMARTAPI
-                else f"Public REST analytics pass exceeded {PIPELINE_TIMEOUT_SECONDS:g}s; SmartAPI remains disabled"
-            ),
-            elapsed,
-        )
-        overlay_state = (
-            f"{LIVE_FEED_PROVIDER} websocket overlay remains active"
-            if USE_SMARTAPI and _feed_allowed(LIVE_FEED_PROVIDER)
-            else f"{DATA_SOURCE} REST polling will retry"
-        )
-        print(f"[pipeline] DELAYED after {elapsed:.2f}s — {overlay_state}", flush=True)
-        return None
-    except Exception as e:
-        _PIPELINE_TASK = None
-        await _publish_pipeline_status("DELAYED", f"Analytics pipeline failed: {e}")
-        print(f"[pipeline] FAILED: {e}", flush=True)
-        return None
+    return (
+        f"Public REST analytics pass exceeded {timeout_seconds:g}s; "
+        "SmartAPI remains disabled"
+    )
+
+
+def _pipeline_delayed_overlay():
+    if USE_SMARTAPI and _feed_allowed(LIVE_FEED_PROVIDER):
+        return f"{LIVE_FEED_PROVIDER} websocket overlay remains active"
+    return f"{MARKET_SELECTION.data_source} REST polling will retry"
+
+
+_MARKET_PIPELINE_SERVICE = MarketPipelineService(
+    run_pipeline=lambda: _run_pipeline_locked(),
+    publish_status=lambda *args, **kwargs: _publish_pipeline_status(
+        *args, **kwargs
+    ),
+    pipeline_status=_PIPELINE_STATUS,
+    timeout_seconds=PIPELINE_TIMEOUT_SECONDS,
+    delayed_reason=_pipeline_delayed_reason,
+    delayed_overlay=_pipeline_delayed_overlay,
+)
+
+
+async def _collect_pipeline_payload(tick_start: float):
+    """Compatibility seam for application market orchestration."""
+    return await _MARKET_PIPELINE_SERVICE.collect(tick_start)
+
+
+_OI_BASELINE_SYNCHRONIZER = OiBaselineSynchronizer(
+    aggregators=_LIVE_FEED_AGGREGATORS.active
+)
 
 
 def _seed_oi_baselines(payload):
-    """Feed NSE's authoritative changeinOpenInterest into every live feed
-    aggregator's OI baselines each cycle — not just at feed startup, since
-    start_*_feed() runs concurrently with engine_loop via asyncio.to_thread
-    and there's no guaranteed ordering. seed_session_baseline() only fills
-    tokens without an existing baseline, so calling this every cycle is
-    safe — previously only SmartAPI was seeded and Upstox/Shoonya fell back
-    to first-tick bootstrap, re-anchoring ceDOI/peDOI on every feed restart
-    (the "ChgOI changing abruptly" symptom).
+    """Compatibility seam for application OI baseline synchronization."""
+    _OI_BASELINE_SYNCHRONIZER.synchronize(payload)
 
-    Guards r[oi_field] == 0: NSE's parser returns None for strike/sides it
-    has no quote for (edge-of-chain strikes missing CE or PE), and
-    _to_int() silently maps that to 0 — indistinguishable from a genuinely
-    zero-OI contract. Seeding a baseline of 0 from a FALSE zero would stick
-    for the rest of the session (setdefault won't overwrite later) and make
-    that token's DOI read as its full OI instead of the true change.
-    Skipping leaves the aggregator's own bootstrap-on-first-tick fallback
-    to establish that baseline instead — self-correcting, never wrong."""
-    chain_rows = payload.get("chain", [])
-    rows_by_strike = {r["strike"]: r for r in chain_rows}
-    for aggregator in _live_aggregators().values():
-        baselines = {}
-        for token, meta in aggregator.token_meta.items():
-            if meta.get("option_type") not in ("CE", "PE"):
-                continue
-            row = rows_by_strike.get(meta["strike"])
-            if not row:
-                continue
-            oi_field = "ceOI" if meta["option_type"] == "CE" else "peOI"
-            chg_field = "ceChgOI" if meta["option_type"] == "CE" else "peChgOI"
-            if oi_field in row and chg_field in row and row[oi_field] != 0:
-                baselines[token] = row[oi_field] - row[chg_field]
-        if baselines:
-            aggregator.seed_session_baseline(baselines)
+
+def _store_canonical_payload(payload, published_at):
+    global LAST_PAYLOAD, LAST_PAYLOAD_AT
+    LAST_PAYLOAD = payload
+    LAST_PAYLOAD_AT = published_at
+
+
+def _store_previous_payload(payload):
+    global _LAST_SENT
+    _LAST_SENT = payload
+
+
+_CANONICAL_PAYLOAD_PUBLISHER = CanonicalPayloadPublisher(
+    stream_lock=_MARKET_STREAM_LOCK,
+    use_delta=lambda: USE_DELTA,
+    previous_payload=lambda: _LAST_SENT,
+    store_payload=_store_canonical_payload,
+    store_previous_payload=_store_previous_payload,
+    broadcast=lambda message: broadcast(message),
+    compute_diff=lambda previous, current: compute_diff(previous, current),
+)
 
 
 async def _publish_canonical_payload(payload):
-    """Publish the new canonical snapshot and derive its wire update
-    atomically relative to the live feeds' in-place patches."""
-    global LAST_PAYLOAD, LAST_PAYLOAD_AT, _LAST_SENT
-    async with _MARKET_STREAM_LOCK:
-        LAST_PAYLOAD = payload
-        LAST_PAYLOAD_AT = datetime.now().astimezone()
-        if not USE_DELTA or _LAST_SENT is None:
-            await broadcast({"type": "full", "payload": payload})
-        else:
-            # compute_diff walks the ENTIRE payload (all expiries, OI
-            # velocity buckets, virtual-OI, greeks) doing recursive equality
-            # checks + keyed-list reconciliation. Keep the event loop
-            # responsive via a worker while the stream lock prevents
-            # concurrent snapshot mutation.
-            diff_start = time.monotonic()
-            diff = await asyncio.to_thread(compute_diff, _LAST_SENT, payload)
-            diff_elapsed = time.monotonic() - diff_start
-            if diff_elapsed > 0.25:
-                print(
-                    f"[ws] WARNING: compute_diff took {diff_elapsed:.2f}s "
-                    f"— this was blocking the event loop before this fix",
-                    flush=True,
-                )
-            if diff is not None:
-                await broadcast({"type": "delta", "payload": diff})
-            else:
-                print("[ws] tick unchanged, skipping broadcast", flush=True)
-        _LAST_SENT = payload
+    """Compatibility seam for canonical application publication."""
+    await _CANONICAL_PAYLOAD_PUBLISHER.publish(payload)
+
+
+_MARKET_TICK_PACER = MarketTickPacer(
+    poll_seconds=POLL_SECONDS,
+    minimum_recompute_seconds=MIN_TICK_RECOMPUTE_SECONDS,
+    symbol_switch_event=_SYMBOL_SWITCH_EVENT,
+    tick_activity_event=_TICK_ACTIVITY_EVENT,
+)
 
 
 async def _pace_until_next_tick(tick_start: float, pipeline_elapsed: float):
-    """Sleep until the next engine tick. POLL_SECONDS is the CEILING (fires
-    anyway if nothing happens — quiet market, public-only mode, or no live
-    feed for this symbol). MIN_TICK_RECOMPUTE_SECONDS is the FLOOR: with
-    ticks flooding in every ~0.25s during market hours, waking on every
-    single one would run the heavy Greeks/OI-velocity/GEX pipeline MORE
-    often than the old fixed poll, not less."""
-    remaining = POLL_SECONDS - (time.monotonic() - tick_start)
-    if remaining <= 0:
-        if pipeline_elapsed > POLL_SECONDS:
-            print(
-                f"[ws] WARNING: pipeline took {pipeline_elapsed:.2f}s, "
-                f"longer than --poll-seconds {POLL_SECONDS}s — "
-                f"broadcast cadence is bottlenecked by pipeline speed, not the sleep.",
-                flush=True,
-            )
-        return
+    """Compatibility seam for application tick pacing."""
+    await _MARKET_TICK_PACER.wait(tick_start, pipeline_elapsed)
 
-    floor_remaining = MIN_TICK_RECOMPUTE_SECONDS - (time.monotonic() - tick_start)
-    if floor_remaining > 0:
-        await asyncio.sleep(min(floor_remaining, remaining))
-        remaining = POLL_SECONDS - (time.monotonic() - tick_start)
-    if remaining <= 0:
-        return
 
-    wait_switch = asyncio.create_task(_SYMBOL_SWITCH_EVENT.wait())
-    wait_tick = asyncio.create_task(_TICK_ACTIVITY_EVENT.wait())
-    try:
-        done, pending = await asyncio.wait(
-            {wait_switch, wait_tick},
-            timeout=remaining,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for t in pending:
-            t.cancel()
-        if wait_switch in done:
-            _SYMBOL_SWITCH_EVENT.clear()
-            print("[ws] symbol switch — ticking early", flush=True)
-        elif wait_tick in done:
-            _TICK_ACTIVITY_EVENT.clear()
-            print(
-                f"[ws] tick activity — ticking early "
-                f"(floor={MIN_TICK_RECOMPUTE_SECONDS}s)",
-                flush=True,
-            )
-        # else: timed out at the POLL_SECONDS ceiling, nothing to clear
-    except Exception as e:
-        print(
-            f"[ws] WARNING: wake-wait failed, falling back to plain sleep: {e}",
-            flush=True,
-        )
-        await asyncio.sleep(remaining)
+def _schedule_auto_execution(decision):
+    _create_background_task(
+        _AUTO_EXECUTOR.maybe_execute(
+            decision, MARKET_SELECTION.symbol, MARKET_SELECTION.expiry
+        ),
+        "auto_executor",
+    )
+
+
+def _schedule_node_relay(payload):
+    _create_background_task(_post_to_node(payload), "node_relay")
+
+
+_MARKET_ENGINE_CYCLE = MarketEngineCycle(
+    reset_daily_sessions=_reset_daily_sessions,
+    trigger_eod=_maybe_trigger_eod,
+    collect_pipeline=lambda tick_started_at: _collect_pipeline_payload(
+        tick_started_at
+    ),
+    observe_pipeline=lambda success, elapsed: METRICS.observe_pipeline(
+        success, elapsed
+    ),
+    market_session_status=_market_session_status,
+    schedule_auto_execution=_schedule_auto_execution,
+    seed_oi_baselines=_seed_oi_baselines,
+    publish_payload=lambda payload: _publish_canonical_payload(payload),
+    schedule_node_relay=_schedule_node_relay,
+    connected_count=lambda: len(CONNECTED),
+    build_current_prices=_build_current_prices,
+    check_pending_orders=lambda prices: PT_ENGINE.check_pending_orders(prices),
+    broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
+    pace=lambda tick_started_at, elapsed: _pace_until_next_tick(
+        tick_started_at, elapsed
+    ),
+)
 
 
 async def engine_loop():
-    while True:
-        tick_start = time.monotonic()
-        now = datetime.now()
-
-        _reset_daily_sessions(now)
-        _maybe_trigger_eod(now)
-
-        payload = await _collect_pipeline_payload(tick_start)
-        pipeline_elapsed = time.monotonic() - tick_start
-        METRICS.observe_pipeline(payload is not None, pipeline_elapsed)
-
-        if payload is not None:
-            # Transport/session context is part of the canonical payload so
-            # the Dashboard can distinguish an exchange closure from a
-            # broken feed.
-            payload["marketSession"] = _market_session_status(now)
-
-            # Strategy -> execution bridge: hand this tick's decision block
-            # to the auto-executor. Fire-and-forget so a slow broker call
-            # can't delay this tick's own broadcast below. No-op unless
-            # AUTO_STRATEGY_EXECUTION_ENABLED=true.
-            decision_block = payload.get("decision")
-            if decision_block:
-                _create_background_task(
-                    _AUTO_EXECUTOR.maybe_execute(decision_block, SYMBOL, EXPIRY),
-                    "auto_executor",
-                )
-
-            _seed_oi_baselines(payload)
-            await _publish_canonical_payload(payload)
-            _create_background_task(_post_to_node(payload), "node_relay")
-            print(
-                f"[ws] broadcast tick -> {len(CONNECTED)} client(s) "
-                f"(pipeline {pipeline_elapsed:.2f}s)",
-                flush=True,
-            )
-
-            # Paper trading: catch pending LIMIT fills and keep unrealized
-            # P&L live tick-to-tick even with zero new orders placed
-            # (mirrors dashboard.js's ptLiveReprice(), which the client
-            # can't do for LIMIT fills on its own).
-            current_prices = _build_current_prices(payload)
-            PT_ENGINE.check_pending_orders(current_prices)
-            await _broadcast_portfolio(current_prices)
-
-        await _pace_until_next_tick(tick_start, pipeline_elapsed)
+    """Compatibility seam for the canonical application engine cycle."""
+    await _MARKET_ENGINE_CYCLE.run_forever()
 
 
 # ── websocket handler ────────────────────────────────────────────────────
-async def _send_handshake_snapshot(ws, *, send_full: bool):
-    """Hand a newly-connected client everything the server already knows,
-    instead of leaving panels blank until each loop's next broadcast."""
-    if send_full:
-        # New clients need a full snapshot before they can apply deltas.
-        # Re-checked under the lock: if a switch/symbol change cleared
-        # LAST_PAYLOAD meanwhile, waiting for the next real tick is better
-        # than handing back a stale snapshot of the old symbol/source.
-        async with _MARKET_STREAM_LOCK:
-            if LAST_PAYLOAD is not None:
-                await ws.send_str(
-                    orjson.dumps(
-                        {
-                            "type": "full",
-                            "payload": LAST_PAYLOAD,
-                            "version": _BASELINE_ID,
-                        },
-                        default=_json_default,
-                    ).decode()
-                )
-    if INDEX_QUOTES:
-        await ws.send_str(
-            orjson.dumps(
-                {"type": "indexQuotes", "payload": INDEX_QUOTES},
-                default=_json_default,
-            ).decode()
-        )
-    # A late joiner must see an already-delayed analytics pass immediately;
-    # transitions are otherwise only broadcast when they change.
-    await ws.send_str(
-        orjson.dumps(
-            {"type": "pipelineStatus", "payload": _PIPELINE_STATUS},
-            default=_json_default,
-        ).decode()
+def _paper_handshake_snapshot():
+    prices = _build_current_prices(LAST_PAYLOAD)
+    portfolio = PT_ENGINE.get_portfolio_summary(prices)
+    spot = prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
+    portfolio["funds"] = PT_ENGINE.get_fund_summary(
+        spot_price=spot, current_prices=prices
     )
-    # Real account funds (Live mode) — absent for the process lifetime if
-    # funds polling has never been toggled on.
-    if LAST_FUNDS is not None:
-        await ws.send_str(
-            orjson.dumps(
-                {"type": "funds", "payload": LAST_FUNDS}, default=_json_default
-            ).decode()
-        )
-    # Algo status (live-trading/kill-switch/account-guard/auto-executor
-    # state) — whatever algo_status_loop() last computed, or a fresh build.
-    try:
-        status = (
-            LAST_ALGO_STATUS
-            if LAST_ALGO_STATUS is not None
-            else _build_algo_status()
-        )
-        await ws.send_str(
-            orjson.dumps(
-                {"type": "algoStatus", "payload": status}, default=_json_default
-            ).decode()
-        )
-    except Exception as e:
-        print(f"[algo-status] initial snapshot failed: {e}", flush=True)
-    # Most recent position-reconciliation mismatch, if any.
-    if LAST_RECONCILIATION_ALERT is not None:
-        try:
-            await ws.send_str(
-                orjson.dumps(
-                    {
-                        "type": "reconciliationAlert",
-                        "payload": LAST_RECONCILIATION_ALERT,
-                    },
-                    default=_json_default,
-                ).decode()
-            )
-        except Exception as e:
-            print(
-                f"[position_reconciler] initial alert snapshot failed: {e}",
-                flush=True,
-            )
-    # Paper-trading state survives restarts via SQLite — hand over whatever
-    # exists instead of leaving the panel empty until the next order/tick.
-    try:
-        init_prices = _build_current_prices(LAST_PAYLOAD)
-        init_portfolio = PT_ENGINE.get_portfolio_summary(init_prices)
-        init_spot = init_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
-        init_portfolio["funds"] = PT_ENGINE.get_fund_summary(
-            spot_price=init_spot, current_prices=init_prices
-        )
-        await ws.send_str(
-            orjson.dumps(
-                {"type": "portfolio", "payload": init_portfolio},
-                default=_json_default,
-            ).decode()
-        )
-        await ws.send_str(
-            orjson.dumps(
-                {"type": "orders", "payload": PT_ENGINE.get_orders()},
-                default=_json_default,
-            ).decode()
-        )
-    except Exception as e:
-        print(f"[paper-trading] initial snapshot failed: {e}", flush=True)
+    return portfolio, PT_ENGINE.get_orders()
+
+
+_WS_HANDSHAKE = WebSocketHandshakeSender(
+    encode=lambda message: orjson.dumps(
+        message, default=_json_default
+    ).decode(),
+    market_lock=_MARKET_STREAM_LOCK,
+    market_payload=lambda: LAST_PAYLOAD,
+    baseline_version=lambda: _BASELINE_ID,
+    index_quotes=lambda: runtime_state.INDEX_QUOTES,
+    pipeline_status=lambda: _PIPELINE_STATUS,
+    funds=lambda: runtime_state.LAST_FUNDS,
+    algo_status=lambda: (
+        runtime_state.LAST_ALGO_STATUS
+        if runtime_state.LAST_ALGO_STATUS is not None
+        else _build_algo_status()
+    ),
+    reconciliation_alert=lambda: LAST_RECONCILIATION_ALERT,
+    paper_snapshot=_paper_handshake_snapshot,
+)
+
+
+async def _send_handshake_snapshot(ws, *, send_full: bool):
+    """Compatibility seam for the canonical handshake sender."""
+    await _WS_HANDSHAKE.send(ws, send_full=send_full)
+
+
+_WS_MESSAGE_ROUTER = WebSocketMessageRouter(
+    place_order=lambda payload: _handle_place_order(payload),
+    cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
+    broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
+    build_current_prices=lambda payload: _build_current_prices(payload),
+    last_payload=lambda: LAST_PAYLOAD,
+    start_funds_polling=lambda: start_funds_polling(),
+    stop_funds_polling=lambda: stop_funds_polling(),
+)
 
 
 async def _ws_dispatch_message(data):
-    """Handle one inbound dashboard control message."""
-    mtype = data.get("type")
-    if mtype == "place_order":
-        try:
-            await _handle_place_order(data.get("payload") or {})
-        except Exception as e:
-            print(f"[paper-trading] place_order FAILED: {e}", flush=True)
-            traceback.print_exc()
-    elif mtype == "cancel_order":
-        try:
-            order_id = (data.get("payload") or {}).get("order_id")
-            if order_id:
-                success = PT_ENGINE.cancel_order(order_id)
-                print(
-                    f"[paper-trading] CANCEL {order_id}: "
-                    f"{'success' if success else 'failed'}",
-                    flush=True,
-                )
-                await _broadcast_portfolio(_build_current_prices(LAST_PAYLOAD))
-        except Exception as e:
-            print(f"[paper-trading] cancel_order FAILED: {e}", flush=True)
-    elif mtype == "toggle_live_mode":
-        # Sent by paper-trading.js whenever the PAPER/LIVE pill flips. This
-        # ONLY starts/stops real-funds polling — real order placement stays
-        # gated by LIVE_TRADING_ENABLED (restart-only, checked separately)
-        # regardless of this toggle. Process-wide: one client's toggle
-        # affects every connected client, since there's a single funds
-        # poller backing all of CONNECTED.
-        enabled = bool((data.get("payload") or {}).get("enabled"))
-        if enabled:
-            start_funds_polling()
-        else:
-            stop_funds_polling()
+    """Compatibility seam for the canonical message router."""
+    await _WS_MESSAGE_ROUTER.dispatch(data)
+
+
+def _set_price_source(value):
+    MARKET_SELECTION.select_price_source(value)
+
+
+def _set_futures_expiry(value):
+    MARKET_SELECTION.select_futures_expiry(value)
+
+
+def _invalidate_market_baseline():
+    global _LAST_SENT
+    _LAST_SENT = None
+    _SYMBOL_SWITCH_EVENT.set()
+
+
+_WS_QUERY_CONTROLLER = WebSocketQueryController(
+    current_symbol=lambda: MARKET_SELECTION.symbol,
+    switch_symbol=lambda symbol, expiry: switch_symbol(symbol, expiry),
+    switch_data_source=lambda source: switch_data_source(source),
+    current_price_source=lambda: MARKET_SELECTION.price_source,
+    set_price_source=_set_price_source,
+    current_futures_expiry=lambda: MARKET_SELECTION.futures_expiry,
+    set_futures_expiry=_set_futures_expiry,
+    invalidate_market_baseline=_invalidate_market_baseline,
+)
+
+
+_DASHBOARD_WS_HANDLER = DashboardWebSocketHandler(
+    origin_allowed=lambda request: _origin_allowed(request),
+    clients=_DASHBOARD_CLIENTS,
+    connected_count=lambda: len(CONNECTED),
+    metrics=METRICS,
+    query_controller=_WS_QUERY_CONTROLLER,
+    send_handshake=lambda websocket, **kwargs: _send_handshake_snapshot(
+        websocket, **kwargs
+    ),
+    has_market_payload=lambda: LAST_PAYLOAD is not None,
+    decode=orjson.loads,
+    dispatch_message=lambda data: _ws_dispatch_message(data),
+    symbol=lambda: MARKET_SELECTION.symbol,
+    expiry=lambda: MARKET_SELECTION.expiry,
+    logger=logger,
+)
 
 
 async def ws_handler(request):
-    global PRICE_SOURCE, FUTURES_EXPIRY, _LAST_SENT
-    if not _origin_allowed(request):
-        print(
-            f"[ws] REJECTED — disallowed Origin: {request.headers.get('Origin')!r}",
-            flush=True,
-        )
-        return web.Response(status=403, text="Origin not allowed")
-
-    ws = web.WebSocketResponse(heartbeat=20)
-    await ws.prepare(request)
-    _DASHBOARD_CLIENTS.add(ws)
-    reconnect_attempt = request.query.get("reconnect") == "1"
-    METRICS.websocket_connected(len(CONNECTED), reconnect=reconnect_attempt)
-    t0 = time.monotonic()
-    logger.info(
-        "dashboard websocket connected",
-        extra={
-            "event": "websocket.connected",
-            "subsystem": "websocket",
-            "status": "connected",
-            "connected_clients": len(CONNECTED),
-            "symbol": SYMBOL,
-            "expiry": EXPIRY,
-        },
-    )
-
-    # ?symbol=/?expiry= — dashboard.js's switchActiveIndex() reconnects with
-    # ?symbol=BANKNIFTY (etc.) on the WS URL when a ticker pill is clicked.
-    # ?expiry= is accepted in either SmartAPI ('31JUL2026') or
-    # option_chain_json ('31-Jul-2026') format via _parse_any_expiry.
-    requested_symbol = request.query.get("symbol")
-    requested_expiry = request.query.get("expiry")
-    if requested_symbol or requested_expiry:
-        switch_symbol(requested_symbol or SYMBOL, requested_expiry)
-
-    # ?dataSource= — the DATA SOURCE dropdown; process-wide, no restart.
-    requested_data_source = request.query.get("dataSource")
-    if requested_data_source:
-        try:
-            await switch_data_source(requested_data_source)
-        except ValueError as e:
-            print(
-                f"[ws] ignoring invalid ?dataSource={requested_data_source!r}: {e}",
-                flush=True,
-            )
-
-    # ?priceSource= controls the analytics reference. AUTO is the safe default:
-    # use live cash/index when NSE EQ is stale, otherwise EQ, and use futures
-    # near/after the close when no live cash quote is available.
-    requested_price_source = request.query.get("priceSource")
-    if requested_price_source:
-        requested_price_source = requested_price_source.strip().upper()
-        if requested_price_source in ("AUTO", "EQ", "FUT"):
-            if requested_price_source != PRICE_SOURCE:
-                print(
-                    f"[ws] price source switch requested: {PRICE_SOURCE} -> {requested_price_source}",
-                    flush=True,
-                )
-                PRICE_SOURCE = requested_price_source
-                _LAST_SENT = None
-                _SYMBOL_SWITCH_EVENT.set()
-        else:
-            print(
-                f"[ws] ignoring invalid ?priceSource={requested_price_source!r} "
-                "(must be AUTO, EQ or FUT)",
-                flush=True,
-            )
-
-    # ?futuresExpiry= — NEAR/NEXT/FAR futures reference selector.
-    futures_reference_switched = False
-    requested_futures_expiry = request.query.get("futuresExpiry")
-    if requested_futures_expiry:
-        fexp = requested_futures_expiry.strip().upper()
-        if fexp in ("NEAR", "NEXT", "FAR"):
-            if fexp != FUTURES_EXPIRY:
-                print(
-                    f"[ws] futures expiry switch requested: {FUTURES_EXPIRY} -> {fexp}",
-                    flush=True,
-                )
-                FUTURES_EXPIRY = fexp
-                futures_reference_switched = True
-                # Never diff the newly-selected contract against a cached
-                # payload from the previous one — the next pipeline pass
-                # becomes a full authoritative snapshot for every client.
-                _LAST_SENT = None
-                _SYMBOL_SWITCH_EVENT.set()
-        else:
-            print(
-                f"[ws] ignoring invalid ?futuresExpiry={requested_futures_expiry!r} "
-                f"(must be NEAR, NEXT, or FAR)",
-                flush=True,
-            )
-
-    await _send_handshake_snapshot(
-        ws, send_full=LAST_PAYLOAD is not None and not futures_reference_switched
-    )
-
-    try:
-        async for msg in ws:
-            if msg.type == web.WSMsgType.TEXT:
-                try:
-                    data = orjson.loads(msg.data)
-                except Exception as e:
-                    print(f"[ws] bad inbound message, ignoring: {e}", flush=True)
-                    continue
-                await _ws_dispatch_message(data)
-            elif msg.type in (
-                web.WSMsgType.ERROR,
-                web.WSMsgType.CLOSE,
-                web.WSMsgType.CLOSING,
-                web.WSMsgType.CLOSED,
-            ):
-                print(
-                    f"[ws] connection ended via {msg.type} close_code={ws.close_code}",
-                    flush=True,
-                )
-    finally:
-        _DASHBOARD_CLIENTS.discard(ws)
-        METRICS.websocket_disconnected(len(CONNECTED))
-        alive_for = time.monotonic() - t0
-        logger.info(
-            "dashboard websocket disconnected",
-            extra={
-                "event": "websocket.disconnected",
-                "subsystem": "websocket",
-                "status": "disconnected",
-                "connected_clients": len(CONNECTED),
-                "duration_seconds": round(alive_for, 3),
-                "reason": f"close_code={ws.close_code}",
-                "symbol": SYMBOL,
-                "expiry": EXPIRY,
-            },
-        )
-    return ws
+    return await _DASHBOARD_WS_HANDLER(request)
 
 
 # ── HTTP handlers (thin adapters; logic lives in server/* modules) ───────
 _HISTORY_API = MarketHistoryApi(
     state=lambda: {
-        "symbol": SYMBOL,
+        "symbol": MARKET_SELECTION.symbol,
         "broker_services_enabled": BROKER_SERVICES_ENABLED,
         "index_tokens": _SMARTAPI_INDEX_TOKENS,
     },
@@ -2322,21 +2094,19 @@ no_cache_middleware = history_no_cache_middleware
 
 
 async def spot_history_handler(request):
-    return await _HISTORY_API.spot_history(request)
+    return await _HTTP_ROUTE_HANDLERS.spot_history(request)
 
 
 async def history_handler(request):
-    return await _HISTORY_API.history(request)
+    return await _HTTP_ROUTE_HANDLERS.history(request)
 
 
 async def backtest_handler(request):
-    return await handle_backtest(
-        request, default_symbol=SYMBOL, run_backtest=run_backtest
-    )
+    return await _HTTP_ROUTE_HANDLERS.backtest(request)
 
 
 async def lot_sizes_handler(request):
-    return await _HISTORY_API.lot_sizes(request)
+    return await _HTTP_ROUTE_HANDLERS.lot_sizes(request)
 
 
 def _build_health_snapshot(now=None):
@@ -2360,12 +2130,13 @@ def _build_health_snapshot(now=None):
             "last_payload": LAST_PAYLOAD,
             "last_payload_at": LAST_PAYLOAD_AT,
             "connected_clients": len(CONNECTED),
-            "symbol": SYMBOL,
-            "expiry": EXPIRY,
+            "symbol": MARKET_SELECTION.symbol,
+            "expiry": MARKET_SELECTION.expiry,
             "broker_services_enabled": USE_SMARTAPI,
-            "data_source": DATA_SOURCE,
+            "data_source": MARKET_SELECTION.data_source,
             "live_feed_provider": LIVE_FEED_PROVIDER,
-            "live_feed_active": USE_SMARTAPI and _feed_allowed(DATA_SOURCE),
+            "live_feed_active": USE_SMARTAPI
+            and _feed_allowed(MARKET_SELECTION.data_source),
             "pipeline_status": _PIPELINE_STATUS,
             "smartapi_connected": smartapi_connected,
             "upstox_connected": upstox_connected,
@@ -2384,105 +2155,146 @@ def _log_health_transition(snapshot):
     )
 
 
-async def health_handler(request):
-    return await _health_response(
-        request, snapshot=_build_health_snapshot, record_transition=_log_health_transition
-    )
+async def broker_health_handler(request):
+    from brokers.connection import get_connection_status
+
+    try:
+        statuses = get_connection_status()
+
+        providers = {}
+
+        for item in statuses:
+            providers[item.provider] = {
+                "status": item.status,
+                "reason": getattr(item, "reason", None),
+            }
+
+        return web.json_response({
+            "providers": providers
+        })
+
+    except Exception as exc:
+        return web.json_response(
+            {
+                "providers": {},
+                "error": str(exc),
+            },
+            status=500,
+        )
 
 
 async def metrics_handler(request):
-    return await _metrics_response(request, metrics=METRICS)
+    return await _HTTP_ROUTE_HANDLERS.metrics(request)
+
+async def health_handler(request):
+    return await _HTTP_ROUTE_HANDLERS.health(request)
+
+
+_HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
+    history_api=_HISTORY_API,
+    backtest_response=handle_backtest,
+    default_symbol=lambda: MARKET_SELECTION.symbol,
+    run_backtest=lambda *args, **kwargs: run_backtest(*args, **kwargs),
+    health_response=_health_response,
+    health_snapshot=lambda: _build_health_snapshot(),
+    record_health_transition=lambda snapshot: _log_health_transition(snapshot),
+    metrics_response=_metrics_response,
+    metrics=METRICS,
+    broker_health_response=broker_health_handler,
+)
 
 
 # ── entry point ──────────────────────────────────────────────────────────
-async def main():
+def _validate_server_startup():
     if not _host_is_loopback(WS_HOST):
         raise RuntimeError(
             f"refusing unsafe non-loopback bind {WS_HOST!r}: the WebSocket "
             "control channel has no remote-client authentication; use "
             "--host localhost or a loopback address"
         )
-    # Must run before any task that can hit a broker API timeout logs one —
-    # see logging_config.py's RedactSensitiveHeaders: without it the SmartApi
-    # SDK dumps the live session Bearer token and API private key in
-    # plaintext on every request failure.
-    from logging_config import configure_logging
 
-    configure_logging()
 
-    app = web.Application(middlewares=[no_cache_middleware])
-    app.router.add_get("/health", health_handler)
-    app.router.add_get("/metrics", metrics_handler)
-    app.router.add_get("/ws", ws_handler)
-    app.router.add_get("/bridge", bridge_ws_handler)
-    app.router.add_get("/dashboard-relay", bridge_ws_handler)
-    app.router.add_get("/api/spot-history", spot_history_handler)
-    app.router.add_get("/api/history", history_handler)
-    app.router.add_get("/api/backtest", backtest_handler)
-    app.router.add_get("/api/lot-sizes", lot_sizes_handler)
-    FRONTEND_DIR = SCRIPT_DIR / "frontend"
-    app.router.add_static("/", path=FRONTEND_DIR, name="static")
+async def _start_http_runtime():
+    from server.app import ServerConfig, start_http_server
 
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, WS_HOST, HTTP_PORT)
-    await site.start()
-    print(f"[http] serving static files at http://{WS_HOST}:{HTTP_PORT}/")
-    print(
-        f"[http] Dashboard available at http://{WS_HOST}:{HTTP_PORT}/dist/Dashboard/DashboardPro.html"
+    return await start_http_server(
+        ServerRoutes(
+                    health=health_handler,
+                    broker_health=broker_health,
+                    metrics=metrics_handler,
+                    websocket=ws_handler,
+                    bridge_websocket=bridge_ws_handler,
+                    spot_history=spot_history_handler,
+                    history=history_handler,
+                    backtest=backtest_handler,
+                    lot_sizes=lot_sizes_handler,
+                ),
+        ServerConfig(
+            host=WS_HOST,
+            port=HTTP_PORT,
+            symbol=MARKET_SELECTION.symbol,
+            middleware=no_cache_middleware,
+        ),
     )
-    print(f"[ws] WebSocket endpoint at ws://{WS_HOST}:{HTTP_PORT}/ws symbol={SYMBOL}")
 
+
+def _set_main_loop(loop):
     global _MAIN_LOOP
-    _MAIN_LOOP = asyncio.get_running_loop()
+    runtime_state.MAIN_LOOP = _MAIN_LOOP = loop
 
-    # start_*_feed() makes blocking REST calls (token resolution) and has
-    # internal sleeps — anything blocking goes through a thread, never runs
-    # inline on the loop (same discipline as compute_diff() in the publish
-    # path).
+
+def _start_live_runtime(loop):
     if USE_SMARTAPI and _feed_allowed(LIVE_FEED_PROVIDER):
-        _start_live_feed(LIVE_FEED_PROVIDER, _MAIN_LOOP)
+        _start_live_feed(LIVE_FEED_PROVIDER, loop)
     elif USE_SMARTAPI:
         print(
             f"[feed] websocket overlay not started "
-            f"(data source={DATA_SOURCE}, feed provider={LIVE_FEED_PROVIDER})",
+            f"(data source={MARKET_SELECTION.data_source}, "
+            f"feed provider={LIVE_FEED_PROVIDER})",
             flush=True,
         )
     else:
         print(
-            "[broker] authenticated services disabled (BROKER_SERVICES_ENABLED=false) — "
-            "no broker login, account/order REST call, or websocket connection; "
-            "public daily ScripMaster allowed",
+            "[broker] authenticated services disabled "
+            "(BROKER_SERVICES_ENABLED=false) — no broker login, account/order "
+            "REST call, or websocket connection; public daily ScripMaster allowed",
             flush=True,
         )
 
-    _create_background_task(index_quote_loop(), "index_quote_loop")
-    _create_background_task(bridge_loop(), "bridge_loop")
-    _create_background_task(algo_status_loop(), "algo_status_loop")
-    if LIVE_TRADING_ENABLED:
-        _create_background_task(reconcile_loop(), "position_reconcile_loop")
-    # No funds task at boot — funds polling starts/stops live via the
-    # {"type":"toggle_live_mode"} WS message (see ws_handler +
-    # start_funds_polling()/stop_funds_polling()), so flipping the
-    # dashboard's LIVE pill controls it without a restart.
-    try:
-        await engine_loop()
-    finally:
-        background_tasks = list(_BACKGROUND_TASKS)
-        for task in background_tasks:
-            task.cancel()
-        if background_tasks:
-            await asyncio.gather(*background_tasks, return_exceptions=True)
-        await _NODE_RELAY.close()
-        # oi_analysis.py buffers OI history in memory and flushes to disk
-        # periodically — force a final write so a clean shutdown (Ctrl+C,
-        # restart) never loses up to a minute of unflushed history.
-        try:
-            from oi_analysis import flush_history_to_disk
 
-            flush_history_to_disk()
-        except Exception as e:
-            print(f"[shutdown] Could not flush OI history: {e}")
+def _runtime_background_jobs():
+    return build_background_jobs(
+        index_quotes=index_quote_loop,
+        bridge=bridge_loop,
+        algo_status=algo_status_loop,
+        reconcile=reconcile_loop,
+        live_trading_enabled=LIVE_TRADING_ENABLED,
+    )
+
+
+def _flush_runtime_state():
+    from oi_analysis import flush_history_to_disk
+
+    flush_history_to_disk()
+
+
+async def main():
+    from infrastructure.logging import configure_logging
+
+    lifecycle = ApplicationLifecycle(
+        validate_startup=_validate_server_startup,
+        configure_logging=configure_logging,
+        start_http_server=_start_http_runtime,
+        set_main_loop=_set_main_loop,
+        start_live_services=_start_live_runtime,
+        background_jobs=_runtime_background_jobs,
+        create_background_task=_create_background_task,
+        run_engine=engine_loop,
+        background_tasks=lambda: runtime_state.BACKGROUND_TASKS,
+        close_relay=lambda: runtime_state.NODE_RELAY.close(),
+        flush_state=_flush_runtime_state,
+    )
+    await lifecycle.run()
 
 
 if __name__ == "__main__":

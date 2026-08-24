@@ -16,7 +16,6 @@ import math
 
 import pandas as pd
 
-from mTerminals_json import _safe_num
 from oi.pricing import (
     ANNUAL_RISK_FREE_RATE,
     _MIN_T_YEARS,
@@ -37,6 +36,17 @@ __all__ = [
     "_build_vol_oi_ratios",
     "_compute_iv_rank_hv30",
 ]
+
+
+def _safe_num(value, default=0.0):
+    """Coerce a chain cell to a finite float without presenter imports."""
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return default if pd.isna(parsed) else parsed
 
 
 # ===========================================================================

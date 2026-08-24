@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from engine import OptionChainEngine
+from decision.engine import OptionChainEngine
 from oi.pricing import (
     bs_charm,
     bs_delta,
@@ -85,4 +85,3 @@ def test_compatibility_engine_uses_canonical_batch_values():
     np.testing.assert_allclose(enriched["PE_Gamma"], pe[1])
     np.testing.assert_allclose(enriched["PE_Theta"], pe[2])
     np.testing.assert_allclose(enriched["PE_Vega"], pe[3])
-

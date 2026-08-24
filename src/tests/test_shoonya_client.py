@@ -46,7 +46,7 @@ class _FakeLoginResponse:
 
 @pytest.fixture
 def shoonya(monkeypatch):
-    module = importlib.import_module("brokers.shoonya_client")
+    module = importlib.import_module("brokers.shoonya.client")
     values = {
         "shoonya_user_id": "USER",
         "shoonya_password": "PASS",

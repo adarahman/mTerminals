@@ -33,7 +33,7 @@ class FakeApi:
 
 @pytest.fixture
 def breeze(monkeypatch):
-    module = importlib.import_module("brokers.breeze_client")
+    module = importlib.import_module("brokers.breeze.client")
     values = {
         "breeze_api_key": "KEY",
         "breeze_api_secret": "SECRET",

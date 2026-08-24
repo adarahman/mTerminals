@@ -13,7 +13,7 @@ def _parse(value):
 
 
 def test_resolver_builds_option_and_index_subscriptions(monkeypatch):
-    import brokers.shoonya_market_data as source
+    import brokers.shoonya.market_data as source
 
     monkeypatch.setattr(source, "list_expiries", lambda *_args, **_kwargs: ["28-Aug-2026"])
     monkeypatch.setattr(

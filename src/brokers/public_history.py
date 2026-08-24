@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import requests
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 
 logger = logging.getLogger("mterminals.public_history")
 

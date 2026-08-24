@@ -10,6 +10,7 @@ API adapters
 must implement these.
 """
 
+from datetime import date
 from typing import Protocol, Iterable
 
 from .domain import (
@@ -18,8 +19,8 @@ from .domain import (
     Candle,
     Order,
     Position,
-    OptionChain,
 )
+from .market.option_chain.models import OptionChain
 
 
 # ============================================================
@@ -46,11 +47,10 @@ class HistoricalDataProvider(Protocol):
 
 
 class OptionChainProvider(Protocol):
-
     def get_option_chain(
         self,
         underlying: Instrument,
-        expiry
+        expiry: date,
     ) -> OptionChain:
         ...
 
@@ -92,9 +92,8 @@ class QuoteRepository(Protocol):
     def save(
         self,
         quote: Quote
-    ):
+    ) -> None:
         ...
-
 
 # ============================================================
 # NOTIFICATION
@@ -105,5 +104,5 @@ class NotificationService(Protocol):
     def send(
         self,
         message: str
-    ):
+    ) -> None:
         ...

@@ -37,7 +37,7 @@ from typing import Optional
 
 import requests
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 
 # ---------------------------------------------------------------------------
 # Config

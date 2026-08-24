@@ -8,7 +8,7 @@ exists; it reads whatever smartapi_instruments.InstrumentResolver reads.
 
 Lot sizes are resolved from FUTSTK/FUTIDX only (not CE/PE options).
 """
-from brokers.smartapi_instruments import InstrumentResolver
+from brokers.smartapi.instruments import InstrumentResolver
 
 resolver = InstrumentResolver().load()
 

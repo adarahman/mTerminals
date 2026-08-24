@@ -13,19 +13,36 @@ from importlib import import_module
 from types import ModuleType
 from typing import Callable, Optional
 
+from brokers.base import missing_execution_methods
 from brokers.logging import broker_event
 from brokers.provider_registry import normalize_provider
+from enum import Enum
+
+
+class BrokerStatus(str, Enum):
+    AVAILABLE = "available"
+    AUTH_FAILED = "auth_failed"
+    SESSION_EXPIRED = "session_expired"
+    API_UNAVAILABLE = "api_unavailable"
+    UNKNOWN = "unknown"
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class ConnectionStatus:
-    """Result of a non-mutating connection readiness check."""
-
     provider: str
     ready: bool
     error: Optional[str] = None
+    status: BrokerStatus = BrokerStatus.UNKNOWN
+
+    def as_dict(self):
+        return {
+            "provider": self.provider,
+            "ready": self.ready,
+            "status": self.status.value,
+            "error": self.error,
+        }
 
 
 def _adapter_healthcheck(module_name: str) -> Callable[[], tuple[bool, Optional[str]]]:
@@ -43,23 +60,46 @@ def _adapter_healthcheck(module_name: str) -> Callable[[], tuple[bool, Optional[
 # providers intentionally do not appear: selecting them must never trigger an
 # account login.
 _CHECKS: dict[str, Callable[[], tuple[bool, Optional[str]]]] = {
-    "SHOONYA": _adapter_healthcheck("brokers.shoonya_client"),
-    "BREEZE": _adapter_healthcheck("brokers.breeze_client"),
+    "SMARTAPI": _adapter_healthcheck("brokers.smartapi.client"),
+    "UPSTOX": _adapter_healthcheck("brokers.upstox.client"),
+    "KITE": _adapter_healthcheck("brokers.kite.client"),
+    "KOTAK": _adapter_healthcheck("brokers.kotak.client"),
+    "SHOONYA": _adapter_healthcheck("brokers.shoonya.client"),
+    "BREEZE": _adapter_healthcheck("brokers.breeze.client"),
 }
+
+def _classify_error(error: Optional[str]) -> BrokerStatus:
+    if not error:
+        return BrokerStatus.AVAILABLE
+
+    text = error.lower()
+
+    if "token" in text or "access_token" in text:
+        return BrokerStatus.AUTH_FAILED
+
+    if "session key" in text or "session expired" in text:
+        return BrokerStatus.SESSION_EXPIRED
+
+    if (
+        "502" in text
+        or "503" in text
+        or "gateway" in text
+        or "api unavailable" in text
+    ):
+        return BrokerStatus.API_UNAVAILABLE
+
+    return BrokerStatus.UNKNOWN
 
 # One canonical execution route per broker.  Market-data modules stay in
 # market_data.py's provider registry; this table is deliberately limited to
 # the account/order contract used by ws_server_live.py.
 EXECUTION_ADAPTERS: dict[str, str] = {
-    "SMARTAPI": "brokers.smartapi_client",
-    "UPSTOX": "brokers.upstox_execution_adapter",
-    "KITE": "brokers.kite_execution_adapter",
-    "SHOONYA": "brokers.shoonya_client",
-    "BREEZE": "brokers.breeze_client",
+    "SMARTAPI": "brokers.smartapi.client",
+    "UPSTOX": "brokers.upstox.execution",
+    "KITE": "brokers.kite.execution",
+    "SHOONYA": "brokers.shoonya.client",
+    "BREEZE": "brokers.breeze.client",
 }
-_EXECUTION_METHODS = ("place_order", "get_order_book", "get_positions", "get_funds")
-
-
 def get_execution_adapter(provider: str) -> ModuleType:
     """Load a broker's common order/account adapter on demand.
 
@@ -74,7 +114,7 @@ def get_execution_adapter(provider: str) -> ModuleType:
             f"No execution adapter for {name!r}. Valid: {sorted(EXECUTION_ADAPTERS)}"
         )
     module = import_module(module_name)
-    missing = [method for method in _EXECUTION_METHODS if not callable(getattr(module, method, None))]
+    missing = missing_execution_methods(module)
     if missing:
         raise RuntimeError(f"Execution adapter {module_name} is incomplete: {', '.join(missing)}")
     return module
@@ -93,7 +133,12 @@ def check_connection(provider: str) -> ConnectionStatus:
         return ConnectionStatus(provider=name, ready=True)
     try:
         ready, error = check()
-        status = ConnectionStatus(provider=name, ready=bool(ready), error=error)
+        status = ConnectionStatus(
+            provider=name,
+            ready=bool(ready),
+            error=error,
+            status=_classify_error(error)
+        )
     except Exception as exc:  # optional SDK/import failures must not crash a switch
         status = ConnectionStatus(provider=name, ready=False, error=str(exc))
     broker_event(

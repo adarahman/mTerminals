@@ -17,7 +17,8 @@ import pandas as pd
 from storage.caches import RollingWindow
 from oi.pricing import DEFAULT_BASE_IV
 
-from decision.types import T, ActiveSignal, DecisionResult
+from core.domain import ActiveSignal, DecisionResult
+from decision.types import T
 
 # DecisionEngine.evaluate() runs on a fresh DecisionEngine() instance every
 # tick (see mTerminals_json.export_dashboard_json()), so per-instance state

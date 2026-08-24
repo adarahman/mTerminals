@@ -25,14 +25,14 @@ Backend requirements are Python 3.10+; frontend tooling uses Node.js 22.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e 'backend[dev]'
+.venv/bin/python -m pip install -e 'src[dev]'
 cd frontend && npm ci && npm run build
 ```
 
 Run the backend from the repository root:
 
 ```bash
-.venv/bin/python ws_server_live.py
+.venv/bin/python run_server.py
 ```
 
 The application is served from `http://127.0.0.1:5500`; operational endpoints
@@ -42,11 +42,10 @@ Never commit `.env` or live credentials.
 ## Release validation
 
 ```bash
-cd backend
-../.venv/bin/ruff check . --select E9,F63,F7,F82
-../.venv/bin/python -m pytest
+PYTHONPATH=src .venv/bin/ruff check src run_server.py --select E9,F63,F7,F82
+PYTHONPATH=src .venv/bin/python -m pytest src/tests
 
-cd ../frontend
+cd frontend
 npm run test:release
 npm run build
 npm run test:e2e

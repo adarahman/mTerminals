@@ -49,7 +49,7 @@ import csv
 import os
 from datetime import date, datetime
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 
 # ---------------------------------------------------------------------------
 # Config

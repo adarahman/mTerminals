@@ -28,7 +28,7 @@ def resolve_chain_tokens(
     report: Callable[[str], None],
 ):
     """Build Upstox instrument-key subscriptions for one option chain."""
-    from brokers.upstox_client import INDEX_KEYS, get_atm_chain, list_expiries
+    from brokers.upstox.client import INDEX_KEYS, get_atm_chain, list_expiries
 
     symbol = symbol.upper()
     exchange = "BFO" if is_bse(symbol) else "NFO"

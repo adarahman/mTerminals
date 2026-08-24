@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from market.quotes import quote_from_legacy
+
 
 class IndexQuoteFetcher:
     def __init__(self, state, market_data, market_api):
@@ -52,8 +54,14 @@ class IndexQuoteFetcher:
                         self.warnings[f"{source}:{key}"] = time.monotonic()
                         print(f"[index-quote] {source.lower()} {key} failed: {exc}", flush=True)
                     continue
-                if row and row.get("ltp") is not None:
-                    ltp, close = row["ltp"], row.get("close")
+                quote = quote_from_legacy(key, row)
+                if quote is not None:
+                    ltp = float(quote.last_price)
+                    close = (
+                        float(quote.previous_close)
+                        if quote.previous_close is not None
+                        else None
+                    )
                     change = round(ltp - close, 2) if close else 0.0
                     out[key] = {"Symbol": key, "Last Price": ltp, "Change": change, "% Change": round(change / close * 100, 2) if close else 0.0}
             return out

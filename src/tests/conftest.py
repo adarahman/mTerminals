@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-Notably: makes server.py (formerly ws_server_live.py) importable at all.
+Notably: makes run_server.py (formerly server.py/ws_server_live.py) importable.
 Before this fixture existed, importing that module in a test process did
 three things no CI box (and no offline dev machine) can rely on:
 
@@ -94,31 +94,19 @@ def ws_server_live(tmp_path_factory):
 
     os.environ["RUNTIME_DIR"] = str(runtime_dir)
     os.environ.pop("LIVE_TRADING_ENABLED", None)  # module reads this once at import; keep it off
-    sys.argv = ["server.py"]
+    sys.argv = ["run_server.py"]
     for p in (PROJECT_ROOT, BACKEND_DIR):
         if p not in sys.path:
             sys.path.insert(0, p)
     os.chdir(str(runtime_dir))
 
     try:
-        # NOTE: this can't be a plain `import server`. The top-level entry
-        # point (server.py, PROJECT_ROOT) and the extracted-subsystem
-        # package (backend/server/, containing broker_services.py etc.)
-        # now share the name "server" since the ws_server_live.py ->
-        # server.py rename. server.py itself does `from server import
-        # broker_services` expecting the PACKAGE — that only resolves
-        # correctly as long as sys.modules["server"] isn't already
-        # claimed by the entry script. Running `python server.py`
-        # directly is fine (it's registered under "__main__", never
-        # "server"), but `import server` here would register the entry
-        # script itself under "server" and break its own internal
-        # `from server import broker_services` with a circular-import
-        # ImportError. Loading it under a distinct module name sidesteps
-        # that collision without touching server.py.
+        # Load the entry point under a stable test-only name so importing the
+        # ``server`` package continues to resolve extracted server modules.
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
-            "mterminals_server_entry", os.path.join(PROJECT_ROOT, "server.py")
+            "mterminals_server_entry", os.path.join(PROJECT_ROOT, "run_server.py")
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -162,8 +150,8 @@ def smartapi_modules(tmp_path_factory):
             sys.path.insert(0, p)
 
     try:
-        import brokers.smartapi_client as smartapi_client
-        import brokers.smartapi_ws_client as smartapi_ws_client
+        import brokers.smartapi.client as smartapi_client
+        import brokers.smartapi.websocket as smartapi_ws_client
         yield smartapi_client, smartapi_ws_client
     finally:
         if old_runtime_dir_env is None:
