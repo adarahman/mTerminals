@@ -1,3 +1,9 @@
+# STALE / DEAD MODULE — DO NOT USE.
+#
+# This was a standalone Breeze SDK constants/URLs/enums file previously at
+# `brokers/breeze_config.py`. Nothing in this codebase imports it (the live
+# Breeze SDK carries its own configuration), so it is kept here only as an
+# offline archive. Do not reference it from new code.
 import enum
 
 #Breeze API BASE URL

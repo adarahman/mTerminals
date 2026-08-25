@@ -36,6 +36,8 @@ from typing import Optional
 
 from kiteconnect import KiteConnect
 
+from core.errors import KiteError
+
 # Rate limiting configuration for Kite Connect API calls
 # Kite Connect has documented rate limits of ~3-10 requests per second depending on endpoint
 _KITE_RATE_LIMIT_MIN_INTERVAL = {
@@ -125,10 +127,6 @@ API_SECRET = os.getenv("KITE_API_SECRET")
 ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN")  # pasted fresh each trading day
 
 INSTRUMENT_CACHE_DIR = os.getenv("KITE_INSTRUMENT_CACHE_DIR", ".kite_cache")
-
-
-class KiteError(RuntimeError):
-    pass
 
 
 # ── 2. Session ───────────────────────────────────────────────────────────

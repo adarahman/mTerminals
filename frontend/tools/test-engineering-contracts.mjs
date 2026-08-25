@@ -7,9 +7,9 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const workflow = read('.github/workflows/ci.yml');
 const build = read('frontend/build.mjs');
 const packageJson = JSON.parse(read('frontend/package.json'));
-const pyproject = read('backend/pyproject.toml');
-const logging = read('backend/logging_config.py');
-const readiness = read('backend/operational_readiness.py');
+const pyproject = read('src/pyproject.toml');
+const logging = read('src/logging_config.py');
+const readiness = read('src/operational_readiness.py');
 const gitignore = read('.gitignore');
 const engineeringDir = path.join(root, 'docs/05_Engineering');
 const docs = fs.readdirSync(engineeringDir).filter((name) => name.endsWith('.md'))

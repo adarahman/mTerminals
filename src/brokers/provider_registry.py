@@ -34,7 +34,7 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ProviderSpec("SHOONYA", "SHOONYA", True, True, True),
     ProviderSpec("KITE", "ZERODHA", True, False, True),
     ProviderSpec("BREEZE", "ICICI DIRECT", True, False, True),
-    ProviderSpec("KOTAK", "KOTAK NEO", True, False, False),
+    ProviderSpec("KOTAK", "KOTAK NEO", True, True, False),
     ProviderSpec("NSE_BSE", "NSE/BSE API", True, False, False),
 )
 

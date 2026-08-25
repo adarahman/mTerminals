@@ -30,6 +30,8 @@ __all__ = [
     "StrategyError",
     "DecisionError",
     "LowConfidenceDecisionError",
+    "UpstoxError",
+    "KiteError",
 ]
 
 
@@ -186,4 +188,28 @@ class DecisionError(MTerminalsError):
 
 
 class LowConfidenceDecisionError(DecisionError):
+    pass
+
+
+# ============================================================
+# BROKER ADAPTER (concrete transport errors)
+# ============================================================
+
+class UpstoxError(BrokerError):
+    """
+    Upstox adapter transport/API failure.
+
+    Replaces the adapter-local ``RuntimeError`` subclass that used to live in
+    brokers.upstox.client; adapters now raise domain exceptions from here.
+    """
+    pass
+
+
+class KiteError(BrokerError):
+    """
+    Kite (Zerodha) adapter transport/API failure.
+
+    Replaces the adapter-local ``RuntimeError`` subclass that used to live in
+    brokers.kite.client; adapters now raise domain exceptions from here.
+    """
     pass

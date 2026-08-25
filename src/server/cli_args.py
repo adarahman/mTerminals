@@ -9,7 +9,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default="NIFTY")
     parser.add_argument("--expiry", default=None)
-    parser.add_argument("--poll-seconds", type=int, default=6)
+    parser.add_argument("--poll-seconds", type=int, default=10)
     parser.add_argument(
         "--pipeline-timeout-seconds",
         type=float,

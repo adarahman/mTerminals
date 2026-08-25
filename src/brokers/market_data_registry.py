@@ -13,6 +13,7 @@ Actual provider implementations stay in brokers.market_data.
 """
 
 import logging
+import time
 
 from infrastructure.config import settings as _md_settings
 from brokers.connection import check_connection
@@ -28,6 +29,38 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_CAPABILITIES: dict[str, dict] = provider_capabilities()
 PROVIDER_DISPLAY_NAMES: dict[str, str] = provider_display_names()
+
+# Last real connectivity result per provider. We never log a broker in just to
+# render the dropdown, but whenever we DO probe one (the active check, or a
+# switch attempt that succeeds or fails), we remember it so the panel can show
+# an honest status instead of a fabricated "ready" dot. Probed-and-down brokers
+# render red; brokers never probed render UNKNOWN (grey) — never a false green.
+_PROVIDER_HEALTH_CACHE: dict[str, tuple[float, dict]] = {}
+
+# How long a real connectivity probe result is trusted before we re-probe a
+# non-active broker. Keeps the dropdown showing live health for every
+# configured broker without firing a login/TOTP storm on every render.
+_PROVIDER_HEALTH_TTL = 180.0
+
+_STATUS_MAP = {
+    "available": "AVAILABLE",
+    "auth_failed": "AUTH_FAILED",
+    "session_expired": "SESSION_EXPIRED",
+    "api_unavailable": "API_UNAVAILABLE",
+    "unknown": "UNKNOWN",
+}
+
+
+def _health_from_connection(name: str, connection) -> dict:
+    return {
+        "id": name,
+        "label": PROVIDER_DISPLAY_NAMES.get(name, name),
+        "status": _STATUS_MAP.get(connection.status.value, "UNKNOWN"),
+        "active": False,
+        "ready": connection.ready,
+        "error": connection.error,
+        "capabilities": PROVIDER_CAPABILITIES.get(name, {}),
+    }
 
 
 def _provider_classes():
@@ -162,6 +195,7 @@ def set_active_provider(name: str) -> bool:
         return True
 
     connection = check_connection(name)
+    _PROVIDER_HEALTH_CACHE[name] = (time.time(), _health_from_connection(name, connection))
 
     if not connection.ready:
         broker_event(
@@ -185,6 +219,19 @@ def set_active_provider(name: str) -> bool:
 
     candidate = _build_instance(name)
 
+    # optional runtime validation
+    if hasattr(candidate, "health_check"):
+        if not candidate.health_check():
+            broker_event(
+                logger,
+                provider=name,
+                operation="provider_switch",
+                status="rejected",
+                level=logging.WARNING,
+                reason="provider health check failed",
+            )
+            return False
+
     _active_provider_name = name
     _active_provider_instance = candidate
 
@@ -205,11 +252,12 @@ def set_active_provider(name: str) -> bool:
 
 def provider_status() -> list[dict]:
     out = []
+    now = time.time()
 
     for key in PROVIDER_KEYS:
         caps = PROVIDER_CAPABILITIES[key]
 
-        # NSE/BSE is public market-data fallback, not an account broker
+        # NSE/BSE is public market-data fallback, not an account broker.
         if key == "NSE_BSE":
             out.append(
                 {
@@ -224,29 +272,50 @@ def provider_status() -> list[dict]:
             )
             continue
 
-        connection = check_connection(key)
+        if key == _active_provider_name:
+            # The active provider is genuinely probed every refresh.
+            connection = check_connection(key)
+            entry = _health_from_connection(key, connection)
+            _PROVIDER_HEALTH_CACHE[key] = (now, entry)
+        else:
+            cached = _PROVIDER_HEALTH_CACHE.get(key)
+            if cached is not None and (now - cached[0]) < _PROVIDER_HEALTH_TTL:
+                # Trust the last real probe within the TTL window.
+                entry = dict(cached[1])
+            elif provider_has_credentials(key):
+                # Configured broker: probe for real status, but throttled by the
+                # TTL above so we don't log in / fire TOTP on every render.
+                try:
+                    connection = check_connection(key)
+                except Exception:
+                    connection = None
+                if connection is not None:
+                    entry = _health_from_connection(key, connection)
+                else:
+                    entry = {
+                        "id": key,
+                        "label": PROVIDER_DISPLAY_NAMES.get(key, key),
+                        "status": "UNKNOWN",
+                        "active": False,
+                        "ready": False,
+                        "error": None,
+                        "capabilities": caps,
+                    }
+                _PROVIDER_HEALTH_CACHE[key] = (now, entry)
+            else:
+                # Not configured: never attempt a login, honestly unknown.
+                entry = {
+                    "id": key,
+                    "label": PROVIDER_DISPLAY_NAMES.get(key, key),
+                    "status": "UNKNOWN",
+                    "active": False,
+                    "ready": False,
+                    "error": None,
+                    "capabilities": caps,
+                }
 
-        status_map = {
-            "available": "AVAILABLE",
-            "auth_failed": "AUTH_FAILED",
-            "session_expired": "SESSION_EXPIRED",
-            "api_unavailable": "API_UNAVAILABLE",
-            "unknown": "UNKNOWN",
-        }
-
-        out.append(
-            {
-                "id": key,
-                "label": PROVIDER_DISPLAY_NAMES.get(key, key),
-                "status": status_map.get(
-                    connection.status.value,
-                    "UNKNOWN"
-                ),
-                "active": key == _active_provider_name,
-                "ready": connection.ready,
-                "error": connection.error,
-                "capabilities": caps,
-            }
-        )
+        entry = dict(entry)
+        entry["active"] = key == _active_provider_name
+        out.append(entry)
 
     return out

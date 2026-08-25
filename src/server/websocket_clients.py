@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from typing import Any
-
+from aiohttp import ClientConnectionResetError
 
 class WebSocketClientHub:
     """Track WebSocket clients and broadcast pre-serialized messages safely."""
@@ -47,5 +47,12 @@ class WebSocketClientHub:
         for client, result in zip(clients, results):
             if isinstance(result, Exception):
                 self.clients.discard(client)
+
+                if isinstance(
+                    result,
+                    (ClientConnectionResetError, ConnectionResetError),
+                ):
+                    continue
+
                 if on_error is not None:
                     on_error(result)

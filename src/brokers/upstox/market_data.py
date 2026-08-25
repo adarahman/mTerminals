@@ -122,38 +122,111 @@ class UpstoxMarketData:
         }
 
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
-        # exchange is unused: Upstox's instrument_key already encodes segment
-        # (e.g. 'NSE_FO|...'), unlike SmartAPI where exchange is a separate
-        # request parameter alongside bare numeric tokens.
-        del exchange
-        from brokers.upstox.client import get_quotes as _up_get_quotes
+        # Upstox requires its own instrument_key values. The incoming
+        # symbol_token_pairs may contain SmartAPI/shared tokens, so never
+        # pass those tokens directly to Upstox.
+        del exchange, mode
+
+        from brokers.upstox.client import (
+            get_quotes as _up_get_quotes,
+            index_instrument_key,
+        )
 
         if not symbol_token_pairs:
             return {}
-        instrument_keys = [token for _, token in symbol_token_pairs]
-        quotes = _up_get_quotes(instrument_keys)  # keyed by Upstox's own composite key
-        by_instrument_key = {q.get("instrument_token"): q for q in quotes.values()}
-        return {
-            tradingsymbol: by_instrument_key[token]
-            for tradingsymbol, token in symbol_token_pairs
-            if token in by_instrument_key
-        }
 
-    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
-        # See class docstring's KNOWN GAP note before wiring this into any
-        # call site that assumes SmartAPI's raw quote field names.
-        del exchange
-        from brokers.upstox.client import get_quotes as _up_get_quotes
+        resolved = []
 
-        if not symbol_token_pairs:
+        for tradingsymbol, original_token in symbol_token_pairs:
+            instrument_key = index_instrument_key(tradingsymbol)
+
+            if instrument_key:
+                resolved.append(
+                    (tradingsymbol, original_token, instrument_key)
+                )
+
+        if not resolved:
             return {}
-        instrument_keys = [token for _, token in symbol_token_pairs]
-        quotes = _up_get_quotes(instrument_keys)
+
+        quotes = _up_get_quotes(
+            [instrument_key for _, _, instrument_key in resolved]
+        )
+
+        # Upstox responses commonly expose instrument_token containing the
+        # actual instrument_key. Build a lookup from both response key and
+        # instrument_token so either response shape works.
+        by_key = {}
+
+        for response_key, quote in quotes.items():
+            by_key[str(response_key)] = quote
+
+            instrument_token = quote.get("instrument_token")
+            if instrument_token:
+                by_key[str(instrument_token)] = quote
+
         results = {}
-        for q in quotes.values():
-            ik = q.get("instrument_token")
-            if ik:
-                results[str(ik)] = q
+
+        for tradingsymbol, _original_token, instrument_key in resolved:
+            quote = by_key.get(str(instrument_key))
+
+            if quote:
+                results[tradingsymbol] = quote
+
+        return results
+
+
+    def get_batch_quotes_by_token(
+        self,
+        exchange,
+        symbol_token_pairs,
+        mode="FULL",
+    ):
+        # Preserve the caller's original token/key contract while resolving
+        # each symbol to an Upstox-specific instrument_key internally.
+        del exchange, mode
+
+        from brokers.upstox.client import (
+            get_quotes as _up_get_quotes,
+            index_instrument_key,
+        )
+
+        if not symbol_token_pairs:
+            return {}
+
+        resolved = []
+
+        for tradingsymbol, original_token in symbol_token_pairs:
+            instrument_key = index_instrument_key(tradingsymbol)
+
+            if instrument_key:
+                resolved.append(
+                    (tradingsymbol, original_token, instrument_key)
+                )
+
+        if not resolved:
+            return {}
+
+        quotes = _up_get_quotes(
+            [instrument_key for _, _, instrument_key in resolved]
+        )
+
+        by_key = {}
+
+        for response_key, quote in quotes.items():
+            by_key[str(response_key)] = quote
+
+            instrument_token = quote.get("instrument_token")
+            if instrument_token:
+                by_key[str(instrument_token)] = quote
+
+        results = {}
+
+        for _tradingsymbol, original_token, instrument_key in resolved:
+            quote = by_key.get(str(instrument_key))
+
+            if quote:
+                results[str(original_token)] = quote
+
         return results
 
     def get_spot_quote(self, underlying):

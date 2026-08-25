@@ -1,65 +1,71 @@
 # Broker integration map
 
-There are three independent paths. They can use different brokers and must
-not be confused with each other.
+The codebase is organized as a layered architecture under `src/`. Broker
+implementations live behind a stable protocol so the rest of the app never
+branches on a provider. There are three broker *roles* (market-data source,
+live-feed source, execution source) and each can be a different provider.
 
 ```text
-                         config.py
-       EXECUTION_BROKER / MARKET_DATA_PROVIDER / LIVE_FEED_PROVIDER
-                              |
-        +---------------------+---------------------+
-        |                     |                     |
-   execution              REST snapshots         tick stream
-        |                     |                     |
- connection.py        brokers/market_data.py   *_ws_client.py
- registry + health     stable provider facade   provider-native socket
-        |                     |                     |
- *_client.py /         smartapi_pipeline_       smartapi_feed_adapter.
- *_execution_adapter   adapter.py               TickAggregator
-        |                     |                     |
- account/order API     wide option/futures      websocket broadcast deltas
-        +---------------------+---------------------+
-                              |
-                       ws_server_live.py
-                              |
-                       dashboard websocket
+                         core/ports.py
+                  MarketDataProvider / ExecutionBroker (Protocols)
+                               |
+        +----------------------+----------------------+
+        |                      |                      |
+   execution              REST market-data      tick/live feed
+        |                      |                      |
+  brokers/connection.py  brokers/market_data_registry.py  server/feed_manager.py
+  EXECUTION_ADAPTERS     runtime switch + FallbackMarketData   broker-neutral lifecycle
+        |                      |                      |
+  brokers/*/client.py /  brokers/*/adapter.py      server/feeds/*_feed_adapter.py
+  brokers/*/execution.py (MarketData protocol)     provider-native stream -> normalized ticks
+        |                      |                      |
+  account/order API     wide option/futures        websocket broadcast deltas
+                               |                      |
+                        application/market_pipeline/  server/ (routes, bridge, app)
+                               |                      |
+                        market/ (option_chain, quotes,  server/websocket_clients
+                        instruments, expiry, providers)
+                               |
+                        dashboard / API / analytics
 ```
+
+The canonical option-chain runtime is import-safe and receives explicit
+configuration from the application layer; it never imports a broker package
+directly (it goes through `brokers/market_data_registry.py`).
 
 ## Canonical files
 
 | Concern | Use this file | Responsibility |
 | --- | --- | --- |
-| Runtime choices | `config.py` | Reads the three broker-role settings. |
-| Execution routing | `brokers/connection.py` | Loads one normalized order/account adapter and performs readiness checks. |
-| Market-data routing | `brokers/market_data.py` | The stable, switchable REST provider facade. All option-chain code should use its `market_data` object. |
-| REST pipeline | `broker_pipeline.py` | Canonical broker-neutral REST pipeline. Converts `market_data` results to the wide DataFrames used by the engine. |
-| Tick aggregation | `tick_pipeline.py` | Canonical provider-neutral `TickAggregator` that converts normalized socket ticks to dashboard deltas. |
-| Live orchestration | `ws_server_live.py` | Chooses roles, starts/stops feeds, invokes the pipeline, and broadcasts results. It should not implement a broker protocol. |
+| Broker contracts | `core/ports.py` | `MarketDataProvider` / `ExecutionBroker` runtime-checkable Protocols. |
+| Provider metadata | `brokers/provider_registry.py` | `ProviderSpec` (display label, snapshot/websocket/execution caps) and `PROVIDER_SPECS`. |
+| Market-data routing | `brokers/market_data_registry.py` | The switchable, fallback-wrapped provider facade. All option-chain code uses this, not a broker package. |
+| Execution routing | `brokers/connection.py` | Loads one normalized order/account adapter via `EXECUTION_ADAPTERS` and runs readiness checks. |
+| Live-feed routing | `server/feed_manager.py` | Broker-neutral lifecycle for a provider's persistent tick feed. |
+| Market-data pipeline | `application/market_pipeline/` | Canonical broker-neutral pipeline (coordinator, quotes, option_chain, futures) producing wide DataFrames. |
+| History API | `server/market_history_api.py` | SmartAPI-backed candle history, decoupled from the active feed source. |
+| Live orchestration | `src/server/app.py` (composition root) | Owns process-wide runtime state, starts/stops feeds, wires `server/*` into the running process. |
 
 ## Provider-specific files
 
-| File pattern | Purpose | Must not do |
+Each broker is a package under `brokers/<provider>/`:
+
+| File | Purpose | Must not do |
 | --- | --- | --- |
-| `*_client.py` | Native SDK/API, credentials, and provider-specific requests. | Depend on dashboard rendering or pipeline DataFrames. |
-| `*_market_data.py` | Translate a provider's raw REST response into the `MarketData` protocol. | Route orders or broadcast WebSocket messages. |
-| `*_execution_adapter.py` | Apply app configuration and normalize the shared order/account contract. | Build option-chain data. |
-| `*_ws_client.py` | Normalize native socket messages into the common tick schema. | Compute option-chain metrics or touch the dashboard. |
-
-## Compatibility names to avoid in new code
-
-- `smartapi_feed_adapter.py` remains a compatible import path; new code
-  imports `TickAggregator` from `tick_pipeline.py`.
-- `smartapi_pipeline_adapter.py` remains the compatible implementation path;
-  new code imports its broker-neutral API from `broker_pipeline.py`.
-- `market_api.py` is the public NSE/BSE source, not the broker-provider
-  registry. New broker code belongs under `brokers/`.
+| `client.py` | Native SDK/API, credentials, auth. | Depend on dashboard rendering or pipeline DataFrames. |
+| `adapter.py` / `market_data.py` | Translate raw REST into the `MarketDataProvider` protocol. | Route orders or broadcast WebSocket messages. |
+| `execution.py` (only if supported) | Apply app config and normalize the shared order/account contract. | Build option-chain data. |
+| `server/feeds/<provider>_feed_adapter.py` | Normalize native socket messages into the common tick schema. | Compute option-chain metrics or touch the dashboard. |
 
 ## Adding a broker
 
-1. Add its REST implementation to `brokers/market_data.py`'s provider
-   registry, using a provider-specific `*_market_data.py` file where needed.
-2. Add an execution adapter to `brokers/connection.py::EXECUTION_ADAPTERS`
+1. Create `brokers/<provider>/{client,adapter,market_data}.py` and satisfy
+   `MarketDataProvider` (see `core/ports.py`). Add it to
+   `brokers/provider_registry.py` with its capabilities.
+2. Register the runtime factory in `brokers/market_data_registry.py`'s
+   `_provider_classes()` and add a credential check to `provider_has_credentials`.
+3. Add an execution module to `brokers/connection.py::EXECUTION_ADAPTERS`
    only if order/account operations are implemented.
-3. Add a `*_ws_client.py` only if the broker offers a supported live feed; it
-   must emit the shared normalized tick shape.
-4. Do not add a new pipeline or feed aggregator for the broker.
+4. Add a `server/feeds/<provider>_feed_adapter.py` only if the broker offers a
+   supported live feed; it must emit the shared normalized tick shape.
+5. Do not add a new pipeline or feed aggregator for the broker.

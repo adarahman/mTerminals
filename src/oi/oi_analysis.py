@@ -170,10 +170,10 @@ def build_master_table_nse(df, spot, risk_free_rate=ANNUAL_RISK_FREE_RATE,
         return _dte_cache[exp_str]
     t_arr = np.array([_dte_years(r['Expiry']) for r in records], dtype=np.float64)
     strikes_arr = np.array([r['StrikePrice'] for r in records], dtype=np.float64)
-    ce_iv_arr = np.array([r['CE_IV'] or 0 for r in records], dtype=np.float64)
-    pe_iv_arr = np.array([r['PE_IV'] or 0 for r in records], dtype=np.float64)
-    ce_oi_arr = np.array([r['CE_OI'] for r in records], dtype=np.float64)
-    pe_oi_arr = np.array([r['PE_OI'] for r in records], dtype=np.float64)
+    ce_iv_arr = np.array([r.get('CE_IV') or 0 for r in records], dtype=np.float64)
+    pe_iv_arr = np.array([r.get('PE_IV') or 0 for r in records], dtype=np.float64)
+    ce_oi_arr = np.array([r.get('CE_OI') or 0 for r in records], dtype=np.float64)
+    pe_oi_arr = np.array([r.get('PE_OI') or 0 for r in records], dtype=np.float64)
 
     ce_valid = (ce_iv_arr > 0) & (ce_oi_arr > 0)
     pe_valid = (pe_iv_arr > 0) & (pe_oi_arr > 0)

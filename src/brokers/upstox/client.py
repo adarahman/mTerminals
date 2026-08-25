@@ -78,11 +78,9 @@ from urllib.parse import urlencode
 
 import requests
 
+from core.errors import UpstoxError
+
 logger = logging.getLogger(__name__)
-
-
-class UpstoxError(RuntimeError):
-    pass
 
 
 # ── Config (self-contained — see module docstring re: standalone status) ──
@@ -670,12 +668,32 @@ def index_instrument_key(underlying: str) -> Optional[str]:
 # ── Market data ─────────────────────────────────────────────────────────
 
 
+def _extract_instrument_key(x):
+    if isinstance(x, dict):
+        return (
+            x.get("instrument_key")
+            or x.get("token")
+            or x.get("instrument_token")
+            or x.get("symbol")
+        )
+
+    if isinstance(x, str):
+        return x
+
+    raise ValueError(f"unsupported instrument key format: {x!r}")
+
+
 def get_ltp(instrument_keys) -> dict:
     """instrument_keys: str or list of instrument_key strings, up to 500
     per Upstox's own documented cap. Returns dict keyed by the response's
     own composite key (e.g. 'NSE_EQ:RELIANCE'), values include last_price."""
+
     if isinstance(instrument_keys, (list, tuple, set)):
-        instrument_keys = ",".join(instrument_keys)
+        instrument_keys = ",".join(
+            _extract_instrument_key(x)
+            for x in instrument_keys
+        )
+
     payload = _session.request(
         "GET",
         f"{API_BASE}/v3/market-quote/ltp",
@@ -688,7 +706,11 @@ def get_quotes(instrument_keys) -> dict:
     """Full OHLC + depth quote (v2 — the confirmed-working full-quote
     endpoint; v3 currently only has LTP and a separate OHLC-only variant)."""
     if isinstance(instrument_keys, (list, tuple, set)):
-        instrument_keys = ",".join(instrument_keys)
+        instrument_keys = ",".join(
+            _extract_instrument_key(x)
+            for x in instrument_keys
+        )
+
     payload = _session.request(
         "GET",
         f"{API_BASE}/v2/market-quote/quotes",

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import importlib
 
-import exceptions as legacy_errors
 from core import errors
 from core.domain import (
     ActiveSignal,
@@ -14,10 +14,18 @@ from core.domain import (
 from core.enums import Exchange, InstrumentType, OptionType, OrderStatus
 
 
-def test_legacy_exceptions_are_identical_to_core_errors():
+def test_core_errors_is_canonical_exception_source():
+    # The legacy `exceptions` shim was deleted; core.errors is the single
+    # owner of all domain exceptions.
+    assert issubclass(errors.MTerminalsError, Exception)
     for name in errors.__all__:
-        assert getattr(legacy_errors, name) is getattr(errors, name)
-    assert legacy_errors.BackendError is errors.MTerminalsError
+        assert hasattr(errors, name)
+    assert hasattr(errors, "UpstoxError") and hasattr(errors, "KiteError")
+
+    import pytest
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("exceptions")
 
 
 def test_original_enum_names_remain_available_during_migration():

@@ -21,8 +21,28 @@ referencing it.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
 from typing import Callable, Optional
+
+from brokers.provider_registry import supports_websocket as _provider_supports_websocket
+from server import feed_lifecycle, runtime_state
+
+
+def _feed_allowed(feed_provider: str) -> bool:
+    """Whether ticks from the given broker feed may still merge/broadcast.
+
+    False after a runtime DATA SOURCE switch away from feed_provider, or
+    when the active source is polling-only (KITE/BREEZE/KOTAK/NSE_BSE — no
+    WebSocket feed in this codebase). Every *_sync_and_broadcast() gates on
+    this BEFORE touching runtime_state.LAST_PAYLOAD/runtime_state.LAST_SENT, so a feed left running
+    after a switch can't contaminate the new provider's baseline."""
+    return feed_lifecycle.is_allowed(
+        feed_provider,
+        runtime_state.MARKET_SELECTION.data_source,
+        _provider_supports_websocket,
+    )
 
 
 class BrokerFeedManager:
@@ -122,6 +142,81 @@ class BrokerFeedManager:
             state = self._snapshot()
             self._stop_fn(state, *stop_args, **stop_kwargs)
             self._store(state)
+
+
+_LOGGER = logging.getLogger("mterminals.server.feed_manager")
+
+
+def _create_background_task(awaitable, task_name: str) -> asyncio.Task:
+    task = asyncio.create_task(awaitable, name=task_name)
+    runtime_state.BACKGROUND_TASKS.add(task)
+    task.add_done_callback(lambda done: _background_task_done(done, task_name))
+    return task
+
+
+def _background_task_done(task: asyncio.Task, task_name: str):
+    """Retain detached tasks and surface unexpected subsystem exits."""
+    runtime_state.BACKGROUND_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _LOGGER.error(
+            "background task failed: %s",
+            task_name,
+            extra={
+                "event": "background_task.failed",
+                "subsystem": task_name,
+                "status": "failed",
+                "reason": str(exc),
+            },
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+def _restart_live_feed(provider: str, symbol: str, expiry=None) -> bool:
+    """Schedule the active provider's existing feed for a symbol switch.
+    Socket lifecycle remains provider-native; every orchestration call site
+    uses this broker-neutral dispatch rather than duplicating a provider
+    branch."""
+    return feed_lifecycle.restart(
+        provider, symbol, expiry, {k: m.restart for k, m in runtime_state.FEEDS.items()}
+    )
+
+
+def _start_live_feed(provider: str, loop) -> bool:
+    """Offload the configured provider's blocking feed startup."""
+    return feed_lifecycle.start(
+        provider,
+        loop,
+        {k: m.start for k, m in runtime_state.FEEDS.items()},
+        lambda start_callback, start_loop, task_name: _create_background_task(
+            asyncio.to_thread(start_callback, start_loop), task_name
+        ),
+    )
+
+
+def _stop_active_broker_feed(provider: str) -> bool:
+    """Best-effort unsubscribe when deactivating a streaming provider.
+    The synchronous feed_manager._feed_allowed gate remains authoritative for stopping
+    payloads; this cleanup releases broker subscription bandwidth."""
+    return feed_lifecycle.stop(
+        provider,
+        {k: m.stop_blocking for k, m in runtime_state.FEEDS.items()},
+        lambda callback: threading.Thread(target=callback, daemon=True).start(),
+    )
+
+
+def _commit_symbol_selection(new_symbol, new_expiry):
+    runtime_state.MARKET_SELECTION.select_symbol(new_symbol, new_expiry)
+    runtime_state.LAST_PAYLOAD = None
+    runtime_state.LAST_SENT = None
+
+
+def _commit_data_source(new_source):
+    runtime_state.MARKET_SELECTION.select_data_source(new_source)
+    runtime_state.LAST_PAYLOAD = None
+    runtime_state.LAST_SENT = None
 
     # ── internals ────────────────────────────────────────────────────
     def _switch_locked(self, symbol: str, strikes_around_atm: int, expiry) -> None:

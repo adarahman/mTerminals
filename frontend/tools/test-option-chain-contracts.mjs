@@ -14,7 +14,7 @@ const build = read('build.mjs');
 const spec = read('../docs/01_Product_Architecture/PDS-02_Option_Chain.md');
 const rangeTabs = read('Dashboard/range-tabs.js');
 const chainView = read('Dashboard/chain/chain-view.js');
-const server = read('../ws_server_live.py');
+const server = read('../src/server/cli_args.py');
 
 const checks = [
   ['standalone Option Chain page is not built', !build.includes('OptionChain/option-chain.html')],
@@ -31,7 +31,7 @@ const checks = [
   ['net OI metrics share their summary headers', template.includes('class="oi-snap-head-net"><small>Net OI') && template.includes('class="oi-snap-head-net"><small>Net ΔOI') && !template.includes('oi-snap-primary')],
   ['PCR change uses ratio precision instead of OI units', template.includes('const signedPcrDelta') && template.includes('signedPcrDelta(pcrShift)')],
   ['structure column uses shared per-strike classifier', template.includes('marketStructureLabels(chain') && template.includes('structureByStrike[Number(r.strike)]')],
-  ['ATM ±15 is the real frontend and backend default', rangeTabs.includes('RANGE_TAB_DEFAULT = 15') && chainView.includes('this.chainRange = 15') && server.includes('(15 if USE_SMARTAPI else 50)')],
+  ['ATM ±15 is the real frontend and backend default', rangeTabs.includes('RANGE_TAB_DEFAULT = 15') && chainView.includes('this.chainRange = 15') && server.includes('default=15')],
   ['PDS permits paired bilateral stacks', spec.includes('paired bilateral PE/CE stacks')],
 ];
 

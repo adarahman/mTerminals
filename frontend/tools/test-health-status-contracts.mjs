@@ -7,12 +7,14 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const dataService = read('shared/services/data-service.js');
 const template = read('Dashboard/chain/chain-template.js');
 const styles = read('styles/navigation.css');
-const server = read('../ws_server_live.py');
+const appPy = read('../src/server/app.py');
+const healthPy = read('../src/server/health.py');
+const cliArgs = read('../src/server/cli_args.py');
 
 const checks = [
-  ['backend exposes health route', server.includes("app.router.add_get('/health', health_handler)")],
-  ['health covers transport and market freshness', server.includes('"websocket"') && server.includes('"marketFeed"') && server.includes('ageSeconds')],
-  ['health reports delayed analytics separately', server.includes('"analyticsPipeline"') && server.includes('PIPELINE_TIMEOUT_SECONDS')],
+  ['backend exposes health route', appPy.includes('add_get("/health", routes.health)')],
+  ['health covers transport and market freshness', healthPy.includes('"websocket"') && healthPy.includes('"marketFeed"') && healthPy.includes('ageSeconds')],
+  ['health reports delayed analytics separately', healthPy.includes('"analyticsPipeline"') && cliArgs.includes('pipeline-timeout-seconds')],
   ['dashboard keeps analytics delay separate from market status', dataService.includes("messageType === 'pipelineStatus'") && dataService.includes('Pipeline health is supplementary')],
   ['analytics delay does not flash in the visible Feed reason', dataService.includes("reason: prev.reason === prev.pipelineReason ? '' : prev.reason") && dataService.includes('pipelineDetail')],
   ['dashboard renders a visible feed status', template.includes('id="feed-status-pill"') && template.includes('feed-source-row')],

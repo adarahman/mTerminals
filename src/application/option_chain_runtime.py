@@ -20,7 +20,6 @@ import argparse
 import logging
 import threading
 import time
-import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, time as dtime
@@ -777,8 +776,13 @@ def main(
         print()
         logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error(
+            "analytics tick failed for %s %s: %s",
+            runtime_config.symbol,
+            runtime_config.expiry,
+            exc,
+        )
 
 
 # =====================================================================

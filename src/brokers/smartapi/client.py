@@ -377,6 +377,15 @@ def _is_rate_limited(err) -> bool:
         or "rate limit" in text
         or "too many requests" in text
         or "access denied because of exceeding" in text
+        # Angel's gateway drops the response body under sustained load
+        # instead of returning a proper 429/error JSON — SmartApi's own
+        # client surfaces that as a JSON-parse DataException with an
+        # empty byte string, not as a recognizable rate-limit message.
+        # Without this branch it falls through to the generic re-login
+        # path in call(), which burns a full TOTP+login round-trip and
+        # doesn't fix anything since the retry hits the same empty body.
+        or "couldn't parse the json response" in text
+        or "b''" in text
     )
 
 

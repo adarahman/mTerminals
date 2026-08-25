@@ -11,18 +11,25 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _server_entry_env():
+    # server.app is the composition root (under src/); PYTHONPATH=src makes it
+    # importable as a top-level module from the repository root.
+    return {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+
+
 def test_public_only_mode_does_not_import_broker_client_or_adapter():
     probe = (
         'import os, sys; '
         'os.environ["BROKER_SERVICES_ENABLED"]="false"; '
-        'import run_server as server; '
-        'assert server.USE_SMARTAPI is False; '
+        'import server.app as server; '
+        'assert server.runtime_state.USE_SMARTAPI is False; '
         'assert "brokers.smartapi.client" not in sys.modules; '
         'assert "smartapi_pipeline_adapter" not in sys.modules'
     )
     result = subprocess.run(
         [sys.executable, "-c", probe],
         cwd=ROOT,
+        env=_server_entry_env(),
         capture_output=True,
         text=True,
         timeout=20,
@@ -47,10 +54,10 @@ def test_project_dotenv_overrides_stale_parent_env():
     probe = (
         'import sys; '
         'sys.path.insert(0, "src"); '
-        'import config; '
-        'assert config.settings.execution_broker != "SHOONYA", f"Got {config.settings.execution_broker}"; '
-        'assert config.settings.live_feed_provider != "SHOONYA", f"Got {config.settings.live_feed_provider}"; '
-        'assert config.settings.market_data_provider != "SHOONYA", f"Got {config.settings.market_data_provider}"; '
+        'from infrastructure.config import settings as _cfg; '
+        'assert _cfg.execution_broker != "SHOONYA", f"Got {_cfg.execution_broker}"; '
+        'assert _cfg.live_feed_provider != "SHOONYA", f"Got {_cfg.live_feed_provider}"; '
+        'assert _cfg.market_data_provider != "SHOONYA", f"Got {_cfg.market_data_provider}"; '
         'print("OK")'
     )
     result = subprocess.run(

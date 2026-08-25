@@ -49,8 +49,8 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
 # importable as bare `upstox_client`, matching how every other cross-module
 # import in this codebase's brokers/ package already resolves siblings
 # (e.g. ws_server_live.py's `from brokers.smartapi.client import ...`).
+from core.errors import UpstoxError
 from brokers.upstox.client import (
-    UpstoxError,
     UpstoxSession,
     PlaceOrderRequest,
     place_order as _upstox_place_order,

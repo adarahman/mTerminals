@@ -31,7 +31,7 @@ import requests
 
 from pathlib import Path
 
-from paths import PROJECT_ROOT
+from infrastructure.paths import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 

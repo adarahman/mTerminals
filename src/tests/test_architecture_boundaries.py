@@ -4,15 +4,24 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 
-LEGACY_MIXED_MODULES = {
-    "engine",
+# Modules from the pre-migration flat `backend/` layout. They were folded into
+# the layered `src/` architecture (brokers/*, application/market_pipeline,
+# server/feeds, core/ports, ...). Nothing under src/ may import them and the
+# files themselves must no longer exist — this pins the migration as complete
+# and blocks accidental reintroduction.
+LEGACY_MODULE_NAMES = {
+    "ws_server_live",
+    "broker_pipeline",
+    "tick_pipeline",
+    "smartapi_pipeline_adapter",
+    "smartapi_feed_adapter",
+    "market_api",
+    "option_chain_json",
+    "mTerminals_json",
     "expiry_manager",
     "index_contributors",
-    "market_api",
-    "mTerminals_json",
-    "option_chain_json",
     "pipeline_config",
-    "tick_pipeline",
+    "engine",
 }
 
 # Temporary outer-edge seams only. These modules translate or compose legacy
@@ -41,29 +50,22 @@ def assert_layer_excludes(layer: str, prohibited: set[str]) -> None:
     assert not violations, "architecture dependency violation(s):\n" + "\n".join(violations)
 
 
-def test_legacy_mixed_modules_are_quarantined_to_explicit_outer_seams():
-    actual = {}
-    architecture_roots = (
-        "analytics",
-        "application",
-        "brokers",
-        "core",
-        "decision",
-        "execution",
-        "infrastructure",
-        "market",
-        "oi",
-        "risk",
-        "server",
-        "storage",
-        "strategy",
-    )
-    for root in architecture_roots:
-        for path in sorted((BACKEND / root).rglob("*.py")):
-            legacy = imported_roots(path) & LEGACY_MIXED_MODULES
-            if legacy:
-                actual[str(path.relative_to(BACKEND))] = legacy
-    assert actual == ALLOWED_LEGACY_SEAMS
+def test_legacy_backend_modules_are_removed():
+    found = [
+        str(path.relative_to(BACKEND))
+        for path in BACKEND.rglob("*")
+        if path.name in LEGACY_MODULE_NAMES
+    ]
+    assert not found, "legacy modules still present under src/: " + ", ".join(sorted(found))
+
+
+def test_legacy_backend_modules_are_not_imported():
+    violations = []
+    for path in sorted(BACKEND.rglob("*.py")):
+        bad = imported_roots(path) & LEGACY_MODULE_NAMES
+        if bad:
+            violations.append(f"{path.relative_to(BACKEND)} -> {', '.join(sorted(bad))}")
+    assert not violations, "legacy imports still present:\n" + "\n".join(violations)
 
 
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():

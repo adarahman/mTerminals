@@ -1,10 +1,15 @@
 """HTTP adapters for service health and operational metrics."""
 
+import logging
+
 from aiohttp import web
 
-from server.health import HealthInputs, build_snapshot
+from server.health import HealthInputs, build_snapshot, log_transition
+from server import runtime_state
 
 from brokers.connection import check_connection
+
+_LOGGER = logging.getLogger("mterminals.server")
 
 _BROKER_PROVIDERS = [
     "KOTAK",
@@ -17,17 +22,41 @@ _BROKER_PROVIDERS = [
 
 
 async def broker_health(request):
+    """Per-provider connectivity classification for the Dashboard's
+    broker-health panel.
+
+    The ACTIVE market-data source gets a real healthcheck (which may trigger a
+    session preflight). Every other provider reports its live-feed connection
+    state from runtime_state.FEEDS — no login is attempted for a broker the
+    runtime isn't actively using, but the panel still shows a status dot for
+    each listed broker instead of marking them all 'unknown'.
+    """
+    active_provider = runtime_state.MARKET_SELECTION.data_source
+
     providers = {}
 
     for provider in _BROKER_PROVIDERS:
-        status = check_connection(provider)
+        if provider == active_provider:
+            status = check_connection(provider)
+            providers[provider] = status.as_dict()
+        else:
+            feed = runtime_state.FEEDS.get(provider)
+            connected = bool(getattr(feed, "connected", False)) if feed else False
+            providers[provider] = {
+                "provider": provider,
+                "ready": connected,
+                "status": "connected" if connected else "idle",
+                "error": None,
+            }
+        providers[provider]["active"] = (provider == active_provider)
 
-        providers[provider] = status.as_dict()
+    return web.json_response({"providers": providers})
 
-    return web.json_response(
-        {
-            "providers": providers
-        }
+
+def log_health_transition(snapshot):
+    """Log health changes once; repeated health polls remain quiet."""
+    runtime_state.LAST_HEALTH_LOG_STATE = log_transition(
+        snapshot, runtime_state.LAST_HEALTH_LOG_STATE, runtime_state.METRICS, _LOGGER
     )
 
 def build_health_snapshot(state, market_session_status, now=None):

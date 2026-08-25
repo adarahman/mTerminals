@@ -35,7 +35,7 @@ class ConcurrentMarketDataGatherer:
         fetch_sensex_quote: Callable[[], Any] | None = None,
         fetch_public_bse_quote: Callable[[str], Any] | None = None,
         public_bse_symbols: Iterable[str] = (),
-        max_workers: int = 5,
+        max_workers: int = 7,
     ) -> None:
         self._fetch_chain = fetch_chain
         self._fetch_futures = fetch_futures
@@ -55,22 +55,30 @@ class ConcurrentMarketDataGatherer:
             indices = executor.submit(self._fetch_indices)
 
             if request.broker_enabled:
-                if self._warm_broker_batch is not None:
-                    executor.submit(self._warm_broker_batch).result()
+                warm = self._submit_optional(
+                    executor, self._warm_broker_batch
+                )
+
                 ticker = self._submit_optional(
                     executor, self._fetch_ticker_payload
                 )
-                vix = self._submit_optional(executor, self._fetch_vix)
+                vix = self._submit_optional(
+                    executor, self._fetch_vix
+                )
                 sensex = self._submit_optional(
                     executor, self._fetch_sensex_quote
                 )
                 public_quotes = ()
             else:
+                warm = None
                 ticker = vix = sensex = None
                 public_quotes = tuple(
                     executor.submit(self._fetch_public_bse_quote, symbol)
                     for symbol in self._public_bse_symbols
                 ) if self._fetch_public_bse_quote is not None else ()
+
+            if warm is not None:
+                warm.result()
 
             return GatheredMarketInputs(
                 chain=chain.result(),

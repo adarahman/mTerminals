@@ -37,6 +37,8 @@ import pandas as pd
 import pytest
 
 from brokers import market_data as md
+from server import runtime_state, feed_manager
+from application import selection_state
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "src"
@@ -49,7 +51,7 @@ def _restore_runtime_state():
     prev_md = md.get_active_provider()
     ws = sys.modules.get("ws_server_live")
     prev_ds = (
-        ws.MARKET_SELECTION.data_source if ws is not None else None
+        runtime_state.MARKET_SELECTION.data_source if ws is not None else None
     )
     yield
     try:
@@ -57,7 +59,7 @@ def _restore_runtime_state():
     except Exception:
         pass
     if ws is not None:
-        ws.MARKET_SELECTION.select_data_source(prev_ds)
+        runtime_state.MARKET_SELECTION.select_data_source(prev_ds)
 
 
 def _noop_restart(*_a, **_k):
@@ -366,17 +368,17 @@ def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
     ws_server_live.switch_data_source("NSE_BSE")
-    assert ws_server_live.MARKET_SELECTION.data_source == "NSE_BSE"
+    assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
 
     # Switch to a broker provider: source + active facade both change.
     ws_server_live.switch_data_source("UPSTOX")
-    assert ws_server_live.MARKET_SELECTION.data_source == "UPSTOX"
+    assert runtime_state.MARKET_SELECTION.data_source == "UPSTOX"
     assert md.get_active_provider() == "UPSTOX"
 
     # And back to the public API.
     ws_server_live.switch_data_source("NSE_BSE")
-    assert ws_server_live.MARKET_SELECTION.data_source == "NSE_BSE"
+    assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
 
 
@@ -399,7 +401,7 @@ def test_switch_rejects_unknown_and_same_source_is_noop(ws_server_live, monkeypa
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
     with pytest.raises(ValueError):
         ws_server_live.switch_data_source("NOT_A_PROVIDER")
-    before = ws_server_live.MARKET_SELECTION.data_source
+    before = runtime_state.MARKET_SELECTION.data_source
     assert ws_server_live.switch_data_source(before) is None  # no-op, stays put
 
 
@@ -460,16 +462,16 @@ def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
 
     # Streaming provider active -> its feed is allowed.
     ws_server_live.switch_data_source("UPSTOX")
-    assert ws_server_live._feed_allowed("UPSTOX") is True
-    assert ws_server_live._feed_allowed("SMARTAPI") is False
+    assert feed_manager._feed_allowed("UPSTOX") is True
+    assert feed_manager._feed_allowed("SMARTAPI") is False
 
     # Polling-only active -> NO broker feed is allowed to broadcast.
     ws_server_live.switch_data_source("NSE_BSE")
     for provider in ("SMARTAPI", "UPSTOX", "SHOONYA"):
-        assert ws_server_live._feed_allowed(provider) is False
+        assert feed_manager._feed_allowed(provider) is False
     # KITE/BREEZE have no websocket client -> never "allowed" either.
     ws_server_live.switch_data_source("KITE")
-    assert ws_server_live._feed_allowed("KITE") is False
+    assert feed_manager._feed_allowed("KITE") is False
 
 
 def test_stop_active_broker_feed_unsubscribes_without_unbound_local_error(
@@ -576,21 +578,21 @@ def test_switch_symbol_unquotes_stale_encoded_symbol(ws_server_live, monkeypatch
     monkeypatch.setattr(ws_server_live, "USE_SMARTAPI", True)
     monkeypatch.setattr(ws_server_live, "LIVE_FEED_PROVIDER", "SMARTAPI")
 
-    orig_symbol = ws_server_live.MARKET_SELECTION.symbol
-    orig_expiry = ws_server_live.MARKET_SELECTION.expiry
+    orig_symbol = runtime_state.MARKET_SELECTION.symbol
+    orig_expiry = runtime_state.MARKET_SELECTION.expiry
     try:
         ws_server_live.switch_symbol("zydus%20lifesciences%20ltd")
-        assert ws_server_live.MARKET_SELECTION.symbol == "ZYDUS LIFESCIENCES LTD"
+        assert runtime_state.MARKET_SELECTION.symbol == "ZYDUS LIFESCIENCES LTD"
         ws_server_live.switch_symbol("BANKNIFTY")  # clean input still works
-        assert ws_server_live.MARKET_SELECTION.symbol == "BANKNIFTY"
+        assert runtime_state.MARKET_SELECTION.symbol == "BANKNIFTY"
     finally:
-        ws_server_live.MARKET_SELECTION.select_symbol(orig_symbol, orig_expiry)
+        runtime_state.MARKET_SELECTION.select_symbol(orig_symbol, orig_expiry)
 
 
 def test_default_data_source_falls_back_to_credentialed_broker(ws_server_live):
-    expected = ws_server_live._resolve_default_data_source()
+    expected = selection_state._resolve_default_data_source()
     assert expected != "NSE_BSE"
-    assert ws_server_live.MARKET_SELECTION.data_source == expected
+    assert runtime_state.MARKET_SELECTION.data_source == expected
     assert ws_server_live._md_get_active_provider() == expected
 
 
@@ -600,9 +602,9 @@ def test_default_data_source_nse_bse_when_no_broker_has_creds(
     # No broker at all has usable credentials -> NSE/BSE (login-free) is
     # the last-resort default.
     monkeypatch.setattr(
-        ws_server_live, "_md_provider_has_credentials", lambda name: False
+        selection_state, "md_provider_has_credentials", lambda name: False
     )
-    assert ws_server_live._resolve_default_data_source() == "NSE_BSE"
+    assert selection_state._resolve_default_data_source() == "NSE_BSE"
 
 
 def test_breeze_requires_all_connection_credentials(monkeypatch):
@@ -905,10 +907,10 @@ class _FakeSpotMD:
 def test_index_quotes_provider_aware(ws_server_live, monkeypatch):
     monkeypatch.setattr(ws_server_live, "market_data", _FakeSpotMD())
 
-    ws_server_live.MARKET_SELECTION.select_data_source("NSE_BSE")
+    runtime_state.MARKET_SELECTION.select_data_source("NSE_BSE")
     assert ws_server_live.fetch_index_quotes_smartapi_sync() == {}
 
-    ws_server_live.MARKET_SELECTION.select_data_source("KITE")
+    runtime_state.MARKET_SELECTION.select_data_source("KITE")
     quotes = ws_server_live.fetch_index_quotes_smartapi_sync()
     # market_api-shaped output index_quote_loop() consumes interchangeably.
     assert set(quotes) == {"NIFTY", "BANKNIFTY", "MIDCPNIFTY", "INDIA VIX", "SENSEX"}
@@ -918,10 +920,10 @@ def test_index_quotes_provider_aware(ws_server_live, monkeypatch):
 
 # ── 14. Per-tick pipeline gate activates the public chain path ───────────
 def test_pipeline_gate_activates_public_nse_path(ws_server_live):
-    ws_server_live.MARKET_SELECTION.select_data_source("NSE_BSE")
+    runtime_state.MARKET_SELECTION.select_data_source("NSE_BSE")
     config = ws_server_live._build_pipeline_runtime_config("NIFTY")
     assert config.use_smartapi is False  # public NSE/BSE chain path
 
-    ws_server_live.MARKET_SELECTION.select_data_source("UPSTOX")
+    runtime_state.MARKET_SELECTION.select_data_source("UPSTOX")
     config = ws_server_live._build_pipeline_runtime_config("NIFTY")
     assert config.use_smartapi is True  # broker REST chain path

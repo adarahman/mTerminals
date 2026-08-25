@@ -48,7 +48,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 
 logger = logging.getLogger(__name__)
 

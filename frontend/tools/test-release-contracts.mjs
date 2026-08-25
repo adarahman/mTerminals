@@ -10,7 +10,7 @@ const docsReadme = read('docs/README.md');
 const index = read('docs/00_MASTER_INDEX.md');
 const changelog = read('docs/CHANGELOG.md');
 const notes = read(`docs/RELEASE_NOTES_v${version}.md`);
-const backendReadme = read('backend/README.md');
+const backendReadme = read('src/README.md');
 const workflow = read('.github/workflows/ci.yml');
 const packageJson = JSON.parse(read('frontend/package.json'));
 

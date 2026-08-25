@@ -14,7 +14,7 @@ const renderer = [
 ].join('\n');
 const store = read('shared/stores/market-store.js');
 const service = read('shared/services/data-service.js');
-const server = read('../ws_server_live.py');
+const server = read('../src/application/market_service.py');
 const modal = read('Dashboard/modal-manager.js');
 const chainView = read('Dashboard/chain/chain-view.js');
 const storeContext = vm.createContext({ window: {} });
@@ -38,7 +38,7 @@ const checks = [
   ['routine ticker updates patch fields', marketContext.includes('function patchIndexTicker(d)') && marketContext.includes("value.textContent = fmtI(idx['Last Price'])")],
   ['ticker rebuild is structural only', marketContext.includes("expected.join('|') !== existing.join('|')")],
   ['live renderer avoids ticker outerHTML replacement', renderer.includes('patchIndexTicker(d)') && !renderer.includes('tickerEl.outerHTML = html')],
-  ['full snapshots establish a wire baseline', server.includes('"version": _BASELINE_ID') && store.includes('this.baselineVersion = msg.version || null')],
+  ['full snapshots establish a wire baseline', server.includes('"type": "full"') && store.includes('this.baselineVersion = msg.version || null')],
   ['incompatible deltas are rejected', store.includes('msg.baseVersion !== this.baselineVersion') && store.includes("this.emit('baselineMismatch'")],
   ['baseline mismatch requests coherent recovery', service.includes("this.store.on('baselineMismatch'") && service.includes('this.wsManager.connect(undefined, true)')],
   ['market events carry metadata rather than snapshots', store.includes('messageType: msg && msg.type') && !store.includes("emit('market:update', this.state)")],

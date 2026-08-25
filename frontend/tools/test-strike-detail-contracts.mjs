@@ -8,14 +8,14 @@ const view = read('Dashboard/strike-detail-report-view.js');
 const modal = read('Dashboard/modal-manager.js');
 const simulator = read('Dashboard/simulator-view.js');
 const sync = read('Dashboard/chain/chain-controls.js');
-const backend = read('../backend/mTerminals_json.py');
+const backend = read('../src/oi/footprint_score.py');
 const build = read('build.mjs');
 
 const checks = [
   ['selected strike is mandatory', modal.includes('!Number.isFinite(n)') && modal.includes('app.strikeDetail.render(n)')],
   ['canonical chain row is the base', view.includes('(d.chain || []).find') && !view.includes('simState')],
   ['Greeks are optional enrichment', view.includes('(d.greeks || []).find') && view.includes('Greeks unavailable; core chain, capital and flow remain live')],
-  ['canonical footprint factors are exported', backend.includes('"footprintFactors"') && backend.includes('footprint_pct_capital_activity')],
+  ['canonical footprint score is exported', backend.includes('"footprintScore"') && backend.includes('compute_footprint_score')],
   ['full footprint contributor breakdown is explained', view.includes('Footprint score contributors') && !view.includes('.slice(0,3)') && view.includes('relative to the currently visible chain')],
   ['feed state and timestamp are explicit', view.includes('Timestamp ${this._escape(asOf)}') && view.includes("replaceAll('_', ' ')")],
   ['5/15/30 velocity context is rendered', ['5m OI velocity','15m OI velocity','30m OI velocity'].every((label) => view.includes(label))],

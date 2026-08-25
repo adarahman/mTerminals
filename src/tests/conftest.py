@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-Notably: makes run_server.py (formerly server.py/ws_server_live.py) importable.
+Notably: makes src/server/app.py (the composition root, formerly run_server.py / server.py / ws_server_live.py) importable.
 Before this fixture existed, importing that module in a test process did
 three things no CI box (and no offline dev machine) can rely on:
 
@@ -101,15 +101,13 @@ def ws_server_live(tmp_path_factory):
     os.chdir(str(runtime_dir))
 
     try:
-        # Load the entry point under a stable test-only name so importing the
-        # ``server`` package continues to resolve extracted server modules.
-        import importlib.util
+        # Load the composition root under its canonical module name so the
+        # dataclass/type machinery resolves against a single module object.
+        # Pop any cached entry first so the test env (RUNTIME_DIR,
+        # LIVE_TRADING_ENABLED) is applied on this fresh import.
+        sys.modules.pop("server.app", None)
+        import server.app as module
 
-        spec = importlib.util.spec_from_file_location(
-            "mterminals_server_entry", os.path.join(PROJECT_ROOT, "run_server.py")
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
         yield module
     finally:
         sys.argv = old_argv

@@ -30,13 +30,12 @@ from brokers.market_data_registry import (
     get_active_provider,
 )
 
-from brokers.smartapi.client import safe_float
 from application.market_pipeline.utils import safe_float
 from market.quotes.ticker_payload import build_ticker_payload
 from market.quotes.vix_service import resolve_vix
 
 from storage.caches import _BATCH_CACHE
-
+from market.providers.nse_bse import NseBseMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,37 @@ def _throttled_warning(
 
     logger.warning(msg)
 
+_PUBLIC_MARKET_DATA = NseBseMarketData()
 
+
+def _load_public_vix():
+    """Canonical INDIA VIX fallback independent of selected broker."""
+    try:
+        quote = _PUBLIC_MARKET_DATA.get_spot_quote("INDIA VIX")
+        if not quote:
+            return None, 0.0, None
+
+        vix = safe_float(
+            quote.get("ltp")
+            or quote.get("last_price")
+            or quote.get("lastPrice")
+        )
+
+        change_pct = safe_float(
+            quote.get("pChange")
+            or quote.get("pct_change")
+            or quote.get("change_percent")
+            or 0.0
+        )
+
+        return vix, change_pct, quote
+
+    except Exception as exc:
+        _throttled_warning(
+            "public-vix",
+            f"[vix:public] NSE fallback failed: {exc}",
+        )
+        return None, 0.0, None
 # ---------------------------------------------------------------------
 # Shared index quote cache
 # ---------------------------------------------------------------------
@@ -127,7 +156,7 @@ def fetch_all_pills_and_vix_batched():
             symbols[sym] = token
 
 
-    if _VIX_TOKEN:
+    if get_active_provider() == "SMARTAPI" and _VIX_TOKEN:
         symbols[_VIX_TRADINGSYMBOL] = _VIX_TOKEN
 
 
@@ -148,21 +177,30 @@ def fetch_all_pills_and_vix_batched():
 
 def fetch_vix_smartapi():
     """
-    Temporary safe VIX fetch.
-    VIX failure must not stop option chain pipeline.
+    Resolve INDIA VIX independently of the selected market-data provider.
+
+    Preference:
+      1. active broker batch quote
+      2. public NSE/BSE provider
     """
     try:
         broker_quote = _BATCH_CACHE.get(_VIX_TRADINGSYMBOL)
 
         return resolve_vix(
             broker_quote,
-            public_loader=lambda: (None, 0.0, None),
+            public_loader=_load_public_vix,
             safe_number=safe_float,
-            warn=lambda key, msg: logger.warning("[%s] %s", key, msg),
+            warn=lambda key, msg: _throttled_warning(
+                key,
+                f"[{key}] {msg}",
+            ),
         )
 
     except Exception as exc:
-        logger.warning("[vix] disabled temporarily: %s", exc)
+        _throttled_warning(
+            "vix-resolve",
+            f"[vix] resolution failed: {exc}",
+        )
         return None, 0.0
 
 
@@ -190,7 +228,7 @@ def fetch_sensex_ticker_smartapi():
 
 # ---------------------------------------------------------------------
 # Compatibility aliases
-# Temporary until run_server.py removal
+# Temporary until src/server/app.py composition root is split into server/* modules
 # ---------------------------------------------------------------------
 
 fetch_vix = fetch_vix_smartapi

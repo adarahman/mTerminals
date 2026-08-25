@@ -32,7 +32,7 @@ cd frontend && npm ci && npm run build
 Run the backend from the repository root:
 
 ```bash
-.venv/bin/python run_server.py
+.venv/bin/python -m main
 ```
 
 The application is served from `http://127.0.0.1:5500`; operational endpoints
@@ -42,7 +42,7 @@ Never commit `.env` or live credentials.
 ## Release validation
 
 ```bash
-PYTHONPATH=src .venv/bin/ruff check src run_server.py --select E9,F63,F7,F82
+PYTHONPATH=src .venv/bin/ruff check src --select E9,F63,F7,F82
 PYTHONPATH=src .venv/bin/python -m pytest src/tests
 
 cd frontend

@@ -53,8 +53,8 @@ try:  # ws_server_live adds backend/ to sys.path; package-level tests do not.
 except ModuleNotFoundError:  # pragma: no cover - depends on launch style
     from infrastructure.config import settings
 
+from core.errors import KiteError
 from brokers.kite.client import (
-    KiteError,
     set_session_token as _kite_set_session_token,
     place_order as _kite_place_order,
     get_order_book as _kite_get_order_book,

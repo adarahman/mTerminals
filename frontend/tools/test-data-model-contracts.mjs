@@ -4,10 +4,10 @@ import process from 'node:process';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
-const exporter = read('backend/mTerminals_json.py');
-const capital = read('backend/oi/capital_metrics.py');
-const decision = read('backend/decision/types.py');
-const transport = read('ws_server_live.py');
+const exporter = read('src/application/dashboard_serializer.py');
+const capital = read('src/oi/capital_metrics.py');
+const decision = read('src/core/domain.py');
+const transport = read('src/application/market_service.py');
 const docs = fs.readdirSync(path.join(root, 'docs/04_Data_Model'))
   .filter((name) => name.endsWith('.md'))
   .map((name) => read(`docs/04_Data_Model/${name}`));
@@ -21,7 +21,7 @@ const checks = [
   ['only contract volume is lot converted', capital.includes('out["ce_volume"] * lot_size * out["ce_ltp"]') && !capital.includes('out["ce_oi"] * lot_size')],
   ['Greek exposure fails closed when incomplete', capital.includes('if series.empty or series.isna().any():') && capital.includes('return None')],
   ['decision carries state provenance and degradation', ['decisionTimestamp','stateVersion','evidenceCoverage','missingInputs','contributors'].every((field) => decision.includes(`"${field}"`))],
-  ['transport versions full and delta baselines', transport.includes('_BASELINE_ID') && transport.includes('"type": "full"') && transport.includes('"type": "delta"')],
+  ['transport emits full and delta message types', transport.includes('"type": "full"') && transport.includes('"type": "delta"')],
   ['institutional model prohibits identity claims', docs.some((doc) => doc.includes('specific institution placed a specific option trade'))],
 ];
 

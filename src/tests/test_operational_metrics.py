@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from operational_metrics import OperationalMetrics
 
+from server import runtime_state
+
 
 def test_registry_tracks_websocket_pipeline_and_feed_lifecycle():
     started = datetime(2026, 8, 8, 9, 0, tzinfo=timezone.utc)
@@ -52,7 +54,7 @@ def test_metrics_handler_returns_registry_snapshot(ws_server_live, monkeypatch):
         "service": "mterminals", "timestamp": "2026-08-08T00:00:00+00:00",
         "counters": {}, "gauges": {"connectedClients": 0},
     }
-    monkeypatch.setattr(module.METRICS, "snapshot", lambda: expected)
+    monkeypatch.setattr(runtime_state.METRICS, "snapshot", lambda: expected)
 
     response = asyncio.run(module.metrics_handler(None))
 

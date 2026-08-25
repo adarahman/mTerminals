@@ -8,7 +8,7 @@ Run:
 
 import asyncio
 
-from run_server import main as server_main
+from server.app import main as server_main
 
 
 def main() -> None:

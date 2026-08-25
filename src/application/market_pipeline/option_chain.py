@@ -1,5 +1,9 @@
 from __future__ import annotations
-
+from brokers.smartapi.client import (
+    _load_scrip_master,
+    _get_strike_interval,
+    _round_to_strike,
+)
 import logging
 from datetime import datetime, date
 import pandas as pd
@@ -7,13 +11,15 @@ from application.market_pipeline.utils import (
     _canon_underlying,
     safe_float,
 )
-from brokers import market_data
+from brokers.market_data import market_data
 
 from market.expiry.instrument_expiries import (
     available_option_expiries,
     from_instrument_expiry as _from_smartapi_expiry,
     to_instrument_expiry as _to_smartapi_expiry,
 )
+
+from market.instruments.lot_sizes import get_lot_size as _lot_size
 
 from market.option_chain.oi_change import (
     PreviousCloseOiTracker,
@@ -474,4 +480,3 @@ def fetch_option_chain_wide(
 # Gap #2: smartapi_client.py resolves OPTIDX/OPTSTK tokens (find_option_token)
 # but has no FUTIDX path. Minimal addition here rather than touching that
 # file — same _load_scrip_master() cache, no new network dependency.
-

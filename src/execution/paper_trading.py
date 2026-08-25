@@ -33,7 +33,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
-from paths import CACHE_DIR
+from infrastructure.paths import CACHE_DIR
 import os
 
 # Previously a bare relative filename ("paper_trading.db"), resolved

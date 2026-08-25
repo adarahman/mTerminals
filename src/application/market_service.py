@@ -23,6 +23,7 @@ class MarketPipelineService:
         timeout_seconds: float,
         delayed_reason: Callable[[float], str],
         delayed_overlay: Callable[[], str],
+        source_key: Callable[[], str] | None = None,
     ):
         self._run_pipeline = run_pipeline
         self._publish_status = publish_status
@@ -30,11 +31,29 @@ class MarketPipelineService:
         self._timeout_seconds = timeout_seconds
         self._delayed_reason = delayed_reason
         self._delayed_overlay = delayed_overlay
+        self._source_key = source_key or (lambda: "")
         self._task: asyncio.Task | None = None
+        self._task_source: str | None = None
 
     @property
     def in_flight(self) -> bool:
         return self._task is not None
+
+    async def cancel_in_flight(self) -> None:
+        """Cancel the current analytics pass, e.g. after provider switch."""
+        task = self._task
+        self._task = None
+        self._task_source = None
+
+        if task is None or task.done():
+            return
+
+        task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     async def collect(self, tick_started_at: float):
         """Collect one pass without overlapping a timed-out worker."""
@@ -42,12 +61,27 @@ class MarketPipelineService:
             self._pipeline_status["startedAt"] = (
                 datetime.now().astimezone().isoformat()
             )
+            self._task_source = self._source_key()
             self._task = asyncio.create_task(self._run_pipeline())
         try:
             payload = await asyncio.wait_for(
                 asyncio.shield(self._task), timeout=self._timeout_seconds
             )
+
+            task_source = self._task_source
+            current_source = self._source_key()
+
             self._task = None
+            self._task_source = None
+
+            if task_source != current_source:
+                print(
+                    f"[pipeline] discarding stale {task_source} result; "
+                    f"active provider is {current_source}",
+                    flush=True,
+                )
+                return None
+
             await self._publish_status("LIVE")
             return payload
         except asyncio.TimeoutError:
@@ -65,6 +99,7 @@ class MarketPipelineService:
             return None
         except Exception as exc:
             self._task = None
+            self._task_source = None
             await self._publish_status(
                 "DELAYED", f"Analytics pipeline failed: {exc}"
             )
@@ -138,35 +173,45 @@ class DataSourceSwitcher:
             f"[data-source] switch requested: {old_source} -> {new_source}",
             flush=True,
         )
+
         try:
-            switched = await self._execution_gate.run_exclusive(
-                lambda: self._activate_provider(new_source)
-            )
+            switched = self._activate_provider(new_source)
         except Exception as exc:
             print(
                 f"[data-source] switch to {new_source} failed; "
                 f"remaining on {old_source}: {exc}",
                 flush=True,
             )
+            self._signal_refresh()
             return False
+
         if not switched:
             print(
                 f"[data-source] {new_source} unavailable; "
                 f"remaining on {old_source}",
                 flush=True,
             )
+            self._signal_refresh()
             return False
 
         self._stop_feed(old_source)
         self._commit_source(new_source)
+
         if self._supports_websocket(new_source):
             self._restart_feed(
-                new_source, self._current_symbol(), self._current_expiry()
+                new_source,
+                self._current_symbol(),
+                self._current_expiry(),
             )
-        self._signal_refresh()
-        print(f"[data-source] switched to {new_source}", flush=True)
-        return True
 
+        self._signal_refresh()
+
+        print(
+            f"[data-source] switched to {new_source}",
+            flush=True,
+        )
+
+        return True
 
 class SymbolSwitcher:
     """Coordinate process-wide symbol and option-expiry changes."""

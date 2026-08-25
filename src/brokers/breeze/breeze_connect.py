@@ -1,3 +1,14 @@
+# STALE VENDORED COPY — DO NOT USE.
+#
+# This file is a snapshot of the third-party `breeze-connect` SDK that was
+# previously vendored at `brokers/breeze_connect.py`. It is now SHADOWED by
+# the installed PyPI package `breeze-connect` (see requirements): every
+# `from breeze_connect import BreezeConnect` in this codebase resolves to the
+# site-packages install, never to this file. It is kept here only as an
+# offline archive of the SDK's source; it is not imported by any module.
+#
+# To change Breeze behaviour, edit/pin the `breeze-connect` dependency, not
+# this file.
 import socketio
 import json
 import requests

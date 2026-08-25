@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from aiohttp.client_exceptions import ClientConnectionResetError
+
 
 class WebSocketHandshakeSender:
     """Send current runtime snapshots through injected read-only sources."""
@@ -33,41 +35,93 @@ class WebSocketHandshakeSender:
         self._reconciliation_alert = reconciliation_alert
         self._paper_snapshot = paper_snapshot
 
-    async def _send(self, websocket, message_type: str, payload, **extra) -> None:
-        message = {"type": message_type, "payload": payload, **extra}
-        await websocket.send_str(self._encode(message))
+    async def _send(
+        self,
+        websocket,
+        message_type: str,
+        payload,
+        **extra,
+    ) -> bool:
+        if websocket.closed:
+            return False
+
+        message = {
+            "type": message_type,
+            "payload": payload,
+            **extra,
+        }
+
+        try:
+            await websocket.send_str(self._encode(message))
+            return True
+        except (ClientConnectionResetError, ConnectionResetError):
+            return False
 
     async def send(self, websocket, *, send_full: bool) -> None:
+        if websocket.closed:
+            return
+
         if send_full:
             async with self._market_lock:
                 payload = self._market_payload()
+
                 if payload is not None:
-                    await self._send(
+                    ok = await self._send(
                         websocket,
                         "full",
                         payload,
                         version=self._baseline_version(),
                     )
+                    if not ok:
+                        return
 
         quotes = self._index_quotes()
         if quotes:
-            await self._send(websocket, "indexQuotes", quotes)
+            if not await self._send(
+                websocket,
+                "indexQuotes",
+                quotes,
+            ):
+                return
 
-        await self._send(websocket, "pipelineStatus", self._pipeline_status())
+        if not await self._send(
+            websocket,
+            "pipelineStatus",
+            self._pipeline_status(),
+        ):
+            return
 
         funds = self._funds()
         if funds is not None:
-            await self._send(websocket, "funds", funds)
+            if not await self._send(
+                websocket,
+                "funds",
+                funds,
+            ):
+                return
 
         try:
-            await self._send(websocket, "algoStatus", self._algo_status())
+            if not await self._send(
+                websocket,
+                "algoStatus",
+                self._algo_status(),
+            ):
+                return
         except Exception as exc:
-            print(f"[algo-status] initial snapshot failed: {exc}", flush=True)
+            print(
+                f"[algo-status] initial snapshot failed: {exc}",
+                flush=True,
+            )
 
         alert = self._reconciliation_alert()
         if alert is not None:
             try:
-                await self._send(websocket, "reconciliationAlert", alert)
+                if not await self._send(
+                    websocket,
+                    "reconciliationAlert",
+                    alert,
+                ):
+                    return
             except Exception as exc:
                 print(
                     f"[position_reconciler] initial alert snapshot failed: {exc}",
@@ -76,7 +130,22 @@ class WebSocketHandshakeSender:
 
         try:
             portfolio, orders = self._paper_snapshot()
-            await self._send(websocket, "portfolio", portfolio)
-            await self._send(websocket, "orders", orders)
+
+            if not await self._send(
+                websocket,
+                "portfolio",
+                portfolio,
+            ):
+                return
+
+            await self._send(
+                websocket,
+                "orders",
+                orders,
+            )
+
         except Exception as exc:
-            print(f"[paper-trading] initial snapshot failed: {exc}", flush=True)
+            print(
+                f"[paper-trading] initial snapshot failed: {exc}",
+                flush=True,
+            )
