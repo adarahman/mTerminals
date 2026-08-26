@@ -27,25 +27,34 @@ def _configured_market_data():
         return None
 
 
+_FNO_SYMBOLS_CACHE = None
+
+
 def get_fno_symbols():
+    global _FNO_SYMBOLS_CACHE
+    if _FNO_SYMBOLS_CACHE is not None:
+        return _FNO_SYMBOLS_CACHE
+    result = FNO_SYMBOLS_FALLBACK
     try:
         from brokers.smartapi.instruments import get_fno_underlyings
 
         symbols = get_fno_underlyings()
         if symbols.get("indices") or symbols.get("stocks"):
-            return symbols
+            result = symbols
     except Exception as error:
         logger.warning("Public ScripMaster universe lookup failed: %s", error)
 
-    market_data = _configured_market_data()
-    if market_data is not None:
-        try:
-            symbols = market_data.get_fno_underlyings()
-            if symbols.get("indices") or symbols.get("stocks"):
-                return symbols
-        except Exception as error:
-            logger.warning("Provider F&O universe lookup failed: %s", error)
-    return FNO_SYMBOLS_FALLBACK
+    if result is FNO_SYMBOLS_FALLBACK:
+        market_data = _configured_market_data()
+        if market_data is not None:
+            try:
+                symbols = market_data.get_fno_underlyings()
+                if symbols.get("indices") or symbols.get("stocks"):
+                    result = symbols
+            except Exception as error:
+                logger.warning("Provider F&O universe lookup failed: %s", error)
+    _FNO_SYMBOLS_CACHE = result
+    return _FNO_SYMBOLS_CACHE
 
 
 def get_symbol_display_name(symbol):

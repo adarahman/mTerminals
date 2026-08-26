@@ -11,9 +11,9 @@ const jobs = [
     cssReplacement: `<link rel="stylesheet" href="dashboard.bundle.css">`,
     jsBlock: /<script src="\.\.\/shared\/config\.js"><\/script>[\s\S]*?<script src="backtest-view\.js"><\/script>/,
     jsReplacement:
-`<script src="dashboard.bundle.1.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-    <script src="dashboard.bundle.2.js"></script>`,
+`<script defer src="dashboard.bundle.1.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script defer src="dashboard.bundle.2.js"></script>`,
     // remove the now-duplicated original CDN line (it's inside jsBlock originally between the two)
   },
 ];

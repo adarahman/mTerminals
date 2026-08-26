@@ -124,7 +124,10 @@ def export_dashboard_json(
                                # avoid a circular import — option_chain_json.py is this
                                # function's only caller.
     futures_expiry=None,      # near-month futures expiry string when price_source="FUT"
-                               # (option_chain_json.FUTURES_EXPIRY at call time), else None.
+                                # (option_chain_json.FUTURES_EXPIRY at call time), else None.
+    pipeline_timings=None,    # dict of per-stage timings injected by the pipeline
+                                # (chain/futures/quotes/engine/extraNear/extraMonthly/
+                                # serialization/total) for the dashboard's perf overlay.
 ):
     logger.info(f"[export_dashboard_json] Assembling frontend payload for {SYMBOL}...")
 
@@ -291,6 +294,10 @@ def export_dashboard_json(
         if capital_df_for_rollup is not None else {}
 
     # ── 10. Full payload ──────────────────────────────────────────────
+    _symbol_name = _get_symbol_display_name(SYMBOL)
+    _ds_active = _active_data_source()
+    _ds_payload = _data_sources_payload()
+    _fno_symbols = _get_fno_symbols()
     payload = {
         "dataContract": {
             "schemaVersion": "1.0.0",
@@ -324,8 +331,10 @@ def export_dashboard_json(
                 "transportStateOwnedBy": "websocket_envelope",
             },
         },
+        "pipelineTimings": pipeline_timings,
+
         "symbol":        str(SYMBOL),
-        "symbolName":    _get_symbol_display_name(SYMBOL),
+        "symbolName":    _symbol_name,
         "spot":          spot,
         "spotChange":    _r(ctx_dict.get("spot_change",  0), 2),
         "spotChgPct":    _r(ctx_dict.get("spot_chg_pct", 0), 2),
@@ -342,8 +351,8 @@ def export_dashboard_json(
         # ?dataSource= handler) ───────────────────────────────────────────
         # dataSource: the ACTIVE provider key; dataSources: every selectable
         # provider + its capability/status for the Dashboard's picker.
-        "dataSource":    _active_data_source(),
-        "dataSources":   _data_sources_payload(),
+        "dataSource":    _ds_active,
+        "dataSources":   _ds_payload,
         "expiry":        str(EXPIRY),
         "expiryDates":   expiry_dates or [],   # <-- NEW: full list
         "dte":           _to_int(dte),
@@ -467,7 +476,7 @@ def export_dashboard_json(
         # COMMON_SYMBOLS list dashboard.js used to hardcode) — see
         # smartapi_client.get_fno_underlyings() / renderSymbolOptions()
         # in chain-views.js.
-        "fnoSymbols": _get_fno_symbols(),
+        "fnoSymbols": _fno_symbols,
     }
 
     # ── 10b. Simulator support fields (V51Pro) ──────────────────────────

@@ -17,6 +17,7 @@ Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 """
 
 import argparse
+import atexit
 import logging
 import threading
 import time
@@ -425,7 +426,7 @@ def _select_runtime_spot(df, spot, df_fut, all_indices, runtime_config):
     return df, selected, used
 
 
-def _gather_market_data(exchange, runtime_config, broker_adapters=None):
+def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=None):
     """Fan out one pass's independent fetches concurrently and assemble the
     market-context pieces. These NSE/BSE calls are independent of each other
     (futures/indices/VIX/ticker-pills don't need the option-chain result);
@@ -488,7 +489,8 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None):
         ),
         fetch_public_bse_quote=_PUBLIC_MARKET.fetch_bse_quote,
         public_bse_symbols=_PUBLIC_MARKET.bse_symbols,
-    ).gather(request)
+        executor=_get_market_io_executor(),
+    ).gather(request, timings=timings)
 
     if request.option_exchange == "BSE":
         df, spot, expiry_dates = gathered.chain
@@ -585,12 +587,48 @@ def _make_expiry_manager_or_none(expiry_dates):
     return em
 
 
-def _build_extra_chains(em, runtime_config, broker_adapters=None):
+# Extra-expiry analytics are expensive (full chain fetch + engine). Cache each
+# rebuilt bundle per (symbol, slot, expiry date) and reuse it until it goes
+# stale or the symbol/expiry rolls, so a 6-10s poll does not re-run the entire
+# analytics engine for NEAR/MONTHLY every single tick.
+_EXTRA_CHAIN_CACHE_TTL_SECONDS = 45.0
+_extra_chain_cache: dict = {}
+
+
+# One process-level I/O executor reused across polls instead of spinning up a
+# fresh ThreadPoolExecutor on every gather / extra-chain rebuild. Created
+# lazily on first use (not at import) so tests and tooling that merely import
+# this module don't pay for a thread pool.
+_MARKET_IO_EXECUTOR = None
+
+
+def _get_market_io_executor() -> ThreadPoolExecutor:
+    global _MARKET_IO_EXECUTOR
+    if _MARKET_IO_EXECUTOR is None:
+        _MARKET_IO_EXECUTOR = ThreadPoolExecutor(max_workers=8)
+        atexit.register(_MARKET_IO_EXECUTOR.shutdown)
+    return _MARKET_IO_EXECUTOR
+
+
+def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
     """NEAR and MONTHLY extra-expiry bundles, built concurrently (they're
-    independent of each other). Empty dict when disabled or nothing pending."""
+    independent of each other) and throttled.
+
+    A rebuilt bundle is cached per (symbol, slot, expiry date) and reused until
+    it goes stale (TTL) or the symbol/expiry rolls — this avoids re-running the
+    full option-chain fetch + analytics engine for the extra expiries on every
+    poll, the single biggest source of redundant pipeline work. Empty dict when
+    disabled or nothing pending."""
     extra_chains = {}
     if em is None or runtime_config.no_extra_chains:
         return extra_chains
+    symbol = runtime_config.symbol
+    now = time.monotonic()
+    # Bound the cache: drop entries for any symbol other than the active one
+    # (only one symbol is live per process at a time).
+    if _extra_chain_cache:
+        for _k in [k for k in _extra_chain_cache if k[0] != symbol]:
+            del _extra_chain_cache[_k]
     try:
         slots = [
             (slot_name, slot)
@@ -601,25 +639,45 @@ def _build_extra_chains(em, runtime_config, broker_adapters=None):
             if slot and slot.date_str != str(runtime_config.expiry)
         ]
         if slots:
-            with ThreadPoolExecutor(max_workers=len(slots)) as ex2:
-                futs = {
-                    ex2.submit(
+            to_build = []
+            for slot_name, slot in slots:
+                key = (symbol, slot_name, slot.date_str)
+                cached = _extra_chain_cache.get(key)
+                if (
+                    cached is not None
+                    and (now - cached[0]) < _EXTRA_CHAIN_CACHE_TTL_SECONDS
+                ):
+                    extra_chains[slot.date_str] = cached[1]
+                    if timings is not None:
+                        timings["extra" + slot_name] = 0.0
+                else:
+                    to_build.append((slot_name, slot, key))
+            if to_build:
+                futs = {}
+                for slot_name, slot, key in to_build:
+                    submitted_at = time.monotonic()
+                    f = _get_market_io_executor().submit(
                         _build_expiry_bundle,
-                        runtime_config.symbol,
+                        symbol,
                         slot.date_str,
-                        _exchange_for_symbol(runtime_config.symbol),
+                        _exchange_for_symbol(symbol),
                         runtime_config=runtime_config,
                         broker_adapters=broker_adapters,
-                    ): (slot_name, slot)
-                    for slot_name, slot in slots
-                }
+                    )
+                    futs[f] = (slot_name, slot, key, submitted_at)
                 for f in as_completed(futs):
-                    slot_name, slot = futs[f]
+                    slot_name, slot, key, submitted_at = futs[f]
                     try:
                         n_df, n_master, n_ctx, n_dte, _ = f.result()
-                        extra_chains[slot.date_str] = (n_df, n_master, n_ctx, n_dte)
+                        value = (n_df, n_master, n_ctx, n_dte)
+                        extra_chains[slot.date_str] = value
+                        _extra_chain_cache[key] = (now, value)
                     except Exception as e:
                         logger.warning(f"[{slot_name}] Skip extra bundle ({e})")
+                    if timings is not None:
+                        timings["extra" + slot_name] = round(
+                            time.monotonic() - submitted_at, 4
+                        )
     except Exception as e:
         logger.warning(f"[ExtraChains] Skip ({e})")
     return extra_chains
@@ -684,10 +742,21 @@ def main(
     if export_dashboard is None:
         raise RuntimeError("dashboard exporter must be injected")
     exchange = _exchange_for_symbol(runtime_config.symbol)
+    timings: dict = {}
+    t_start = time.monotonic()
 
     try:
-        md = _gather_market_data(exchange, runtime_config, broker_adapters)
+        md = _gather_market_data(
+            exchange, runtime_config, broker_adapters, timings=timings
+        )
         df, spot = md["df"], md["spot"]
+
+        _quote_keys = ("ticker", "vix", "sensex") + tuple(
+            k for k in timings if k.startswith("publicBse:")
+        )
+        timings["quotes"] = round(
+            max([timings.get(k, 0.0) for k in _quote_keys] or [0.0]), 4
+        )
 
         resolved_expiry = (
             runtime_config.expiry
@@ -724,7 +793,7 @@ def main(
 
         em = _make_expiry_manager_or_none(md["expiry_dates"])
         extra_chains = _build_extra_chains(
-            em, runtime_config, broker_adapters
+            em, runtime_config, broker_adapters, timings=timings
         )
 
         # Fallback to local JSON snap logs for historical OI analysis.
@@ -736,6 +805,7 @@ def main(
 
         _near_expiry_str, _far_expiry_str = _calendar_spread_expiries(em)
 
+        _engine_start = time.monotonic()
         engine_result = build_engine_result(
             df=df,
             df_clean=df_clean,
@@ -752,10 +822,12 @@ def main(
             near_expiry=_near_expiry_str,
             far_expiry=_far_expiry_str,
         )
+        timings["engine"] = round(time.monotonic() - _engine_start, 4)
 
         ctx_dict = engine_result.to_ctx_dict()
         _patch_bse_spot_change(ctx_dict, all_indices, runtime_config)
 
+        _export_start = time.monotonic()
         export_dashboard(
             df_clean=df_clean,
             master=engine_result.master,
@@ -772,7 +844,10 @@ def main(
             all_indices=all_indices,
             price_source=md["price_source_used"],
             futures_expiry=runtime_config.futures_expiry,
+            pipeline_timings=timings,
         )
+        timings["serialization"] = round(time.monotonic() - _export_start, 4)
+        timings["total"] = round(time.monotonic() - t_start, 4)
         print()
         logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 

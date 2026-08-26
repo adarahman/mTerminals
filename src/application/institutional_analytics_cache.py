@@ -49,3 +49,18 @@ def get_cached_bias():
         _BIAS_CACHE.clear()
         _BIAS_CACHE.set(today, report)
     return _BIAS_CACHE.get(today)
+
+
+def warm() -> None:
+    """Pre-populate the daily caches at startup.
+
+    get_cached_sentiment()/get_cached_bias() compute their analytics only on
+    the first cache miss, which made the first dashboard serialize pay a
+    ~10s one-time cost during profiling. Warming once at startup keeps that
+    off the first pipeline tick.
+    """
+    try:
+        get_cached_sentiment()
+        get_cached_bias()
+    except Exception:  # noqa: BLE001 - warm-up must never block startup
+        logger.debug("institutional analytics warm-up skipped", exc_info=True)

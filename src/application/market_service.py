@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 from urllib.parse import unquote
@@ -113,6 +114,17 @@ class SerializedPipelineExecutor:
     def __init__(self, *, lock=None):
         self._lock = lock or asyncio.Lock()
 
+    @asynccontextmanager
+    async def exclusive_scope(self):
+        """Async scope that holds the pipeline lock for the duration.
+
+        Lets non-pipeline mutations (e.g. a provider switch) run mutually
+        exclusive with the analytics pass, which also acquires this lock via
+        :meth:`run_blocking`.
+        """
+        async with self._lock:
+            yield
+
     async def run_blocking(self, operation: Callable[[], Any]):
         async with self._lock:
             return await asyncio.to_thread(operation)
@@ -154,64 +166,71 @@ class DataSourceSwitcher:
 
     async def switch(self, requested_source: str):
         new_source = (requested_source or "").strip().upper()
-        valid_sources = set(self._valid_sources())
-        if new_source not in valid_sources:
+        # Run the whole switch under the same exclusive gate the analytics
+        # pipeline uses, so a provider switch cannot interleave with an
+        # in-flight (even timed-out) analytics pass. Previously the gate was
+        # accepted but never used, allowing the switch to mutate the active
+        # provider/feed while the previous pipeline was still consuming broker
+        # capacity and shared caches.
+        async with self._execution_gate.exclusive_scope():
+            valid_sources = set(self._valid_sources())
+            if new_source not in valid_sources:
+                print(
+                    f"[data-source] rejecting invalid data source {new_source!r} "
+                    f"(valid: {sorted(valid_sources)})",
+                    flush=True,
+                )
+                raise ValueError(
+                    f"Unknown data source {new_source!r}. "
+                    f"Valid: {sorted(valid_sources)}"
+                )
+
+            old_source = self._current_source()
+            if new_source == old_source:
+                return None
             print(
-                f"[data-source] rejecting invalid data source {new_source!r} "
-                f"(valid: {sorted(valid_sources)})",
+                f"[data-source] switch requested: {old_source} -> {new_source}",
                 flush=True,
             )
-            raise ValueError(
-                f"Unknown data source {new_source!r}. "
-                f"Valid: {sorted(valid_sources)}"
-            )
 
-        old_source = self._current_source()
-        if new_source == old_source:
-            return None
-        print(
-            f"[data-source] switch requested: {old_source} -> {new_source}",
-            flush=True,
-        )
+            try:
+                switched = self._activate_provider(new_source)
+            except Exception as exc:
+                print(
+                    f"[data-source] switch to {new_source} failed; "
+                    f"remaining on {old_source}: {exc}",
+                    flush=True,
+                )
+                self._signal_refresh()
+                return False
 
-        try:
-            switched = self._activate_provider(new_source)
-        except Exception as exc:
-            print(
-                f"[data-source] switch to {new_source} failed; "
-                f"remaining on {old_source}: {exc}",
-                flush=True,
-            )
+            if not switched:
+                print(
+                    f"[data-source] {new_source} unavailable; "
+                    f"remaining on {old_source}",
+                    flush=True,
+                )
+                self._signal_refresh()
+                return False
+
+            self._stop_feed(old_source)
+            self._commit_source(new_source)
+
+            if self._supports_websocket(new_source):
+                self._restart_feed(
+                    new_source,
+                    self._current_symbol(),
+                    self._current_expiry(),
+                )
+
             self._signal_refresh()
-            return False
 
-        if not switched:
             print(
-                f"[data-source] {new_source} unavailable; "
-                f"remaining on {old_source}",
+                f"[data-source] switched to {new_source}",
                 flush=True,
             )
-            self._signal_refresh()
-            return False
 
-        self._stop_feed(old_source)
-        self._commit_source(new_source)
-
-        if self._supports_websocket(new_source):
-            self._restart_feed(
-                new_source,
-                self._current_symbol(),
-                self._current_expiry(),
-            )
-
-        self._signal_refresh()
-
-        print(
-            f"[data-source] switched to {new_source}",
-            flush=True,
-        )
-
-        return True
+            return True
 
 class SymbolSwitcher:
     """Coordinate process-wide symbol and option-expiry changes."""
@@ -427,11 +446,24 @@ class MarketEngineCycle:
             self._seed_oi_baselines(payload)
             await self._publish_payload(payload)
             self._schedule_node_relay(payload)
-            print(
-                f"[ws] broadcast tick -> {self._connected_count()} client(s) "
-                f"(pipeline {pipeline_elapsed:.2f}s)",
-                flush=True,
-            )
+            timings = payload.get("pipelineTimings")
+            if timings:
+                breakdown = " ".join(
+                    f"{k}={v:.2f}"
+                    for k, v in timings.items()
+                    if isinstance(v, (int, float))
+                )
+                print(
+                    f"[ws] broadcast tick -> {self._connected_count()} client(s) "
+                    f"(pipeline {pipeline_elapsed:.2f}s) | {breakdown}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[ws] broadcast tick -> {self._connected_count()} client(s) "
+                    f"(pipeline {pipeline_elapsed:.2f}s)",
+                    flush=True,
+                )
 
             current_prices = self._build_current_prices(payload)
             self._check_pending_orders(current_prices)
@@ -440,6 +472,15 @@ class MarketEngineCycle:
         await self._pace(tick_started_at, pipeline_elapsed)
 
     async def run_forever(self) -> None:
+        from application.institutional_analytics_cache import warm as _warm_institutional_caches
+        from application.dashboard_market_metadata import (
+            get_fno_symbols as _warm_fno_symbols,
+            data_sources_payload as _warm_ds_payload,
+        )
+
+        _warm_institutional_caches()
+        _warm_fno_symbols()
+        _warm_ds_payload()
         while True:
             await self.run_once()
 

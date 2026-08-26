@@ -622,6 +622,47 @@ def test_data_source_switcher_rejects_unknown_provider():
         raise AssertionError("unknown provider was accepted")
 
 
+def test_data_source_switch_waits_for_inflight_pipeline():
+    """A provider switch must serialize with the analytics pipeline: while a
+    pass holds the execution gate, a switch cannot commit a new provider."""
+    executor = SerializedPipelineExecutor()
+    state = {"source": "NSE_BSE"}
+    switcher = DataSourceSwitcher(
+        valid_sources=lambda: {"NSE_BSE", "UPSTOX"},
+        current_source=lambda: state["source"],
+        execution_gate=executor,
+        activate_provider=lambda source: True,
+        stop_feed=lambda source: None,
+        commit_source=lambda source: state.update(source=source),
+        supports_websocket=lambda source: False,
+        restart_feed=lambda *a: None,
+        current_symbol=lambda: "NIFTY",
+        current_expiry=lambda: None,
+        signal_refresh=lambda: None,
+    )
+
+    async def scenario():
+        # Mimic the real analytics pass, which holds the gate for the whole run.
+        pipeline = asyncio.create_task(
+            executor.run_blocking(lambda: time.sleep(0.1))
+        )
+        await asyncio.sleep(0.02)  # let the pipeline acquire the gate
+
+        switch_task = asyncio.create_task(switcher.switch("UPSTOX"))
+        # Give the switch every chance to run if it were NOT gated.
+        await asyncio.sleep(0.05)
+        assert state["source"] == "NSE_BSE", (
+            "switch committed before the in-flight pipeline released the gate"
+        )
+
+        await pipeline
+        result = await switch_task
+        assert result is True
+        assert state["source"] == "UPSTOX"
+
+    asyncio.run(scenario())
+
+
 def test_symbol_switcher_normalizes_commits_and_restarts_live_feed():
     state = {"symbol": "NIFTY", "expiry": "old"}
     calls = []
