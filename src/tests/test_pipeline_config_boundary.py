@@ -15,6 +15,12 @@ def test_runtime_config_preserves_partial_update_defaults():
     assert config.symbol == "NIFTY"
     assert config.expiry is None
     assert config.use_smartapi is None
+    assert config.broker_enabled is None
+
+
+def test_broker_enabled_is_the_clear_compatibility_view():
+    config = CanonicalRuntimeConfig(use_smartapi=True)
+    assert config.broker_enabled is True
 
 
 def test_runtime_config_is_immutable_and_normalizes_enums():

@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import datetime
 import logging
+import threading
+import time
 
 from brokers.market_data_registry import get_active_provider, market_data
 
@@ -23,13 +25,24 @@ class BrokerExpiryAdapter:
         fallback: Callable[[str], Iterable[str]],
         active_provider: Callable[[], str] = get_active_provider,
         provider_market_data=market_data,
+        cache_ttl_seconds: float = 60.0,
     ) -> None:
         self._fallback = fallback
         self._active_provider = active_provider
         self._provider_market_data = provider_market_data
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._cache: dict[tuple[str, str, str], tuple[float, tuple[str, ...]]] = {}
+        self._cache_lock = threading.Lock()
 
     def list_expiries(self, symbol: str, exchange: str) -> list[str]:
         provider = self._active_provider()
+        key = (provider, symbol.strip().upper(), exchange.strip().upper())
+        now = time.monotonic()
+        with self._cache_lock:
+            cached = self._cache.get(key)
+            if cached is not None and now - cached[0] < self._cache_ttl_seconds:
+                return list(cached[1])
+
         if provider in _DIRECT_EXPIRY_PROVIDERS:
             try:
                 offered = self._provider_market_data.list_expiries(
@@ -41,6 +54,8 @@ class BrokerExpiryAdapter:
                     if (expiry := self._normalize(value)) is not None
                 ]
                 if normalized:
+                    with self._cache_lock:
+                        self._cache[key] = (now, tuple(normalized))
                     return normalized
             except Exception as exc:
                 logger.warning(
@@ -49,7 +64,10 @@ class BrokerExpiryAdapter:
                     symbol,
                     exc,
                 )
-        return list(self._fallback(symbol))
+        fallback = list(self._fallback(symbol))
+        with self._cache_lock:
+            self._cache[key] = (now, tuple(fallback))
+        return fallback
 
     @staticmethod
     def _normalize(value) -> str | None:

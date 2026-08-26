@@ -22,7 +22,11 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FutureTimeoutError,
+    as_completed,
+)
 from datetime import date, datetime, time as dtime
 
 import pandas as pd
@@ -80,10 +84,10 @@ def _exchange_for_symbol(symbol: str) -> str:
 # sys.argv at import time — that was the old behavior and forced every
 # importing host to hide argv mid-import.
 #
-# NOTE: SmartAPI is enabled by default unless BROKER_SERVICES_ENABLED=false.
-# MARKET_DATA_PROVIDER selects the REST quote adapter, not whether the
-# authenticated SmartAPI chain pipeline is on — keeping Upstox/Shoonya
-# websocket provider selection independent from the SmartAPI REST chain path.
+# NOTE: authenticated broker mode is enabled by default unless
+# BROKER_SERVICES_ENABLED=false. ``use_smartapi`` is the legacy configuration
+# spelling; runtime code uses RuntimeConfig.broker_enabled because the active
+# provider may be SmartAPI, Upstox, Shoonya, Kite, Breeze, or Kotak.
 try:
     from infrastructure.config import settings as _broker_settings
 except ImportError:  # pragma: no cover - standalone legacy invocation
@@ -196,7 +200,7 @@ def _canon_symbol(symbol, runtime_config, broker_adapters=None):
     ChgOI / lot-size scaling silently diverge. Idempotent for tickers.
     No-op in public-only mode."""
     raw = (symbol or "").strip().upper()
-    if not runtime_config.use_smartapi or not raw:
+    if not runtime_config.broker_enabled or not raw:
         return raw
     if broker_adapters is None:
         raise RuntimeError("broker adapters are required in broker mode")
@@ -217,17 +221,17 @@ def _fetch_and_parse(
     service = OptionChainFetchService(
         canonicalize_symbol=(
             broker_adapters.canonicalize_symbol
-            if runtime_config.use_smartapi
+            if runtime_config.broker_enabled
             else lambda value: (value or "").strip().upper()
         ),
         fetch_broker_chain=(
             broker_adapters.fetch_chain
-            if runtime_config.use_smartapi
+            if runtime_config.broker_enabled
             else lambda *args: None
         ),
         list_broker_expiries=(
             broker_adapters.list_expiries
-            if runtime_config.use_smartapi
+            if runtime_config.broker_enabled
             else lambda *args: []
         ),
         fetch_public_bse_chain=_fetch_bse_chain_no_smartapi,
@@ -243,7 +247,7 @@ def _fetch_and_parse(
         option_exchange=exchange,
         strict_expiry=strict_expiry,
         futures_expiry=runtime_config.futures_expiry,
-        broker_enabled=runtime_config.use_smartapi,
+        broker_enabled=runtime_config.broker_enabled,
     )
     return service.fetch(
         request, strikes_each_side=runtime_config.strikes_each_side
@@ -380,7 +384,7 @@ def _select_runtime_spot(df, spot, df_fut, all_indices, runtime_config):
 
     live_cash = (
         _live_index_quote(runtime_config.symbol)
-        if runtime_config.use_smartapi
+        if runtime_config.broker_enabled
         else 0.0
     )
     fut_ltp = _futures_ltp(df_fut)
@@ -441,7 +445,7 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
         option_exchange=exchange,
         strict_expiry=runtime_config.strict_expiry,
         futures_expiry=runtime_config.futures_expiry,
-        broker_enabled=runtime_config.use_smartapi,
+        broker_enabled=runtime_config.broker_enabled,
     )
     if request.broker_enabled and broker_adapters is None:
         raise RuntimeError("broker adapters are required in broker mode")
@@ -592,6 +596,7 @@ def _make_expiry_manager_or_none(expiry_dates):
 # stale or the symbol/expiry rolls, so a 6-10s poll does not re-run the entire
 # analytics engine for NEAR/MONTHLY every single tick.
 _EXTRA_CHAIN_CACHE_TTL_SECONDS = 45.0
+_EXTRA_CHAIN_OPERATION_TIMEOUT_SECONDS = 15.0
 _extra_chain_cache: dict = {}
 
 
@@ -665,19 +670,35 @@ def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
                         broker_adapters=broker_adapters,
                     )
                     futs[f] = (slot_name, slot, key, submitted_at)
-                for f in as_completed(futs):
-                    slot_name, slot, key, submitted_at = futs[f]
-                    try:
-                        n_df, n_master, n_ctx, n_dte, _ = f.result()
-                        value = (n_df, n_master, n_ctx, n_dte)
-                        extra_chains[slot.date_str] = value
-                        _extra_chain_cache[key] = (now, value)
-                    except Exception as e:
-                        logger.warning(f"[{slot_name}] Skip extra bundle ({e})")
-                    if timings is not None:
-                        timings["extra" + slot_name] = round(
-                            time.monotonic() - submitted_at, 4
-                        )
+                try:
+                    completed = as_completed(
+                        futs, timeout=_EXTRA_CHAIN_OPERATION_TIMEOUT_SECONDS
+                    )
+                    for f in completed:
+                        slot_name, slot, key, submitted_at = futs[f]
+                        try:
+                            n_df, n_master, n_ctx, n_dte, _ = f.result()
+                            value = (n_df, n_master, n_ctx, n_dte)
+                            extra_chains[slot.date_str] = value
+                            _extra_chain_cache[key] = (now, value)
+                        except Exception as e:
+                            logger.warning(f"[{slot_name}] Skip extra bundle ({e})")
+                        if timings is not None:
+                            timings["extra" + slot_name] = round(
+                                time.monotonic() - submitted_at, 4
+                            )
+                except FutureTimeoutError:
+                    for f, (slot_name, _slot, _key, submitted_at) in futs.items():
+                        if not f.done():
+                            f.cancel()
+                            logger.warning(
+                                "[%s] Skip extra bundle (operation timed out)",
+                                slot_name,
+                            )
+                            if timings is not None:
+                                timings["extra" + slot_name] = round(
+                                    time.monotonic() - submitted_at, 4
+                                )
     except Exception as e:
         logger.warning(f"[ExtraChains] Skip ({e})")
     return extra_chains
@@ -742,8 +763,8 @@ def main(
     if export_dashboard is None:
         raise RuntimeError("dashboard exporter must be injected")
     exchange = _exchange_for_symbol(runtime_config.symbol)
-    timings: dict = {}
     t_start = time.monotonic()
+    timings: dict = {"_pipelineStartedAt": t_start}
 
     try:
         md = _gather_market_data(
@@ -827,7 +848,6 @@ def main(
         ctx_dict = engine_result.to_ctx_dict()
         _patch_bse_spot_change(ctx_dict, all_indices, runtime_config)
 
-        _export_start = time.monotonic()
         export_dashboard(
             df_clean=df_clean,
             master=engine_result.master,
@@ -846,8 +866,6 @@ def main(
             futures_expiry=runtime_config.futures_expiry,
             pipeline_timings=timings,
         )
-        timings["serialization"] = round(time.monotonic() - _export_start, 4)
-        timings["total"] = round(time.monotonic() - t_start, 4)
         print()
         logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 

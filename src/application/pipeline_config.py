@@ -41,6 +41,16 @@ class RuntimeConfig:
     # value alone, matching every other field's semantics here.
     futures_expiry: Optional[str] = None
 
+    @property
+    def broker_enabled(self) -> Optional[bool]:
+        """Whether this pass uses the active authenticated broker.
+
+        ``use_smartapi`` is retained as a constructor field for compatibility
+        with existing integrations.  It historically grew to mean "any broker
+        provider"; new code should use this accurately named property.
+        """
+        return self.use_smartapi
+
     def __post_init__(self) -> None:
         if self.symbol is not None:
             symbol = self.symbol.strip().upper()

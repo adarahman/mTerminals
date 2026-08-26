@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, timezone
 import pytz
 import pandas as pd
@@ -512,7 +513,22 @@ def export_dashboard_json(
     # json.dump if orjson isn't available OR if a non-serializable type
     # still sneaks into the payload after the default coercer runs
     # (engine/decision paths routinely leave numpy scalars / Timestamps).
+    # Write once to measure the real persistence cost, then include that
+    # measurement and end-to-end total in the canonical on-disk payload.
+    # The second atomic write is the published snapshot; callers receive the
+    # same updated timings dictionary.
+    _serialization_started = time.monotonic()
     _write_dashboard_json(out_path, payload)
+    if pipeline_timings is not None:
+        _pipeline_started = pipeline_timings.pop("_pipelineStartedAt", None)
+        pipeline_timings["serialization"] = round(
+            time.monotonic() - _serialization_started, 4
+        )
+        if _pipeline_started is not None:
+            pipeline_timings["total"] = round(
+                time.monotonic() - _pipeline_started, 4
+            )
+        _write_dashboard_json(out_path, payload)
 
     vel_counts = [len(b["rows"]) for b in oi_velocity]
     vol_count = len([r for r in chain_rows if r.get("ceVolChg") != 0 or r.get("peVolChg") != 0])

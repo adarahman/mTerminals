@@ -1,5 +1,6 @@
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.requests import MarketDataRequestPlan
+import threading
 
 
 def _request(broker_enabled):
@@ -52,3 +53,21 @@ def test_gatherer_uses_public_bse_quotes_without_broker_context():
         {"Symbol": "SENSEX"},
         {"Symbol": "BANKEX"},
     )
+
+
+def test_gatherer_bounds_a_stalled_operation():
+    import pytest
+
+    release = threading.Event()
+    gatherer = ConcurrentMarketDataGatherer(
+        fetch_chain=lambda request: release.wait(1),
+        fetch_futures=lambda request: "futures",
+        fetch_indices=lambda: "indices",
+        operation_timeout_seconds=0.01,
+    )
+
+    try:
+        with pytest.raises(TimeoutError, match="chain"):
+            gatherer.gather(_request(False))
+    finally:
+        release.set()

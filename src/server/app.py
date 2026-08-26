@@ -1,57 +1,3 @@
-"""Dependency-injected aiohttp application bootstrap."""
-from __future__ import annotations
-
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable
-
-from aiohttp import web
-from server.routes import ServerRoutes
-
-
-@dataclass(frozen=True)
-class ServerConfig:
-    host: str
-    port: int
-    symbol: str
-    middleware: Callable[..., Any]
-    frontend_dir: Path = Path(__file__).resolve().parents[2] / "frontend"
-
-
-def create_app(routes: ServerRoutes, config: ServerConfig) -> web.Application:
-    """Build the HTTP application without importing runtime state."""
-    app = web.Application(middlewares=[config.middleware])
-    app.router.add_get("/health", routes.health)
-    app.router.add_get("/metrics", routes.metrics)
-    app.router.add_get("/ws", routes.websocket)
-    app.router.add_get("/bridge", routes.bridge_websocket)
-    app.router.add_get("/dashboard-relay", routes.bridge_websocket)
-    app.router.add_get("/api/spot-history", routes.spot_history)
-    app.router.add_get("/api/history", routes.history)
-    app.router.add_get("/api/backtest", routes.backtest)
-    app.router.add_get("/api/lot-sizes", routes.lot_sizes)
-    app.router.add_get("/api/broker-health", routes.broker_health)
-    app.router.add_static("/", path=config.frontend_dir, name="static")
-    return app
-
-
-async def start_http_server(routes: ServerRoutes, config: ServerConfig):
-    app = create_app(routes, config)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, config.host, config.port)
-    await site.start()
-
-    print(f"[http] serving static files at http://{config.host}:{config.port}/")
-    print(
-        "[http] Dashboard available at "
-        f"http://{config.host}:{config.port}/dist/Dashboard/DashboardPro.html"
-    )
-    print(
-        f"[ws] WebSocket endpoint at ws://{config.host}:{config.port}/ws "
-        f"symbol={config.symbol}"
-    )
-    return runner
 """mTerminals live server — composition root.
 
 Wires the extracted subsystems (server.feeds.*, server.feed_manager,
@@ -64,6 +10,8 @@ orchestration between subsystems; the mechanics live in server/*.
 The canonical option-chain runtime is import-safe and receives explicit
 configuration from the application layer.
 """
+
+from __future__ import annotations
 
 import asyncio
 import ipaddress
@@ -85,6 +33,8 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 # migrated away). Inserting src/ keeps direct invocations working the same way
 # `PYTHONPATH=src python3 -m main` does.
 sys.path.insert(0, str(SCRIPT_DIR.parent))
+
+from server.http_app import ServerConfig, create_app, start_http_server  # noqa: E402
 
 import aiohttp
 import orjson
@@ -255,7 +205,10 @@ _SMARTAPI_INDEX_TOKENS = broker_services.SMARTAPI_INDEX_TOKENS
 # broker never need that broker's SDK installed just to boot.
 runtime_state.LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
 
-ARGS = build_arg_parser().parse_args()
+# This module is also imported by tests and tooling. Preserve server CLI
+# parsing while leaving unrelated host arguments (for example pytest flags)
+# to the embedding process instead of terminating during import.
+ARGS, _HOST_PROCESS_ARGS = build_arg_parser().parse_known_args()
 
 _initial_symbol = ARGS.symbol.strip().upper()
 # Manual price-source selector — "EQ" (default, cash-market spot) is the
@@ -1711,7 +1664,6 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
     record_health_transition=lambda snapshot: _log_health_transition(snapshot),
     metrics_response=_metrics_response,
     metrics=runtime_state.METRICS,
-    broker_health_response=_broker_health,
 )
 
 

@@ -45,3 +45,22 @@ def test_broker_expiry_adapter_uses_fallback_for_non_direct_provider():
     )
 
     assert adapter.list_expiries("NIFTY", "NFO") == ["10-Sep-2026"]
+
+
+def test_broker_expiry_adapter_caches_by_provider_symbol_and_exchange():
+    market_data = MarketData(["27AUG2026"])
+    calls = []
+    original = market_data.list_expiries
+    market_data.list_expiries = lambda symbol, exchange: (
+        calls.append((symbol, exchange)) or original(symbol, exchange)
+    )
+    adapter = BrokerExpiryAdapter(
+        fallback=lambda symbol: [],
+        active_provider=lambda: "UPSTOX",
+        provider_market_data=market_data,
+        cache_ttl_seconds=60,
+    )
+
+    assert adapter.list_expiries("NIFTY", "NFO") == ["27-Aug-2026"]
+    assert adapter.list_expiries("NIFTY", "NFO") == ["27-Aug-2026"]
+    assert calls == [("NIFTY", "NFO")]

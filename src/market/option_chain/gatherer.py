@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,6 +39,7 @@ class ConcurrentMarketDataGatherer:
         public_bse_symbols: Iterable[str] = (),
         max_workers: int = 7,
         executor: ThreadPoolExecutor | None = None,
+        operation_timeout_seconds: float = 15.0,
     ) -> None:
         self._fetch_chain = fetch_chain
         self._fetch_futures = fetch_futures
@@ -53,6 +55,7 @@ class ConcurrentMarketDataGatherer:
         # polls (avoids creating/joining a thread pool every tick). When None,
         # gather() falls back to a per-call executor for isolation.
         self._executor = executor
+        self._operation_timeout_seconds = operation_timeout_seconds
 
     def gather(
         self,
@@ -76,6 +79,23 @@ class ConcurrentMarketDataGatherer:
             return future
 
         try:
+            deadline = time.monotonic() + self._operation_timeout_seconds
+
+            def result(future, operation: str):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    future.cancel()
+                    raise TimeoutError(
+                        f"market-data operation timed out: {operation}"
+                    )
+                try:
+                    return future.result(timeout=remaining)
+                except FutureTimeoutError as exc:
+                    future.cancel()
+                    raise TimeoutError(
+                        f"market-data operation timed out: {operation}"
+                    ) from exc
+
             chain = submit("chain", self._fetch_chain, request)
             futures = submit("futures", self._fetch_futures, request)
             indices = submit("indices", self._fetch_indices)
@@ -106,7 +126,7 @@ class ConcurrentMarketDataGatherer:
                 )
 
             if warm is not None:
-                warm.result()
+                result(warm, "warm")
 
             # Quote consumers depend on the populated batch cache; only fan
             # them out once warm_batch above has refilled it.
@@ -129,17 +149,20 @@ class ConcurrentMarketDataGatherer:
                 )
 
             return GatheredMarketInputs(
-                chain=chain.result(),
-                futures=futures.result(),
-                indices=indices.result(),
-                ticker_payload=ticker.result() if ticker is not None else None,
-                vix=vix.result() if vix is not None else None,
-                sensex_quote=sensex.result() if sensex is not None else None,
-                public_bse_quotes=tuple(f.result() for f in public_quotes),
+                chain=result(chain, "chain"),
+                futures=result(futures, "futures"),
+                indices=result(indices, "indices"),
+                ticker_payload=result(ticker, "ticker") if ticker is not None else None,
+                vix=result(vix, "vix") if vix is not None else None,
+                sensex_quote=result(sensex, "sensex") if sensex is not None else None,
+                public_bse_quotes=tuple(
+                    result(f, f"publicBse:{symbol}")
+                    for symbol, f in zip(self._public_bse_symbols, public_quotes)
+                ),
             )
         finally:
             if own_executor:
-                executor.shutdown(wait=True)
+                executor.shutdown(wait=False, cancel_futures=True)
 
     @staticmethod
     def _submit_optional(executor, operation):
