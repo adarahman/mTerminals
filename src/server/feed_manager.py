@@ -143,6 +143,16 @@ class BrokerFeedManager:
             self._stop_fn(state, *stop_args, **stop_kwargs)
             self._store(state)
 
+    def _switch_locked(
+        self,
+        symbol: str,
+        strikes_around_atm: int,
+        expiry,
+    ) -> None:
+        """Switch subscriptions while the manager lifecycle lock is held."""
+        state = self._snapshot()
+        self._switch_fn(state, symbol, strikes_around_atm, expiry)
+        self._store(state)
 
 _LOGGER = logging.getLogger("mterminals.server.feed_manager")
 
@@ -217,9 +227,3 @@ def _commit_data_source(new_source):
     runtime_state.MARKET_SELECTION.select_data_source(new_source)
     runtime_state.LAST_PAYLOAD = None
     runtime_state.LAST_SENT = None
-
-    # ── internals ────────────────────────────────────────────────────
-    def _switch_locked(self, symbol: str, strikes_around_atm: int, expiry) -> None:
-        state = self._snapshot()
-        self._switch_fn(state, symbol, strikes_around_atm, expiry)
-        self._store(state)
