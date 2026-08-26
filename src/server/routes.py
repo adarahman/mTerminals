@@ -32,6 +32,7 @@ class HttpRouteHandlers:
         record_health_transition,
         metrics_response,
         metrics,
+        
     ):
         self._history_api = history_api
         self._backtest_response = backtest_response
@@ -42,6 +43,7 @@ class HttpRouteHandlers:
         self._record_health_transition = record_health_transition
         self._metrics_response = metrics_response
         self._metrics = metrics
+
 
     async def spot_history(self, request):
         return await self._history_api.spot_history(request)

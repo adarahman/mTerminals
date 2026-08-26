@@ -28,20 +28,27 @@ def lot_size(underlying: str) -> int:
     return lots.get(str(underlying).upper(), 1)
 
 
-def _canon_underlying(symbol: str) -> str:
-    """
-    Backward-compatible symbol normalization.
-    """
-    return (
-        str(symbol)
-        .upper()
-        .replace(" ", "")
-        .replace("-", "")
-    )
+from brokers.symbol_names import (
+    _COMMON_UNDERLYING_ALIASES,
+    canonicalize_underlying,
+)
+
 
 def _canon_underlying(underlying: str) -> str:
-    value = str(underlying or "").upper().replace(" ", "")
+    raw = str(underlying or "").strip().upper()
+    if not raw:
+        return ""
 
+    # Shared company-name -> exchange-ticker resolver.
+    resolved = canonicalize_underlying(
+        raw,
+        _COMMON_UNDERLYING_ALIASES,
+    )
+    if resolved:
+        return resolved
+
+    # Index aliases.
+    compact = raw.replace(" ", "").replace("-", "")
     aliases = {
         "BANKNIFTY": "BANKNIFTY",
         "NIFTYBANK": "BANKNIFTY",
@@ -49,9 +56,10 @@ def _canon_underlying(underlying: str) -> str:
         "FINNIFTY": "FINNIFTY",
         "MIDCPNIFTY": "MIDCPNIFTY",
     }
+    return aliases.get(compact, compact)
 
-    return aliases.get(value, value)
-# public alias for new code
+
+# Public alias for new code.
 canon_underlying = _canon_underlying
 
     

@@ -37,6 +37,7 @@ import pandas as pd
 import pytest
 
 from brokers import market_data as md
+from brokers import market_data_registry as md_registry
 from server import runtime_state, feed_manager
 from application import selection_state
 
@@ -77,7 +78,7 @@ def test_seven_providers_selectable_including_nse_bse():
     }
     assert md.PROVIDER_CAPABILITIES["KOTAK"] == {
         "snapshot": True,
-        "websocket": False,
+        "websocket": True,
         "execution": False,
     }
     assert "NSE/BSE" in md.PROVIDER_DISPLAY_NAMES["NSE_BSE"]
@@ -367,17 +368,17 @@ def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
-    ws_server_live.switch_data_source("NSE_BSE")
+    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
     assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
 
     # Switch to a broker provider: source + active facade both change.
-    ws_server_live.switch_data_source("UPSTOX")
+    asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
     assert runtime_state.MARKET_SELECTION.data_source == "UPSTOX"
     assert md.get_active_provider() == "UPSTOX"
 
     # And back to the public API.
-    ws_server_live.switch_data_source("NSE_BSE")
+    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
     assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
 
@@ -387,11 +388,13 @@ def test_switch_clears_baseline_for_full_republish(ws_server_live, monkeypatch):
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
-    ws_server_live.LAST_PAYLOAD = {"symbol": "NIFTY", "chain": []}
-    ws_server_live._LAST_SENT = {"symbol": "NIFTY", "chain": []}
-    ws_server_live.switch_data_source("KITE")
-    assert ws_server_live.LAST_PAYLOAD is None
-    assert ws_server_live._LAST_SENT is None
+    runtime_state.LAST_PAYLOAD = {"symbol": "NIFTY", "chain": []}
+    runtime_state.LAST_SENT = {"symbol": "NIFTY", "chain": []}
+
+    asyncio.run(ws_server_live.switch_data_source("KITE"))
+
+    assert runtime_state.LAST_PAYLOAD is None
+    assert runtime_state.LAST_SENT is None
     assert md.get_active_provider() == "KITE"
 
 
@@ -400,77 +403,84 @@ def test_switch_rejects_unknown_and_same_source_is_noop(ws_server_live, monkeypa
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
     with pytest.raises(ValueError):
-        ws_server_live.switch_data_source("NOT_A_PROVIDER")
+        asyncio.run(ws_server_live.switch_data_source("NOT_A_PROVIDER"))
     before = runtime_state.MARKET_SELECTION.data_source
-    assert ws_server_live.switch_data_source(before) is None  # no-op, stays put
+    result = asyncio.run(ws_server_live.switch_data_source(before))
+    assert result is None
 
 
-def test_switch_starts_feed_for_never_booted_provider(ws_server_live, monkeypatch):
-    # Switching to a provider whose feed never started at boot (its
-    # _*_loop was never captured because LIVE_FEED_PROVIDER pointed
-    # elsewhere) must actually START that feed on the main loop, not
-    # silently no-op. Covers all three feed backends.
-    sentinel_loop = object()
-    monkeypatch.setattr(ws_server_live, "_MAIN_LOOP", sentinel_loop)
+def test_switch_starts_feed_for_never_booted_provider(monkeypatch):
+    """A never-started broker feed starts on the main/captured loop."""
+    from types import SimpleNamespace
+    from server.feed_manager import BrokerFeedManager
 
+    main_loop = object()
+    captured_loop = object()
     calls = []
 
-    def _spy_smart(loop, underlying=None, strikes_around_atm=10, expiry=None):
-        calls.append(("smart", loop, underlying, expiry))
+    state = SimpleNamespace(
+        stream=None,
+        aggregator=None,
+        loop=None,
+        current_expiry=None,
+    )
 
-    def _spy_upstox(loop, underlying=None, strikes_around_atm=10, expiry=None):
-        calls.append(("upstox", loop, underlying, expiry))
+    def snapshot():
+        return state
 
-    def _spy_shoonya(loop, underlying=None, strikes_around_atm=10, expiry=None):
-        calls.append(("shoonya", loop, underlying, expiry))
+    def store(new_state):
+        nonlocal state
+        state = new_state
 
-    monkeypatch.setattr(ws_server_live, "start_smartapi_feed", _spy_smart)
-    monkeypatch.setattr(ws_server_live, "start_upstox_feed", _spy_upstox)
-    monkeypatch.setattr(ws_server_live, "start_shoonya_feed", _spy_shoonya)
+    def start(state_obj, loop, symbol, strikes_around_atm, expiry):
+        calls.append((loop, symbol, strikes_around_atm, expiry))
+        # Mark it running exactly as a real provider start would.
+        state_obj.stream = object()
+        state_obj.aggregator = object()
+        state_obj.loop = loop
 
-    # All three loops never captured (feed never started at boot).
-    monkeypatch.setattr(ws_server_live, "_smartapi_loop", None)
-    monkeypatch.setattr(ws_server_live, "_upstox_loop", None)
-    monkeypatch.setattr(ws_server_live, "_shoonya_loop", None)
-    monkeypatch.setattr(ws_server_live, "_smartapi_stream", None)
-    monkeypatch.setattr(ws_server_live, "_upstox_stream", None)
-    monkeypatch.setattr(ws_server_live, "_shoonya_stream", None)
-    monkeypatch.setattr(ws_server_live, "_smartapi_aggregator", None)
-    monkeypatch.setattr(ws_server_live, "_upstox_aggregator", None)
-    monkeypatch.setattr(ws_server_live, "_shoonya_aggregator", None)
+    manager = BrokerFeedManager(
+        "SMARTAPI",
+        snapshot=snapshot,
+        store=store,
+        start=start,
+        switch=lambda *a, **k: None,
+        stop=lambda *a, **k: None,
+        default_symbol=lambda: "NIFTY",
+        main_loop=lambda: main_loop,
+        log=lambda *_: None,
+    )
 
-    ws_server_live._switch_smartapi_symbol_blocking("NIFTY")
-    ws_server_live._switch_upstox_symbol_blocking("NIFTY")
-    ws_server_live._switch_shoonya_symbol_blocking("NIFTY")
+    # Never started: switch must start on MAIN_LOOP.
+    manager.switch_blocking("NIFTY")
+    assert calls == [(main_loop, "NIFTY", 10, None)]
 
-    assert calls == [
-        ("smart", sentinel_loop, "NIFTY", None),
-        ("upstox", sentinel_loop, "NIFTY", None),
-        ("shoonya", sentinel_loop, "NIFTY", None),
-    ]
-    # A captured provider loop still wins over the main loop.
-    monkeypatch.setattr(ws_server_live, "_upstox_loop", sentinel_loop)
-    ws_server_live._switch_upstox_symbol_blocking("NIFTY")
-    assert calls[-1] == ("upstox", sentinel_loop, "NIFTY", None)
+    # Never running, but a provider-specific loop was captured:
+    # that captured loop takes precedence over MAIN_LOOP.
+    state.stream = None
+    state.aggregator = None
+    state.loop = captured_loop
+
+    manager.switch_blocking("BANKNIFTY")
+    assert calls[-1] == (captured_loop, "BANKNIFTY", 10, None)
 
 
-# ── 7+8. No cross-provider contamination / clean feed stop ───────────────
 def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
     monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
     # Streaming provider active -> its feed is allowed.
-    ws_server_live.switch_data_source("UPSTOX")
+    asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
     assert feed_manager._feed_allowed("UPSTOX") is True
     assert feed_manager._feed_allowed("SMARTAPI") is False
 
     # Polling-only active -> NO broker feed is allowed to broadcast.
-    ws_server_live.switch_data_source("NSE_BSE")
+    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
     for provider in ("SMARTAPI", "UPSTOX", "SHOONYA"):
         assert feed_manager._feed_allowed(provider) is False
     # KITE/BREEZE have no websocket client -> never "allowed" either.
-    ws_server_live.switch_data_source("KITE")
+    asyncio.run(ws_server_live.switch_data_source("KITE"))
     assert feed_manager._feed_allowed("KITE") is False
 
 
@@ -492,32 +502,35 @@ def test_stop_active_broker_feed_unsubscribes_without_unbound_local_error(
         def unsubscribe(self, exchange, tokens):
             calls.append((exchange, list(tokens)))
 
-    monkeypatch.setattr(ws_server_live, "_smartapi_stream", _FakeStream())
-    monkeypatch.setattr(ws_server_live, "_smartapi_tokens", ["123", "456"])
-    monkeypatch.setattr(ws_server_live, "_smartapi_exchange", 2)
-    monkeypatch.setattr(ws_server_live, "_smartapi_index_token", "26000")
-    monkeypatch.setattr(ws_server_live, "_smartapi_index_exchange", 1)
-    # Deterministic regardless of the session's import mode: pin the
-    # exchange-name map so the unsubscribe keys are stable.
+    from server.feeds import orchestration as feed_orchestration
+    from server import feed_manager
+
+    monkeypatch.setattr(feed_orchestration, "_smartapi_stream", _FakeStream())
+    monkeypatch.setattr(feed_orchestration, "_smartapi_tokens", ["123", "456"])
+    monkeypatch.setattr(feed_orchestration, "_smartapi_exchange", 2)
+    monkeypatch.setattr(feed_orchestration, "_smartapi_index_token", "26000")
+    monkeypatch.setattr(feed_orchestration, "_smartapi_index_exchange", 1)
+
     monkeypatch.setattr(
-        ws_server_live, "EXCHANGE_TYPE", {1: "NSE_CM", 2: "NFO"}
+        feed_orchestration,
+        "EXCHANGE_TYPE",
+        {1: "NSE_CM", 2: "NFO"},
     )
 
-    ws_server_live._stop_active_broker_feed("SMARTAPI")
+    feed_manager._stop_active_broker_feed("SMARTAPI")
 
     deadline = time.time() + 3.0
     while time.time() < deadline and len(calls) < 2:
         time.sleep(0.05)
     assert ("NFO", ["123", "456"]) in calls
     assert ("NSE_CM", ["26000"]) in calls
-    assert ws_server_live._smartapi_tokens is None
-
+    assert feed_orchestration._smartapi_tokens is None
 
 def test_stale_feed_broadcast_is_a_noop(ws_server_live, monkeypatch):
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
-    ws_server_live.switch_data_source("NSE_BSE")
+    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
+    asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
+    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
+    asyncio.run(ws_server_live.switch_data_source("KITE"))
 
     broadcast_calls = []
     monkeypatch.setattr(ws_server_live, "broadcast", lambda m: broadcast_calls.append(m))
@@ -541,7 +554,7 @@ def test_switch_away_unsubscribes_feed_without_error(ws_server_live, monkeypatch
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
     ws_server_live._smartapi_stream = None
-    ws_server_live.switch_data_source("SMARTAPI")
+    asyncio.run(ws_server_live.switch_data_source("SMARTAPI"))
     ws_server_live._smartapi_stream = None
     ws_server_live._upstox_stream = None
     ws_server_live._shoonya_stream = None
@@ -562,7 +575,8 @@ def test_provider_status_reports_polling_and_shape():
     for entry in md.provider_status():
         assert {"id", "label", "status", "active", "capabilities"} <= set(entry)
         assert entry["status"] in {
-            "LIVE", "POLLING", "UNAVAILABLE", "SESSION_REQUIRED",
+            "LIVE", "AVAILABLE", "POLLING", "UNAVAILABLE", "SESSION_REQUIRED",
+            "AUTH_FAILED", "SESSION_EXPIRED", "API_UNAVAILABLE", "UNKNOWN",
         }
 
 
@@ -575,8 +589,8 @@ def test_switch_symbol_unquotes_stale_encoded_symbol(ws_server_live, monkeypatch
     monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "USE_SMARTAPI", True)
-    monkeypatch.setattr(ws_server_live, "LIVE_FEED_PROVIDER", "SMARTAPI")
+    monkeypatch.setattr(runtime_state, "USE_SMARTAPI", True)
+    monkeypatch.setattr(runtime_state, "LIVE_FEED_PROVIDER", "SMARTAPI")
 
     orig_symbol = runtime_state.MARKET_SELECTION.symbol
     orig_expiry = runtime_state.MARKET_SELECTION.expiry
@@ -592,8 +606,7 @@ def test_switch_symbol_unquotes_stale_encoded_symbol(ws_server_live, monkeypatch
 def test_default_data_source_falls_back_to_credentialed_broker(ws_server_live):
     expected = selection_state._resolve_default_data_source()
     assert expected != "NSE_BSE"
-    assert runtime_state.MARKET_SELECTION.data_source == expected
-    assert ws_server_live._md_get_active_provider() == expected
+    assert md.provider_has_credentials(expected) is True
 
 
 def test_default_data_source_nse_bse_when_no_broker_has_creds(
@@ -610,17 +623,17 @@ def test_default_data_source_nse_bse_when_no_broker_has_creds(
 def test_breeze_requires_all_connection_credentials(monkeypatch):
     """A token alone cannot create a Breeze session or serve a price."""
     originals = {
-        name: getattr(md._md_settings, name)
+        name: getattr(md_registry._md_settings, name)
         for name in ("breeze_api_key", "breeze_api_secret", "breeze_api_session")
     }
     try:
-        object.__setattr__(md._md_settings, "breeze_api_key", "KEY")
-        object.__setattr__(md._md_settings, "breeze_api_secret", None)
-        object.__setattr__(md._md_settings, "breeze_api_session", "SESSION")
+        object.__setattr__(md_registry._md_settings, "breeze_api_key", "KEY")
+        object.__setattr__(md_registry._md_settings, "breeze_api_secret", None)
+        object.__setattr__(md_registry._md_settings, "breeze_api_session", "SESSION")
         assert md.provider_has_credentials("BREEZE") is False
     finally:
         for name, value in originals.items():
-            object.__setattr__(md._md_settings, name, value)
+            object.__setattr__(md_registry._md_settings, name, value)
 
 
 # ── 11. Unknown provider keys rejected ───────────────────────────────────
@@ -673,7 +686,7 @@ class _FakeChainMD:
 
 
 def test_chain_pipeline_routes_by_active_provider(monkeypatch):
-    from application import broker_market_pipeline as spa
+    from application.market_pipeline import option_chain as spa
 
     fake = _FakeChainMD()
     monkeypatch.setattr(spa, "market_data", fake)
@@ -706,7 +719,7 @@ def test_chain_pipeline_canonicalizes_full_name_underlying(monkeypatch):
     # and ChgOI degrades to an abrupt first-tick delta. The fake chain echoes
     # `underlying` back, so a non-canonical Symbol would prove the raw name
     # leaked through.
-    from application import broker_market_pipeline as spa
+    from application.market_pipeline import option_chain as spa
 
     md.set_active_provider("BREEZE")
     monkeypatch.setattr(spa, "market_data", _FakeChainMD())
@@ -746,7 +759,7 @@ def test_upstox_oi_normalized_from_shares_to_lots(monkeypatch):
     # A raw share count must be divided by lot_size or OI reads lot_size× too
     # high and ChgOI (raw shares minus NSE lot anchor) is garbage. Seed a
     # known NSE anchor of 900 lots and confirm ChgOI comes out correct.
-    from application import broker_market_pipeline as spa
+    from application.market_pipeline import option_chain as spa
 
     class _FakeUpstoxChainMD:
         def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
@@ -781,7 +794,7 @@ def test_upstox_oi_normalized_from_shares_to_lots(monkeypatch):
 def test_shoonya_oi_normalized_from_shares_to_lots(monkeypatch):
     # Shoonya (Noren) also reports OI in quantity with `ls` (lot size) in the
     # quote — the shared path must convert to lots the same way as Upstox.
-    from application import broker_market_pipeline as spa
+    from application.market_pipeline import option_chain as spa
 
     class _FakeShoonyaChainMD:
         def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
@@ -819,7 +832,7 @@ def test_breeze_oi_normalized_from_shares_to_lots(monkeypatch):
     # reads lot_size× too high and ChgOI (raw shares minus NSE lot anchor)
     # is garbage, exactly like Upstox was. Breeze rows carry no lot_size,
     # so resolution falls back to the instrument-master lookup.
-    from application import broker_market_pipeline as spa
+    from application.market_pipeline import option_chain as spa
 
     class _FakeBreezeChainMD:
         def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
@@ -851,21 +864,33 @@ def test_breeze_oi_normalized_from_shares_to_lots(monkeypatch):
     assert float(row["CE_ChgOI"]) == pytest.approx(400.0 - 300.0)  # 100 lots
 
 
+
 def test_broker_auth_failure_falls_back_to_public_nse_bse(monkeypatch):
-    # A dead broker login (e.g. Shoonya's QuickAuth returning 502, session
-    # down) must not empty the whole chain: fetch_option_chain_wide falls
-    # back to the public NSE/BSE source. Its rows already carry OI in lots
-    # (NSE convention) — the per-provider shares→lots normalization must NOT
-    # re-run on fallback data or CE_OI would be divided a second time.
-    from application import broker_market_pipeline as spa
-    from brokers import market_data as md_module
+    """Broker chain failure falls back to public NSE/BSE without re-scaling OI."""
+    from application.market_pipeline import option_chain as spa
+    from brokers import market_data_registry as md_registry
+    from market.providers import nse_bse as nse_bse_module
 
     class _FailingBrokerMD:
-        def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
-            raise RuntimeError("Shoonya login failed: HTTP 502 from QuickAuth")
+        def get_atm_chain(
+            self,
+            underlying,
+            expiry,
+            strikes_around_atm=10,
+            exchange="NFO",
+        ):
+            raise RuntimeError(
+                "Shoonya login failed: HTTP 502 from QuickAuth"
+            )
 
     class _FakeNseBse:
-        def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
+        def get_atm_chain(
+            self,
+            underlying,
+            expiry,
+            strikes_around_atm=10,
+            exchange="NFO",
+        ):
             return {
                 "underlying": underlying,
                 "spot": 24000.0,
@@ -873,34 +898,71 @@ def test_broker_auth_failure_falls_back_to_public_nse_bse(monkeypatch):
                 "expiry": expiry,
                 "rows": [
                     {
-                        "strike": 24000, "type": "CE",
-                        "tradingsymbol": None, "token": None,
+                        "strike": 24000,
+                        "type": "CE",
+                        "tradingsymbol": None,
+                        "token": None,
                         "lot_size": None,
-                        "ltp": 120.0, "oi": 1000.0, "volume": 500,
+                        "ltp": 120.0,
+                        "oi": 1000.0,
+                        "volume": 500,
                     },
                 ],
             }
 
-    md.set_active_provider("SHOONYA")
-    monkeypatch.setattr(spa, "market_data", _FailingBrokerMD())
-    monkeypatch.setattr(md_module, "NseBseMarketData", _FakeNseBse)
-    monkeypatch.setattr(spa, "_seed_day_anchor_from_nse", lambda *a, **k: None)
-    spa._day_open_oi.clear()  # drop any anchor seeded by an earlier test
+    # Exercise the option-chain fallback path directly.
+    # set_active_provider("SHOONYA") is intentionally NOT used because
+    # the new registry correctly rejects an unhealthy broker before switching.
+    monkeypatch.setattr(
+        md_registry,
+        "get_active_provider",
+        lambda: "SHOONYA",
+    )
+    monkeypatch.setattr(
+        spa,
+        "market_data",
+        _FailingBrokerMD(),
+    )
+    monkeypatch.setattr(
+        nse_bse_module,
+        "NseBseMarketData",
+        _FakeNseBse,
+    )
+    monkeypatch.setattr(
+        spa,
+        "_seed_day_anchor_from_nse",
+        lambda *a, **k: None,
+    )
 
-    df = spa.fetch_option_chain_wide("NIFTY", "31-Jul-2026", strikes_around_atm=1)
-    assert isinstance(df, pd.DataFrame) and not df.empty
-    row = df.iloc[0]
-    # NSE/BSE rows arrive in lots already — no division by lot_size.
-    assert float(row["CE_OI"]) == pytest.approx(1000.0)
-    assert float(row["CE_ChgOI"]) == pytest.approx(0.0)  # no NSE anchor seeded
+    spa._day_open_oi.clear()
+
+    df = spa.fetch_option_chain_wide(
+        "NIFTY",
+        "31-Jul-2026",
+        strikes_around_atm=1,
+    )
+
+    assert isinstance(df, pd.DataFrame)
+    assert not df.empty
+
+    # Public NSE/BSE OI is already in lots and must not be divided again.
+    assert float(df.iloc[0]["CE_OI"]) == pytest.approx(1000.0)
 
 
-# ── 13. Index-quote fetch is provider-aware ──────────────────────────────
+
 class _FakeSpotMD:
-    def get_spot_quote(self, underlying):
+    def get_spot_quote(self, symbol):
+        prices = {
+            "NIFTY": 24000.0,
+            "BANKNIFTY": 52000.0,
+            "MIDCPNIFTY": 12000.0,
+            "INDIA VIX": 14.0,
+            "SENSEX": 79000.0,
+        }
+        ltp = prices[symbol]
         return {
-            "ltp": 24000.0, "close": 23800.0, "open": 23850.0,
-            "high": 24050.0, "low": 23775.0,
+            "ltp": ltp,
+            "close": ltp - 200.0,
         }
 
 

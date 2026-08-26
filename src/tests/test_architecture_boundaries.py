@@ -12,6 +12,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 LEGACY_MODULE_NAMES = {
     "ws_server_live",
     "broker_pipeline",
+    "broker_market_pipeline",
     "tick_pipeline",
     "smartapi_pipeline_adapter",
     "smartapi_feed_adapter",

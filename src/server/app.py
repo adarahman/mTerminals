@@ -585,7 +585,7 @@ async def broadcast(message):
 def _fetch_bridge_futures(symbol, which, use_smartapi):
     """Composition seam for the bridge's legacy/public futures sources."""
     if use_smartapi:
-        from application.broker_market_pipeline import fetch_futures_wide
+        from application.market_pipeline.futures import fetch_futures_wide
 
         return fetch_futures_wide(symbol, which=which)
     return market_api.fetch_public_futures(symbol, which)
@@ -659,16 +659,18 @@ def _build_pipeline_runtime_config(
 
 
 def _build_broker_market_adapters():
-    from application.broker_market_pipeline import (
-        _canon_underlying,
-        fetch_all_pills_and_vix_batched,
-        fetch_futures_wide,
+    from application.market_pipeline.futures import fetch_futures_wide
+    from application.market_pipeline.option_chain import (
         fetch_option_chain_wide,
+        get_available_expiries,
+    )
+    from application.market_pipeline.quotes import (
+        fetch_all_pills_and_vix_batched,
         fetch_sensex_ticker,
         fetch_ticker_payload,
         fetch_vix,
-        get_available_expiries,
     )
+    from application.market_pipeline.utils import _canon_underlying
 
     chain = BrokerOptionChainAdapter(
         fetch_chain=fetch_option_chain_wide,
@@ -1665,7 +1667,6 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
     metrics=runtime_state.METRICS,
 )
 
-
 # ── entry point ──────────────────────────────────────────────────────────
 def _validate_server_startup():
     if not _host_is_loopback(WS_HOST):
@@ -1699,7 +1700,7 @@ async def _start_http_runtime():
 
 
 def _set_main_loop(loop):
-    runtime_state.MAIN_LOOP = runtime_state.MAIN_LOOP = loop
+    runtime_state.MAIN_LOOP = loop
 
 
 def _start_live_runtime(loop):
