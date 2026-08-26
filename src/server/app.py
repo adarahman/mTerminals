@@ -210,6 +210,16 @@ runtime_state.LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
 ARGS, _HOST_PROCESS_ARGS = build_arg_parser().parse_known_args()
 
 _initial_symbol = ARGS.symbol.strip().upper()
+def _resolve_default_pipeline_expiry(symbol):
+    """Resolve the nearest valid exchange-calendar option expiry."""
+    symbol = (symbol or "").strip().upper()
+    if symbol in {"SENSEX", "BANKEX", "SENSEX50"}:
+        return option_chain_runtime.BSE_EXPIRY_DEFAULT.get(
+            symbol, option_chain_runtime._nearest_Thursday
+        )()
+    return option_chain_runtime._nearest_Tuesday()
+
+
 # Manual price-source selector — "EQ" (default, cash-market spot) is the
 # fixed option-pricing/decision reference; "FUT" is displayed separately
 # (see option_chain_json.py's PRICE_SOURCE docstring for the 3:15-3:30
@@ -220,7 +230,11 @@ _initial_price_source = "AUTO"
 # Switched via ?futuresExpiry= on the WS URL (see ws_handler) and read
 # fresh into RuntimeConfig every tick by run_pipeline_once().
 _initial_futures_expiry = "NEAR"
-_initial_expiry = ARGS.expiry
+_initial_expiry = (
+    ARGS.expiry.strip()
+    if ARGS.expiry
+    else _resolve_default_pipeline_expiry(_initial_symbol)
+)
 runtime_state.POLL_SECONDS = ARGS.poll_seconds
 runtime_state.PIPELINE_TIMEOUT_SECONDS = max(1.0, ARGS.pipeline_timeout_seconds)
 runtime_state.MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
@@ -617,15 +631,6 @@ async def bridge_ws_handler(request):
 
 async def bridge_loop():
     await _BRIDGE.run()
-
-
-def _resolve_default_pipeline_expiry(symbol):
-    """Keep legacy exchange-calendar access at the composition boundary."""
-    if symbol in _BSE_SYMBOLS:
-        return option_chain_runtime.BSE_EXPIRY_DEFAULT.get(
-            symbol, option_chain_runtime._nearest_Thursday
-        )()
-    return option_chain_runtime._nearest_Tuesday()
 
 
 _PIPELINE_RUNTIME_CONFIGURATOR = PipelineRuntimeConfigurator(
