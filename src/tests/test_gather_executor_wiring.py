@@ -47,3 +47,18 @@ def test_gather_wiring_passes_executor_to_constructor_only():
     # and must NOT be forwarded to gather(), which has no such parameter
     assert "executor" not in calls["gather"]
     assert calls["gather"]["timings"] == {}
+
+
+def test_timed_out_executor_is_retired_without_waiting(monkeypatch):
+    calls = []
+
+    class Executor:
+        def shutdown(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(ocr, "_MARKET_IO_EXECUTOR", Executor())
+
+    ocr._reset_market_io_executor()
+
+    assert ocr._MARKET_IO_EXECUTOR is None
+    assert calls == [{"wait": False, "cancel_futures": True}]

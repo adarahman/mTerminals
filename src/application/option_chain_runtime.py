@@ -471,30 +471,37 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
             plan.futures_expiry,
         )
 
-    gathered = ConcurrentMarketDataGatherer(
-        fetch_chain=fetch_chain,
-        fetch_futures=fetch_futures,
-        fetch_indices=_fetch_all_indices_cached,
-        warm_broker_batch=(
-            broker_adapters.warm_batch if request.broker_enabled else None
-        ),
-        fetch_ticker_payload=(
-            broker_adapters.fetch_ticker_payload
-            if request.broker_enabled
-            else None
-        ),
-        fetch_vix=(
-            broker_adapters.fetch_vix if request.broker_enabled else None
-        ),
-        fetch_sensex_quote=(
-            broker_adapters.fetch_sensex_quote
-            if request.broker_enabled
-            else None
-        ),
-        fetch_public_bse_quote=_PUBLIC_MARKET.fetch_bse_quote,
-        public_bse_symbols=_PUBLIC_MARKET.bse_symbols,
-        executor=_get_market_io_executor(),
-    ).gather(request, timings=timings)
+    try:
+        gathered = ConcurrentMarketDataGatherer(
+            fetch_chain=fetch_chain,
+            fetch_futures=fetch_futures,
+            fetch_indices=_fetch_all_indices_cached,
+            warm_broker_batch=(
+                broker_adapters.warm_batch if request.broker_enabled else None
+            ),
+            fetch_ticker_payload=(
+                broker_adapters.fetch_ticker_payload
+                if request.broker_enabled
+                else None
+            ),
+            fetch_vix=(
+                broker_adapters.fetch_vix if request.broker_enabled else None
+            ),
+            fetch_sensex_quote=(
+                broker_adapters.fetch_sensex_quote
+                if request.broker_enabled
+                else None
+            ),
+            fetch_public_bse_quote=_PUBLIC_MARKET.fetch_bse_quote,
+            public_bse_symbols=_PUBLIC_MARKET.bse_symbols,
+            executor=_get_market_io_executor(),
+        ).gather(request, timings=timings)
+    except TimeoutError:
+        # Running Python threads cannot be forcibly stopped. Retire this pool
+        # so a broker SDK call that ignores its deadline cannot consume worker
+        # capacity from every later analytics tick.
+        _reset_market_io_executor()
+        raise
 
     if request.option_exchange == "BSE":
         df, spot, expiry_dates = gathered.chain
@@ -615,6 +622,15 @@ def _get_market_io_executor() -> ThreadPoolExecutor:
     return _MARKET_IO_EXECUTOR
 
 
+def _reset_market_io_executor() -> None:
+    """Retire the shared pool after a timed-out, non-cancellable operation."""
+    global _MARKET_IO_EXECUTOR
+    executor = _MARKET_IO_EXECUTOR
+    _MARKET_IO_EXECUTOR = None
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
     """NEAR and MONTHLY extra-expiry bundles, built concurrently (they're
     independent of each other) and throttled.
@@ -699,6 +715,7 @@ def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
                                 timings["extra" + slot_name] = round(
                                     time.monotonic() - submitted_at, 4
                                 )
+                    _reset_market_io_executor()
     except Exception as e:
         logger.warning(f"[ExtraChains] Skip ({e})")
     return extra_chains
