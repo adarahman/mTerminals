@@ -23,6 +23,7 @@ class OperationalMetrics:
         self._gauges = {
             "connectedClients": 0,
             "pipelineDurationSeconds": None,
+            "pipelineStageTimings": None,
             "lastPipelineSuccessAt": None,
             "lastPipelineFailureAt": None,
         }
@@ -47,10 +48,30 @@ class OperationalMetrics:
             self._counters["websocket_disconnections_total"] += 1
             self._gauges["connectedClients"] = max(0, int(connected_clients))
 
-    def observe_pipeline(self, success, duration_seconds, observed_at=None):
+    def observe_pipeline(
+        self,
+        success,
+        duration_seconds,
+        observed_at=None,
+        stage_timings=None,
+    ):
         with self._lock:
             self._counters["pipeline_runs_total"] += 1
             self._gauges["pipelineDurationSeconds"] = round(max(0.0, float(duration_seconds)), 6)
+            # Per-stage breakdown (chain/futures/quotes/engine/serialize/...).
+            # Stored as a plain dict so /metrics JSON stays serializable; a
+            # None value means no stage detail was supplied for this run.
+            if stage_timings:
+                try:
+                    self._gauges["pipelineStageTimings"] = {
+                        str(k): round(float(v), 4)
+                        for k, v in stage_timings.items()
+                        if isinstance(v, (int, float))
+                    }
+                except (TypeError, ValueError):
+                    self._gauges["pipelineStageTimings"] = None
+            else:
+                self._gauges["pipelineStageTimings"] = None
             if success:
                 self._gauges["lastPipelineSuccessAt"] = self._iso(observed_at)
             else:
