@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from oi.pricing import DEFAULT_BASE_IV
 from oi.capital_metrics import compute_chain_metrics
-from infrastructure.json_writer import write_json
+from infrastructure.json_writer import encode_json, write_json
 from application.payload_builders.signals import build_signals
 from application.payload_builders.common import (
     compact_number as fmt_k,
@@ -513,12 +513,11 @@ def export_dashboard_json(
     # json.dump if orjson isn't available OR if a non-serializable type
     # still sneaks into the payload after the default coercer runs
     # (engine/decision paths routinely leave numpy scalars / Timestamps).
-    # Write once to measure the real persistence cost, then include that
-    # measurement and end-to-end total in the canonical on-disk payload.
-    # The second atomic write is the published snapshot; callers receive the
-    # same updated timings dictionary.
+    # Measure encoding in memory, add the result to the payload, then publish
+    # the canonical snapshot once. This keeps timings complete without
+    # doubling dashboard file I/O on every tick.
     _serialization_started = time.monotonic()
-    _write_dashboard_json(out_path, payload)
+    encode_json(payload, default=_json_default)
     if pipeline_timings is not None:
         _pipeline_started = pipeline_timings.pop("_pipelineStartedAt", None)
         pipeline_timings["serialization"] = round(
@@ -528,7 +527,7 @@ def export_dashboard_json(
             pipeline_timings["total"] = round(
                 time.monotonic() - _pipeline_started, 4
             )
-        _write_dashboard_json(out_path, payload)
+    _write_dashboard_json(out_path, payload)
 
     vel_counts = [len(b["rows"]) for b in oi_velocity]
     vol_count = len([r for r in chain_rows if r.get("ceVolChg") != 0 or r.get("peVolChg") != 0])

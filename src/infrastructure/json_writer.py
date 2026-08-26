@@ -21,22 +21,32 @@ def write_json(
     *,
     default: Callable[[Any], Any],
 ) -> None:
+    encoded = encode_json(payload, default=default)
+    if isinstance(encoded, bytes):
+        with open(out_path, "wb") as output:
+            output.write(encoded)
+    else:
+        with open(out_path, "w", encoding="utf-8") as output:
+            output.write(encoded)
+
+
+def encode_json(
+    payload: dict,
+    *,
+    default: Callable[[Any], Any],
+) -> bytes | str:
+    """Encode a payload without performing file I/O."""
     if _orjson is not None:
         try:
-            with open(out_path, "wb") as output:
-                output.write(
-                    _orjson.dumps(
-                        payload,
-                        default=default,
-                        option=_orjson.OPT_NON_STR_KEYS
-                        | getattr(_orjson, "OPT_SERIALIZE_NUMPY", 0),
-                    )
-                )
-            return
+            return _orjson.dumps(
+                payload,
+                default=default,
+                option=_orjson.OPT_NON_STR_KEYS
+                | getattr(_orjson, "OPT_SERIALIZE_NUMPY", 0),
+            )
         except TypeError as exc:
             logger.warning(
                 "orjson dump failed (%s); falling back to stdlib json",
                 exc,
             )
-    with open(out_path, "w", encoding="utf-8") as output:
-        json.dump(payload, output, ensure_ascii=False, default=default)
+    return json.dumps(payload, ensure_ascii=False, default=default)
