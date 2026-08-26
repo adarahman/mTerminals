@@ -18,6 +18,7 @@ LEGACY_MODULE_NAMES = {
     "market_api",
     "option_chain_json",
     "mTerminals_json",
+    "dashboard_serializer",
     "expiry_manager",
     "index_contributors",
     "pipeline_config",

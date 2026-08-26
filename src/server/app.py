@@ -132,7 +132,6 @@ from server.feeds.orchestration import (  # noqa: E402
     configure_feed_orchestration,
 )
 from market.providers import nse_bse_client as market_api  # noqa: E402
-from application import dashboard_serializer  # noqa: E402
 from application import option_chain_runtime  # noqa: E402
 
 from operational_metrics import OperationalMetrics  # noqa: E402
@@ -697,7 +696,7 @@ _OPTION_CHAIN_PIPELINE = OptionChainPipeline(
     implementation=lambda config: option_chain_runtime.main(
         config,
         broker_adapters=_BROKER_MARKET_ADAPTERS,
-        export_dashboard=dashboard_serializer.export_dashboard_json,
+        export_dashboard=_PAYLOAD_EXPORT_CAPTURE.export,
     ),
 )
 

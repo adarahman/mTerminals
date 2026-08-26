@@ -8,7 +8,7 @@ one serialization path.
 import json
 
 from infrastructure.payload_capture import PayloadExportCapture
-import application.dashboard_serializer as dashboard_serializer
+from application.dashboard import serializer as dashboard_serializer
 
 
 def load_exported_dashboard_payload():
@@ -18,7 +18,7 @@ def load_exported_dashboard_payload():
 
 
 def install_payload_export_capture():
-    """Build the capture and monkey-patch the live export entry point.
+    """Build the capture adapter around the canonical exporter.
 
     Returns the PayloadExportCapture instance so callers (e.g.
     server/app.py's run_pipeline_once) can reach .clear / .payload.
@@ -28,5 +28,4 @@ def install_payload_export_capture():
         fallback_loader=load_exported_dashboard_payload,
         export_overrides={"out_path": "mTerminals.json"},
     )
-    dashboard_serializer.export_dashboard_json = capture.export
     return capture

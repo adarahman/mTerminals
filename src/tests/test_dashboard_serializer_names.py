@@ -2,12 +2,8 @@ import builtins
 import inspect
 import symtable
 
-# Inspect the canonical implementation, not the `application.dashboard_serializer`
-# shim: server/app.py monkeypatches that shim's `export_dashboard_json`
-# attribute at import time with a bound method (the PayloadExportCapture
-# seam), which would make inspect.getsource() return an indented method body
-# and break symtable compilation. The real function object — and its globals
-# resolution — lives in application.dashboard.serializer regardless.
+# Runtime composition and payload capture use this canonical module directly;
+# this test protects its global-name resolution contract.
 import application.dashboard.serializer as serializer
 
 
