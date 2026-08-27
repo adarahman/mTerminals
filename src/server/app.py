@@ -54,7 +54,6 @@ from server.market_history_api import (  # noqa: E402
 from server.index_quotes import IndexQuoteFetcher  # noqa: E402
 from application.runtime import (  # noqa: E402
     ApplicationLifecycle,
-    build_background_jobs,
 )
 from application.market_service import (  # noqa: E402
     AnalyticsPipelineRunner,
@@ -181,6 +180,7 @@ from server.task_callbacks import (  # noqa: E402
     flow_task_done as _flow_task_done,
     report_failed_task as _report_failed_task,
 )
+from server.runtime_services import ServerRuntimeServices, flush_oi_history  # noqa: E402
 logger = logging.getLogger("mterminals.server")
 configure_lot_size_resolver(_smartapi_lot_size)
 
@@ -1577,15 +1577,6 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
 )
 
 # ── entry point ──────────────────────────────────────────────────────────
-def _validate_server_startup():
-    if not host_is_loopback(WS_HOST):
-        raise RuntimeError(
-            f"refusing unsafe non-loopback bind {WS_HOST!r}: the WebSocket "
-            "control channel has no remote-client authentication; use "
-            "--host localhost or a loopback address"
-        )
-
-
 async def _start_http_runtime():
     return await start_http_server(
         ServerRoutes(
@@ -1607,43 +1598,18 @@ async def _start_http_runtime():
         ),
     )
 
-
-def _set_main_loop(loop):
-    runtime_state.MAIN_LOOP = loop
-
-
-def _start_live_runtime(loop):
-    if runtime_state.USE_SMARTAPI and feed_manager._feed_allowed(runtime_state.LIVE_FEED_PROVIDER):
-        feed_manager._start_live_feed(runtime_state.LIVE_FEED_PROVIDER, loop)
-    elif runtime_state.USE_SMARTAPI:
-        print(
-            f"[feed] websocket overlay not started "
-            f"(data source={runtime_state.MARKET_SELECTION.data_source}, "
-            f"feed provider={runtime_state.LIVE_FEED_PROVIDER})",
-            flush=True,
-        )
-    else:
-        print(
-            "[broker] authenticated services disabled "
-            "(BROKER_SERVICES_ENABLED=false) — no broker login, account/order "
-            "REST call, or websocket connection; public daily ScripMaster allowed",
-            flush=True,
-        )
-
-
-def _runtime_background_jobs():
-    return build_background_jobs(
-        index_quotes=_INDEX_QUOTE_LOOP.run,
-        bridge=bridge_loop,
-        algo_status=_ALGO_STATUS_LOOP.run,
-        reconcile=_RECONCILIATION_LOOP.run,
-        live_trading_enabled=LIVE_TRADING_ENABLED,
-    )
-
-
-def _flush_runtime_state():
-    from oi.oi_analysis import flush_history_to_disk
-    flush_history_to_disk()
+_RUNTIME_SERVICES = ServerRuntimeServices(
+    host=WS_HOST,
+    runtime_state=runtime_state,
+    feed_manager=feed_manager,
+    host_is_loopback=host_is_loopback,
+    index_quotes=_INDEX_QUOTE_LOOP.run,
+    bridge=bridge_loop,
+    algo_status=_ALGO_STATUS_LOOP.run,
+    reconcile=_RECONCILIATION_LOOP.run,
+    live_trading_enabled=LIVE_TRADING_ENABLED,
+    flush_history=flush_oi_history,
+)
 
 # Wire app-level dependencies into the feed orchestration module (kept free
 # of a circular import on the websocket broadcast + paper-trading engine).
@@ -1657,17 +1623,17 @@ async def main():
     from infrastructure.logging import configure_logging
 
     lifecycle = ApplicationLifecycle(
-        validate_startup=_validate_server_startup,
+        validate_startup=_RUNTIME_SERVICES.validate_startup,
         configure_logging=configure_logging,
         start_http_server=_start_http_runtime,
-        set_main_loop=_set_main_loop,
-        start_live_services=_start_live_runtime,
-        background_jobs=_runtime_background_jobs,
+        set_main_loop=_RUNTIME_SERVICES.set_main_loop,
+        start_live_services=_RUNTIME_SERVICES.start_live_services,
+        background_jobs=_RUNTIME_SERVICES.background_jobs,
         create_background_task=feed_manager._create_background_task,
         run_engine=engine_loop,
         background_tasks=lambda: runtime_state.BACKGROUND_TASKS,
         close_relay=lambda: runtime_state.NODE_RELAY.close(),
-        flush_state=_flush_runtime_state,
+        flush_state=_RUNTIME_SERVICES.flush_state,
     )
     await lifecycle.run()
 
