@@ -30,6 +30,9 @@ const Config = {
     // seconds. Use 30s so sparse ticks do not make the badge oscillate,
     // while a genuinely frozen stream is still surfaced promptly.
     staleAfterMs: 30000,
+    // Minimum spacing between forced replacements of a socket that remains
+    // open at the transport layer but stops delivering market snapshots.
+    staleRecoveryCooldownMs: 30000,
     // ws_server_live.py's bridge_ws_handler — separate endpoint from /ws,
     // same origin/port. Used by fiidii-report.js's FiiDiiReportFeed
     // (connects only while the FII/DII modal is open).

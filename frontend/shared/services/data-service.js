@@ -30,6 +30,7 @@ class DataService {
     this.store = new MarketStore();
     this.wsManager = new WSManager(Config.ws.url);
     this.feedStatusTimer = null;
+    this.lastStaleRecoveryAt = 0;
     this._setFeedStatus('CONNECTING');
     this.wsManager.on('open', () => {
       err('');
@@ -164,11 +165,20 @@ class DataService {
   _checkFeedFreshness(){
     const fs = AppState.feedState || {};
     if (!fs.lastMessageAt) return;
-    if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING' || fs.status === 'RECOVERING') return;
+    if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING') return;
     const age = Date.now() - fs.lastMessageAt;
     const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 30000;
-    if (age > staleAfter && fs.status !== 'STALE') {
-      this._setFeedStatus('STALE', `No market snapshot for ${Math.floor(age/1000)}s`);
+    if (age > staleAfter) {
+      const reason = `No market snapshot for ${Math.floor(age/1000)}s`;
+      if (fs.status !== 'STALE' && fs.status !== 'RECOVERING') {
+        this._setFeedStatus('STALE', reason);
+      }
+      const cooldown = (Config.ws && Config.ws.staleRecoveryCooldownMs) || staleAfter;
+      if (Date.now() - this.lastStaleRecoveryAt >= cooldown) {
+        this.lastStaleRecoveryAt = Date.now();
+        this._setFeedStatus('RECOVERING', `${reason}; reconnecting`);
+        this.wsManager.connect(undefined, true);
+      }
     } else if (fs.status === 'STALE') {
       // Keep the age label moving without causing a Dashboard re-render.
       this._updateFeedStatusDom();

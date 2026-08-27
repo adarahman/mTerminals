@@ -66,10 +66,10 @@ function loadDataService() {
   let now = 1_000_000;
   class FakeDate extends Date { static now() { return now; } }
   class FakeWSManager {
-    constructor(url) { this.url = url; this.listeners = {}; }
+    constructor(url) { this.url = url; this.listeners = {}; this.connectCalls = []; }
     on(name, fn) { (this.listeners[name] ||= []).push(fn); return this; }
     emit(name, value) { for (const fn of this.listeners[name] || []) fn(value); }
-    connect() {}
+    connect(url, reconnect) { this.connectCalls.push({ url, reconnect }); }
   }
   class FakeMarketStore {
     constructor() { this.listeners = {}; }
@@ -80,7 +80,9 @@ function loadDataService() {
   const eventBus = { emit(name, value) { if (name === 'feed:status') statuses.push(value.status); } };
   const context = vm.createContext({
     Date: FakeDate,
-    Config: { refresh: { defaultAutoRefreshMins: 5 }, ws: { url: 'ws://test', staleAfterMs: 12_000 } },
+    Config: { refresh: { defaultAutoRefreshMins: 5 }, ws: {
+      url: 'ws://test', staleAfterMs: 12_000, staleRecoveryCooldownMs: 12_000,
+    } },
     AppState: { feedState: null },
     WSManager: FakeWSManager,
     MarketStore: FakeMarketStore,
@@ -116,12 +118,13 @@ function loadDataService() {
 
   advance(12_001);
   service._checkFeedFreshness();
-  assert.equal(AppState.feedState.status, 'STALE');
+  assert.equal(AppState.feedState.status, 'RECOVERING');
   assert.match(AppState.feedState.reason, /No market snapshot for 12s/);
+  assert.deepEqual(service.wsManager.connectCalls, [{ url: undefined, reconnect: true }]);
 
   const staleMarketAt = AppState.feedState.lastMessageAt;
   service.wsManager.emit('message', { type: 'algoStatus', payload: { running: true } });
-  assert.equal(AppState.feedState.status, 'STALE', 'auxiliary traffic must not conceal stale market data');
+  assert.equal(AppState.feedState.status, 'RECOVERING', 'auxiliary traffic must not conceal stale market data');
   assert.equal(AppState.feedState.lastMessageAt, staleMarketAt);
 
   service.wsManager.emit('message', { type: 'delta', payload: {} });
@@ -129,7 +132,7 @@ function loadDataService() {
   assert.equal(AppState.feedState.reason, '');
   assert.deepEqual(statuses, [
     'CONNECTING', 'RECOVERING', 'DISCONNECTED', 'RECOVERING',
-    'LIVE', 'STALE', 'LIVE',
+    'LIVE', 'STALE', 'RECOVERING', 'LIVE',
   ], 'shared consumers must receive both recovery transitions');
 }
 
@@ -138,4 +141,5 @@ console.log('PASS  Explicit connect cancels an obsolete reconnect timer');
 console.log('PASS  Open socket remains RECOVERING until data arrives');
 console.log('PASS  Feed transitions LIVE → STALE → LIVE deterministically');
 console.log('PASS  Auxiliary traffic cannot refresh market freshness');
-console.log('\n5/5 feed recovery checks passed.');
+console.log('PASS  A stale half-open socket is replaced with a reconnect baseline');
+console.log('\n6/6 feed recovery checks passed.');
