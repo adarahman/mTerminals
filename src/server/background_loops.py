@@ -1,15 +1,10 @@
-"""Periodic background loops extracted from ws_server_live.
+"""Periodic background loops used by the server composition root.
 
 Mirrors the injected-callable pattern already used by BrokerFeedManager
 (server/feed_manager.py) and LiveOrderGateway (server/order_gateway.py):
 loop *mechanics* live here, fully unit-testable with fake callables.
-Runtime state that other parts of ws_server_live already read directly
-(LAST_FUNDS, LAST_LIVE_POSITIONS, LAST_ALGO_STATUS, INDEX_QUOTES,
-_NODE_SESSION — e.g. the handshake snapshot and shutdown cleanup) is NOT
-owned here. It stays exactly where it already lives (ws_server_live module
-globals), and is threaded through via get_*/set_* seams — same reasoning
-server/feed_manager.py's own docstring gives for keeping feed state as
-"legacy module globals because tests seam through them".
+Runtime state remains owned by ``server.runtime_state`` and is supplied through
+small injected accessors, keeping these loop mechanics independently testable.
 
 This is a pure refactor: no behavior change relative to the functions it
 replaces (index_quote_loop, _funds_poll_body/start_funds_polling/

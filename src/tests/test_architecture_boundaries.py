@@ -120,6 +120,12 @@ def test_composition_root_has_no_daily_scheduler_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_has_no_background_state_setter_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in ("_set_last_funds", "_set_last_live_positions", "_set_last_algo_status"):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

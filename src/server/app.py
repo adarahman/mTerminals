@@ -983,18 +983,6 @@ async def _broadcast_reconciliation_alert(result, source: str):
 
 
 # ── background pollers ───────────────────────────────────────────────────
-def _set_last_funds(value):
-    runtime_state.LAST_FUNDS = value
-
-
-def _set_last_live_positions(value):
-    runtime_state.LAST_LIVE_POSITIONS = value
-
-
-def _set_last_algo_status(value):
-    runtime_state.LAST_ALGO_STATUS = value
-
-
 # Pushes {"type":"indexQuotes",...}; dashboard.js's generic handler lands it
 # at wsState.indexQuotes, which paper-trading.js reads once Live mode is on.
 # (VIX is never the active SYMBOL, so it's always included in "others".)
@@ -1015,7 +1003,7 @@ _INDEX_QUOTE_LOOP = IndexQuoteLoop(
 _FUNDS_POLLER = FundsPoller(
     get_funds=smartapi_get_funds,
     broadcast=broadcast,
-    set_last_funds=_set_last_funds,
+    set_last_funds=lambda value: setattr(runtime_state, "LAST_FUNDS", value),
     poll_seconds=runtime_state.FUNDS_POLL_SECONDS,
     spawn_task=feed_manager._create_background_task,
     report=_print_log,
@@ -1031,7 +1019,9 @@ _RECONCILIATION_LOOP = ReconciliationLoop(
     get_positions=smartapi_get_positions,
     reconciler=_POSITION_RECONCILER,
     lot_sizes=PT_LOT_SIZES,
-    set_last_positions=_set_last_live_positions,
+    set_last_positions=lambda value: setattr(
+        runtime_state, "LAST_LIVE_POSITIONS", value
+    ),
     broadcast_alert=lambda result, source: _broadcast_reconciliation_alert(
         result, source=source
     ),
@@ -1043,7 +1033,7 @@ _RECONCILIATION_LOOP = ReconciliationLoop(
 _ALGO_STATUS_LOOP = AlgoStatusLoop(
     build_status=lambda: _build_algo_status(),
     broadcast=broadcast,
-    set_last_status=_set_last_algo_status,
+    set_last_status=lambda value: setattr(runtime_state, "LAST_ALGO_STATUS", value),
     poll_seconds=runtime_state.ALGO_STATUS_POLL_SECONDS,
     report=_print_log,
 )
