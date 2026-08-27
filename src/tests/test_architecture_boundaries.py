@@ -126,6 +126,17 @@ def test_composition_root_has_no_background_state_setter_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_has_no_market_cycle_service_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in (
+        "_collect_pipeline_payload",
+        "_seed_oi_baselines",
+        "_publish_canonical_payload",
+        "_pace_until_next_tick",
+    ):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

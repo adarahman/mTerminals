@@ -1095,20 +1095,9 @@ _MARKET_PIPELINE_SERVICE = MarketPipelineService(
 )
 
 
-async def _collect_pipeline_payload(tick_start: float):
-    """Compatibility seam for application market orchestration."""
-    return await _MARKET_PIPELINE_SERVICE.collect(tick_start)
-
-
 _OI_BASELINE_SYNCHRONIZER = OiBaselineSynchronizer(
     aggregators=_LIVE_FEED_AGGREGATORS.active
 )
-
-
-def _seed_oi_baselines(payload):
-    """Compatibility seam for application OI baseline synchronization."""
-    _OI_BASELINE_SYNCHRONIZER.synchronize(payload)
-
 
 def _store_canonical_payload(payload, published_at):
     runtime_state.LAST_PAYLOAD = payload
@@ -1130,22 +1119,12 @@ runtime_state.CANONICAL_PAYLOAD_PUBLISHER = CanonicalPayloadPublisher(
 )
 
 
-async def _publish_canonical_payload(payload):
-    """Compatibility seam for canonical application publication."""
-    await runtime_state.CANONICAL_PAYLOAD_PUBLISHER.publish(payload)
-
-
 runtime_state.MARKET_TICK_PACER = MarketTickPacer(
     poll_seconds=runtime_state.POLL_SECONDS,
     minimum_recompute_seconds=runtime_state.MIN_TICK_RECOMPUTE_SECONDS,
     symbol_switch_event=runtime_state.SYMBOL_SWITCH_EVENT,
     tick_activity_event=runtime_state.TICK_ACTIVITY_EVENT,
 )
-
-
-async def _pace_until_next_tick(tick_start: float, pipeline_elapsed: float):
-    """Compatibility seam for application tick pacing."""
-    await runtime_state.MARKET_TICK_PACER.wait(tick_start, pipeline_elapsed)
 
 
 def _schedule_auto_execution(decision):
@@ -1164,24 +1143,20 @@ def _schedule_node_relay(payload):
 runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
     reset_daily_sessions=_DAILY_MARKET_SCHEDULER.reset_sessions,
     trigger_eod=_DAILY_MARKET_SCHEDULER.trigger_eod,
-    collect_pipeline=lambda tick_started_at: _collect_pipeline_payload(
-        tick_started_at
-    ),
+    collect_pipeline=_MARKET_PIPELINE_SERVICE.collect,
     observe_pipeline=lambda success, elapsed: runtime_state.METRICS.observe_pipeline(
         success, elapsed
     ),
     market_session_status=selection_state._market_session_status,
     schedule_auto_execution=_schedule_auto_execution,
-    seed_oi_baselines=_seed_oi_baselines,
-    publish_payload=lambda payload: _publish_canonical_payload(payload),
+    seed_oi_baselines=_OI_BASELINE_SYNCHRONIZER.synchronize,
+    publish_payload=runtime_state.CANONICAL_PAYLOAD_PUBLISHER.publish,
     schedule_node_relay=_schedule_node_relay,
     connected_count=lambda: len(runtime_state.CONNECTED),
     build_current_prices=_PAPER_PRICE_BOOK.build,
     check_pending_orders=lambda prices: PT_ENGINE.check_pending_orders(prices),
     broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
-    pace=lambda tick_started_at, elapsed: _pace_until_next_tick(
-        tick_started_at, elapsed
-    ),
+    pace=runtime_state.MARKET_TICK_PACER.wait,
 )
 
 
