@@ -53,3 +53,20 @@ WS_QUERY_CONTROLLER = None
 LIVE_TRADING_KILL_SWITCH_ACTIVE = False
 PIPELINE_DELAYED_OVERLAY = None
 PIPELINE_DELAYED_REASON = None
+
+
+def store_canonical_payload(payload, published_at) -> None:
+    global LAST_PAYLOAD, LAST_PAYLOAD_AT
+    LAST_PAYLOAD = payload
+    LAST_PAYLOAD_AT = published_at
+
+
+def store_previous_payload(payload) -> None:
+    global LAST_SENT
+    LAST_SENT = payload
+
+
+def invalidate_market_baseline() -> None:
+    global LAST_SENT
+    LAST_SENT = None
+    SYMBOL_SWITCH_EVENT.set()

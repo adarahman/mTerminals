@@ -1099,21 +1099,12 @@ _OI_BASELINE_SYNCHRONIZER = OiBaselineSynchronizer(
     aggregators=_LIVE_FEED_AGGREGATORS.active
 )
 
-def _store_canonical_payload(payload, published_at):
-    runtime_state.LAST_PAYLOAD = payload
-    runtime_state.LAST_PAYLOAD_AT = published_at
-
-
-def _store_previous_payload(payload):
-    runtime_state.LAST_SENT = payload
-
-
 runtime_state.CANONICAL_PAYLOAD_PUBLISHER = CanonicalPayloadPublisher(
     stream_lock=runtime_state.MARKET_STREAM_LOCK,
     use_delta=lambda: runtime_state.USE_DELTA,
     previous_payload=lambda: runtime_state.LAST_SENT,
-    store_payload=_store_canonical_payload,
-    store_previous_payload=_store_previous_payload,
+    store_payload=runtime_state.store_canonical_payload,
+    store_previous_payload=runtime_state.store_previous_payload,
     broadcast=lambda message: broadcast(message),
     compute_diff=lambda previous, current: compute_diff(previous, current),
 )
@@ -1207,11 +1198,6 @@ runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
 )
 
 
-def _invalidate_market_baseline():
-    runtime_state.LAST_SENT = None
-    runtime_state.SYMBOL_SWITCH_EVENT.set()
-
-
 runtime_state.WS_QUERY_CONTROLLER = WebSocketQueryController(
     current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
     switch_symbol=lambda symbol, expiry: switch_symbol(symbol, expiry),
@@ -1220,7 +1206,7 @@ runtime_state.WS_QUERY_CONTROLLER = WebSocketQueryController(
     set_price_source=runtime_state.MARKET_SELECTION.select_price_source,
     current_futures_expiry=lambda: runtime_state.MARKET_SELECTION.futures_expiry,
     set_futures_expiry=runtime_state.MARKET_SELECTION.select_futures_expiry,
-    invalidate_market_baseline=_invalidate_market_baseline,
+    invalidate_market_baseline=runtime_state.invalidate_market_baseline,
 )
 
 
