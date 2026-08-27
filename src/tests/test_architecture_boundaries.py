@@ -114,6 +114,12 @@ def test_composition_root_has_no_live_order_gateway_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_has_no_daily_scheduler_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in ("_live_aggregators", "_reset_daily_sessions", "_maybe_trigger_eod"):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

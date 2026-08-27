@@ -1059,12 +1059,6 @@ _NODE_RELAY = runtime_state.NODE_RELAY
 # ── engine loop ──────────────────────────────────────────────────────────
 _LIVE_FEED_AGGREGATORS = LiveFeedAggregatorRegistry(managers=lambda: runtime_state.FEEDS)
 
-
-def _live_aggregators() -> dict:
-    """Compatibility seam for active application feed aggregators."""
-    return _LIVE_FEED_AGGREGATORS.active()
-
-
 def _schedule_eod_jobs(now):
     eod_task = asyncio.create_task(asyncio.to_thread(fetch_all_eod, now, True))
     eod_task.add_done_callback(_eod_task_done)
@@ -1079,16 +1073,6 @@ _DAILY_MARKET_SCHEDULER = DailyMarketScheduler(
     eod_trigger_time=EOD_TRIGGER_TIME,
     schedule_eod_jobs=_schedule_eod_jobs,
 )
-
-
-def _reset_daily_sessions(now: datetime):
-    """Compatibility seam for application daily-session maintenance."""
-    _DAILY_MARKET_SCHEDULER.reset_sessions(now)
-
-
-def _maybe_trigger_eod(now: datetime):
-    """Compatibility seam for application EOD scheduling."""
-    _DAILY_MARKET_SCHEDULER.trigger_eod(now)
 
 
 def _pipeline_delayed_reason(timeout_seconds):
@@ -1188,8 +1172,8 @@ def _schedule_node_relay(payload):
 
 
 runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
-    reset_daily_sessions=_reset_daily_sessions,
-    trigger_eod=_maybe_trigger_eod,
+    reset_daily_sessions=_DAILY_MARKET_SCHEDULER.reset_sessions,
+    trigger_eod=_DAILY_MARKET_SCHEDULER.trigger_eod,
     collect_pipeline=lambda tick_started_at: _collect_pipeline_payload(
         tick_started_at
     ),
