@@ -13,7 +13,8 @@ class _Lock:
 
 
 class _WebSocket:
-    def __init__(self):
+    def __init__(self, *, closed=False):
+        self.closed = closed
         self.messages = []
 
     async def send_str(self, value):
@@ -75,3 +76,11 @@ def test_does_not_send_stale_or_absent_optional_snapshots():
         "portfolio",
         "orders",
     ]
+
+
+def test_closed_websocket_receives_no_handshake_messages():
+    websocket = _WebSocket(closed=True)
+
+    asyncio.run(_sender().send(websocket, send_full=True))
+
+    assert websocket.messages == []
