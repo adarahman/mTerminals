@@ -1196,11 +1196,6 @@ runtime_state.WS_HANDSHAKE = WebSocketHandshakeSender(
 )
 
 
-async def _send_handshake_snapshot(ws, *, send_full: bool):
-    """Compatibility seam for the canonical handshake sender."""
-    await runtime_state.WS_HANDSHAKE.send(ws, send_full=send_full)
-
-
 runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
     place_order=lambda payload: _handle_place_order(payload),
     cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
@@ -1210,19 +1205,6 @@ runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
     start_funds_polling=lambda: _FUNDS_POLLER.start(),
     stop_funds_polling=lambda: _FUNDS_POLLER.stop(),
 )
-
-
-async def _ws_dispatch_message(data):
-    """Compatibility seam for the canonical message router."""
-    await runtime_state.WS_MESSAGE_ROUTER.dispatch(data)
-
-
-def _set_price_source(value):
-    runtime_state.MARKET_SELECTION.select_price_source(value)
-
-
-def _set_futures_expiry(value):
-    runtime_state.MARKET_SELECTION.select_futures_expiry(value)
 
 
 def _invalidate_market_baseline():
@@ -1235,9 +1217,9 @@ runtime_state.WS_QUERY_CONTROLLER = WebSocketQueryController(
     switch_symbol=lambda symbol, expiry: switch_symbol(symbol, expiry),
     switch_data_source=lambda source: switch_data_source(source),
     current_price_source=lambda: runtime_state.MARKET_SELECTION.price_source,
-    set_price_source=_set_price_source,
+    set_price_source=runtime_state.MARKET_SELECTION.select_price_source,
     current_futures_expiry=lambda: runtime_state.MARKET_SELECTION.futures_expiry,
-    set_futures_expiry=_set_futures_expiry,
+    set_futures_expiry=runtime_state.MARKET_SELECTION.select_futures_expiry,
     invalidate_market_baseline=_invalidate_market_baseline,
 )
 
@@ -1248,12 +1230,10 @@ runtime_state.DASHBOARD_WS_HANDLER = DashboardWebSocketHandler(
     connected_count=lambda: len(runtime_state.CONNECTED),
     metrics=runtime_state.METRICS,
     query_controller=runtime_state.WS_QUERY_CONTROLLER,
-    send_handshake=lambda websocket, **kwargs: _send_handshake_snapshot(
-        websocket, **kwargs
-    ),
+    send_handshake=runtime_state.WS_HANDSHAKE.send,
     has_market_payload=lambda: runtime_state.LAST_PAYLOAD is not None,
     decode=orjson.loads,
-    dispatch_message=lambda data: _ws_dispatch_message(data),
+    dispatch_message=runtime_state.WS_MESSAGE_ROUTER.dispatch,
     symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
     expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
     logger=logger,

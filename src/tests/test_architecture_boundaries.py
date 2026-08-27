@@ -137,6 +137,17 @@ def test_composition_root_has_no_market_cycle_service_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_has_no_websocket_service_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in (
+        "_send_handshake_snapshot",
+        "_ws_dispatch_message",
+        "_set_price_source",
+        "_set_futures_expiry",
+    ):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 
