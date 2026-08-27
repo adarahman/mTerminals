@@ -55,18 +55,23 @@ def backtest_env(ws_server_live, monkeypatch):
 
 def test_defaults_to_server_symbol_when_none_given(backtest_env):
     m, captured = backtest_env
-    monkeypatch_symbol = "BANKNIFTY"
-    m.SYMBOL = monkeypatch_symbol
+    original_symbol = m.runtime_state.MARKET_SELECTION.symbol
+    original_expiry = m.runtime_state.MARKET_SELECTION.expiry
+    m.runtime_state.MARKET_SELECTION.select_symbol("BANKNIFTY", original_expiry)
 
-    resp = _run(m.backtest_handler(_FakeRequest()))
+    try:
+        resp = _run(m.backtest_handler(_FakeRequest()))
+    finally:
+        m.runtime_state.MARKET_SELECTION.select_symbol(
+            original_symbol, original_expiry
+        )
 
     assert resp.status == 200
-    assert captured["symbol"] == monkeypatch_symbol
+    assert captured["symbol"] == "BANKNIFTY"
 
 
 def test_explicit_symbol_query_param_overrides_server_symbol(backtest_env):
     m, captured = backtest_env
-    m.SYMBOL = "NIFTY"
 
     _run(m.backtest_handler(_FakeRequest({"symbol": "banknifty"})))
 

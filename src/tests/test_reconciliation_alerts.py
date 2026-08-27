@@ -24,10 +24,8 @@ def _run(coro):
 @pytest.fixture
 def recon_env(ws_server_live, monkeypatch):
     """Captures every broadcast() call instead of touching CONNECTED/real
-    websockets, and gives each test a fresh LAST_RECONCILIATION_ALERT /
-    trip_lots so tests don't leak state into each other (module-level
-    globals, same reason live_env resets _live_order_timestamps etc. in
-    test_handle_place_order.py)."""
+    websockets, and gives each test fresh reconciliation runtime state so
+    tests do not leak through the session-scoped server fixture."""
     m = ws_server_live
     sent = []
 
@@ -35,7 +33,7 @@ def recon_env(ws_server_live, monkeypatch):
         sent.append(message)
 
     monkeypatch.setattr(m, "broadcast", _fake_broadcast)
-    monkeypatch.setattr(m, "LAST_RECONCILIATION_ALERT", None)
+    monkeypatch.setattr(m.runtime_state, "LAST_RECONCILIATION_ALERT", None)
     monkeypatch.setattr(m._POSITION_RECONCILER, "trip_lots", 2)
     return m, sent
 
@@ -47,7 +45,7 @@ def test_clean_result_does_not_broadcast(recon_env):
     _run(m._broadcast_reconciliation_alert(result, source="periodic"))
 
     assert sent == []
-    assert m.LAST_RECONCILIATION_ALERT is None
+    assert m.runtime_state.LAST_RECONCILIATION_ALERT is None
 
 
 def test_below_threshold_mismatch_broadcasts_untripped(recon_env):
@@ -72,7 +70,7 @@ def test_below_threshold_mismatch_broadcasts_untripped(recon_env):
     assert payload["unparseableSymbols"] == []
     assert "ts" in payload
     # Broadcasting also updates the snapshot new connections are handed.
-    assert m.LAST_RECONCILIATION_ALERT == payload
+    assert m.runtime_state.LAST_RECONCILIATION_ALERT == payload
 
 
 def test_at_or_above_threshold_mismatch_marks_tripped(recon_env):
@@ -130,7 +128,7 @@ def test_multiple_mismatches_all_included(recon_env):
 
 def test_last_reconciliation_alert_replayed_to_new_connections_field_shape(recon_env):
     """Not exercising the actual aiohttp handshake here (out of scope for
-    a unit test), just confirming the module-level snapshot the
+    a unit test), just confirming the runtime-state snapshot the
     websocket handler's initial-send branch serializes is the exact same
     dict that was broadcast — i.e. broadcasting and "what a new client is
     handed" never drift apart because they're the same object."""
@@ -142,4 +140,4 @@ def test_last_reconciliation_alert_replayed_to_new_connections_field_shape(recon
 
     _run(m._broadcast_reconciliation_alert(result, source="periodic"))
 
-    assert m.LAST_RECONCILIATION_ALERT is sent[0]["payload"]
+    assert m.runtime_state.LAST_RECONCILIATION_ALERT is sent[0]["payload"]
