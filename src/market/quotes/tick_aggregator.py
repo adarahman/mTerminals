@@ -1,14 +1,8 @@
 """Canonical broker-neutral WebSocket tick aggregation pipeline.
 
-Bridges normalized provider tick streams into ws_server_live.py's
-ACTUAL broadcast() coroutine — verified directly against both files:
-
-  ws_server_live.py:
-    - Single aiohttp asyncio app, one event loop (asyncio.run(main())).
-    - async def broadcast(message): sends orjson-encoded {type, payload}
-      to every ws in CONNECTED via ws.send_str().
-    - compute_diff()'s keyed-list format: {"_keyed": True,
-      "_key_field": "strike", "changed": [...], "_removed_keys": [...]}
+Bridges normalized provider tick streams into the server's broadcast
+coroutine. The server uses one asyncio loop and emits keyed chain deltas:
+{"_keyed": True, "_key_field": "strike", "changed": [...]}.
 
   Dashboard.js:
     - updateDashboard() branches on msg.type === 'delta' -> applyDelta()
@@ -17,8 +11,8 @@ ACTUAL broadcast() coroutine — verified directly against both files:
 
 SmartTickStream's underlying websocket-client loop runs in its own OS
 thread (it's NOT asyncio-native), so TickAggregator can't just `await
-broadcast(...)` directly — that coroutine must run on ws_server_live.py's
-event loop. This adapter uses asyncio.run_coroutine_threadsafe() to hop
+broadcast(...)` directly — that coroutine must run on the server event
+loop. This adapter uses asyncio.run_coroutine_threadsafe() to hop
 from the provider socket thread back onto that loop safely.
 """
 
@@ -33,9 +27,8 @@ class TickAggregator:
     token_meta:   dict {token: {"strike": int, "option_type": "CE"/"PE"}}
                   — build once from get_atm_chain()'s rows.
     loop:         the asyncio event loop broadcast() runs on — pass the
-                  loop captured inside main() (see wiring notes below).
-    broadcast_fn: ws_server_live.py's existing `broadcast` coroutine
-                  function itself (not called yet — just the reference).
+                  loop captured inside main().
+    broadcast_fn: the server's `broadcast` coroutine function itself.
     flush_interval: seconds between merged-row broadcasts.
     """
 
@@ -47,7 +40,7 @@ class TickAggregator:
         # Optional asyncio.Event, set (thread-safely, via
         # loop.call_soon_threadsafe — this runs on the flush thread, not
         # the event loop) after each successful flush. Lets a consumer
-        # like ws_server_live.py's engine_loop() wake early on real tick
+        # like the market engine loop wake early on real tick
         # activity instead of always waiting out its full poll interval —
         # see that file's MIN_TICK_RECOMPUTE_SECONDS for why a floor is
         # still needed on top of this (ticks arrive every flush_interval
@@ -115,8 +108,7 @@ class TickAggregator:
                 self._session_open_oi.setdefault(token, base_oi)
 
     def reset_session(self):
-        """Call at actual trading-day rollover (see ws_server_live.py's
-        engine_loop() _LAST_SESSION_DATE check) — NOT on ordinary
+        """Call at actual trading-day rollover — NOT on ordinary
         symbol/expiry switches within the same day."""
         with self._lock:
             self._session_open_oi.clear()
@@ -126,7 +118,7 @@ class TickAggregator:
 
         Field names here are camelCase (ceOI, ceLTP, ceVol, ceDOI, ...) —
         confirmed as the actual wire schema chain-views.js and
-        ws_server_live.py's own row.get("ceLTP") both read from. An earlier
+        the server serializer's row.get("ceLTP") both read from. An earlier
         version of this file used snake_case (ce_oi, ce_ltp, ...) to match
         oi_analysis.py's internal Python schema, but that's a DIFFERENT,
         pre-transform schema that never reaches the client — that change
@@ -232,7 +224,7 @@ class TickAggregator:
 
             message = {"type": "delta", "payload": payload}
 
-            # Hop from this thread onto ws_server_live.py's event loop to
+            # Hop from this thread onto the server's event loop to
             # actually run the `broadcast()` coroutine. Fire-and-forget:
             # we don't block this thread waiting for the send to complete.
             try:
@@ -243,82 +235,3 @@ class TickAggregator:
                     self.loop.call_soon_threadsafe(self.tick_event.set)
             except Exception as e:
                 logger.error(f"[TickAggregator] failed to schedule broadcast: {e}")
-
-
-# ── Exact wiring for ws_server_live.py ──────────────────────────────────
-"""
-Add near the top of ws_server_live.py, with the other imports:
-
-    import threading
-    from brokers.smartapi.client import get_atm_chain, list_expiries
-    from brokers.smartapi.websocket import SmartTickStream, EXCHANGE_TYPE
-    from market.quotes.tick_aggregator import TickAggregator
-
-Add a startup function (place it near switch_symbol()/run_pipeline_once()):
-
-    _smartapi_stream = None
-    _smartapi_aggregator = None
-
-    def start_smartapi_feed(loop, underlying=None, strikes_around_atm=10):
-        '''Starts a live SmartAPI tick feed for `underlying` (defaults to
-        the module's current SYMBOL global) and merges ticks into the same
-        broadcast() pipeline engine_loop() already uses. Independent of
-        engine_loop's own NSE/BSE-driven chain — this ADDS a second,
-        faster-updating source for the same `chain` state slice.'''
-        global _smartapi_stream, _smartapi_aggregator
-        target_symbol = (underlying or SYMBOL).upper()
-        exchange = "BFO" if target_symbol in _BSE_SYMBOLS else "NFO"
-
-        expiries = list_expiries(target_symbol, exchange=exchange)
-        if not expiries:
-            print(f"[smartapi] No expiries found for {target_symbol}, skipping feed")
-            return
-        chain = get_atm_chain(target_symbol, expiries[0], strikes_around_atm, exchange=exchange)
-        if not chain:
-            print(f"[smartapi] Could not build ATM chain for {target_symbol}, skipping feed")
-            return
-
-        token_meta = {
-            row["token"]: {"strike": row["strike"], "option_type": row["type"]}
-            for row in chain["rows"]
-        }
-
-        _smartapi_aggregator = TickAggregator(token_meta, loop, broadcast)
-        _smartapi_aggregator.start()
-
-        _smartapi_stream = SmartTickStream(on_tick=_smartapi_aggregator.on_tick, mode=3)
-        _smartapi_stream.connect()
-        threading.Thread(target=_smartapi_stream.run_forever, daemon=True).start()
-        time.sleep(2)  # let the WS connection establish before subscribing
-        _smartapi_stream.subscribe(EXCHANGE_TYPE[exchange], list(token_meta.keys()))
-        print(f"[smartapi] Streaming {len(token_meta)} {target_symbol} option legs")
-
-Then inside main(), alongside the existing index_quote_loop task:
-
-    async def main():
-        app = web.Application(middlewares=[no_cache_middleware])
-        ...
-        loop = asyncio.get_running_loop()
-        start_smartapi_feed(loop)          # <-- add this line
-
-        try:
-            asyncio.create_task(index_quote_loop())
-            await engine_loop()
-        finally:
-            ...
-
-No changes needed in Dashboard.js — applyDelta() already patches `chain`
-rows keyed by `strike` exactly as compute_diff() itself would produce
-them. Ticks pushed by TickAggregator will render through the exact same
-_rerenderChainPanels() path as your existing NSE/BSE-driven updates.
-
-Caveat worth deciding on deliberately: engine_loop() ALSO periodically
-rebuilds and broadcasts the full chain from your NSE/BSE pipeline. If both
-sources are live simultaneously, whichever writes last to `chain[strike]`
-"wins" until the next tick from either side. That's fine if SmartAPI is
-your primary real-time leg-level feed and NSE/BSE remains the source for
-Greeks/OI-derived analytics (GEX, decision_engine, etc.) that aren't in
-SmartAPI's tick payload — but worth being explicit that this is a
-supplementary feed, not a replacement, unless/until you decide to retire
-the NSE/BSE polling path entirely.
-"""

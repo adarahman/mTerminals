@@ -347,10 +347,8 @@ class UpstoxTickStream:
         self._closed_event.wait()
 
     def run_forever_with_reconnect(self, *_args, **_kwargs):
-        """Kept for call-site symmetry with SmartTickStream's identically-
-        named method (ws_server_live.py's start_upstox_feed() calls this
-        exactly like start_smartapi_feed() calls SmartTickStream's
-        version). No separate outer backoff loop needed here — the SDK's
+        """Kept for symmetry with SmartTickStream's identically named method.
+        No separate outer backoff loop is needed here — the SDK's
         own auto_reconnect(...) (enabled in connect() above) already
         handles reconnection; this just blocks until an intentional
         close() or an exhausted auto-reconnect (_handle_reconnect_stopped)."""

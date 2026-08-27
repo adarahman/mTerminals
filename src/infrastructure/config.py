@@ -236,10 +236,8 @@ class Settings:
     )
 
     # -- Live tick-streaming feed provider ---------------------------------
-    # Selects which broker's WEBSOCKET tick feed ws_server_live.py's
-    # start_smartapi_feed()/start_upstox_feed()/start_shoonya_feed()
-    # dispatch (see that file's USE_SMARTAPI/LIVE_FEED_PROVIDER block) uses
-    # to overlay fast leg-level ticks onto the slower NSE/BSE-polled chain.
+    # Selects which broker's WebSocket manager overlays fast leg-level ticks
+    # onto the slower snapshot-polled chain.
     #
     # Deliberately NOT independently defaulted from execution_broker
     # (order routing) or market_data_provider (REST chain-building

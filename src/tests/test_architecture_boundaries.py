@@ -82,6 +82,15 @@ def test_composition_root_does_not_build_paper_price_maps():
     assert "def _build_current_prices" not in app
 
 
+def test_composition_root_has_no_provider_specific_feed_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for provider in ("smartapi", "upstox", "shoonya", "kotak"):
+        assert f"def start_{provider}_feed" not in app
+        assert f"def restart_{provider}_feed" not in app
+        assert f"def _switch_{provider}_symbol_blocking" not in app
+        assert f"def _stop_{provider}_feed_blocking" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

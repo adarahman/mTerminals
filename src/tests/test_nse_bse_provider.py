@@ -63,10 +63,6 @@ def _restore_runtime_state():
         runtime_state.MARKET_SELECTION.select_data_source(prev_ds)
 
 
-def _noop_restart(*_a, **_k):
-    return None
-
-
 # ── 1. Seven selectable providers ────────────────────────────────────────
 def test_seven_providers_selectable_including_nse_bse():
     keys = set(md.PROVIDER_KEYS)
@@ -364,9 +360,6 @@ def test_upstox_canonical_name_maps_ticker_to_full_name(ws_server_live):
 
 # ── 5+6. Runtime switching without restart, full-baseline reset ──────────
 def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
     asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
     assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
@@ -384,9 +377,6 @@ def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
 
 
 def test_switch_clears_baseline_for_full_republish(ws_server_live, monkeypatch):
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
     runtime_state.LAST_PAYLOAD = {"symbol": "NIFTY", "chain": []}
     runtime_state.LAST_SENT = {"symbol": "NIFTY", "chain": []}
@@ -399,9 +389,6 @@ def test_switch_clears_baseline_for_full_republish(ws_server_live, monkeypatch):
 
 
 def test_switch_rejects_unknown_and_same_source_is_noop(ws_server_live, monkeypatch):
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
     with pytest.raises(ValueError):
         asyncio.run(ws_server_live.switch_data_source("NOT_A_PROVIDER"))
     before = runtime_state.MARKET_SELECTION.data_source
@@ -484,9 +471,6 @@ def test_background_feed_restart_contains_start_failure():
 
 
 def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
 
     # Streaming provider active -> its feed is allowed.
     asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
@@ -564,9 +548,6 @@ def test_stale_feed_broadcast_is_a_noop(ws_server_live, monkeypatch):
 def test_switch_away_unsubscribes_feed_without_error(ws_server_live, monkeypatch):
     # _stop_active_broker_feed must tolerate not-yet-started feeds and still
     # run its unsubscribe best-effort (no exception).
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
     ws_server_live.runtime_state.FEEDS["SMARTAPI"].state.stream = None
     asyncio.run(ws_server_live.switch_data_source("SMARTAPI"))
     for provider in ("SMARTAPI", "UPSTOX", "SHOONYA"):
@@ -599,9 +580,6 @@ def test_switch_symbol_unquotes_stale_encoded_symbol(ws_server_live, monkeypatch
     # on the wire; aiohttp decodes once, leaving "ZYDUS%20LIFESCIENCES%20LTD".
     # switch_symbol must normalize it so the engine never probes a literal
     # "%20" symbol (acceptance: symbol switches are resilient to encoding).
-    monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
-    monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
     monkeypatch.setattr(runtime_state, "USE_SMARTAPI", True)
     monkeypatch.setattr(runtime_state, "LIVE_FEED_PROVIDER", "SMARTAPI")
 
