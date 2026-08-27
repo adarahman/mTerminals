@@ -40,6 +40,7 @@ class ConcurrentMarketDataGatherer:
         max_workers: int = 7,
         executor: ThreadPoolExecutor | None = None,
         operation_timeout_seconds: float = 15.0,
+        warm_timeout_seconds: float = 1.0,
     ) -> None:
         self._fetch_chain = fetch_chain
         self._fetch_futures = fetch_futures
@@ -56,6 +57,7 @@ class ConcurrentMarketDataGatherer:
         # gather() falls back to a per-call executor for isolation.
         self._executor = executor
         self._operation_timeout_seconds = operation_timeout_seconds
+        self._warm_timeout_seconds = warm_timeout_seconds
 
     def gather(
         self,
@@ -126,7 +128,14 @@ class ConcurrentMarketDataGatherer:
                 )
 
             if warm is not None:
-                result(warm, "warm")
+                # Warming only refreshes a shared cache. A slow broker REST
+                # request must not consume the whole market-data deadline;
+                # consumers can safely use the previous successful snapshot.
+                remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    warm.result(timeout=min(self._warm_timeout_seconds, remaining))
+                except FutureTimeoutError:
+                    warm.cancel()
 
             # Quote consumers depend on the populated batch cache; only fan
             # them out once warm_batch above has refilled it.

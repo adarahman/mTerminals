@@ -70,6 +70,18 @@ def test_legacy_backend_modules_are_not_imported():
     assert not violations, "legacy imports still present:\n" + "\n".join(violations)
 
 
+def test_composition_root_does_not_own_websocket_security_policy():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "import ipaddress" not in app
+    assert "def _peer_is_loopback" not in app
+    assert "def _host_is_loopback" not in app
+
+
+def test_composition_root_does_not_build_paper_price_maps():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _build_current_prices" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

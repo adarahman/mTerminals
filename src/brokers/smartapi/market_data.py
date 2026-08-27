@@ -43,10 +43,14 @@ class SmartApiMarketData:
 
         return get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
 
-    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+    def get_batch_quotes_by_token(
+        self, exchange, symbol_token_pairs, mode="FULL", **retry_policy
+    ):
         from brokers.smartapi.client import get_batch_quotes_by_token
 
-        return get_batch_quotes_by_token(exchange, symbol_token_pairs, mode=mode)
+        return get_batch_quotes_by_token(
+            exchange, symbol_token_pairs, mode=mode, **retry_policy
+        )
 
     def get_spot_quote(self, underlying):
         from brokers.smartapi.client import get_spot_quote

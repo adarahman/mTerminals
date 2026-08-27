@@ -1,6 +1,7 @@
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.requests import MarketDataRequestPlan
 import threading
+import time
 
 
 def _request(broker_enabled):
@@ -71,3 +72,27 @@ def test_gatherer_bounds_a_stalled_operation():
             gatherer.gather(_request(False))
     finally:
         release.set()
+
+
+def test_gatherer_does_not_block_on_optional_batch_warmup():
+    release = threading.Event()
+    calls = []
+    gatherer = ConcurrentMarketDataGatherer(
+        fetch_chain=lambda request: "chain",
+        fetch_futures=lambda request: "futures",
+        fetch_indices=lambda: "indices",
+        warm_broker_batch=lambda: release.wait(1),
+        fetch_ticker_payload=lambda: calls.append("ticker") or ["cached"],
+        operation_timeout_seconds=0.2,
+        warm_timeout_seconds=0.01,
+    )
+
+    started = time.monotonic()
+    try:
+        result = gatherer.gather(_request(True))
+    finally:
+        release.set()
+
+    assert time.monotonic() - started < 0.15
+    assert result.ticker_payload == ["cached"]
+    assert calls == ["ticker"]

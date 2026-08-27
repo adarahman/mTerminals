@@ -149,6 +149,21 @@ def test_call_rate_limited_exhausts_retries_returns_status_false(session):
     assert session.login_calls["n"] == 1  # still never treated as an auth problem
 
 
+def test_call_supports_a_bounded_optional_rate_limit_budget(session):
+    always_rate_limited = Exception("too many requests")
+    session.mock_api.someMethod.side_effect = [always_rate_limited] * 2
+
+    result = session.call(
+        "someMethod",
+        _rate_limit_max_retries=1,
+        _rate_limit_backoff_s=0.25,
+    )
+
+    assert result["status"] is False
+    assert session.mock_api.someMethod.call_count == 2
+    assert session.login_calls["n"] == 1
+
+
 # ── generic/unrecognized exceptions: re-login and retry once ────────────
 
 def test_call_generic_exception_triggers_relogin_and_retries(session):

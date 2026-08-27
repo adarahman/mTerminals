@@ -14,7 +14,6 @@ configuration from the application layer.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import logging
 import os
@@ -86,6 +85,11 @@ from server.websocket import DashboardWebSocketHandler  # noqa: E402
 from server.websocket_handshake import WebSocketHandshakeSender  # noqa: E402
 from server.websocket_messages import WebSocketMessageRouter  # noqa: E402
 from server.websocket_query import WebSocketQueryController  # noqa: E402
+from server.websocket_security import (  # noqa: E402
+    build_allowed_origins,
+    host_is_loopback,
+    origin_allowed,
+)
 from server.feeds.smartapi import (  # noqa: E402
     FeedState as _SmartApiFeedState,
     resolve_chain_tokens as _resolve_smartapi_feed_tokens,
@@ -142,6 +146,7 @@ from brokers.option_chain_adapter import BrokerOptionChainAdapter  # noqa: E402
 from market.option_chain.runtime_adapters import BrokerMarketAdapters  # noqa: E402
 from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
+from server.paper_portfolio import PaperPriceBook  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
@@ -373,11 +378,15 @@ runtime_state.LAST_FUNDS = None
 # around the sqlite3 connection.
 PT_ENGINE = PaperTradingEngine()
 
-# _build_current_prices() only ever sees ONE symbol's chain per tick. This
+# PaperPriceBook only sees one symbol's chain per tick. This
 # cache holds the last known price per instrument_key across symbol
 # switches, so a leg on a non-active symbol keeps its LTP instead of going
 # blank ("—") the moment the dashboard switches symbols.
 runtime_state.LAST_KNOWN_LEG_PRICES: dict = {}
+_PAPER_PRICE_BOOK = PaperPriceBook(
+    runtime_state.LAST_KNOWN_LEG_PRICES,
+    _instrument_key,
+)
 
 # Throttle for the fast-path portfolio broadcast fired from the live-tick
 # sync path (see runtime_state.PORTFOLIO_POLL_SECONDS) — separate from engine_loop()'s
@@ -452,45 +461,15 @@ runtime_state.LAST_LIVE_POSITIONS = None
 # including submitting orders (cross-site WebSocket hijacking). Origin-less
 # requests are accepted only from a loopback peer, so a remote client can't
 # bypass the browser-origin allowlist by omitting Origin.
-_DEFAULT_ALLOWED_ORIGINS = {
-    f"http://{WS_HOST}:{HTTP_PORT}",
-    f"http://localhost:{HTTP_PORT}",
-    f"http://127.0.0.1:{HTTP_PORT}",
-}
-_EXTRA_ALLOWED_ORIGINS = {
-    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
-}
-ALLOWED_ORIGINS = _DEFAULT_ALLOWED_ORIGINS | _EXTRA_ALLOWED_ORIGINS
-
-
-def _host_is_loopback(host: str) -> bool:
-    """Return whether a listener host is restricted to this machine."""
-    normalized = str(host or "").strip().lower()
-    if normalized == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(normalized).is_loopback
-    except ValueError:
-        return False
-
-
-def _peer_is_loopback(request) -> bool:
-    try:
-        return ipaddress.ip_address(request.remote).is_loopback
-    except (TypeError, ValueError):
-        return False
+ALLOWED_ORIGINS = build_allowed_origins(
+    WS_HOST,
+    HTTP_PORT,
+    os.environ.get("ALLOWED_ORIGINS", "").split(","),
+)
 
 
 def _origin_allowed(request) -> bool:
-    origin = request.headers.get("Origin")
-    if origin is None:
-        return _peer_is_loopback(request)
-    # A dashboard opened directly from disk (file://...) gets the opaque
-    # browser origin "null". Permit that development mode only from a
-    # loopback peer; a remote Origin:null stays rejected.
-    if origin == "null":
-        return _peer_is_loopback(request)
-    return origin in ALLOWED_ORIGINS
+    return origin_allowed(request, ALLOWED_ORIGINS)
 
 
 # Analytics passes are serialized with provider switches so one pass observes
@@ -916,50 +895,6 @@ async def switch_data_source(new_source: str):
     return await _DATA_SOURCE_SWITCHER.switch(new_source)
 
 
-# ── paper-trading pricing ────────────────────────────────────────────────
-def _build_current_prices(payload):
-    """Build the {instrument_key: ltp} map paper_trading.py's
-    check_pending_orders()/mark_to_market()/place_order() expect, from the
-    SAME tick payload the dashboard renders — the paper engine is always
-    priced off exactly what the user sees on screen, never a stale/separate
-    fetch."""
-    prices = {}
-    if not payload:
-        return dict(runtime_state.LAST_KNOWN_LEG_PRICES)
-    symbol = payload.get("symbol")
-    if not symbol:
-        return dict(runtime_state.LAST_KNOWN_LEG_PRICES)
-
-    spot = payload.get("spot")
-    if spot is not None:
-        prices[_instrument_key(symbol, "", None, "INDEX")] = spot
-
-    expiry = payload.get("expiry") or ""
-    fut_ltp = payload.get("futLTP")
-    if fut_ltp is not None:
-        prices[_instrument_key(symbol, expiry, None, "FUT")] = fut_ltp
-
-    chains = payload.get("chains") or {}
-    if not chains and expiry:
-        chains = {expiry: payload.get("chain") or []}
-
-    for exp, rows in chains.items():
-        for row in rows or []:
-            strike = row.get("strike")
-            if strike is None:
-                continue
-            if row.get("ceLTP") is not None:
-                prices[_instrument_key(symbol, exp, strike, "CE")] = row["ceLTP"]
-            if row.get("peLTP") is not None:
-                prices[_instrument_key(symbol, exp, strike, "PE")] = row["peLTP"]
-
-    # A tick only ever prices ONE symbol's legs — merge, don't replace, so
-    # positions on other symbols keep their last known price instead of
-    # going blank the moment the dashboard's active symbol changes.
-    runtime_state.LAST_KNOWN_LEG_PRICES.update(prices)
-    return {**runtime_state.LAST_KNOWN_LEG_PRICES, **prices}
-
-
 async def _broadcast_portfolio(current_prices):
     """Push fresh portfolio + orders snapshots to every connected client.
     dashboard.js's generic deepMerge branch lands these at
@@ -982,7 +917,7 @@ async def _feed_portfolio_broadcast(payload):
     the tick payload the dashboard already shows, sweep pending LIMIT fills,
     then push portfolio/orders to clients. Injected into the feed
     orchestration module so it stays decoupled from server.app."""
-    current_prices = _build_current_prices(payload)
+    current_prices = _PAPER_PRICE_BOOK.build(payload)
     PT_ENGINE.check_pending_orders(current_prices)
     await _broadcast_portfolio(current_prices)
 
@@ -1081,11 +1016,11 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
     validation_reason = validate_order_intent(intent)
     if validation_reason:
         print(f"[order] REJECTED malformed intent: {validation_reason}", flush=True)
-        current_prices = _build_current_prices(runtime_state.LAST_PAYLOAD)
+        current_prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
         await _broadcast_portfolio(current_prices)
         return {"status": "rejected", "reason": validation_reason}
 
-    current_prices = _build_current_prices(runtime_state.LAST_PAYLOAD)
+    current_prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
 
     # Serialize the complete live pre-trade check and submission (see
     # LiveOrderGateway.order_gate for the TOCTOU this closes).
@@ -1471,7 +1406,7 @@ runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
     publish_payload=lambda payload: _publish_canonical_payload(payload),
     schedule_node_relay=_schedule_node_relay,
     connected_count=lambda: len(runtime_state.CONNECTED),
-    build_current_prices=_build_current_prices,
+    build_current_prices=_PAPER_PRICE_BOOK.build,
     check_pending_orders=lambda prices: PT_ENGINE.check_pending_orders(prices),
     broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
     pace=lambda tick_started_at, elapsed: _pace_until_next_tick(
@@ -1487,7 +1422,7 @@ async def engine_loop():
 
 # ── websocket handler ────────────────────────────────────────────────────
 def _paper_handshake_snapshot():
-    prices = _build_current_prices(runtime_state.LAST_PAYLOAD)
+    prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
     portfolio = PT_ENGINE.get_portfolio_summary(prices)
     spot = prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
     portfolio["funds"] = PT_ENGINE.get_fund_summary(
@@ -1525,7 +1460,7 @@ runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
     place_order=lambda payload: _handle_place_order(payload),
     cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
     broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
-    build_current_prices=lambda payload: _build_current_prices(payload),
+    build_current_prices=_PAPER_PRICE_BOOK.build,
     last_payload=lambda: runtime_state.LAST_PAYLOAD,
     start_funds_polling=lambda: _FUNDS_POLLER.start(),
     stop_funds_polling=lambda: _FUNDS_POLLER.stop(),
@@ -1674,7 +1609,7 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
 
 # ── entry point ──────────────────────────────────────────────────────────
 def _validate_server_startup():
-    if not _host_is_loopback(WS_HOST):
+    if not host_is_loopback(WS_HOST):
         raise RuntimeError(
             f"refusing unsafe non-loopback bind {WS_HOST!r}: the WebSocket "
             "control channel has no remote-client authentication; use "

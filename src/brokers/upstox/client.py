@@ -301,16 +301,13 @@ _session = UpstoxSession()
 
 
 def healthcheck() -> tuple[bool, str | None]:
-    """Return whether an Upstox access token is configured for this session.
-
-    Upstox has no unattended refresh flow, so readiness is a local token
-    check. Network/API validity is established by the first broker operation.
-    """
+    """Validate the configured Upstox token with an authenticated probe."""
 
     try:
         _session.access_token
+        _session.request("GET", f"{API_BASE}/v2/user/profile", max_retries=1)
         return True, None
-    except UpstoxError as exc:
+    except Exception as exc:
         return False, str(exc)
 
 

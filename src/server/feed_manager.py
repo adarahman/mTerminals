@@ -130,11 +130,22 @@ class BrokerFeedManager:
         block on network I/O; the RLock makes piled-up switches from rapid
         clicks execute one at a time, in order."""
         threading.Thread(
-            target=self.switch_blocking,
+            target=self._restart_blocking,
             args=(new_symbol, 10, new_expiry),
             daemon=True,
             name=f"{self._tag}-feed-switch",
         ).start()
+
+    def _restart_blocking(
+        self, new_symbol: str, strikes_around_atm: int, expiry=None
+    ) -> None:
+        try:
+            self.switch_blocking(new_symbol, strikes_around_atm, expiry)
+        except Exception as exc:  # background threads must never leak tracebacks
+            self._log(f"[{self._tag}] Feed switch failed: {exc}")
+            logging.getLogger(__name__).warning(
+                "[%s] feed switch failed", self._tag, exc_info=True
+            )
 
     def stop_blocking(self, *stop_args, **stop_kwargs) -> None:
         """Best-effort unsubscribe while preserving the state globals."""

@@ -224,7 +224,14 @@ class SmartApiSession:
         self.ensure_session()
         return self._auth_token
 
-    def call(self, fn_name, *args, **kwargs):
+    def call(
+        self,
+        fn_name,
+        *args,
+        _rate_limit_max_retries=None,
+        _rate_limit_backoff_s=None,
+        **kwargs,
+    ):
         """
         Call a SmartConnect method by name, auto re-logging in once on
         auth-type failures (expired/invalid token) before giving up.
@@ -240,7 +247,15 @@ class SmartApiSession:
             result = method(*args, **kwargs)
         except Exception as e:
             if _is_rate_limited(e):
-                return self._retry_after_rate_limit(fn_name, method, args, kwargs, e)
+                return self._retry_after_rate_limit(
+                    fn_name,
+                    method,
+                    args,
+                    kwargs,
+                    e,
+                    max_retries=_rate_limit_max_retries,
+                    backoff_s=_rate_limit_backoff_s,
+                )
             if isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
                 # Transient network blip (timeout, connection reset) — the
                 # existing session/token is fine, so retrying on the SAME
@@ -285,7 +300,13 @@ class SmartApiSession:
             errorcode = str(result.get("errorcode", ""))
             if _is_rate_limited(msg) or errorcode in {"AB8050", "AB8051"}:
                 return self._retry_after_rate_limit(
-                    fn_name, method, args, kwargs, f"code={errorcode or 'n/a'}"
+                    fn_name,
+                    method,
+                    args,
+                    kwargs,
+                    f"code={errorcode or 'n/a'}",
+                    max_retries=_rate_limit_max_retries,
+                    backoff_s=_rate_limit_backoff_s,
                 )
             if errorcode in {"AG8001", "AG8002", "AB1010", "AB1050"}:  # token/session errors
                 logger.warning(f"[smartapi_client] {fn_name} token error {errorcode}, re-logging in")
@@ -298,7 +319,17 @@ class SmartApiSession:
 
         return result
 
-    def _retry_after_rate_limit(self, fn_name, method, args, kwargs, reason):
+    def _retry_after_rate_limit(
+        self,
+        fn_name,
+        method,
+        args,
+        kwargs,
+        reason,
+        *,
+        max_retries=None,
+        backoff_s=None,
+    ):
         """Escalating backoff for rate-limited calls: 1.25s, 2.5s, 5s across
         up to _RATE_LIMIT_MAX_RETRIES attempts. Previously this was a single
         fixed-length retry, which was enough to survive an isolated blip but
@@ -307,12 +338,15 @@ class SmartApiSession:
         BANKNIFTY, MIDCPNIFTY, FINNIFTY, and the chain resolver's own spot
         quote call, all within the same second, and every one of those gave
         up after exactly one retry."""
-        delay = _RATE_LIMIT_BACKOFF_S
+        max_retries = (
+            _RATE_LIMIT_MAX_RETRIES if max_retries is None else max_retries
+        )
+        delay = _RATE_LIMIT_BACKOFF_S if backoff_s is None else backoff_s
         last_exc = None
-        for attempt in range(1, _RATE_LIMIT_MAX_RETRIES + 1):
+        for attempt in range(1, max_retries + 1):
             logger.warning(
                 f"[smartapi_client] {fn_name} rate-limited ({reason}); "
-                f"backing off {delay}s (attempt {attempt}/{_RATE_LIMIT_MAX_RETRIES}, no re-login)"
+                f"backing off {delay}s (attempt {attempt}/{max_retries}, no re-login)"
             )
             time.sleep(delay)
             _rate_limit_wait(fn_name)
@@ -333,7 +367,7 @@ class SmartApiSession:
             return result
         logger.warning(
             f"[smartapi_client] {fn_name} still rate-limited after "
-            f"{_RATE_LIMIT_MAX_RETRIES} retries; giving up for this call"
+            f"{max_retries} retries; giving up for this call"
         )
         if last_exc is not None:
             return {"status": False, "message": str(last_exc)}
@@ -1135,7 +1169,14 @@ def get_batch_quotes(exchange, symbol_token_pairs, mode="FULL"):
     return results
 
 
-def get_batch_quotes_by_token(exchange, symbol_token_pairs, mode="FULL"):
+def get_batch_quotes_by_token(
+    exchange,
+    symbol_token_pairs,
+    mode="FULL",
+    *,
+    rate_limit_max_retries=None,
+    rate_limit_backoff_s=None,
+):
     """
     Same request as get_batch_quotes(), but keyed by symbolToken (as a
     str) instead of Angel's tradingSymbol display name.
@@ -1169,7 +1210,11 @@ def get_batch_quotes_by_token(exchange, symbol_token_pairs, mode="FULL"):
         chunk = symbol_token_pairs[i:i + 50]
         tokens = [token for _, token in chunk]
         response = _session.call(
-            "getMarketData", mode, {exchange: tokens}
+            "getMarketData",
+            mode,
+            {exchange: tokens},
+            _rate_limit_max_retries=rate_limit_max_retries,
+            _rate_limit_backoff_s=rate_limit_backoff_s,
         )
         if not response.get("status"):
             logger.warning(f"[smartapi_client] getMarketData batch failed: {response}")

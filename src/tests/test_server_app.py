@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from server.app import ServerConfig, ServerRoutes, create_app
+from server.http_app import ServerConfig, create_app
+from server.routes import ServerRoutes
 
 
 async def _handler(_request):
@@ -12,7 +13,7 @@ async def _middleware(request, handler):
 
 
 def test_create_app_registers_routes_without_runtime_launcher(tmp_path: Path):
-    routes = ServerRoutes(*([_handler] * 8))
+    routes = ServerRoutes(*([_handler] * 9))
     config = ServerConfig(
         host="127.0.0.1",
         port=8765,

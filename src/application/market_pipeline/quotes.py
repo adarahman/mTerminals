@@ -14,6 +14,7 @@ Provider routing comes from brokers.market_data_registry.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from application.index_quote_cache import (
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 
 _WARN_COOLDOWNS: dict[str, float] = {}
+_BATCH_WARM_LOCK = threading.Lock()
 
 
 def _throttled_warning(
@@ -131,48 +133,74 @@ def fetch_all_pills_and_vix_batched():
     Called once per market-data cycle.
     """
 
-    index_tokens = market_data.index_tokens()
-
-    symbols = {}
-
-    for sym in _TICKER_SYMBOLS:
-        token = index_tokens.get(sym)
-
-        if token:
-            symbols[sym] = token
-
-
-    for sym in _NSE_TICKER_SYMBOLS:
-        token = index_tokens.get(sym)
-
-        if token:
-            symbols[sym] = token
-
-
-    for sym in _BSE_TICKER_SYMBOLS:
-        token = index_tokens.get(sym)
-
-        if token:
-            symbols[sym] = token
-
-
-    if get_active_provider() == "SMARTAPI" and _VIX_TOKEN:
-        symbols[_VIX_TRADINGSYMBOL] = _VIX_TOKEN
-
-
-    if not symbols:
+    # A timed-out SDK request keeps running because Python cannot stop a
+    # worker thread. Do not queue another identical REST request on the next
+    # poll; consumers continue reading the last successful cache snapshot.
+    if not _BATCH_WARM_LOCK.acquire(blocking=False):
         return {}
 
-    symbol_token_pairs = list(symbols.items())
+    try:
+        return _fetch_all_pills_and_vix_batched_locked()
+    finally:
+        _BATCH_WARM_LOCK.release()
 
-    quotes = market_data.get_batch_quotes_by_token(
-        "NSE",
-        symbol_token_pairs,
+
+def _fetch_all_pills_and_vix_batched_locked():
+    index_tokens = market_data.index_tokens()
+    pairs_by_exchange = _index_pairs_by_exchange(
+        index_tokens,
+        include_vix=get_active_provider() == "SMARTAPI",
     )
+    if not pairs_by_exchange:
+        return {}
 
-    _BATCH_CACHE.refill(quotes)
+    provider_options = (
+        {
+            "rate_limit_max_retries": 1,
+            "rate_limit_backoff_s": 0.25,
+        }
+        if get_active_provider() == "SMARTAPI"
+        else {}
+    )
+    quotes = {}
+    for exchange, symbol_token_pairs in pairs_by_exchange.items():
+        by_token = market_data.get_batch_quotes_by_token(
+            exchange,
+            symbol_token_pairs,
+            **provider_options,
+        )
+        quotes.update(_quotes_by_symbol(symbol_token_pairs, by_token))
+
+    # An empty/failed response must not erase the last known-good snapshot.
+    if quotes:
+        _BATCH_CACHE.refill(quotes)
 
     return quotes
+
+
+def _index_pairs_by_exchange(index_tokens, *, include_vix=False):
+    pairs_by_exchange = {}
+    for symbol in _TICKER_SYMBOLS:
+        info = index_tokens.get(symbol)
+        if not isinstance(info, dict) or not info.get("token"):
+            continue
+        exchange = info.get("exchange", "NSE")
+        pairs_by_exchange.setdefault(exchange, []).append(
+            (symbol, str(info["token"]))
+        )
+    if include_vix and _VIX_TOKEN:
+        pairs_by_exchange.setdefault("NSE", []).append(
+            (_VIX_TRADINGSYMBOL, str(_VIX_TOKEN))
+        )
+    return pairs_by_exchange
+
+
+def _quotes_by_symbol(symbol_token_pairs, quotes_by_token):
+    return {
+        symbol: quotes_by_token[str(token)]
+        for symbol, token in symbol_token_pairs
+        if str(token) in quotes_by_token
+    }
 
 
 def fetch_vix_smartapi():
@@ -207,8 +235,8 @@ def fetch_vix_smartapi():
 def fetch_ticker_payload_smartapi(
     symbols=None,
 ):
-    if not symbols:
-        symbols = list(symbols or [])
+    if symbols is None:
+        symbols = list(_TICKER_SYMBOLS)
 
     return build_ticker_payload(
         symbols or [],
@@ -221,9 +249,8 @@ def fetch_sensex_ticker_smartapi():
     Fetch SENSEX ticker data.
     """
 
-    return fetch_ticker_payload_smartapi(
-        ["SENSEX"]
-    )
+    payload = fetch_ticker_payload_smartapi(["SENSEX"])
+    return payload[0] if payload else None
 
 
 # ---------------------------------------------------------------------

@@ -8,7 +8,7 @@ function renderIndexTicker(d) {
   const indices = d.allIndices || [];
   const active = d.symbol || 'NIFTY';
 
-  // FUT pill in the first slot (replaces the old VIX pill): near-month
+  // FUT pill in the first slot: near-month
   // futures symbol + price, day change / % change (smallest tier), basis,
   // and the NEAR/NEXT/FAR contract dropdown — the whole futures-reference
   // widget, moved in here from the expiry strip (same ids the top-bar
@@ -38,6 +38,15 @@ function renderIndexTicker(d) {
     </span>
   </div>`;
 
+  const vix = Number(d.indiaVix) || 0;
+  const vixPct = Number(d.indiaVixChgPct) || 0;
+  const vixUp = vixPct >= 0;
+  const vixPill = `<div class="idx-pill idx-pill-vix" data-index-symbol="VIX" title="India VIX — market volatility index">
+    <span class="idx-pill-sym">INDIA VIX</span>
+    <span class="idx-pill-val">${vix > 0 ? fmtN(vix, 2) : '—'}</span>
+    <span class="idx-pill-chg ${vixUp ? 'up' : 'down'}">${vixUp ? '▲' : '▼'}${Math.abs(vixPct).toFixed(2)}%</span>
+  </div>`;
+
   // Map display names to backend symbols (matches market_api.py INDEX_RENAME)
   // Backend now sends renamed symbols (NIFTY, BANKNIFTY) directly
   const symbolMap = {
@@ -64,7 +73,7 @@ function renderIndexTicker(d) {
       </button>`;
     }).join('');
 
-  return `<div class="index-ticker" id="index-ticker-bar">${futPill}${pills}</div>`;
+  return `<div class="index-ticker" id="index-ticker-bar">${futPill}${vixPill}${pills}</div>`;
 }
 
 // Patch the frequently-changing quote values without replacing ticker buttons.
@@ -75,7 +84,7 @@ function patchIndexTicker(d) {
   if (!ticker) return;
   const active = d.symbol || 'NIFTY';
   const indices = (d.allIndices || []).filter((idx) => (idx.BackendSymbol || idx.Symbol) !== active);
-  const expected = ['FUT'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
+  const expected = ['FUT', 'VIX'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
   const existing = Array.from(ticker.querySelectorAll('[data-index-symbol]'))
     .map((el) => el.dataset.indexSymbol);
 
@@ -99,6 +108,19 @@ function patchIndexTicker(d) {
     if (change && d.futureChgPct !== undefined && (futChg || futPct)) {
       change.className = 'idx-pill-chg ' + (futPct >= 0 ? 'up' : 'down');
       change.textContent = `${futPct >= 0 ? '▲' : '▼'} ${Math.abs(futChg).toFixed(2)} ${Math.abs(futPct).toFixed(2)}%`;
+    }
+  }
+
+  const vix = ticker.querySelector('[data-index-symbol="VIX"]');
+  if (vix) {
+    const value = vix.querySelector('.idx-pill-val');
+    const change = vix.querySelector('.idx-pill-chg');
+    const vixValue = Number(d.indiaVix) || 0;
+    const vixPct = Number(d.indiaVixChgPct) || 0;
+    if (value) value.textContent = vixValue > 0 ? fmtN(vixValue, 2) : '—';
+    if (change) {
+      change.className = 'idx-pill-chg ' + (vixPct >= 0 ? 'up' : 'down');
+      change.textContent = `${vixPct >= 0 ? '▲' : '▼'}${Math.abs(vixPct).toFixed(2)}%`;
     }
   }
 

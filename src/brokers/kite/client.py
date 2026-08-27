@@ -197,20 +197,23 @@ _session = KiteSession()
 
 
 def healthcheck() -> tuple[bool, str | None]:
-    """Test whether a usable Kite session exists.
+    """Validate Kite authentication and live market-data permission.
 
     Same (True, None)/(False, error) contract as shoonya_client/
     breeze_client/smartapi_client/kotak_client.healthcheck(), so
     brokers.connection.check_connection("KITE") reflects real token
     state instead of the previous always-ready default. Kite has no
     headless re-login (see KiteSession docstring), so this is a token-
-    presence check, not a login attempt — that matches what
-    ensure_session() itself does here.
+    validity check rather than merely checking that a token string exists.
     """
     try:
-        _session.ensure_session()
+        kite = _session.ensure_session()
+        probe_key = "NSE:NIFTY 50"
+        quotes = _kite_call_with_retry("quote", kite.quote, [probe_key])
+        if not isinstance(quotes, dict) or not quotes.get(probe_key):
+            return False, "Kite market-data quote probe returned no data"
         return True, None
-    except KiteError as exc:
+    except Exception as exc:
         return False, str(exc)
 set_session_token = _session.set_session_token
 login_url = _session.login_url

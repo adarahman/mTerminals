@@ -74,7 +74,14 @@ def _classify_error(error: Optional[str]) -> BrokerStatus:
 
     text = error.lower()
 
-    if "token" in text or "access_token" in text:
+    if (
+        "token" in text
+        or "access_token" in text
+        or "unauthorized" in text
+        or "permission" in text
+        or "401" in text
+        or "403" in text
+    ):
         return BrokerStatus.AUTH_FAILED
 
     if "session key" in text or "session expired" in text:

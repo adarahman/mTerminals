@@ -465,6 +465,33 @@ def test_switch_starts_feed_for_never_booted_provider(monkeypatch):
     assert calls[-1] == (captured_loop, "BANKNIFTY", 10, None)
 
 
+def test_background_feed_restart_contains_start_failure():
+    from types import SimpleNamespace
+    from server.feed_manager import BrokerFeedManager
+
+    logs = []
+    state = SimpleNamespace(stream=None, aggregator=None, loop=object())
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("invalid token")
+
+    manager = BrokerFeedManager(
+        "UPSTOX",
+        snapshot=lambda: state,
+        store=lambda _state: None,
+        start=fail,
+        switch=fail,
+        stop=lambda *args, **kwargs: None,
+        default_symbol=lambda: "NIFTY",
+        main_loop=lambda: state.loop,
+        log=logs.append,
+    )
+
+    manager._restart_blocking("NIFTY", 10)
+
+    assert logs == ["[upstox] Feed switch failed: invalid token"]
+
+
 def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
     monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)

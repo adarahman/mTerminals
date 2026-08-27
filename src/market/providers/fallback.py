@@ -162,9 +162,11 @@ class FallbackMarketData:
     def get_batch_quotes(self, exchange, symbol_token_pairs, mode="FULL"):
         return self._primary.get_batch_quotes(exchange, symbol_token_pairs, mode=mode)
 
-    def get_batch_quotes_by_token(self, exchange, symbol_token_pairs, mode="FULL"):
+    def get_batch_quotes_by_token(
+        self, exchange, symbol_token_pairs, mode="FULL", **provider_options
+    ):
         return self._primary.get_batch_quotes_by_token(
-            exchange, symbol_token_pairs, mode=mode
+            exchange, symbol_token_pairs, mode=mode, **provider_options
         )
 
     def index_tokens(self):
@@ -173,4 +175,3 @@ class FallbackMarketData:
 
 
 # ── NSE/BSE Public API provider ──────────────────────────────────────────
-

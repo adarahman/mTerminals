@@ -124,11 +124,39 @@ def test_kite_healthcheck_reports_missing_token(kite, monkeypatch):
 def test_kite_healthcheck_reports_ready_with_token(kite, monkeypatch):
     monkeypatch.setattr(kite, "API_KEY", "KEY")
     monkeypatch.setattr(kite, "ACCESS_TOKEN", "TOKEN")
+    fake = type(
+        "FakeKite",
+        (),
+        {"quote": lambda self, keys: {keys[0]: {"last_price": 25000.0}}},
+    )()
+    monkeypatch.setattr(kite._session, "ensure_session", lambda: fake)
+    monkeypatch.setattr(
+        kite, "_kite_call_with_retry", lambda _name, fn, *args: fn(*args)
+    )
 
     ready, error = kite.healthcheck()
 
     assert ready is True
     assert error is None
+
+
+def test_kite_healthcheck_rejects_token_without_quote_permission(kite, monkeypatch):
+    monkeypatch.setattr(kite, "API_KEY", "KEY")
+    monkeypatch.setattr(kite, "ACCESS_TOKEN", "TOKEN")
+
+    def denied(_keys):
+        raise kite.KiteError("Insufficient permission for that call")
+
+    fake = type("FakeKite", (), {"quote": lambda self, keys: denied(keys)})()
+    monkeypatch.setattr(kite._session, "ensure_session", lambda: fake)
+    monkeypatch.setattr(
+        kite, "_kite_call_with_retry", lambda _name, fn, *args: fn(*args)
+    )
+
+    ready, error = kite.healthcheck()
+
+    assert ready is False
+    assert "Insufficient permission" in error
 
 
 # ── upstox_client ───────────────────────────────────────────────────────────
@@ -147,13 +175,32 @@ def test_upstox_healthcheck_reports_missing_token(upstox):
     assert "UPSTOX_ACCESS_TOKEN" in error
 
 
-def test_upstox_healthcheck_reports_ready_with_token(upstox):
+def test_upstox_healthcheck_reports_ready_with_token(upstox, monkeypatch):
     upstox._session.set_token("TOKEN")
+    monkeypatch.setattr(
+        upstox._session,
+        "request",
+        lambda *args, **kwargs: {"status": "success"},
+    )
 
     ready, error = upstox.healthcheck()
 
     assert ready is True
     assert error is None
+
+
+def test_upstox_healthcheck_rejects_an_expired_token(upstox, monkeypatch):
+    upstox._session.set_token("EXPIRED")
+
+    def reject(*args, **kwargs):
+        raise upstox.UpstoxError("401: Invalid token used to access API")
+
+    monkeypatch.setattr(upstox._session, "request", reject)
+
+    ready, error = upstox.healthcheck()
+
+    assert ready is False
+    assert "Invalid token" in error
 
 
 # ── brokers.connection wiring ────────────────────────────────────────────────
@@ -177,6 +224,27 @@ def test_check_connection_reports_unready_when_credentials_missing(monkeypatch):
 
     assert status.ready is False
     assert status.error == "Missing KITE_ACCESS_TOKEN"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Insufficient permission for that call",
+        "401 Unauthorized",
+        "HTTP 403",
+    ],
+)
+def test_check_connection_classifies_permission_failures_as_auth_failed(
+    monkeypatch, error
+):
+    from brokers import connection
+
+    monkeypatch.setitem(connection._CHECKS, "KITE", lambda: (False, error))
+
+    status = connection.check_connection("KITE")
+
+    assert status.ready is False
+    assert status.status is connection.BrokerStatus.AUTH_FAILED
 
 
 def test_check_connection_reports_ready_when_session_usable(monkeypatch):
