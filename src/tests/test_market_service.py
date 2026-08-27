@@ -41,6 +41,35 @@ def test_successful_pipeline_publishes_live_status():
     assert service.in_flight is False
 
 
+def test_stale_chain_payload_is_published_with_delayed_status():
+    statuses = []
+    payload = {
+        "symbol": "NIFTY",
+        "pipelineTimings": {
+            "chainStaleReason": "Option chain refresh timed out; using snapshot"
+        },
+    }
+
+    async def publish(*args):
+        statuses.append(args)
+
+    service = MarketPipelineService(
+        run_pipeline=lambda: asyncio.sleep(0, result=payload),
+        publish_status=publish,
+        pipeline_status={},
+        timeout_seconds=1,
+        delayed_reason=lambda timeout: f"delayed {timeout}",
+        delayed_overlay=lambda: "polling",
+    )
+
+    result = asyncio.run(service.collect(time.monotonic()))
+
+    assert result is payload
+    assert statuses == [
+        ("DELAYED", "Option chain refresh timed out; using snapshot")
+    ]
+
+
 def test_timeout_retains_worker_and_collects_it_without_overlap():
     statuses = []
     runs = {"count": 0}

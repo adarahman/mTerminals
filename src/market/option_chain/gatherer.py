@@ -20,6 +20,7 @@ class GatheredMarketInputs:
     vix: Any = None
     sensex_quote: Any = None
     public_bse_quotes: tuple[Any, ...] = ()
+    stale_operations: tuple[str, ...] = ()
 
 
 class ConcurrentMarketDataGatherer:
@@ -36,6 +37,7 @@ class ConcurrentMarketDataGatherer:
         fetch_vix: Callable[[], Any] | None = None,
         fetch_sensex_quote: Callable[[], Any] | None = None,
         fetch_public_bse_quote: Callable[[str], Any] | None = None,
+        fallback_chain: Callable[[MarketDataRequestPlan], Any] | None = None,
         public_bse_symbols: Iterable[str] = (),
         max_workers: int = 7,
         executor: ThreadPoolExecutor | None = None,
@@ -50,6 +52,7 @@ class ConcurrentMarketDataGatherer:
         self._fetch_vix = fetch_vix
         self._fetch_sensex_quote = fetch_sensex_quote
         self._fetch_public_bse_quote = fetch_public_bse_quote
+        self._fallback_chain = fallback_chain
         self._public_bse_symbols = tuple(public_bse_symbols)
         self._max_workers = max_workers
         # When provided, a single process-level executor is reused across
@@ -82,8 +85,11 @@ class ConcurrentMarketDataGatherer:
 
         try:
             deadline = time.monotonic() + self._operation_timeout_seconds
+            stale_operations = []
 
             def result(future, operation: str):
+                if future.done():
+                    return future.result()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     future.cancel()
@@ -157,8 +163,20 @@ class ConcurrentMarketDataGatherer:
                     else None
                 )
 
+            try:
+                chain_value = result(chain, "chain")
+            except TimeoutError:
+                chain_value = (
+                    self._fallback_chain(request)
+                    if self._fallback_chain is not None
+                    else None
+                )
+                if chain_value is None:
+                    raise
+                stale_operations.append("chain")
+
             return GatheredMarketInputs(
-                chain=result(chain, "chain"),
+                chain=chain_value,
                 futures=result(futures, "futures"),
                 indices=result(indices, "indices"),
                 ticker_payload=result(ticker, "ticker") if ticker is not None else None,
@@ -168,6 +186,7 @@ class ConcurrentMarketDataGatherer:
                     result(f, f"publicBse:{symbol}")
                     for symbol, f in zip(self._public_bse_symbols, public_quotes)
                 ),
+                stale_operations=tuple(stale_operations),
             )
         finally:
             if own_executor:

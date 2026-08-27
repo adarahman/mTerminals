@@ -74,6 +74,27 @@ def test_gatherer_bounds_a_stalled_operation():
         release.set()
 
 
+def test_gatherer_uses_stale_chain_and_keeps_completed_context():
+    release = threading.Event()
+    gatherer = ConcurrentMarketDataGatherer(
+        fetch_chain=lambda request: release.wait(1),
+        fetch_futures=lambda request: "fresh-futures",
+        fetch_indices=lambda: "fresh-indices",
+        fallback_chain=lambda request: "cached-chain",
+        operation_timeout_seconds=0.01,
+    )
+
+    try:
+        result = gatherer.gather(_request(False))
+    finally:
+        release.set()
+
+    assert result.chain == "cached-chain"
+    assert result.futures == "fresh-futures"
+    assert result.indices == "fresh-indices"
+    assert result.stale_operations == ("chain",)
+
+
 def test_gatherer_does_not_block_on_optional_batch_warmup():
     release = threading.Event()
     calls = []

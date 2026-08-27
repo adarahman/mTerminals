@@ -83,7 +83,16 @@ class MarketPipelineService:
                 )
                 return None
 
-            await self._publish_status("LIVE")
+            timings = payload.get("pipelineTimings") if isinstance(payload, dict) else None
+            stale_reason = (
+                timings.get("chainStaleReason")
+                if isinstance(timings, dict)
+                else None
+            )
+            if stale_reason:
+                await self._publish_status("DELAYED", stale_reason)
+            else:
+                await self._publish_status("LIVE")
             return payload
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - tick_started_at

@@ -18,6 +18,7 @@ Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 
 import argparse
 import atexit
+import copy
 import logging
 import threading
 import time
@@ -450,14 +451,34 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
     if request.broker_enabled and broker_adapters is None:
         raise RuntimeError("broker adapters are required in broker mode")
 
+    from brokers.market_data_registry import get_active_provider
+
+    source = get_active_provider() if request.broker_enabled else "NSE_BSE"
+    chain_cache_key = (
+        source,
+        request.symbol,
+        request.option_expiry,
+        request.option_exchange,
+        request.strict_expiry,
+    )
+
     def fetch_chain(plan):
-        return _fetch_and_parse(
+        value = _fetch_and_parse(
             plan.symbol,
             plan.option_expiry,
             plan.option_exchange,
             plan.strict_expiry,
             runtime_config,
             broker_adapters,
+        )
+        _remember_chain_snapshot(chain_cache_key, value)
+        return value
+
+    def fallback_chain(_plan):
+        return _load_chain_snapshot(
+            chain_cache_key,
+            source=source,
+            timings=timings,
         )
 
     def fetch_futures(plan):
@@ -494,6 +515,7 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
             ),
             fetch_public_bse_quote=_PUBLIC_MARKET.fetch_bse_quote,
             public_bse_symbols=_PUBLIC_MARKET.bse_symbols,
+            fallback_chain=fallback_chain,
             executor=_get_market_io_executor(),
         ).gather(request, timings=timings)
     except TimeoutError:
@@ -502,6 +524,11 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
         # capacity from every later analytics tick.
         _reset_market_io_executor()
         raise
+
+    if "chain" in gathered.stale_operations:
+        # The timed-out thread may still be blocked inside a broker SDK call.
+        # Retire its pool so later ticks start with fresh worker capacity.
+        _reset_market_io_executor()
 
     if request.option_exchange == "BSE":
         df, spot, expiry_dates = gathered.chain
@@ -605,6 +632,38 @@ def _make_expiry_manager_or_none(expiry_dates):
 _EXTRA_CHAIN_CACHE_TTL_SECONDS = 45.0
 _EXTRA_CHAIN_OPERATION_TIMEOUT_SECONDS = 15.0
 _extra_chain_cache: dict = {}
+_chain_snapshot_cache: dict = {}
+_CHAIN_FALLBACK_MAX_AGE_SECONDS = 300.0
+
+
+def _remember_chain_snapshot(key, value, *, now=None) -> None:
+    frame = value[0] if isinstance(value, tuple) and value else None
+    if isinstance(frame, pd.DataFrame) and not frame.empty:
+        _chain_snapshot_cache[key] = (
+            time.monotonic() if now is None else now,
+            copy.deepcopy(value),
+        )
+
+
+def _load_chain_snapshot(key, *, source, timings=None, now=None):
+    cached = _chain_snapshot_cache.get(key)
+    if cached is None:
+        return None
+    cached_at, value = cached
+    current = time.monotonic() if now is None else now
+    age = current - cached_at
+    if age > _CHAIN_FALLBACK_MAX_AGE_SECONDS:
+        return None
+    reason = (
+        f"Option chain refresh timed out; using {age:.1f}s-old "
+        f"{source} snapshot"
+    )
+    if timings is not None:
+        timings["chainStale"] = 1
+        timings["chainStaleAgeSeconds"] = round(age, 3)
+        timings["chainStaleReason"] = reason
+    logger.warning("[chain:stale-fallback] %s", reason)
+    return copy.deepcopy(value)
 
 
 # One process-level I/O executor reused across polls instead of spinning up a
