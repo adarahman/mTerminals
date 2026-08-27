@@ -792,28 +792,6 @@ _LIVE_ORDERS = LiveOrderGateway(
 )
 
 
-# Legacy seams (were module-level helpers before the gateway extraction;
-# tests may call these directly).
-def _live_order_gate():
-    return _LIVE_ORDERS.order_gate()
-
-
-def _check_live_rate_limit():
-    return _LIVE_ORDERS.rate_limit_allows()
-
-
-def _live_trading_kill_switch_active():
-    return _LIVE_ORDERS.kill_switch_active()
-
-
-def _completed_live_order(client_order_id):
-    return _LIVE_ORDERS.completed_order(client_order_id)
-
-
-def _submit_live_order_idempotent(client_order_id, *args, **kwargs):
-    return _LIVE_ORDERS.submit_idempotent(client_order_id, *args, **kwargs)
-
-
 async def _handle_place_order(payload, _live_gate_acquired=False):
     """Handles an inbound {"type":"place_order", "payload":{...}} message
     from dashboard.js's sendWsMessage('place_order', ...).
@@ -965,7 +943,7 @@ def _build_algo_status() -> dict:
             )
         ),
         "liveTradingEnabled": LIVE_TRADING_ENABLED,
-        "killSwitchActive": _live_trading_kill_switch_active(),
+        "killSwitchActive": _LIVE_ORDERS.kill_switch_active(),
         "maxLotsPerOrder": LIVE_MAX_LOTS_PER_ORDER,
         "maxOrdersPerMinute": LIVE_MAX_ORDERS_PER_MINUTE,
         "accountGuard": guard_status,

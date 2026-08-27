@@ -125,7 +125,7 @@ class LiveAccountRiskGuard:
                 # Fresh trading day — new row, guard starts untripped.
                 # (The shared kill-switch FILE, if still present from a
                 # previous day's trip, still blocks orders independently —
-                # see server/app.py's own _live_trading_kill_switch_active().)
+                # see LiveOrderGateway.kill_switch_active().)
                 state = GuardState(today, 0.0, 0.0, 0, False, None)
                 self._save(state)
                 return state
