@@ -2,7 +2,7 @@
 execution.paper_trading — standalone paper trading engine for fno-dashboard.
 
 Design goals:
-  - No dependency on engine.py / ws_server_live.py — import this module and
+  - No dependency on engine.py / server/app.py — import this module and
     call into it; nothing here reaches back into your existing pipeline.
   - SQLite for storage (stdlib only, no new package) so orders/positions
     survive a WS server restart, unlike everything else in the live-tick
@@ -14,7 +14,7 @@ Design goals:
     keeps it decoupled from market_api.py entirely.
 
 Suggested integration:
-  - ws_server_live.py: on a new "place_order" WS message, call place_order()
+  - server/app.py: on a new "place_order" WS message, call place_order()
     with the LTP for that leg pulled from the same tick's option chain data.
     On every broadcast tick, also call check_pending_orders() and
     mark_to_market() with a {instrument_key: ltp} map built from that tick,
@@ -63,7 +63,7 @@ def _instrument_lot_size(symbol: str, instrument_type: str) -> int:
 # consolidated in lot_sizes.py (the canonical shared module per the v4
 # migration plan); this file just re-exports it so existing call sites
 # (`from paper_trading import get_lot_size, LOT_SIZES`, incl.
-# ws_server_live.py) keep working unchanged.
+# server/app.py) keep working unchanged.
 from market.instruments.lot_sizes import get_lot_size, LOT_SIZES  # noqa: F401
 
 # ── Risk / RMS-style order checks ────────────────────────────────────────

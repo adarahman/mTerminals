@@ -148,7 +148,7 @@ class UpstoxTickStream:
     """Wraps upstox_client.MarketDataStreamerV3 with the same public
     surface SmartTickStream (smartapi_ws_client.py) exposes: connect(),
     subscribe(), unsubscribe(), run_forever(), run_forever_with_reconnect(),
-    close(), and a `_connected` threading.Event ws_server_live.py's health
+    close(), and a `_connected` threading.Event server/app.py's health
     endpoint already knows how to read (see its `smartapiConnected` check —
     the Upstox equivalent reads this same attribute name off whichever
     stream object is active)."""

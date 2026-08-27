@@ -4,7 +4,7 @@ brokers.smartapi.client
 SmartAPI (Angel One) data-fetch layer for mTerminals.
 Mirrors the shape of market_api.py's NSE/BSE fetchers so it can be
 dropped in as an additional data source without changing call patterns
-elsewhere in the pipeline (ws_server_live.py, engine.py, etc).
+elsewhere in the pipeline (server/app.py, engine.py, etc).
 
 Sections
 --------
@@ -441,7 +441,7 @@ def _rate_limit_wait(fn_name: str) -> None:
 
 
 # Short-TTL cache for spot/index quotes. get_atm_chain() calls get_spot_quote()
-# internally, and separately ws_server_live.py's fetch_ticker_payload_smartapi
+# internally, and separately server/app.py's fetch_ticker_payload_smartapi
 # fetches the same index quotes for the ticker strip — within one poll tick
 # those are almost always the same value fetched twice. A ~1.5s TTL is short
 # enough that nothing goes stale for a live feed, but long enough to collapse
@@ -1188,7 +1188,7 @@ def get_batch_quotes_by_token(
     human-readable variant, not the plain short code requested. Token is
     what's actually sent on the request, so it's the one identifier
     guaranteed to round-trip correctly regardless of naming quirks.
-    See fetch_index_quotes_smartapi_sync() in ws_server_live.py for the
+    See fetch_index_quotes_smartapi_sync() in server/app.py for the
     call site this was added for (2026-08-02) — get_batch_quotes()'s
     tradingSymbol keying silently missed NIFTY/BANKNIFTY/MIDCPNIFTY there
     because their short codes don't match Angel's display names, the same
@@ -1407,7 +1407,7 @@ def get_atm_chain_with_greeks(underlying, expiry_ddmmmyyyy, strikes_around_atm=1
 
 
 # ── 6. Live order placement (real money — see caller-side safeguards in
-#      ws_server_live.py: LIVE_TRADING_ENABLED, kill-switch file, lot caps
+#      server/app.py: LIVE_TRADING_ENABLED, kill-switch file, lot caps
 #      before assuming this is safe to call directly) ────────────────────
 def _find_order_by_tag(tag: str, *, suppress_errors: bool = True):
     """Look up a live order by its ordertag in the current order book.
@@ -1544,11 +1544,11 @@ def get_funds():
     unrealized M2M. This was the missing piece behind the dashboard's
     "Fund" readout always showing the paper-trading estimate even in
     Live mode: nothing in this file called rmsLimit() at all, so there
-    was nothing for ws_server_live.py to broadcast. Powers
-    paper-trading-shared.js's ptComputeFundSummary() once ws_server_live.py
+    was nothing for server/app.py to broadcast. Powers
+    paper-trading-shared.js's ptComputeFundSummary() once server/app.py
     calls this and pushes it as a `{type:"funds", payload:{...}}` WS
     message (see the note in that file — not added here since this repo
-    doesn't have ws_server_live.py's dispatch loop to hook into safely
+    doesn't have server/app.py's dispatch loop to hook into safely
     without seeing it).
 
     rmsLimit()'s response `data` fields come back as strings; safe_float()

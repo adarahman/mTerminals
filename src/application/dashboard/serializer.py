@@ -348,7 +348,7 @@ def export_dashboard_json(
         # the frontend needs this to label which contract the FUT price
         # came from, not just that it's a FUT price.
         "futuresExpiry": str(futures_expiry) if futures_expiry else "",
-        # ── DATA SOURCE (runtime-switchable, see ws_server_live.py's
+        # ── DATA SOURCE (runtime-switchable, see server/app.py's
         # ?dataSource= handler) ───────────────────────────────────────────
         # dataSource: the ACTIVE provider key; dataSources: every selectable
         # provider + its capability/status for the Dashboard's picker.
@@ -449,7 +449,7 @@ def export_dashboard_json(
         # (fetch hasn't run yet, module missing, or no file for that date).
         "fiiDiiSentiment": _get_cached_fii_dii_sentiment() or {},
         # ── Combined cash+F&O FII/DII bias summary (display only) ──
-        # Same source ws_server_live.py's bridge_loop() computes for the
+        # Same source server/app.py's bridge_loop() computes for the
         # /dashboard-relay feed (fiidii-report.js's fdRenderBias) — cached
         # here on the same once/day cadence so the main dashboard's FII/DII
         # summary card can show it without needing that relay connection.
@@ -509,7 +509,7 @@ def export_dashboard_json(
 
 
     # orjson is ~5-10× faster than stdlib json for the dashboard payload
-    # and is already a hard dependency of ws_server_live.py. Fall back to
+    # and is already a hard dependency of server/app.py. Fall back to
     # json.dump if orjson isn't available OR if a non-serializable type
     # still sneaks into the payload after the default coercer runs
     # (engine/decision paths routinely leave numpy scalars / Timestamps).

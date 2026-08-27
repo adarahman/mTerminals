@@ -3,7 +3,7 @@ risk/account_guard.py
 ----------------------
 Account-level risk guard for LIVE trading (paper trading is unaffected).
 
-What existed before this module: ws_server_live.py's `_handle_place_order`
+What existed before this module: server/app.py's `_handle_place_order`
 already rejects a single live order for a bad lot size, an over-cap
 quantity, or too many orders/minute — all *per-order* checks. Nothing
 tracked risk *across* orders over the course of a trading day. A human (or
@@ -32,7 +32,7 @@ nothing else in the live-tick pipeline is stateful across restarts):
 
 A trip does two things: (a) marks this trading day tripped in the guard's
 own SQLite state, and (b) touches the SAME kill-switch file
-ws_server_live.py already checks (LIVE_TRADING_KILL_SWITCH_FILE) — so
+server/app.py already checks (LIVE_TRADING_KILL_SWITCH_FILE) — so
 there is exactly ONE kill switch, not two competing mechanisms. Once
 tripped, the file stays until a human removes it; a new trading day does
 NOT auto-clear it. That's deliberate — an auto-tripped guard should
@@ -90,7 +90,7 @@ class GuardState:
 
 
 class LiveAccountRiskGuard:
-    """One instance, created once at ws_server_live.py startup, shared
+    """One instance, created once at server/app.py startup, shared
     across every _handle_place_order call for the process lifetime."""
 
     def __init__(self, kill_switch_path: str, db_path: str = DB_PATH):
@@ -125,7 +125,7 @@ class LiveAccountRiskGuard:
                 # Fresh trading day — new row, guard starts untripped.
                 # (The shared kill-switch FILE, if still present from a
                 # previous day's trip, still blocks orders independently —
-                # see ws_server_live.py's own _live_trading_kill_switch_active().)
+                # see server/app.py's own _live_trading_kill_switch_active().)
                 state = GuardState(today, 0.0, 0.0, 0, False, None)
                 self._save(state)
                 return state
@@ -152,14 +152,14 @@ class LiveAccountRiskGuard:
     def is_tripped(self) -> tuple[bool, str | None]:
         """Check BEFORE allowing a live order. Also true if the shared
         kill-switch file exists for any other reason (manual touch) —
-        that check already lives in ws_server_live.py; this only reports
+        that check already lives in server/app.py; this only reports
         THIS guard's own trip state."""
         state = self._load()
         return state.tripped, state.trip_reason
 
     def get_status(self) -> dict:
         """Read-only snapshot of today's guard state for status reporting
-        (e.g. ws_server_live.py's algoStatus broadcast). Reuses the same
+        (e.g. server/app.py's algoStatus broadcast). Reuses the same
         _load() as is_tripped()/check_new_order() — one SQLite read, no
         extra state — so this can be polled periodically without adding
         a second source of truth."""

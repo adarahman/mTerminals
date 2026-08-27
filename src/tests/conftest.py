@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-Notably: makes src/server/app.py (the composition root, formerly run_server.py / server.py / ws_server_live.py) importable.
+Notably: makes src/server/app.py (the composition root) importable.
 Before this fixture existed, importing that module in a test process did
 three things no CI box (and no offline dev machine) can rely on:
 
@@ -9,7 +9,7 @@ three things no CI box (and no offline dev machine) can rely on:
   2. Ran brokers/smartapi_client.py's `INDEX_TOKENS = _build_index_tokens()`
      at import time, which downloads Angel One's ScripMaster over the
      network with NO test seam — a real HTTP call as a side effect of
-     `import server` (the module was renamed from ws_server_live.py),
+     `import server.app`,
      that raises if the network is unavailable
      (or blocked, as it is in this sandbox) and there's no local cache yet.
   3. Wrote a live paper_trading.db / ScripMaster cache file into whatever
@@ -28,7 +28,7 @@ as an escape hatch for exactly this, so this fixture:
   - pre-seeds a minimal ScripMaster cache file there so
     _build_index_tokens() has something to index without a network call
   - clears sys.argv before import so pytest's own flags aren't parsed by
-    ws_server_live's argparse.
+    the server composition root's argparse.
 """
 import json
 import os
@@ -57,7 +57,7 @@ _FAKE_SCRIP_MASTER = [
 # previously-downloaded ScripMaster cache: it transitively imports
 # mTerminals_json.py -> brokers/market_data.py -> brokers/smartapi_client.py,
 # which runs `INDEX_TOKENS = _build_index_tokens()` at module level — a real
-# HTTP call with no test seam, same root cause as ws_server_live.py's gap
+# HTTP call with no test seam, same root cause as server/app.py's gap
 # below. This is a suite-wide hermeticity issue, not something specific to
 # _handle_place_order, and fixing it generally means adding a proper test
 # seam in smartapi_client.py itself (e.g. an env var or injectable loader
@@ -72,7 +72,7 @@ _FAKE_SCRIP_MASTER = [
 
 @pytest.fixture(scope="session")
 def ws_server_live(tmp_path_factory):
-    """Imports ws_server_live.py exactly once for the whole test session
+    """Imports server.app exactly once for the whole test session
     (it's an expensive, side-effecting import) and hands back the live
     module object so tests can monkeypatch its globals per-test.
 

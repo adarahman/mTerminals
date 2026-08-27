@@ -1,4 +1,4 @@
-"""Unit tests for ws_server_live.py's `backtest_handler` — the /api/backtest
+"""Unit tests for server/app.py's `backtest_handler` — the /api/backtest
 HTTP endpoint the dashboard's backtest results viewer
 (Dashboard/backtest-view.js) calls. Exercises the handler's own JSON
 shaping (summary/trades/equityCurve) and query-param parsing; the actual

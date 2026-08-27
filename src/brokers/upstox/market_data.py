@@ -19,7 +19,7 @@ class UpstoxMarketData:
     Format translation: every method here keeps accepting/returning
     expiries in SmartAPI's DDMMMYYYY convention (e.g. '31JUL2026'),
     matching the Protocol's documented contract and every existing call
-    site (option_chain_json.py, ws_server_live.py, ...) — even though
+    site (option_chain_json.py, server/app.py, ...) — even though
     upstox_client.py itself works in Upstox's native 'YYYY-MM-DD'
     format. _to_iso/_to_ddmmmyyyy below do that conversion at the
     boundary so callers never need to know which broker is behind
@@ -35,7 +35,7 @@ class UpstoxMarketData:
     or place_order, never as something to parse or compare numerically.
 
     KNOWN GAP — do not point the `market_data` singleton at this class
-    in production without checking ws_server_live.py's
+    in production without checking server/app.py's
     fetch_index_quotes_smartapi_sync(): it calls
     market_data.get_batch_quotes_by_token() and passes the raw row
     straight into _map_smartapi_quote(), which parses AngelOne's own

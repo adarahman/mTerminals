@@ -16,7 +16,7 @@ What this validates:
     replay produces — pass `use_account_guard=True` to wire in a real
     LiveAccountRiskGuard instance backed by a throwaway SQLite file, fed
     with update_pnl() after every simulated exit exactly like
-    ws_server_live.py's live path does after every real fill.
+    server/app.py's live path does after every real fill.
 
 What this does NOT validate: decision_engine.py's own scoring logic
 (pcr_score/bias_score/etc.) — the decision snapshots are taken AS
@@ -304,7 +304,7 @@ async def run_backtest(
     current_day: Optional[str] = None
 
     async def _submit(sym, instrument_type, expiry, strike, side, lots):
-        """Stands in for ws_server_live.py's _submit_auto_order /
+        """Stands in for server/app.py's _submit_auto_order /
         _handle_place_order — fills using this tick's LTP instead of
         hitting a broker. Raises when no price data exists, so
         AutoExecutor.maybe_execute()'s existing failure path (it already

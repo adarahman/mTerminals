@@ -1,5 +1,5 @@
 """Upstox execution adapter — brokers.upstox.client, shaped for
-ws_server_live.py's EXECUTION_BROKER dispatch.
+server/app.py's EXECUTION_BROKER dispatch.
 
 upstox_client.py deliberately stays standalone and config.py-independent
 (see its own module docstring), so this adapter is the seam: it pulls
@@ -14,7 +14,7 @@ smartapi_client.py and shoonya_client.py already share —
     get_positions() -> list
     get_funds() -> dict
 
-so ws_server_live.py can add an EXECUTION_BROKER == "UPSTOX" branch that
+so server/app.py can add an EXECUTION_BROKER == "UPSTOX" branch that
 imports these four names exactly like its existing SMARTAPI/SHOONYA
 branches do, with no changes needed anywhere else in that dispatch.
 
@@ -48,7 +48,7 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
 # `brokers.upstox.client` is unambiguous regardless of what else is
 # importable as bare `upstox_client`, matching how every other cross-module
 # import in this codebase's brokers/ package already resolves siblings
-# (e.g. ws_server_live.py's `from brokers.smartapi.client import ...`).
+# (e.g. server/app.py's `from brokers.smartapi.client import ...`).
 from core.errors import UpstoxError
 from brokers.upstox.client import (
     UpstoxSession,

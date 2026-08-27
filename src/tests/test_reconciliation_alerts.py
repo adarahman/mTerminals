@@ -1,4 +1,4 @@
-"""Unit tests for ws_server_live.py's `_broadcast_reconciliation_alert` —
+"""Unit tests for server/app.py's `_broadcast_reconciliation_alert` —
 turns a risk/position_reconciler.py `ReconciliationResult` into the
 {"type":"reconciliationAlert",...} broadcast the dashboard's toast/banner
 (algo-status.js's renderReconciliationAlerts) consumes. Before this

@@ -23,7 +23,7 @@ class ShoonyaMarketData:
     class's get_batch_quotes()/get_batch_quotes_by_token() return
     brokers.shoonya.market_data's RAW per-contract row (Noren's own field
     abbreviations — lp/o/h/l/c/v/oi/nc/pc), not AngelOne's field names
-    (ltp/netChange/...). ws_server_live.py's
+    (ltp/netChange/...). server/app.py's
     fetch_index_quotes_smartapi_sync() passes that raw row straight into
     _map_smartapi_quote(), which only understands AngelOne's shape — so
     that one call site needs a Shoonya-aware mapper before

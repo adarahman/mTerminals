@@ -19,7 +19,7 @@ module (different underlying, different fields) rather than generalized
 into one shared history file, matching this project's existing preference
 for one file per distinct daily-history concern.
 
-Public contract (used by ws_server_live.py):
+Public contract (used by server/app.py):
     record_today_iv_spot(symbol, atm_iv, spot) -> bool
         No network call — the caller already has today's live atm_iv/spot
         from the current pipeline tick. Appends a row to the local CSV if

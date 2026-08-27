@@ -40,7 +40,7 @@ class FallbackMarketData:
     row (Shoonya: lp/o/h/l/c/v/oi/nc/pc; Upstox: last_price/net_change/...)
     rather than a normalized shape, because nothing in this codebase's 7
     real call sites needed that translation layer built — until now,
-    only ws_server_live.py's fetch_index_quotes_smartapi_sync() calls
+    only server/app.py's fetch_index_quotes_smartapi_sync() calls
     these, and it parses AngelOne's own field names directly. A silent
     failover on these two would hand that caller a differently-shaped
     row with no error — every field read as None, not an exception —

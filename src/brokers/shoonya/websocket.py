@@ -90,7 +90,7 @@ class ShoonyaTickStream:
     """Wraps NorenApi.start_websocket() with the same public surface
     SmartTickStream/UpstoxTickStream expose: connect(), subscribe(),
     unsubscribe(), run_forever(), run_forever_with_reconnect(), close(),
-    and a `_connected` threading.Event — ws_server_live.py's health
+    and a `_connected` threading.Event — server/app.py's health
     endpoint already knows how to read this attribute off whichever
     stream object is active."""
 
@@ -173,7 +173,7 @@ class ShoonyaTickStream:
             merged = dict(state)
 
         # Keyed as "EXCH|TOKEN" (not the bare numeric token) so this
-        # matches the subscribe-string keys ws_server_live.py's
+        # matches the subscribe-string keys server/app.py's
         # _resolve_shoonya_chain_tokens() builds instrument_meta with —
         # a bare token isn't guaranteed unique across exchanges the way
         # SmartAPI's per-exchangeType tokens are.

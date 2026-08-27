@@ -70,6 +70,17 @@ def test_legacy_backend_modules_are_not_imported():
     assert not violations, "legacy imports still present:\n" + "\n".join(violations)
 
 
+def test_active_source_does_not_document_the_deleted_server_filename():
+    legacy_filename = "ws_server" + "_live.py"
+    violations = []
+    for path in sorted(BACKEND.rglob("*.py")):
+        if "tests" in path.parts:
+            continue
+        if legacy_filename in path.read_text(encoding="utf-8"):
+            violations.append(str(path.relative_to(BACKEND)))
+    assert not violations, "stale legacy server references: " + ", ".join(violations)
+
+
 def test_composition_root_does_not_own_websocket_security_policy():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     assert "import ipaddress" not in app

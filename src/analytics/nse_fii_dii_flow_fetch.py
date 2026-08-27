@@ -8,7 +8,7 @@ those cover F&O participant-wise Open Interest. This module covers the
 much simpler daily cash-market buy/sell/net figures NSE publishes for
 FII/FPI and DII, e.g. via https://www.nseindia.com/api/fiidiiTradeReact
 
-Public contract (used by ws_server_live.py):
+Public contract (used by server/app.py):
     record_today_flow() -> bool
         Blocking. Fetches the latest published FII/DII cash flow row from
         NSE and appends it to the local CSV history if it's a new date.

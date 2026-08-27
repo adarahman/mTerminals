@@ -349,7 +349,7 @@ def get_strike_step(strikes, default=DEFAULT_STRIKE_STEP):
 # mode, so every write serializes the whole thing. Left alone, this was
 # on track to become the new compute_dte()/iterrows() bottleneck.
 #
-# Fix: since ws_server_live.py runs this pipeline from one long-lived
+# Fix: since server/app.py runs this pipeline from one long-lived
 # process (not re-spawned per tick), we keep the accumulating history as
 # an in-memory DataFrame — loaded from disk once, then read/appended to
 # in memory on every tick — and only flush back to disk periodically
@@ -444,7 +444,7 @@ def append_json_history(
 def flush_history_to_disk(log_path=JSON_HISTORY_LOG_PATH):
     """Force-write the in-memory history to disk now, regardless of the
     flush interval. Call this from a graceful-shutdown path (e.g.
-    ws_server_live.py's `finally` block) so process exit doesn't lose up
+    server/app.py's `finally` block) so process exit doesn't lose up
     to flush_interval_seconds of unflushed history. Safe to call even if
     nothing has changed (no-ops when not dirty)."""
     if _HISTORY_MEM.df is None or not _HISTORY_MEM.dirty:

@@ -99,7 +99,7 @@ def _classify_error(error: Optional[str]) -> BrokerStatus:
 
 # One canonical execution route per broker.  Market-data modules stay in
 # market_data.py's provider registry; this table is deliberately limited to
-# the account/order contract used by ws_server_live.py.
+# the account/order contract used by server/app.py.
 EXECUTION_ADAPTERS: dict[str, str] = {
     "SMARTAPI": "brokers.smartapi.client",
     "UPSTOX": "brokers.upstox.execution",

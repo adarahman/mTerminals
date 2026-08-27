@@ -6,7 +6,7 @@ config.py-independent — same convention upstox_client.py's own docstring
 establishes (see config.py's comment on upstox_access_token): this module
 should stay smoke-testable on its own via KITE_* environment variables,
 with kite_execution_adapter.py as the seam that wires it into config.py
-and ws_server_live.py's shared broker-neutral signatures.
+and server/app.py's shared broker-neutral signatures.
 
 Token lifecycle note (the one real divergence from SmartAPI/Shoonya):
 Kite's access_token expires daily and there is NO headless re-login —

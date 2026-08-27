@@ -13,7 +13,7 @@ Usage (run from anywhere — DATA_DIR is anchored to PROJECT_ROOT, not cwd):
     python backfill_eod.py --start 2026-07-01 --end 2026-07-31
 
 Writes to <PROJECT_ROOT>/data/eod/<dataset>/<dataset>_<yyyymmdd>.parquet —
-the same location fii_dii_sentiment.py and the live ws_server_live.py EOD
+the same location fii_dii_sentiment.py and the live server/app.py EOD
 job both read/write via nse_eod_fetch.DATA_DIR, so this is immediately
 visible to the running dashboard without needing a restart (the next 5s
 poll tick re-reads via analytics/fii_dii_sentiment.py's own cache, which is

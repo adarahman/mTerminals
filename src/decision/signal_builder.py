@@ -24,7 +24,7 @@ from decision.types import T
 # tick (see mTerminals_json.export_dashboard_json()), so per-instance state
 # never survives between polls. India VIX is a single market-wide reading
 # regardless of symbol/expiry, so one process-level history is correct even
-# though ws_server_live.py runs one process per --symbol.
+# though server/app.py runs one process per --symbol.
 _VIX_HISTORY = RollingWindow(max_age_seconds=T.IV_CRUSH_MAX_AGE_SECONDS)
 
 # ── Volume confirmation constants ─────────────────────────────────────────

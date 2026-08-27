@@ -266,7 +266,7 @@ def reconcile(
 
 
 class PositionReconciler:
-    """One instance, created once at ws_server_live.py startup alongside
+    """One instance, created once at server/app.py startup alongside
     _ACCOUNT_GUARD. Stateless across calls (no SQLite, unlike
     LiveAccountRiskGuard) — every mismatch is independently re-derived
     from the broker's current order/position book each call, so there's

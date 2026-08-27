@@ -210,7 +210,7 @@ class Settings:
     # Independent of execution_broker: which feed backs brokers/market_data.py's
     # `market_data` singleton (list_expiries/get_atm_chain/find_option_token/
     # index quotes/etc). Defaults to SMARTAPI to preserve existing behavior.
-    # NOTE before flipping this to UPSTOX: ws_server_live.py's
+    # NOTE before flipping this to UPSTOX: server/app.py's
     # fetch_index_quotes_smartapi_sync() calls market_data.get_batch_quotes_by_token()
     # and feeds the raw row straight into _map_smartapi_quote(), which parses
     # AngelOne's own field names (ltp, netChange, ...). UpstoxMarketData's
@@ -314,7 +314,7 @@ settings = Settings()
 # ── Execution-broker validation ──────────────────────────────────────────
 # Keep this registry deliberately separate from the market-data registry:
 # KOTAK and NSE/BSE can provide snapshots, but neither has an execution path
-# wired into ws_server_live.py.  Validating the actual order-routing surface
+# wired into server/app.py.  Validating the actual order-routing surface
 # at startup prevents a configuration typo (or a data-only provider) from
 # failing much later, after the dashboard has already booted.
 EXECUTION_BROKERS = EXECUTION_PROVIDER_KEYS

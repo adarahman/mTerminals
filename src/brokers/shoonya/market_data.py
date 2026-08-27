@@ -6,7 +6,7 @@ Expiry format note: like breeze_market_data.py, this module works in
 "%d-%b-%Y" (e.g. "28-Aug-2025") rather than SmartAPI's dash-less
 DDMMMYYYY convention, because that's the format brokers/shoonya_client.py's
 resolve_option_contract()/place_order() already expect (see that module's
-docstring). This is safe: nothing in ws_server_live.py or
+docstring). This is safe: nothing in server/app.py or
 option_chain_json.py parses an expiry string returned by list_expiries()
 directly — it's only ever displayed and round-tripped back into
 get_atm_chain()/find_option_token(), so as long as this adapter is

@@ -6,12 +6,12 @@ from a decision-support terminal into an actual algo: everything up to
 this module (decision_engine.py's DecisionResult) already computes a
 bias/confidence/action every tick, but nothing acted on it — every live
 order still required a human to click a confirm button in the UI
-(_handle_place_order's `confirmed=true` requirement in ws_server_live.py).
+(_handle_place_order's `confirmed=true` requirement in server/app.py).
 
 This module does NOT touch that manual path at all. It adds a second,
 parallel path: AutoExecutor.evaluate() looks at each tick's DecisionResult
 and decides whether it clears a strict bar to auto-submit an order. When
-it does, it calls the SAME `submit_order_fn` callback ws_server_live.py
+it does, it calls the SAME `submit_order_fn` callback server/app.py
 wires up — which is just `_handle_place_order` with `live=True,
 confirmed=True` filled in on the algo's behalf — so an auto-executed order
 goes through EXACTLY the same checks a manual one does: lot-size
@@ -20,7 +20,7 @@ verification, per-order rate limit, and every risk/account_guard.py check
 GATES on top of that, it does not replace any of it.
 
 Master switch: AUTO_STRATEGY_EXECUTION_ENABLED (env, default false). This
-is INDEPENDENT of ws_server_live.py's LIVE_TRADING_ENABLED — both must be
+is INDEPENDENT of server/app.py's LIVE_TRADING_ENABLED — both must be
 true for an auto-executed order to reach the real broker. Same
 double-opt-in pattern as the rest of the live-trading config.
 
@@ -88,7 +88,7 @@ class ExecutionDecision:
 
 
 class AutoExecutor:
-    """One instance, created once at ws_server_live.py startup alongside
+    """One instance, created once at server/app.py startup alongside
     _ACCOUNT_GUARD, and called once per tick with that tick's decision
     block (already computed by DecisionEngine inside mTerminals_json.py —
     this module never calls DecisionEngine itself, it only consumes its
@@ -118,7 +118,7 @@ class AutoExecutor:
         self.max_decision_age_seconds = max_decision_age_seconds
         self.enforce_freshness = enforce_freshness
         # Pluggable clock, defaulting to the real wall clock — every live
-        # call site (ws_server_live.py) never passes these, so production
+        # call site (server/app.py) never passes these, so production
         # behavior is unchanged. backtest/replay.py injects functions
         # bound to each tick's SIMULATED timestamp instead, so cooldown
         # and the daily-trade-cap rollover get evaluated against real
@@ -262,7 +262,7 @@ class AutoExecutor:
                                   instrument_type=instrument_type, side=side, strike=int(strike))
 
     def get_status(self, symbol: str) -> dict:
-        """Read-only snapshot for status reporting (e.g. ws_server_live.py's
+        """Read-only snapshot for status reporting (e.g. server/app.py's
         algoStatus broadcast) — does not affect gating, safe to call from
         any coroutine. `last_decision_reason` mirrors the most recent
         evaluate() outcome, which is already the same human-readable

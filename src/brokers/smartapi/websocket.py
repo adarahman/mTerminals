@@ -67,7 +67,7 @@ class SmartTickStream:
         # tokens that SHOULD be subscribed right now. subscribe()/unsubscribe()
         # update this; _handle_open() replays it in full on every (re)connect,
         # so a dropped connection comes back with exactly the right tokens
-        # without ws_server_live.py needing to resubscribe manually.
+        # without server/app.py needing to resubscribe manually.
         self._desired = {}
         self._desired_lock = threading.Lock()
 
@@ -188,7 +188,7 @@ class SmartTickStream:
     def run_forever(self):
         """Blocks the current thread for a SINGLE connection lifetime — if
         the socket drops, this returns and nothing reconnects. Kept for
-        the standalone smoke-test below; ws_server_live.py should use
+        the standalone smoke-test below; server/app.py should use
         run_forever_with_reconnect() instead for a long-lived server."""
         self._ws.connect()
 

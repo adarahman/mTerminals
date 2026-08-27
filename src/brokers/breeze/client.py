@@ -3,10 +3,10 @@
 Same broker-neutral function shape as brokers/shoonya_client.py — this is
 the second implementation of that pattern, not a new one:
 place_order/get_order_book/get_positions/get_funds all take/return the
-same shapes ws_server_live.py and risk/account_guard.py, risk/
+same shapes server/app.py and risk/account_guard.py, risk/
 position_reconciler.py already consume from Shoonya. Swapping
 EXECUTION_BROKER=BREEZE in .env is the only wiring change needed at the
-call site (see ws_server_live.py's broker dispatch block).
+call site (see server/app.py's broker dispatch block).
 
 Breeze's contract model doesn't fit that shape natively, though. SmartAPI
 and Shoonya both resolve a contract to (exchange, tradingsymbol, token)
@@ -16,7 +16,7 @@ Breeze instead wants four separate fields on every call — stock_code
 not "DD-Mon-YYYY"), strike_price, and right ("Call"/"Put") — and has no
 single string that encodes all four. resolve_option_contract() below
 still returns the same 3-tuple shoonya_client.resolve_option_contract()
-does (so _resolve_live_order_token() in ws_server_live.py needs no
+does (so _resolve_live_order_token() in server/app.py needs no
 branching beyond picking which resolver to call), but the "tradingsymbol"
 it returns is a synthetic, display-shaped key (e.g. "NIFTY28AUG25024800CE")
 whose four Breeze fields are stashed in an in-memory _CONTRACT_CACHE at
@@ -61,7 +61,7 @@ def derivative_stock_code(symbol: str, exchange: str = "NFO") -> str:
 def _default_api_factory():
     # breeze_connect's own package contains a module also named `config`
     # (it does a bare `import config` internally, expecting its own bundled
-    # module). Since ws_server_live.py adds backend/ to sys.path so this
+    # module). Since server/app.py adds backend/ to sys.path so this
     # codebase's own config.py can be imported as `from config import
     # settings`, that same sys.path entry causes breeze_connect's `import
     # config` to resolve to OUR config.py instead of its own — surfacing

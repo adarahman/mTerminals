@@ -1,10 +1,10 @@
-"""Unit tests for ws_server_live.py's `_handle_place_order` — the single
+"""Unit tests for server/app.py's `_handle_place_order` — the single
 chokepoint every order (manual dashboard click or AutoExecutor-submitted)
 passes through before it can reach a real AngelOne order or the paper
 trading engine.
 
 Nothing here talks to a real broker: `smartapi_place_order` /
-`smartapi_get_positions` (the names ws_server_live.py binds
+`smartapi_get_positions` (the names server/app.py binds
 brokers.smartapi.client.place_order / get_positions to) are monkeypatched
 per test, same for `_resolve_live_order_token` where a test isn't
 specifically exercising resolution itself. See conftest.py's

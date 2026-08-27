@@ -14,7 +14,7 @@ docstring — that class's token_meta is built from get_atm_chain()'s CE/PE/
 INDEX rows only). Futures OI arrives via the separate REST poll
 (smartapi_pipeline_adapter.fetch_futures_wide(), called once per pipeline
 tick from option_chain_json.py's main()), which is single-threaded under
-ws_server_live.py's _PIPELINE_LOCK — so this tracker doesn't need
+server/app.py's _PIPELINE_LOCK — so this tracker doesn't need
 TickAggregator's threading.Lock rigor, but keeps one anyway since
 reset_session() is called from engine_loop()'s asyncio task, a different
 call path than the update() calls happening inside the pipeline thread.
@@ -45,7 +45,7 @@ class FuturesOITracker:
 
     def reset_session(self):
         """Call at actual trading-day rollover (same hook as
-        TickAggregator.reset_session() — ws_server_live.py's engine_loop()
+        TickAggregator.reset_session() — server/app.py's engine_loop()
         _LAST_SESSION_DATE check), NOT on an ordinary contract rollover
         within the same day (a rollover mid-day is handled automatically:
         the new contract symbol just has no baseline yet, see class
@@ -85,7 +85,7 @@ class FuturesOITracker:
 
 # Singleton — one live futures contract in flight per process at a time
 # (mirrors the single module-level _smartapi_aggregator instance pattern
-# in ws_server_live.py), so engine.py and ws_server_live.py's day-rollover
+# in server/app.py), so engine.py and server/app.py's day-rollover
 # hook share the same tracker without needing it threaded through every
 # call signature.
 _TRACKER = FuturesOITracker()

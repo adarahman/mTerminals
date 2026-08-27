@@ -1,5 +1,5 @@
 """Kite Connect (Zerodha) execution adapter — brokers.kite.client,
-shaped for ws_server_live.py's EXECUTION_BROKER dispatch.
+shaped for server/app.py's EXECUTION_BROKER dispatch.
 
 kite_client.py deliberately stays standalone and config.py-independent
 (see its own module docstring), so this adapter is the seam: it pulls
@@ -15,7 +15,7 @@ already share —
     get_positions() -> list
     get_funds() -> dict
 
-so ws_server_live.py can add an EXECUTION_BROKER == "KITE" branch that
+so server/app.py can add an EXECUTION_BROKER == "KITE" branch that
 imports these four names exactly like its existing SMARTAPI/SHOONYA/
 UPSTOX branches do, with no changes needed anywhere else in that
 dispatch.
@@ -32,7 +32,7 @@ token, it doesn't produce one.
 
 order_tag: kite_client.place_order() forwards this straight through to
 KiteConnect's own `tag` param, which is exactly the identity
-_submit_live_order()/_LIVE_ORDER_STORE (ws_server_live.py) needs for
+_submit_live_order()/_LIVE_ORDER_STORE (server/app.py) needs for
 its own dedupe-on-uncertain-response recovery — same role AngelOne's
 order tag and Shoonya's `remarks` play for their brokers. Unlike
 Shoonya, this adapter does NOT try to recover an order by tag lookup
