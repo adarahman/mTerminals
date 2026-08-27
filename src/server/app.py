@@ -32,8 +32,6 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 # `PYTHONPATH=src python3 -m main` does.
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
-from server.http_app import ServerConfig, create_app, start_http_server  # noqa: E402
-
 import aiohttp
 import orjson
 from aiohttp import web
@@ -69,7 +67,8 @@ from application.market_service import (  # noqa: E402
     SerializedPipelineExecutor,
     SymbolSwitcher,
 )
-from server.routes import HttpRouteHandlers, ServerRoutes  # noqa: E402
+from server.routes import HttpRouteHandlers  # noqa: E402
+from server.http_runtime import build_http_runtime  # noqa: E402
 from server.health_api import (
     build_health_snapshot as _build_health_response,
     health_handler as _health_response,
@@ -1577,26 +1576,21 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
 )
 
 # ── entry point ──────────────────────────────────────────────────────────
-async def _start_http_runtime():
-    return await start_http_server(
-        ServerRoutes(
-                    health=health_handler,
-                    broker_health=_broker_health,
-                    metrics=metrics_handler,
-                    websocket=ws_handler,
-                    bridge_websocket=bridge_ws_handler,
-                    spot_history=spot_history_handler,
-                    history=history_handler,
-                    backtest=backtest_handler,
-                    lot_sizes=lot_sizes_handler,
-                ),
-        ServerConfig(
-            host=WS_HOST,
-            port=HTTP_PORT,
-            symbol=runtime_state.MARKET_SELECTION.symbol,
-            middleware=no_cache_middleware,
-        ),
-    )
+_HTTP_RUNTIME = build_http_runtime(
+    health=health_handler,
+    broker_health=_broker_health,
+    metrics=metrics_handler,
+    websocket=ws_handler,
+    bridge_websocket=bridge_ws_handler,
+    spot_history=spot_history_handler,
+    history=history_handler,
+    backtest=backtest_handler,
+    lot_sizes=lot_sizes_handler,
+    host=WS_HOST,
+    port=HTTP_PORT,
+    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
+    middleware=no_cache_middleware,
+)
 
 _RUNTIME_SERVICES = ServerRuntimeServices(
     host=WS_HOST,
@@ -1625,7 +1619,7 @@ async def main():
     lifecycle = ApplicationLifecycle(
         validate_startup=_RUNTIME_SERVICES.validate_startup,
         configure_logging=configure_logging,
-        start_http_server=_start_http_runtime,
+        start_http_server=_HTTP_RUNTIME.start,
         set_main_loop=_RUNTIME_SERVICES.set_main_loop,
         start_live_services=_RUNTIME_SERVICES.start_live_services,
         background_jobs=_RUNTIME_SERVICES.background_jobs,
