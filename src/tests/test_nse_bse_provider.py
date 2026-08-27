@@ -425,13 +425,6 @@ def test_switch_starts_feed_for_never_booted_provider(monkeypatch):
         current_expiry=None,
     )
 
-    def snapshot():
-        return state
-
-    def store(new_state):
-        nonlocal state
-        state = new_state
-
     def start(state_obj, loop, symbol, strikes_around_atm, expiry):
         calls.append((loop, symbol, strikes_around_atm, expiry))
         # Mark it running exactly as a real provider start would.
@@ -441,8 +434,7 @@ def test_switch_starts_feed_for_never_booted_provider(monkeypatch):
 
     manager = BrokerFeedManager(
         "SMARTAPI",
-        snapshot=snapshot,
-        store=store,
+        state=state,
         start=start,
         switch=lambda *a, **k: None,
         stop=lambda *a, **k: None,
@@ -477,8 +469,7 @@ def test_background_feed_restart_contains_start_failure():
 
     manager = BrokerFeedManager(
         "UPSTOX",
-        snapshot=lambda: state,
-        store=lambda _state: None,
+        state=state,
         start=fail,
         switch=fail,
         stop=lambda *args, **kwargs: None,
@@ -514,13 +505,8 @@ def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
 def test_stop_active_broker_feed_unsubscribes_without_unbound_local_error(
     ws_server_live, monkeypatch
 ):
-    # Regression: _stop_active_broker_feed's worker thread used to raise
-    # UnboundLocalError ("cannot access local variable '_smartapi_tokens'")
-    # on any switch away from a running feed — it assigned the module
-    # globals without declaring them global, so Python scoped them as
-    # locals for the whole function and the very first read blew up. The
-    # broadcast gate (_feed_allowed) still stopped data leakage, but the
-    # unsubscribe never ran, so the old feed kept consuming bandwidth.
+    # Regression: switching away must unsubscribe both derivative and index
+    # tokens through the state now owned by BrokerFeedManager.
     import time
 
     calls = []
@@ -529,14 +515,15 @@ def test_stop_active_broker_feed_unsubscribes_without_unbound_local_error(
         def unsubscribe(self, exchange, tokens):
             calls.append((exchange, list(tokens)))
 
-    from server.feeds import orchestration as feed_orchestration
     from server import feed_manager
+    from server.feeds import orchestration as feed_orchestration
 
-    monkeypatch.setattr(feed_orchestration, "_smartapi_stream", _FakeStream())
-    monkeypatch.setattr(feed_orchestration, "_smartapi_tokens", ["123", "456"])
-    monkeypatch.setattr(feed_orchestration, "_smartapi_exchange", 2)
-    monkeypatch.setattr(feed_orchestration, "_smartapi_index_token", "26000")
-    monkeypatch.setattr(feed_orchestration, "_smartapi_index_exchange", 1)
+    state = ws_server_live.runtime_state.FEEDS["SMARTAPI"].state
+    state.stream = _FakeStream()
+    state.tokens = ["123", "456"]
+    state.exchange = 2
+    state.index_token = "26000"
+    state.index_exchange = 1
 
     monkeypatch.setattr(
         feed_orchestration,
@@ -551,7 +538,7 @@ def test_stop_active_broker_feed_unsubscribes_without_unbound_local_error(
         time.sleep(0.05)
     assert ("NFO", ["123", "456"]) in calls
     assert ("NSE_CM", ["26000"]) in calls
-    assert feed_orchestration._smartapi_tokens is None
+    assert state.tokens is None
 
 def test_stale_feed_broadcast_is_a_noop(ws_server_live, monkeypatch):
     asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
@@ -580,11 +567,10 @@ def test_switch_away_unsubscribes_feed_without_error(ws_server_live, monkeypatch
     monkeypatch.setattr(ws_server_live, "restart_smartapi_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_upstox_feed", _noop_restart)
     monkeypatch.setattr(ws_server_live, "restart_shoonya_feed", _noop_restart)
-    ws_server_live._smartapi_stream = None
+    ws_server_live.runtime_state.FEEDS["SMARTAPI"].state.stream = None
     asyncio.run(ws_server_live.switch_data_source("SMARTAPI"))
-    ws_server_live._smartapi_stream = None
-    ws_server_live._upstox_stream = None
-    ws_server_live._shoonya_stream = None
+    for provider in ("SMARTAPI", "UPSTOX", "SHOONYA"):
+        ws_server_live.runtime_state.FEEDS[provider].state.stream = None
 
 
 # ── 9. POLLING status is expected, not an error ──────────────────────────

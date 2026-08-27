@@ -87,49 +87,9 @@ from server.websocket_security import (  # noqa: E402
     host_is_loopback,
     origin_allowed,
 )
-from server.feeds.smartapi import (  # noqa: E402
-    FeedState as _SmartApiFeedState,
-    resolve_chain_tokens as _resolve_smartapi_feed_tokens,
-    start_new_feed as _start_smartapi_feed_new,
-    stop_feed as _stop_smartapi_feed,
-    switch_existing_feed as _switch_smartapi_feed_existing,
-)
-from server.feeds.shoonya import (  # noqa: E402
-    FeedState as _ShoonyaFeedState,
-    resolve_chain_tokens as _resolve_shoonya_feed_tokens,
-    start_new_feed as _start_shoonya_feed_new,
-    stop_feed as _stop_shoonya_feed,
-    switch_existing_feed as _switch_shoonya_feed_existing,
-)
-from server.feeds.upstox import (  # noqa: E402
-    FeedState as _UpstoxFeedState,
-    resolve_chain_tokens as _resolve_upstox_feed_tokens,
-    start_new_feed as _start_upstox_feed_new,
-    stop_feed as _stop_upstox_feed,
-    switch_existing_feed as _switch_upstox_feed_existing,
-)
 from server.feeds.orchestration import (  # noqa: E402
-    _smartapi_feed_state,
-    _store_smartapi_feed_state,
-    _smartapi_feed_start,
-    _smartapi_feed_switch,
-    _smartapi_feed_stop,
-    _upstox_feed_state,
-    _store_upstox_feed_state,
-    _upstox_feed_start,
-    _upstox_feed_switch,
-    _upstox_feed_stop,
-    _shoonya_feed_state,
-    _store_shoonya_feed_state,
-    _shoonya_feed_start,
-    _shoonya_feed_switch,
-    _shoonya_feed_stop,
-    _kotak_feed_state,
-    _store_kotak_feed_state,
-    _kotak_feed_start,
-    _kotak_feed_switch,
-    _kotak_feed_stop,
     _smartapi_sync_and_broadcast,
+    build_feed_managers,
     configure_feed_orchestration,
 )
 from market.providers import nse_bse_client as market_api  # noqa: E402
@@ -161,7 +121,6 @@ from analytics.nse_fii_dii_flow_fetch import record_today_flow  # noqa: E402
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker  # noqa: E402
 from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
 from server.cli_args import build_arg_parser  # noqa: E402
-from server.feed_manager import BrokerFeedManager  # noqa: E402
 from server.background_loops import (  # noqa: E402
     AlgoStatusLoop,
     FundsPoller,
@@ -701,63 +660,20 @@ def fetch_index_quotes_smartapi_sync():
     return _index_quote_fetcher().provider()
 
 
-# ── Live feed state (per provider, legacy module-global seams) ───────────
-# Tests and the health snapshot read these directly; BrokerFeedManager only
-# touches them via the snapshot/store pairs below.
-# The asyncio loop main() runs on lets a runtime switch to a provider whose
-# feed was never started at boot and start that feed on the live loop.
+# ── Live feed state ──────────────────────────────────────────────────────
+# Each BrokerFeedManager owns its provider's mutable state. The asyncio loop
+# captured by main() lets a runtime switch start a feed that was not active
+# at boot.
 
 def _print_log(message):
     print(message, flush=True)
 
 
-runtime_state.FEEDS = {
-    provider: BrokerFeedManager(
-        provider,
-        snapshot=snapshot,
-        store=store,
-        start=start,
-        switch=switch,
-        stop=stop,
-        default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-        main_loop=lambda: runtime_state.MAIN_LOOP,
-        log=_print_log,
-    )
-    for provider, snapshot, store, start, switch, stop in (
-        (
-            "SMARTAPI",
-            _smartapi_feed_state,
-            _store_smartapi_feed_state,
-            _smartapi_feed_start,
-            _smartapi_feed_switch,
-            _smartapi_feed_stop,
-        ),
-        (
-            "UPSTOX",
-            _upstox_feed_state,
-            _store_upstox_feed_state,
-            _upstox_feed_start,
-            _upstox_feed_switch,
-            _upstox_feed_stop,
-        ),
-        (
-            "SHOONYA",
-            _shoonya_feed_state,
-            _store_shoonya_feed_state,
-            _shoonya_feed_start,
-            _shoonya_feed_switch,
-            _shoonya_feed_stop,
-        ),
-        (
-            "KOTAK",
-            _kotak_feed_state,
-            _store_kotak_feed_state,
-            _kotak_feed_start,
-            _kotak_feed_switch,
-            _kotak_feed_stop,
-        ),
-    )
-}
+runtime_state.FEEDS = build_feed_managers(
+    default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
+    main_loop=lambda: runtime_state.MAIN_LOOP,
+    log=_print_log,
+)
 
 
 # Legacy entry points, kept as thin wrappers — existing tests and external

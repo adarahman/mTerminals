@@ -75,112 +75,6 @@ def _print_log(message):
     print(message, flush=True)
 
 
-# ── per-provider live-feed state ───────────────────────────────────────────
-_smartapi_stream = None
-_smartapi_aggregator = None
-_smartapi_loop = None  # captured once at startup, reused for symbol switches
-_smartapi_exchange = None  # exchange type subscribed (NFO/BFO), for unsubscribe
-_smartapi_tokens = None  # token list subscribed, for unsubscribe
-_smartapi_current_expiry = None  # expiry being streamed, e.g. "31JUL2026"
-_smartapi_index_token = None  # underlying INDEX token for fast spot ticks
-_smartapi_index_exchange = None  # "NSE_CM"/"BSE_CM" — DIFFERENT from
-# _smartapi_exchange (NFO/BFO), needs its own unsubscribe call
-_smartapi_futures_token = None  # current-month futures token (VWAP/volume)
-_smartapi_futures_exchange = None  # NFO/BFO; folded into _smartapi_tokens
-# for unsubscribe but needs its own basis-calc lookup
-
-_upstox_stream = None
-_upstox_aggregator = None
-_upstox_loop = None
-_upstox_keys = None  # instrument_key list subscribed, for unsubscribe
-_upstox_current_expiry = None  # ISO 'YYYY-MM-DD' expiry being streamed
-
-_shoonya_stream = None
-_shoonya_aggregator = None
-_shoonya_loop = None
-_shoonya_instruments = None  # 'EXCH|TOKEN' strings subscribed, for unsubscribe
-_shoonya_current_expiry = None  # 'DD-Mon-YYYY' expiry being streamed
-
-
-_kotak_stream = None
-_kotak_aggregator = None
-_kotak_loop = None
-_kotak_instruments = None  # subscribe-payload dicts, for unsubscribe
-_kotak_current_expiry = None  # expiry being streamed
-
-
-def _smartapi_feed_state():
-    return _SmartApiFeedState(
-        stream=_smartapi_stream,
-        aggregator=_smartapi_aggregator,
-        loop=_smartapi_loop,
-        exchange=_smartapi_exchange,
-        tokens=_smartapi_tokens,
-        current_expiry=_smartapi_current_expiry,
-        index_token=_smartapi_index_token,
-        index_exchange=_smartapi_index_exchange,
-        futures_token=_smartapi_futures_token,
-        futures_exchange=_smartapi_futures_exchange,
-    )
-
-
-def _store_smartapi_feed_state(state):
-    global _smartapi_stream, _smartapi_aggregator, _smartapi_loop
-    global _smartapi_exchange, _smartapi_tokens, _smartapi_current_expiry
-    global _smartapi_index_token, _smartapi_index_exchange
-    global _smartapi_futures_token, _smartapi_futures_exchange
-    _smartapi_stream = state.stream
-    _smartapi_aggregator = state.aggregator
-    _smartapi_loop = state.loop
-    _smartapi_exchange = state.exchange
-    _smartapi_tokens = state.tokens
-    _smartapi_current_expiry = state.current_expiry
-    _smartapi_index_token = state.index_token
-    _smartapi_index_exchange = state.index_exchange
-    _smartapi_futures_token = state.futures_token
-    _smartapi_futures_exchange = state.futures_exchange
-
-
-def _upstox_feed_state():
-    return _UpstoxFeedState(
-        stream=_upstox_stream,
-        aggregator=_upstox_aggregator,
-        loop=_upstox_loop,
-        instruments=_upstox_keys,
-        current_expiry=_upstox_current_expiry,
-    )
-
-
-def _store_upstox_feed_state(state):
-    global _upstox_stream, _upstox_aggregator, _upstox_loop
-    global _upstox_keys, _upstox_current_expiry
-    _upstox_stream = state.stream
-    _upstox_aggregator = state.aggregator
-    _upstox_loop = state.loop
-    _upstox_keys = state.instruments
-    _upstox_current_expiry = state.current_expiry
-
-
-def _shoonya_feed_state():
-    return _ShoonyaFeedState(
-        stream=_shoonya_stream,
-        aggregator=_shoonya_aggregator,
-        loop=_shoonya_loop,
-        instruments=_shoonya_instruments,
-        current_expiry=_shoonya_current_expiry,
-    )
-
-
-def _store_shoonya_feed_state(state):
-    global _shoonya_stream, _shoonya_aggregator, _shoonya_loop
-    global _shoonya_instruments, _shoonya_current_expiry
-    _shoonya_stream = state.stream
-    _shoonya_aggregator = state.aggregator
-    _shoonya_loop = state.loop
-    _shoonya_instruments = state.instruments
-    _shoonya_current_expiry = state.current_expiry
-
-
 def _parse_any_expiry(expiry_str):
     """Normalize an expiry string to a date, accepting SmartAPI's format
     ('31JUL2026'), option_chain_json's ('31-Jul-2026'), Upstox's ISO
@@ -206,15 +100,26 @@ def _matches_current_feed_expiry(current_expiry, payload_expiry_str):
 
 
 def _smartapi_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(_smartapi_current_expiry, payload_expiry_str)
+    return _matches_current_feed_expiry(
+        _current_feed_expiry("SMARTAPI"), payload_expiry_str
+    )
 
 
 def _upstox_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(_upstox_current_expiry, payload_expiry_str)
+    return _matches_current_feed_expiry(
+        _current_feed_expiry("UPSTOX"), payload_expiry_str
+    )
 
 
 def _shoonya_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(_shoonya_current_expiry, payload_expiry_str)
+    return _matches_current_feed_expiry(
+        _current_feed_expiry("SHOONYA"), payload_expiry_str
+    )
+
+
+def _current_feed_expiry(provider):
+    manager = runtime_state.FEEDS.get(provider)
+    return manager.current_expiry if manager is not None else None
 
 
 def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
@@ -465,28 +370,10 @@ def _shoonya_feed_stop(state):
 
 
 # ── Kotak Neo feed adapters ────────────────────────────────────────────────
-def _kotak_feed_state():
-    return _KotakFeedState(
-        stream=_kotak_stream,
-        aggregator=_kotak_aggregator,
-        loop=_kotak_loop,
-        instruments=_kotak_instruments,
-        current_expiry=_kotak_current_expiry,
-    )
-
-
-def _store_kotak_feed_state(state):
-    global _kotak_stream, _kotak_aggregator, _kotak_loop
-    global _kotak_instruments, _kotak_current_expiry
-    _kotak_stream = state.stream
-    _kotak_aggregator = state.aggregator
-    _kotak_loop = state.loop
-    _kotak_instruments = state.instruments
-    _kotak_current_expiry = state.current_expiry
-
-
 def _kotak_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(_kotak_current_expiry, payload_expiry_str)
+    return _matches_current_feed_expiry(
+        _current_feed_expiry("KOTAK"), payload_expiry_str
+    )
 
 
 def _resolve_kotak_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
@@ -541,3 +428,52 @@ def _kotak_feed_switch(state, symbol, strikes_around_atm, expiry):
 
 def _kotak_feed_stop(state):
     _stop_kotak_feed(state, report=lambda m: _LOGGER.warning(m))
+
+
+def build_feed_managers(*, default_symbol, main_loop, log):
+    """Build provider managers that directly own their mutable feed state."""
+    from server.feed_manager import BrokerFeedManager
+
+    specs = (
+        (
+            "SMARTAPI",
+            _SmartApiFeedState(),
+            _smartapi_feed_start,
+            _smartapi_feed_switch,
+            _smartapi_feed_stop,
+        ),
+        (
+            "UPSTOX",
+            _UpstoxFeedState(),
+            _upstox_feed_start,
+            _upstox_feed_switch,
+            _upstox_feed_stop,
+        ),
+        (
+            "SHOONYA",
+            _ShoonyaFeedState(),
+            _shoonya_feed_start,
+            _shoonya_feed_switch,
+            _shoonya_feed_stop,
+        ),
+        (
+            "KOTAK",
+            _KotakFeedState(),
+            _kotak_feed_start,
+            _kotak_feed_switch,
+            _kotak_feed_stop,
+        ),
+    )
+    return {
+        provider: BrokerFeedManager(
+            provider,
+            state=state,
+            start=start,
+            switch=switch,
+            stop=stop,
+            default_symbol=default_symbol,
+            main_loop=main_loop,
+            log=log,
+        )
+        for provider, state, start, switch, stop in specs
+    }

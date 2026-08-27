@@ -1,15 +1,8 @@
 """Broker-neutral lifecycle for one provider's persistent tick feed.
 
-ws_server_live used to carry three parallel copies (SmartAPI/Upstox/Shoonya)
-of identical choreography: module-global stream/aggregator/expiry state, an
-RLock serializing lifecycle entry points, start-or-switch, switch-or-start,
-and a fire-and-forget restart thread. This manager owns that choreography
-once; provider differences live entirely in injected callables:
-
-- snapshot()/store(): read/write the provider's legacy state globals (kept
-  as ws_server_live module globals because tests seam through them).
-- start()/switch()/stop(): call the provider's extracted service functions
-  (server.feeds.*) with whatever argument shape each exposes.
+The legacy server carried parallel copies of stream/aggregator/expiry state.
+This manager owns one provider's mutable state and lifecycle choreography;
+provider differences live entirely in injected start/switch/stop callables.
 
 Locking: one RLock per manager, reentrant so a switch that finds no running
 feed can fall back into start() while holding the lock. This closes the race
@@ -50,8 +43,7 @@ class BrokerFeedManager:
         self,
         provider: str,
         *,
-        snapshot: Callable[[], object],
-        store: Callable[[object], None],
+        state: object,
         start: Callable[..., None],
         switch: Callable[..., None],
         stop: Callable[..., None],
@@ -61,8 +53,7 @@ class BrokerFeedManager:
     ) -> None:
         self.provider = provider
         self._tag = provider.lower()
-        self._snapshot = snapshot
-        self._store = store
+        self._state = state
         self._start = start
         self._switch_fn = switch
         self._stop_fn = stop
@@ -73,8 +64,13 @@ class BrokerFeedManager:
 
     # ── introspection ────────────────────────────────────────────────
     @property
+    def state(self):
+        """Provider-owned mutable state for diagnostics and focused tests."""
+        return self._state
+
+    @property
     def running(self) -> bool:
-        state = self._snapshot()
+        state = self._state
         return (
             getattr(state, "stream", None) is not None
             and getattr(state, "aggregator", None) is not None
@@ -82,18 +78,18 @@ class BrokerFeedManager:
 
     @property
     def connected(self) -> bool:
-        stream = getattr(self._snapshot(), "stream", None)
+        stream = getattr(self._state, "stream", None)
         connected_event = getattr(stream, "_connected", None)
         return bool(connected_event and connected_event.is_set())
 
     @property
     def current_expiry(self) -> Optional[str]:
-        return getattr(self._snapshot(), "current_expiry", None)
+        return getattr(self._state, "current_expiry", None)
 
     @property
     def aggregator(self):
         """Current normalized tick aggregator, if this feed has started."""
-        return getattr(self._snapshot(), "aggregator", None)
+        return getattr(self._state, "aggregator", None)
 
     # ── lifecycle ────────────────────────────────────────────────────
     def start(self, loop, underlying: str = None, strikes_around_atm: int = 10, expiry=None) -> None:
@@ -107,9 +103,7 @@ class BrokerFeedManager:
                 )
                 self._switch_locked(target, strikes_around_atm, expiry)
                 return
-            state = self._snapshot()
-            self._start(state, loop, target, strikes_around_atm, expiry)
-            self._store(state)
+            self._start(self._state, loop, target, strikes_around_atm, expiry)
 
     def switch_blocking(self, new_symbol: str, strikes_around_atm: int = 10, expiry=None) -> None:
         """Switch subscriptions on the existing socket; start if none.
@@ -119,7 +113,7 @@ class BrokerFeedManager:
         the switch."""
         with self._lock:
             if not self.running:
-                loop = getattr(self._snapshot(), "loop", None) or self._main_loop()
+                loop = getattr(self._state, "loop", None) or self._main_loop()
                 if loop is not None:
                     self.start(loop, new_symbol, strikes_around_atm, expiry)
                 return
@@ -150,9 +144,7 @@ class BrokerFeedManager:
     def stop_blocking(self, *stop_args, **stop_kwargs) -> None:
         """Best-effort unsubscribe while preserving the state globals."""
         with self._lock:
-            state = self._snapshot()
-            self._stop_fn(state, *stop_args, **stop_kwargs)
-            self._store(state)
+            self._stop_fn(self._state, *stop_args, **stop_kwargs)
 
     def _switch_locked(
         self,
@@ -161,9 +153,7 @@ class BrokerFeedManager:
         expiry,
     ) -> None:
         """Switch subscriptions while the manager lifecycle lock is held."""
-        state = self._snapshot()
-        self._switch_fn(state, symbol, strikes_around_atm, expiry)
-        self._store(state)
+        self._switch_fn(self._state, symbol, strikes_around_atm, expiry)
 
 _LOGGER = logging.getLogger("mterminals.server.feed_manager")
 
