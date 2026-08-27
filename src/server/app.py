@@ -20,7 +20,6 @@ import os
 import sys
 import threading
 import time
-import traceback
 import uuid
 from datetime import datetime
 from datetime import time as dtime
@@ -176,6 +175,11 @@ from server.order_gateway import (  # noqa: E402
     LiveOrderGateway,
     parse_order_intent,
     validate_order_intent,
+)
+from server.task_callbacks import (  # noqa: E402
+    eod_task_done as _eod_task_done,
+    flow_task_done as _flow_task_done,
+    report_failed_task as _report_failed_task,
 )
 logger = logging.getLogger("mterminals.server")
 configure_lot_size_resolver(_smartapi_lot_size)
@@ -494,41 +498,6 @@ runtime_state.MARKET_STREAM_LOCK = asyncio.Lock()
 from server.payload_capture import install_payload_export_capture  # noqa: E402
 
 _PAYLOAD_EXPORT_CAPTURE = install_payload_export_capture()
-
-
-# ── task plumbing ────────────────────────────────────────────────────────
-
-
-def _report_failed_task(task: asyncio.Task, tag: str) -> bool:
-    """Print a fire-and-forget task's exception; returns True on success."""
-    if task.cancelled():
-        return False
-    exc = task.exception()
-    if exc is not None:
-        print(f"[{tag}] FAILED: {exc!r}", flush=True)
-        traceback.print_exception(type(exc), exc, exc.__traceback__)
-        return False
-    return True
-
-
-def _eod_task_done(task: asyncio.Task):
-    """Surface exceptions from the fire-and-forget EOD fetch (nothing
-    awaits it directly, so they'd otherwise fail silently)."""
-    if _report_failed_task(task, "eod"):
-        print("[eod] fetch_all_eod completed successfully", flush=True)
-
-
-def _flow_task_done(task: asyncio.Task):
-    """Same rationale as _eod_task_done, for the cash-market FII/DII flow
-    fetch — a separate NSE endpoint, so its failure isn't conflated with
-    the participant-OI EOD fetch's own success/failure reporting."""
-    if _report_failed_task(task, "flow"):
-        ok = task.result()
-        print(
-            f"[flow] record_today_flow "
-            f"{'succeeded' if ok else 'returned False (no data yet)'}",
-            flush=True,
-        )
 
 
 # ── pipeline plumbing ────────────────────────────────────────────────────
