@@ -52,7 +52,6 @@ from application.runtime import (  # noqa: E402
     ApplicationLifecycle,
 )
 from application.market_service import (  # noqa: E402
-    AnalyticsPipelineRunner,
     CanonicalPayloadPublisher,
     DailyMarketScheduler,
     DataSourceSwitcher,
@@ -61,8 +60,6 @@ from application.market_service import (  # noqa: E402
     MarketPipelineService,
     MarketTickPacer,
     OiBaselineSynchronizer,
-    PipelineRuntimeConfigurator,
-    SerializedPipelineExecutor,
     SymbolSwitcher,
 )
 from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
@@ -96,10 +93,6 @@ from application import option_chain_runtime  # noqa: E402
 
 from operational_metrics import OperationalMetrics  # noqa: E402
 from application import selection_state  # noqa: E402
-from analytics.option_chain_pipeline import OptionChainPipeline  # noqa: E402
-from brokers.expiry_adapter import BrokerExpiryAdapter  # noqa: E402
-from brokers.option_chain_adapter import BrokerOptionChainAdapter  # noqa: E402
-from market.option_chain.runtime_adapters import BrokerMarketAdapters  # noqa: E402
 from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
 from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa: E402
@@ -107,6 +100,10 @@ from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
 from server.trading_supervision import LiveTradingSupervisor  # noqa: E402
 from server.order_submission import OrderSubmissionService  # noqa: E402
 from server.market_cycle_operations import MarketCycleOperations  # noqa: E402
+from server.analytics_runtime import (  # noqa: E402
+    AnalyticsRuntime,
+    build_broker_market_adapters,
+)
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
@@ -427,9 +424,6 @@ ALLOWED_ORIGINS = build_allowed_origins(
 _ORIGIN_POLICY = partial(origin_allowed, allowed_origins=ALLOWED_ORIGINS)
 
 
-# Analytics passes are serialized with provider switches so one pass observes
-# one stable provider identity from request planning through final export.
-_PIPELINE_EXECUTOR = SerializedPipelineExecutor()
 runtime_state.INDEX_QUOTES = {}  # {"BANKNIFTY": {"spot":.., "spotChgPct":..}, ...}
 runtime_state.SYMBOL_SWITCH_EVENT = asyncio.Event()
 # Set (thread-safely) by TickAggregator's flush loop on every real tick
@@ -500,98 +494,28 @@ _BRIDGE = DashboardBridge(
 )
 BRIDGE_CONNECTED = _BRIDGE.clients
 
-_PIPELINE_RUNTIME_CONFIGURATOR = PipelineRuntimeConfigurator(
+_ANALYTICS_RUNTIME = AnalyticsRuntime(
+    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
+    expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
     data_source=lambda: runtime_state.MARKET_SELECTION.data_source,
+    price_source=lambda: runtime_state.MARKET_SELECTION.price_source,
+    futures_expiry=lambda: runtime_state.MARKET_SELECTION.futures_expiry,
+    strikes_each_side=lambda: runtime_state.STRIKES_EACH_SIDE,
     activate_provider=_md_set_active_provider,
     resolve_default_expiry=_resolve_default_pipeline_expiry,
     apply_config=lambda config: None,
-)
-
-
-def _build_pipeline_runtime_config(
-    symbol,
-    expiry=None,
-    no_extra_chains=None,
-    strict_expiry=None,
-    no_virtual_oi=None,
-    price_source=None,
-    futures_expiry=None,
-):
-    """Build the complete configuration passed to one analytics run."""
-    return _PIPELINE_RUNTIME_CONFIGURATOR.configure(
-        symbol=symbol,
-        expiry=expiry,
-        no_extra_chains=no_extra_chains,
-        strict_expiry=strict_expiry,
-        no_virtual_oi=no_virtual_oi,
-        price_source=price_source,
-        futures_expiry=futures_expiry,
-        strikes_each_side=runtime_state.STRIKES_EACH_SIDE,
-    )
-
-
-def _build_broker_market_adapters():
-    from application.market_pipeline.futures import fetch_futures_wide
-    from application.market_pipeline.option_chain import (
-        fetch_option_chain_wide,
-        get_available_expiries,
-    )
-    from application.market_pipeline.quotes import (
-        fetch_all_pills_and_vix_batched,
-        fetch_sensex_ticker,
-        fetch_ticker_payload,
-        fetch_vix,
-    )
-    from application.market_pipeline.utils import _canon_underlying
-
-    chain = BrokerOptionChainAdapter(
-        fetch_chain=fetch_option_chain_wide,
-        canonicalize_symbol=_canon_underlying,
-    )
-    expiries = BrokerExpiryAdapter(fallback=get_available_expiries)
-    return BrokerMarketAdapters(
-        canonicalize_symbol=chain.canonicalize,
-        fetch_chain=chain.fetch,
-        list_expiries=expiries.list_expiries,
-        fetch_futures=lambda symbol, exchange, which: fetch_futures_wide(
-            symbol, None, exchange=exchange, which=which
-        ),
-        warm_batch=fetch_all_pills_and_vix_batched,
-        fetch_ticker_payload=fetch_ticker_payload,
-        fetch_vix=fetch_vix,
-        fetch_sensex_quote=fetch_sensex_ticker,
-    )
-
-
-_BROKER_MARKET_ADAPTERS = (
-    _build_broker_market_adapters() if runtime_state.USE_SMARTAPI else None
-)
-_OPTION_CHAIN_PIPELINE = OptionChainPipeline(
-    implementation=lambda config: option_chain_runtime.main(
-        config,
-        broker_adapters=_BROKER_MARKET_ADAPTERS,
-        export_dashboard=_PAYLOAD_EXPORT_CAPTURE.export,
-    ),
-)
-
-
-_ANALYTICS_PIPELINE_RUNNER = AnalyticsPipelineRunner(
-    configure=lambda: _build_pipeline_runtime_config(
-        runtime_state.MARKET_SELECTION.symbol,
-        runtime_state.MARKET_SELECTION.expiry,
-        no_extra_chains=not ARGS.extra_chains,
-        strict_expiry=ARGS.strict_expiry,
-        no_virtual_oi=ARGS.no_virtual_oi,
-        price_source=runtime_state.MARKET_SELECTION.price_source,
-        futures_expiry=runtime_state.MARKET_SELECTION.futures_expiry,
-    ),
     clear_capture=_PAYLOAD_EXPORT_CAPTURE.clear,
-    invoke=_OPTION_CHAIN_PIPELINE.run,
     captured_payload=lambda: _PAYLOAD_EXPORT_CAPTURE.payload,
+    export_dashboard=_PAYLOAD_EXPORT_CAPTURE.export,
+    invoke_analytics=option_chain_runtime.main,
+    broker_adapters=(
+        build_broker_market_adapters() if runtime_state.USE_SMARTAPI else None
+    ),
+    extra_chains=ARGS.extra_chains,
+    strict_expiry=ARGS.strict_expiry,
+    no_virtual_oi=ARGS.no_virtual_oi,
 )
-_RUN_PIPELINE_SERIALIZED = partial(
-    _PIPELINE_EXECUTOR.run_blocking, _ANALYTICS_PIPELINE_RUNNER.run_once
-)
+_RUN_PIPELINE_SERIALIZED = _ANALYTICS_RUNTIME.run
 
 
 # ── Live feed state ──────────────────────────────────────────────────────
@@ -623,7 +547,7 @@ _SYMBOL_SWITCHER = SymbolSwitcher(
 _DATA_SOURCE_SWITCHER = DataSourceSwitcher(
     valid_sources=lambda: _MD_PROVIDER_KEYS,
     current_source=lambda: runtime_state.MARKET_SELECTION.data_source,
-    execution_gate=_PIPELINE_EXECUTOR,
+    execution_gate=_ANALYTICS_RUNTIME.execution_gate,
     activate_provider=_md_set_active_provider,
     stop_feed=feed_manager._stop_active_broker_feed,
     commit_source=feed_manager._commit_data_source,

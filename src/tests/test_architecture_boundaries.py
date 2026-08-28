@@ -253,6 +253,14 @@ def test_composition_root_delegates_market_cycle_operations():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_delegates_analytics_runtime_assembly():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _build_pipeline_runtime_config" not in app
+    assert "def _build_broker_market_adapters" not in app
+    assert "AnalyticsPipelineRunner(" not in app
+    assert "PipelineRuntimeConfigurator(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

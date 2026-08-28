@@ -983,9 +983,9 @@ def test_index_quotes_provider_aware(ws_server_live):
 # ── 14. Per-tick pipeline gate activates the public chain path ───────────
 def test_pipeline_gate_activates_public_nse_path(ws_server_live):
     runtime_state.MARKET_SELECTION.select_data_source("NSE_BSE")
-    config = ws_server_live._build_pipeline_runtime_config("NIFTY")
+    config = ws_server_live._ANALYTICS_RUNTIME.configure("NIFTY")
     assert config.use_smartapi is False  # public NSE/BSE chain path
 
     runtime_state.MARKET_SELECTION.select_data_source("UPSTOX")
-    config = ws_server_live._build_pipeline_runtime_config("NIFTY")
+    config = ws_server_live._ANALYTICS_RUNTIME.configure("NIFTY")
     assert config.use_smartapi is True  # broker REST chain path
