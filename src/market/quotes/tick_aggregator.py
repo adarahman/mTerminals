@@ -85,7 +85,7 @@ class TickAggregator:
         _session_open_oi is intentionally NOT cleared here — a symbol/
         expiry switch mid-day isn't a new trading session, and the new
         token set has no baselines yet anyway (on_tick()'s bootstrap
-        fallback + the next engine_loop() seeding cycle will fill them
+        fallback + the next MarketEngineCycle seeding pass will fill them
         in). Call reset_session() explicitly for an actual new-day
         rollover instead."""
         with self._lock:
@@ -95,7 +95,7 @@ class TickAggregator:
             self._prev_vol.clear()
 
     def seed_session_baseline(self, baselines):
-        """baselines: dict {token: baseline_oi}. Call once per engine_loop()
+        """baselines: dict {token: baseline_oi}. Call once per market cycle
         cycle using OI figures derived from a source with correct
         day-over-day change (NSE's own changeinOpenInterest):
             baseline_oi = current_oi - nse_reported_chg_oi

@@ -16,7 +16,7 @@ INDEX rows only). Futures OI arrives via the separate REST poll
 tick from option_chain_json.py's main()), which is single-threaded under
 server/app.py's _PIPELINE_LOCK — so this tracker doesn't need
 TickAggregator's threading.Lock rigor, but keeps one anyway since
-reset_session() is called from engine_loop()'s asyncio task, a different
+reset_session() is called from MarketEngineCycle's asyncio task, a different
 call path than the update() calls happening inside the pipeline thread.
 
 KEYED BY CONTRACT SYMBOL, not underlying: NIFTY/BANKNIFTY futures roll to
@@ -45,8 +45,8 @@ class FuturesOITracker:
 
     def reset_session(self):
         """Call at actual trading-day rollover (same hook as
-        TickAggregator.reset_session() — server/app.py's engine_loop()
-        _LAST_SESSION_DATE check), NOT on an ordinary contract rollover
+        TickAggregator.reset_session() — the server's daily market scheduler),
+        NOT on an ordinary contract rollover
         within the same day (a rollover mid-day is handled automatically:
         the new contract symbol just has no baseline yet, see class
         docstring)."""

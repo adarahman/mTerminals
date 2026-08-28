@@ -337,7 +337,7 @@ runtime_state.LAST_FUNDS = None
 # Paper trading — single engine instance for the whole process, backed by
 # SQLite (paper_trading.db) so positions/orders survive a restart. All
 # access happens on the main asyncio thread (ws_handler for place_order,
-# engine_loop for mark-to-market/broadcast), so no extra locking is needed
+# MarketEngineCycle for mark-to-market/broadcast), so no extra locking is needed
 # around the sqlite3 connection.
 PT_ENGINE = PaperTradingEngine()
 
@@ -352,7 +352,7 @@ _PAPER_PRICE_BOOK = PaperPriceBook(
 )
 
 # Throttle for the fast-path portfolio broadcast fired from the live-tick
-# sync path (see runtime_state.PORTFOLIO_POLL_SECONDS) — separate from engine_loop()'s
+# sync path (see runtime_state.PORTFOLIO_POLL_SECONDS) — separate from the market cycle's
 # runtime_state.POLL_SECONDS-paced broadcast, which still runs as the slower fallback
 # (covers public-only mode and feed-reconnect gaps).
 runtime_state.LAST_PORTFOLIO_BROADCAST_TS = 0.0
@@ -438,7 +438,7 @@ _PIPELINE_EXECUTOR = SerializedPipelineExecutor()
 runtime_state.INDEX_QUOTES = {}  # {"BANKNIFTY": {"spot":.., "spotChgPct":..}, ...}
 runtime_state.SYMBOL_SWITCH_EVENT = asyncio.Event()
 # Set (thread-safely) by TickAggregator's flush loop on every real tick
-# flush. engine_loop() waits on this OR runtime_state.SYMBOL_SWITCH_EVENT, bounded by
+# flush. MarketEngineCycle waits on this OR runtime_state.SYMBOL_SWITCH_EVENT, bounded by
 # runtime_state.MIN_TICK_RECOMPUTE_SECONDS (floor) and runtime_state.POLL_SECONDS (ceiling).
 runtime_state.TICK_ACTIVITY_EVENT = asyncio.Event()
 # Serializes the canonical full/delta stream and its backing snapshots.
@@ -1149,11 +1149,6 @@ runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
 )
 
 
-async def engine_loop():
-    """Compatibility seam for the canonical application engine cycle."""
-    await runtime_state.MARKET_ENGINE_CYCLE.run_forever()
-
-
 # ── websocket handler ────────────────────────────────────────────────────
 def _paper_handshake_snapshot():
     prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
@@ -1365,7 +1360,7 @@ async def main():
         start_live_services=_RUNTIME_SERVICES.start_live_services,
         background_jobs=_RUNTIME_SERVICES.background_jobs,
         create_background_task=feed_manager._create_background_task,
-        run_engine=engine_loop,
+        run_engine=runtime_state.MARKET_ENGINE_CYCLE.run_forever,
         background_tasks=lambda: runtime_state.BACKGROUND_TASKS,
         close_relay=lambda: runtime_state.NODE_RELAY.close(),
         flush_state=_RUNTIME_SERVICES.flush_state,
