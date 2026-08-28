@@ -457,11 +457,6 @@ _PAYLOAD_EXPORT_CAPTURE = install_payload_export_capture()
 
 
 # ── pipeline plumbing ────────────────────────────────────────────────────
-async def _run_pipeline_locked():
-    """Run exactly one blocking pipeline pass without permitting overlap."""
-    return await _PIPELINE_EXECUTOR.run_blocking(_ANALYTICS_PIPELINE_RUNNER.run_once)
-
-
 async def _publish_pipeline_status(status, reason="", elapsed=None):
     """Broadcast analytics availability only when its visible state changes."""
     previous = (runtime_state.PIPELINE_STATUS.get("status"), runtime_state.PIPELINE_STATUS.get("reason"))
@@ -625,6 +620,9 @@ _ANALYTICS_PIPELINE_RUNNER = AnalyticsPipelineRunner(
     clear_capture=_PAYLOAD_EXPORT_CAPTURE.clear,
     invoke=_OPTION_CHAIN_PIPELINE.run,
     captured_payload=lambda: _PAYLOAD_EXPORT_CAPTURE.payload,
+)
+_RUN_PIPELINE_SERIALIZED = partial(
+    _PIPELINE_EXECUTOR.run_blocking, _ANALYTICS_PIPELINE_RUNNER.run_once
 )
 
 
@@ -1075,7 +1073,7 @@ def _pipeline_delayed_overlay():
 
 
 _MARKET_PIPELINE_SERVICE = MarketPipelineService(
-    run_pipeline=lambda: _run_pipeline_locked(),
+    run_pipeline=_RUN_PIPELINE_SERIALIZED,
     publish_status=lambda *args, **kwargs: _publish_pipeline_status(
         *args, **kwargs
     ),

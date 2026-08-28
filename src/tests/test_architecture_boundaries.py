@@ -172,6 +172,7 @@ def test_composition_root_has_no_print_logging_wrapper():
 def test_composition_root_has_no_analytics_runner_wrapper():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     assert "def run_pipeline_once" not in app
+    assert "def _run_pipeline_locked" not in app
 
 
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
