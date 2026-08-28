@@ -104,7 +104,8 @@ from brokers.option_chain_adapter import BrokerOptionChainAdapter  # noqa: E402
 from market.option_chain.runtime_adapters import BrokerMarketAdapters  # noqa: E402
 from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
-from server.paper_portfolio import PaperPriceBook  # noqa: E402
+from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa: E402
+from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
@@ -493,6 +494,15 @@ async def broadcast(message):
     )
 
 
+_PAPER_PORTFOLIO = PaperPortfolioService(
+    engine=PT_ENGINE,
+    price_book=_PAPER_PRICE_BOOK,
+    instrument_key=_instrument_key,
+    broadcast=broadcast,
+    last_payload=lambda: runtime_state.LAST_PAYLOAD,
+)
+
+
 _BRIDGE = DashboardBridge(
     state=lambda: {
         "symbol": runtime_state.MARKET_SELECTION.symbol,
@@ -646,33 +656,6 @@ _DATA_SOURCE_SWITCHER = DataSourceSwitcher(
 )
 
 
-async def _broadcast_portfolio(current_prices):
-    """Push fresh portfolio + orders snapshots to every connected client.
-    dashboard.js's generic deepMerge branch lands these at
-    _wsState.portfolio / _wsState.orders with no extra client wiring."""
-    portfolio = PT_ENGINE.get_portfolio_summary(current_prices)
-    orders = PT_ENGINE.get_orders()
-    # Fund summary (NIFTY spot as proxy for index-margin checks when the
-    # active symbol's spot is missing) keeps the frontend Fund pill synced
-    # with PT_STARTING_CAPITAL and SPAN estimation.
-    spot = current_prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
-    portfolio["funds"] = PT_ENGINE.get_fund_summary(
-        spot_price=spot, current_prices=current_prices
-    )
-    await broadcast({"type": "portfolio", "payload": portfolio})
-    await broadcast({"type": "orders", "payload": orders})
-
-
-async def _feed_portfolio_broadcast(payload):
-    """Paper-trading fast path fired by the live feed: reprice open legs off
-    the tick payload the dashboard already shows, sweep pending LIMIT fills,
-    then push portfolio/orders to clients. Injected into the feed
-    orchestration module so it stays decoupled from server.app."""
-    current_prices = _PAPER_PRICE_BOOK.build(payload)
-    PT_ENGINE.check_pending_orders(current_prices)
-    await _broadcast_portfolio(current_prices)
-
-
 # ── live order token resolution + gateway ────────────────────────────────
 def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
     """Resolves (exchange, tradingsymbol, symboltoken) for a live order.
@@ -746,7 +729,7 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
     if validation_reason:
         print(f"[order] REJECTED malformed intent: {validation_reason}", flush=True)
         current_prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
-        await _broadcast_portfolio(current_prices)
+        await _PAPER_PORTFOLIO.broadcast(current_prices)
         return {"status": "rejected", "reason": validation_reason}
 
     current_prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
@@ -761,7 +744,7 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
         return await _LIVE_ORDERS.place_live_order(
             intent,
             current_prices,
-            broadcast_portfolio=_broadcast_portfolio,
+            broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
             broadcast_alert=_broadcast_reconciliation_alert,
         )
 
@@ -790,7 +773,7 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
         + (f" — {order.reject_reason}" if order.reject_reason else ""),
         flush=True,
     )
-    await _broadcast_portfolio(current_prices)
+    await _PAPER_PORTFOLIO.broadcast(current_prices)
     return {
         "status": order.status,
         "reason": order.reject_reason,
@@ -1079,22 +1062,12 @@ runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
     connected_count=lambda: len(runtime_state.CONNECTED),
     build_current_prices=_PAPER_PRICE_BOOK.build,
     check_pending_orders=lambda prices: PT_ENGINE.check_pending_orders(prices),
-    broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
+    broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
     pace=runtime_state.MARKET_TICK_PACER.wait,
 )
 
 
 # ── websocket handler ────────────────────────────────────────────────────
-def _paper_handshake_snapshot():
-    prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
-    portfolio = PT_ENGINE.get_portfolio_summary(prices)
-    spot = prices.get(_instrument_key("NIFTY", "", None, "INDEX"))
-    portfolio["funds"] = PT_ENGINE.get_fund_summary(
-        spot_price=spot, current_prices=prices
-    )
-    return portfolio, PT_ENGINE.get_orders()
-
-
 runtime_state.WS_HANDSHAKE = WebSocketHandshakeSender(
     encode=lambda message: orjson.dumps(
         message, default=_json_default
@@ -1111,14 +1084,14 @@ runtime_state.WS_HANDSHAKE = WebSocketHandshakeSender(
         else _build_algo_status()
     ),
     reconciliation_alert=lambda: runtime_state.LAST_RECONCILIATION_ALERT,
-    paper_snapshot=_paper_handshake_snapshot,
+    paper_snapshot=_PAPER_PORTFOLIO.handshake_snapshot,
 )
 
 
 runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
     place_order=lambda payload: _handle_place_order(payload),
     cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
-    broadcast_portfolio=lambda prices: _broadcast_portfolio(prices),
+    broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
     build_current_prices=_PAPER_PRICE_BOOK.build,
     last_payload=lambda: runtime_state.LAST_PAYLOAD,
     start_funds_polling=lambda: _FUNDS_POLLER.start(),
@@ -1169,42 +1142,12 @@ _HISTORY_API = MarketHistoryApi(
 no_cache_middleware = history_no_cache_middleware
 
 
-def _build_health_snapshot(now=None):
-    """Process, transport, and market-feed health contract. A closed
-    exchange is not itself a degraded service; during an open session, a
-    missing or old canonical payload makes the service degraded even when
-    both listeners are reachable."""
-    smartapi_connected = upstox_connected = shoonya_connected = False
-    if runtime_state.USE_SMARTAPI:
-        if runtime_state.LIVE_FEED_PROVIDER == "UPSTOX":
-            upstox_connected = runtime_state.FEEDS["UPSTOX"].connected
-        elif runtime_state.LIVE_FEED_PROVIDER == "SHOONYA":
-            shoonya_connected = runtime_state.FEEDS["SHOONYA"].connected
-        else:
-            smartapi_connected = runtime_state.FEEDS["SMARTAPI"].connected
-
-    return _build_health_response(
-        {
-            "process_started_at": runtime_state.PROCESS_STARTED_AT,
-            "poll_seconds": runtime_state.POLL_SECONDS,
-            "last_payload": runtime_state.LAST_PAYLOAD,
-            "last_payload_at": runtime_state.LAST_PAYLOAD_AT,
-            "connected_clients": len(runtime_state.CONNECTED),
-            "symbol": runtime_state.MARKET_SELECTION.symbol,
-            "expiry": runtime_state.MARKET_SELECTION.expiry,
-            "broker_services_enabled": runtime_state.USE_SMARTAPI,
-            "data_source": runtime_state.MARKET_SELECTION.data_source,
-            "live_feed_provider": runtime_state.LIVE_FEED_PROVIDER,
-            "live_feed_active": runtime_state.USE_SMARTAPI
-            and feed_manager._feed_allowed(runtime_state.MARKET_SELECTION.data_source),
-            "pipeline_status": runtime_state.PIPELINE_STATUS,
-            "smartapi_connected": smartapi_connected,
-            "upstox_connected": upstox_connected,
-            "shoonya_connected": shoonya_connected,
-        },
-        selection_state._market_session_status,
-        now,
-    )
+_HEALTH_SNAPSHOT = RuntimeHealthSnapshot(
+    runtime_state=runtime_state,
+    feed_allowed=feed_manager._feed_allowed,
+    market_session_status=selection_state._market_session_status,
+    build_snapshot=_build_health_response,
+)
 
 
 runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
@@ -1213,7 +1156,7 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
     default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
     run_backtest=lambda *args, **kwargs: run_backtest(*args, **kwargs),
     health_response=_health_response,
-    health_snapshot=lambda: _build_health_snapshot(),
+    health_snapshot=_HEALTH_SNAPSHOT.build,
     record_health_transition=lambda snapshot: _log_health_transition(snapshot),
     metrics_response=_metrics_response,
     metrics=runtime_state.METRICS,
@@ -1253,7 +1196,7 @@ _RUNTIME_SERVICES = ServerRuntimeServices(
 # of a circular import on the websocket broadcast + paper-trading engine).
 configure_feed_orchestration(
     broadcast=broadcast,
-    portfolio_broadcaster=_feed_portfolio_broadcast,
+    portfolio_broadcaster=_PAPER_PORTFOLIO.broadcast_from_feed,
 )
 
 

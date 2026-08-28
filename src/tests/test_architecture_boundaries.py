@@ -217,6 +217,17 @@ def test_composition_root_has_no_bridge_futures_router():
     assert "def _fetch_bridge_futures" not in app
 
 
+def test_composition_root_delegates_health_and_paper_portfolio_logic():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in (
+        "_build_health_snapshot",
+        "_broadcast_portfolio",
+        "_feed_portfolio_broadcast",
+        "_paper_handshake_snapshot",
+    ):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 
