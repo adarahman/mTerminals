@@ -97,8 +97,6 @@ from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
 from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa: E402
 from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
-from server.trading_supervision import LiveTradingSupervisor  # noqa: E402
-from server.order_submission import OrderSubmissionService  # noqa: E402
 from server.market_cycle_operations import MarketCycleOperations  # noqa: E402
 from server.analytics_runtime import (  # noqa: E402
     AnalyticsRuntime,
@@ -108,11 +106,7 @@ from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
 from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
-from risk.account_guard import LiveAccountRiskGuard  # noqa: E402
-from risk.live_order_store import LiveOrderStore  # noqa: E402
-from risk.position_reconciler import PositionReconciler  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
-from decision.auto_executor import AutoExecutor  # noqa: E402
 from nse_eod_fetch import fetch_all_eod, is_trading_day  # noqa: E402
 from analytics.nse_fii_dii_flow_fetch import record_today_flow  # noqa: E402
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker  # noqa: E402
@@ -125,7 +119,10 @@ from server.background_loops import (  # noqa: E402
     NodeRelay,
     ReconciliationLoop,
 )
-from server.order_gateway import LiveOrderGateway  # noqa: E402
+from server.live_trading_runtime import (  # noqa: E402
+    LiveTradingConfig,
+    build_live_trading_runtime,
+)
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
@@ -350,49 +347,13 @@ _PAPER_PRICE_BOOK = PaperPriceBook(
 runtime_state.LAST_PORTFOLIO_BROADCAST_TS = 0.0
 EOD_TRIGGER_TIME = dtime(15, 45)  # shortly after NSE cash close (15:30)
 
-# ── Live trading configuration ──────────────────────────────────────────
-# Master switch — OFF by default; must be explicitly set to place real
-# orders. Read once at process start: flipping it mid-session is a
-# deliberate deploy-time decision, not a casual toggle.
-LIVE_TRADING_ENABLED = (
-    os.environ.get("LIVE_TRADING_ENABLED", "").strip().lower() == "true"
-)
-
-# Instant kill switch — checked on EVERY live order attempt, no restart
-# needed. touch LIVE_TRADING_KILL to block all live orders in seconds
-# during market hours; delete to resume.
-LIVE_TRADING_KILL_SWITCH_FILE = str(PROJECT_ROOT / "LIVE_TRADING_KILL")
-
-# Hard caps enforced SERVER-SIDE (not just in the UI) — a bug in strike/qty
-# resolution on the client can't bypass them. Conservative safety net, not
-# a trading limit.
-LIVE_MAX_LOTS_PER_ORDER = int(os.environ.get("LIVE_MAX_LOTS_PER_ORDER", "1"))
-LIVE_MAX_ORDERS_PER_MINUTE = int(os.environ.get("LIVE_MAX_ORDERS_PER_MINUTE", "5"))
-_LIVE_ORDER_STORE = LiveOrderStore(max_entries=500)
-
-if LIVE_TRADING_ENABLED:
-    print(
-        f"[live-trading] ENABLED — max {LIVE_MAX_LOTS_PER_ORDER} lot(s)/order, "
-        f"{LIVE_MAX_ORDERS_PER_MINUTE}/min. Kill switch: touch {LIVE_TRADING_KILL_SWITCH_FILE} to disable instantly.",
-        flush=True,
-    )
-else:
-    print(
-        "[live-trading] disabled (paper trading only) — set LIVE_TRADING_ENABLED=true to enable",
-        flush=True,
-    )
-
-# Account-level risk guard — daily loss limit, max open exposure, and a
-# drawdown-streak breaker, evaluated across the whole trading day. Trips
-# the SAME kill-switch file (see risk/account_guard.py).
-_ACCOUNT_GUARD = LiveAccountRiskGuard(LIVE_TRADING_KILL_SWITCH_FILE)
-
-# Diffs the live order book against the live position book (both from the
-# broker) and alerts on mismatch — same kill-switch file. Periodic sweep
-# (reconcile_loop) plus a post-fill check (in the order path) — see
-# risk/position_reconciler.py.
-_POSITION_RECONCILER = PositionReconciler(LIVE_TRADING_KILL_SWITCH_FILE)
-POSITION_RECONCILE_SECONDS = int(os.environ.get("POSITION_RECONCILE_SECONDS", "120"))
+_LIVE_TRADING_CONFIG = LiveTradingConfig.from_environment(PROJECT_ROOT)
+LIVE_TRADING_ENABLED = _LIVE_TRADING_CONFIG.enabled
+LIVE_TRADING_KILL_SWITCH_FILE = _LIVE_TRADING_CONFIG.kill_switch_file
+LIVE_MAX_LOTS_PER_ORDER = _LIVE_TRADING_CONFIG.max_lots_per_order
+LIVE_MAX_ORDERS_PER_MINUTE = _LIVE_TRADING_CONFIG.max_orders_per_minute
+POSITION_RECONCILE_SECONDS = _LIVE_TRADING_CONFIG.reconcile_seconds
+_LIVE_TRADING_CONFIG.report(lambda message: print(message, flush=True))
 
 # Algo status panel refresh cadence. Deliberately NOT tick-cadence — this
 # is supervisory/status info and _ACCOUNT_GUARD.get_status() does a SQLite
@@ -559,82 +520,20 @@ _DATA_SOURCE_SWITCHER = DataSourceSwitcher(
 )
 
 
-# ── live order token resolution + gateway ────────────────────────────────
-def _resolve_live_order_token(symbol, instrument_type, expiry, strike):
-    """Resolves (exchange, tradingsymbol, symboltoken) for a live order.
-    Mirrors the tick feed's underlying/exchange logic (_BSE_SYMBOLS -> BFO,
-    else NFO) so live orders target the same contract space the dashboard
-    is already streaming ticks for."""
-    exchange = "BFO" if symbol in _BSE_SYMBOLS else "NFO"
-
-    if instrument_type in ("CE", "PE"):
-        if _execution_resolve_option_contract is not None:
-            return _execution_resolve_option_contract(
-                symbol, expiry, strike, instrument_type, exchange
-            )
-        # expiry arrives in option_chain_json's format ("14-Jul-2026");
-        # ScripMaster uses "14JUL2026" — convert before lookup.
-        try:
-            expiry_ddmmmyyyy = (
-                datetime.strptime(expiry, "%d-%b-%Y").strftime("%d%b%Y").upper()
-            )
-        except (ValueError, TypeError):
-            return None
-        resolved = market_data.find_option_token(
-            symbol, expiry_ddmmmyyyy, strike, instrument_type, exchange
-        )
-        if not resolved:
-            return None
-        return exchange, resolved["tradingsymbol"], resolved["token"]
-
-    if instrument_type == "FUT":
-        # Futures aren't resolved anywhere in this pipeline yet — refuse
-        # rather than silently mis-resolving a real order's token.
-        return None
-    # INDEX (spot) — not a tradeable instrument on its own; refuse.
-    return None
-
-
-_LIVE_ORDERS = LiveOrderGateway(
-    enabled=LIVE_TRADING_ENABLED,
-    kill_switch_file=LIVE_TRADING_KILL_SWITCH_FILE,
-    max_lots_per_order=LIVE_MAX_LOTS_PER_ORDER,
-    max_orders_per_minute=LIVE_MAX_ORDERS_PER_MINUTE,
-    lot_sizes=PT_LOT_SIZES,
-    account_guard=_ACCOUNT_GUARD,
-    position_reconciler=_POSITION_RECONCILER,
-    resolve_token=_resolve_live_order_token,
+_LIVE_TRADING_RUNTIME = build_live_trading_runtime(
+    config=_LIVE_TRADING_CONFIG,
+    bse_symbols=_BSE_SYMBOLS,
+    resolve_option_contract=_execution_resolve_option_contract,
+    find_option_token=market_data.find_option_token,
     place_order=smartapi_place_order,
     get_positions=smartapi_get_positions,
     get_order_book=smartapi_get_order_book,
-    order_store=_LIVE_ORDER_STORE,
-)
-
-_ORDER_SUBMISSION = OrderSubmissionService(
-    live_orders=_LIVE_ORDERS,
+    lot_sizes=PT_LOT_SIZES,
     paper_engine=PT_ENGINE,
     price_book=_PAPER_PRICE_BOOK,
     portfolio_broadcast=_PAPER_PORTFOLIO.broadcast,
-    reconciliation_alert=lambda result, source: (
-        _TRADING_SUPERVISOR.publish_reconciliation_alert(result, source)
-    ),
     last_payload=lambda: runtime_state.LAST_PAYLOAD,
     instrument_key=_instrument_key,
-    report=_REPORT,
-)
-
-
-# Strategy -> execution bridge. OFF by default (AUTO_STRATEGY_EXECUTION_ENABLED);
-# independent of LIVE_TRADING_ENABLED (both must be true for an auto order
-# to reach the real broker). See decision/auto_executor.py.
-_AUTO_EXECUTOR = AutoExecutor(_ACCOUNT_GUARD, _ORDER_SUBMISSION.submit_auto)
-
-_TRADING_SUPERVISOR = LiveTradingSupervisor(
-    account_guard=_ACCOUNT_GUARD,
-    auto_executor=_AUTO_EXECUTOR,
-    live_orders=_LIVE_ORDERS,
-    reconciler=_POSITION_RECONCILER,
-    lot_sizes=PT_LOT_SIZES,
     cached_positions=lambda: runtime_state.LAST_LIVE_POSITIONS,
     symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
     broker_label=lambda: (
@@ -644,15 +543,19 @@ _TRADING_SUPERVISOR = LiveTradingSupervisor(
             _broker_settings.execution_broker, "Angel One"
         )
     ),
-    live_trading_enabled=LIVE_TRADING_ENABLED,
-    max_lots_per_order=LIVE_MAX_LOTS_PER_ORDER,
-    max_orders_per_minute=LIVE_MAX_ORDERS_PER_MINUTE,
     store_alert=lambda payload: setattr(
         runtime_state, "LAST_RECONCILIATION_ALERT", payload
     ),
     broadcast=broadcast,
     report=_REPORT,
 )
+_ACCOUNT_GUARD = _LIVE_TRADING_RUNTIME.account_guard
+_POSITION_RECONCILER = _LIVE_TRADING_RUNTIME.position_reconciler
+_LIVE_ORDERS = _LIVE_TRADING_RUNTIME.orders
+_ORDER_SUBMISSION = _LIVE_TRADING_RUNTIME.submission
+_AUTO_EXECUTOR = _LIVE_TRADING_RUNTIME.auto_executor
+_TRADING_SUPERVISOR = _LIVE_TRADING_RUNTIME.supervisor
+_resolve_live_order_token = _LIVE_TRADING_RUNTIME.resolve_token
 
 
 # ── background pollers ───────────────────────────────────────────────────

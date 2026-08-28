@@ -261,6 +261,14 @@ def test_composition_root_delegates_analytics_runtime_assembly():
     assert "PipelineRuntimeConfigurator(" not in app
 
 
+def test_composition_root_delegates_live_trading_runtime_assembly():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _resolve_live_order_token" not in app
+    assert "LiveOrderGateway(" not in app
+    assert "OrderSubmissionService(" not in app
+    assert "LiveTradingSupervisor(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 
