@@ -1,4 +1,4 @@
-"""Unit tests for server/app.py's `_handle_place_order` — the single
+"""Unit tests for OrderSubmissionService — the single
 chokepoint every order (manual dashboard click or AutoExecutor-submitted)
 passes through before it can reach a real AngelOne order or the paper
 trading engine.
@@ -94,7 +94,7 @@ def live_env(ws_server_live, monkeypatch, tmp_path):
     # `LOT_SIZES.get(SYMBOL, 65)` every tick for whatever symbol the
     # dashboard is actively showing, long before a live order for that
     # symbol could be clicked, so the entry always exists by the time
-    # `_handle_place_order`'s `symbol not in PT_LOT_SIZES` check runs.
+    # LiveOrderGateway's verified-lot-size check runs.
     # Nothing in this isolated test process ever runs that pipeline, so
     # tests reaching this check need to warm it the same way — otherwise
     # every single test would spuriously hit "no verified lot size",
@@ -116,6 +116,7 @@ def live_env(ws_server_live, monkeypatch, tmp_path):
         order_store=_MemoryLiveOrderStore(),
     )
     monkeypatch.setattr(m, "_LIVE_ORDERS", gateway)
+    monkeypatch.setattr(m._ORDER_SUBMISSION, "_live_orders", gateway)
     return m
 
 
@@ -159,7 +160,7 @@ def test_live_trading_disabled_rejects_explicit_live_order_without_paper_fallbac
     )
     broker_calls = {}
     monkeypatch.setattr(m._LIVE_ORDERS, "_place_order", lambda *a, **k: broker_calls.setdefault("called", True))
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert "called" not in broker_calls
     assert "called" not in paper_calls
 
@@ -168,13 +169,13 @@ def test_kill_switch_active_rejects(resolvable):
     m, placed = resolvable
     with open(m._LIVE_ORDERS.kill_switch_file, "w") as f:
         f.write("stop")
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert "args" not in placed
 
 
 def test_qty_lots_zero_rejects(resolvable):
     m, placed = resolvable
-    _run(m._handle_place_order(_order_payload(qty_lots=0)))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(qty_lots=0)))
     assert "args" not in placed
 
 
@@ -186,7 +187,7 @@ def test_invalid_side_is_rejected_before_broker_or_paper(live_env, monkeypatch, 
     monkeypatch.setattr(m._LIVE_ORDERS, "_place_order", lambda *a, **k: broker_calls.setdefault("called", True))
     monkeypatch.setattr(m.PT_ENGINE, "place_order", lambda *a, **k: paper_calls.setdefault("called", True))
 
-    result = _run(m._handle_place_order(_order_payload(side=side)))
+    result = _run(m._ORDER_SUBMISSION.handle(_order_payload(side=side)))
 
     assert result["status"] == "rejected"
     assert "side" in result["reason"]
@@ -204,7 +205,7 @@ def test_invalid_side_is_rejected_before_broker_or_paper(live_env, monkeypatch, 
 ])
 def test_malformed_order_intent_never_reaches_broker(resolvable, overrides):
     m, placed = resolvable
-    result = _run(m._handle_place_order(_order_payload(**overrides)))
+    result = _run(m._ORDER_SUBMISSION.handle(_order_payload(**overrides)))
     assert result["status"] == "rejected"
     assert "args" not in placed
 
@@ -212,24 +213,24 @@ def test_malformed_order_intent_never_reaches_broker(resolvable, overrides):
 def test_qty_lots_over_max_rejects(resolvable, monkeypatch):
     m, placed = resolvable
     monkeypatch.setattr(m._LIVE_ORDERS, "max_lots_per_order", 1)
-    _run(m._handle_place_order(_order_payload(qty_lots=2)))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(qty_lots=2)))
     assert "args" not in placed
 
 
 def test_rate_limit_exceeded_rejects_second_order(resolvable, monkeypatch):
     m, placed = resolvable
     monkeypatch.setattr(m._LIVE_ORDERS, "max_orders_per_minute", 1)
-    _run(m._handle_place_order(_order_payload(client_order_id="liveorder00000001")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(client_order_id="liveorder00000001")))
     assert "args" in placed, "first order should still go through and consume the window's one slot"
     placed.clear()
-    _run(m._handle_place_order(_order_payload(client_order_id="liveorder00000002")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(client_order_id="liveorder00000002")))
     assert "args" not in placed, "second order within the same window should be rejected pre-broker"
 
 
 @pytest.mark.parametrize("client_order_id", [None, "short", "live_order_000001", "x" * 21])
 def test_live_order_requires_bounded_alphanumeric_client_identity(resolvable, client_order_id):
     m, placed = resolvable
-    result = _run(m._handle_place_order(_order_payload(client_order_id=client_order_id)))
+    result = _run(m._ORDER_SUBMISSION.handle(_order_payload(client_order_id=client_order_id)))
     assert result["status"] == "rejected"
     assert "client_order_id" in result["reason"]
     assert "args" not in placed
@@ -237,12 +238,12 @@ def test_live_order_requires_bounded_alphanumeric_client_identity(resolvable, cl
 
 def test_replayed_live_order_returns_original_without_second_broker_call(resolvable):
     m, placed = resolvable
-    first = _run(m._handle_place_order(_order_payload()))
+    first = _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     first_args = placed["args"]
     first_kwargs = placed["kwargs"]
     placed.clear()
 
-    replay = _run(m._handle_place_order(_order_payload()))
+    replay = _run(m._ORDER_SUBMISSION.handle(_order_payload()))
 
     assert first["order_id"] == replay["order_id"] == "ORDER123"
     assert replay["duplicate"] is True
@@ -253,14 +254,14 @@ def test_replayed_live_order_returns_original_without_second_broker_call(resolva
 
 def test_unknown_symbol_rejects_without_guessing_lot_size(resolvable):
     m, placed = resolvable
-    _run(m._handle_place_order(_order_payload(symbol="NOTAREALSYMBOL")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(symbol="NOTAREALSYMBOL")))
     assert "args" not in placed
 
 
 def test_account_guard_tripped_rejects(resolvable, monkeypatch):
     m, placed = resolvable
     monkeypatch.setattr(m._LIVE_ORDERS, "_guard", _FakeGuard(tripped=True, trip_reason="daily loss limit breached"))
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert "args" not in placed
 
 
@@ -270,13 +271,13 @@ def test_exposure_check_failure_rejects(resolvable, monkeypatch):
         m._LIVE_ORDERS, "_guard",
         _FakeGuard(allow_new_order=False, exposure_reason="would exceed max open exposure"),
     )
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert "args" not in placed
 
 
 def test_position_book_fetch_failure_still_consults_guard_with_none(resolvable, monkeypatch):
     """If the pre-trade position-book fetch itself raises,
-    open_lots_from_positions can't be computed — _handle_place_order must
+    open_lots_from_positions can't be computed — order submission must
     pass None through to the guard (fail-closed territory, exercised in
     test_account_guard.py) rather than treating the failure as "no open
     positions, go ahead"."""
@@ -290,7 +291,7 @@ def test_position_book_fetch_failure_still_consults_guard_with_none(resolvable, 
     guard = _FakeGuard(allow_new_order=False, exposure_reason="could not verify current open exposure")
     monkeypatch.setattr(guard, "check_new_order", lambda qty, open_lots: seen.setdefault("open_lots", open_lots) or (False, "could not verify current open exposure"))
     monkeypatch.setattr(m._LIVE_ORDERS, "_guard", guard)
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert "args" not in placed
     assert seen["open_lots"] is None
 
@@ -303,7 +304,7 @@ def test_instrument_resolution_failure_rejects(live_env, monkeypatch):
     m = live_env
     calls = {}
     monkeypatch.setattr(m._LIVE_ORDERS, "_place_order", lambda *a, **k: calls.setdefault("called", True))
-    _run(m._handle_place_order(_order_payload(instrument_type="INDEX")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(instrument_type="INDEX")))
     assert "called" not in calls
 
 
@@ -312,7 +313,7 @@ def test_instrument_resolution_failure_rejects(live_env, monkeypatch):
 def test_successful_live_order_places_with_resolved_token_and_correct_quantity(resolvable):
     m, placed = resolvable
     lot_size = m.PT_LOT_SIZES["NIFTY"]
-    _run(m._handle_place_order(_order_payload(qty_lots=2, side="SELL")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(qty_lots=2, side="SELL")))
     assert placed["args"][0] == "NIFTY31JUL25000CE"   # tradingsymbol
     assert placed["args"][2] == "NFO"                  # exchange
     assert placed["args"][3] == "SELL"                 # transaction_type
@@ -324,7 +325,7 @@ def test_successful_live_order_updates_guard_pnl_from_post_fill_positions(resolv
     guard = _FakeGuard()
     monkeypatch.setattr(m._LIVE_ORDERS, "_guard", guard)
     monkeypatch.setattr(m._LIVE_ORDERS, "_get_positions", lambda: [{"netqty": "0", "pnl": "250.0"}])
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert "args" in placed
     assert guard.update_pnl_calls == [250.0]
 
@@ -339,16 +340,16 @@ def test_broker_exception_during_placement_is_caught_not_raised(resolvable, monk
     guard = _FakeGuard()
     monkeypatch.setattr(m._LIVE_ORDERS, "_guard", guard)
     # Should not raise, and should still attempt the post-fill P&L refresh.
-    _run(m._handle_place_order(_order_payload()))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload()))
     assert guard.update_pnl_calls == [0.0]  # empty position book -> pnl_from_positions([]) == 0.0
 
 
 def test_buy_and_sell_sides_map_to_correct_transaction_type(resolvable):
     m, placed = resolvable
-    _run(m._handle_place_order(_order_payload(side="buy", client_order_id="liveorder00000001")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(side="buy", client_order_id="liveorder00000001")))
     assert placed["args"][3] == "BUY"
     placed.clear()
-    _run(m._handle_place_order(_order_payload(side="sell", client_order_id="liveorder00000002")))
+    _run(m._ORDER_SUBMISSION.handle(_order_payload(side="sell", client_order_id="liveorder00000002")))
     assert placed["args"][3] == "SELL"
 
 
@@ -368,7 +369,7 @@ def test_closing_order_checks_projected_reduced_exposure(resolvable, monkeypatch
     )
     monkeypatch.setattr(m._LIVE_ORDERS, "_guard", guard)
 
-    result = _run(m._handle_place_order(_order_payload(side="SELL")))
+    result = _run(m._ORDER_SUBMISSION.handle(_order_payload(side="SELL")))
 
     assert result["status"] == "placed"
     assert seen["projected"] == 0
@@ -411,8 +412,8 @@ def test_concurrent_orders_cannot_race_exposure_cap(resolvable, monkeypatch):
 
     async def _concurrent():
         return await asyncio.gather(
-            m._handle_place_order(_order_payload(side="BUY", client_order_id="liveorder00000011")),
-            m._handle_place_order(_order_payload(side="BUY", client_order_id="liveorder00000012")),
+            m._ORDER_SUBMISSION.handle(_order_payload(side="BUY", client_order_id="liveorder00000011")),
+            m._ORDER_SUBMISSION.handle(_order_payload(side="BUY", client_order_id="liveorder00000012")),
         )
 
     results = _run(_concurrent())
@@ -431,6 +432,6 @@ def test_anything_short_of_live_and_confirmed_uses_paper_engine(resolvable, monk
         lambda *a, **k: (calls.setdefault("called", True), _StubFilledOrder())[1],
     )
     payload = _order_payload(**{**{"live": False, "confirmed": False}, **overrides})
-    _run(m._handle_place_order(payload))
+    _run(m._ORDER_SUBMISSION.handle(payload))
     assert "args" not in placed, "must never reach the real broker without explicit live+confirmed"
     assert calls.get("called") is True

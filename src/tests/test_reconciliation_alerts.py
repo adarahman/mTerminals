@@ -4,7 +4,7 @@ turns a risk/position_reconciler.py `ReconciliationResult` into the
 (algo-status.js's renderReconciliationAlerts) consumes. Before this
 existed, a non-clean check() result (even one well below the kill-switch
 trip threshold) was only ever printed to the server log — see
-reconcile_loop's and _handle_place_order's own prints.
+reconcile loop and order-submission logs.
 
 Nothing here talks to a real broker or a real websocket: `broadcast` is
 monkeypatched to just record what it was called with, same pattern

@@ -234,6 +234,14 @@ def test_composition_root_delegates_live_trading_supervision():
     assert "def _broadcast_reconciliation_alert" not in app
 
 
+def test_composition_root_delegates_order_submission():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _handle_place_order" not in app
+    assert "def _submit_auto_order" not in app
+    assert "parse_order_intent" not in app
+    assert "validate_order_intent" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

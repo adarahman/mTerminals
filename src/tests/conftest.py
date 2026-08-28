@@ -16,7 +16,7 @@ three things no CI box (and no offline dev machine) can rely on:
      the current working directory happened to be, via paths.py's
      CACHE_DIR.
 
-This is very likely *why* `_handle_place_order` had zero direct tests
+This is very likely *why* order submission had zero direct tests
 despite everything built on top of it (account_guard, auto_executor)
 being well covered — the module simply could not be imported in a normal
 test process. None of the underlying logic is actually untestable; it
@@ -59,7 +59,7 @@ _FAKE_SCRIP_MASTER = [
 # which runs `INDEX_TOKENS = _build_index_tokens()` at module level — a real
 # HTTP call with no test seam, same root cause as server/app.py's gap
 # below. This is a suite-wide hermeticity issue, not something specific to
-# _handle_place_order, and fixing it generally means adding a proper test
+# OrderSubmissionService, and fixing it generally means adding a proper test
 # seam in smartapi_client.py itself (e.g. an env var or injectable loader
 # for the ScripMaster source) rather than a tests/-side workaround — a
 # tests/-only fix would either have to monkeypatch every affected module's
@@ -80,7 +80,7 @@ def ws_server_live(tmp_path_factory):
     module-level side effect (ScripMaster load, PaperTradingEngine()
     opening its SQLite file, etc.) for no benefit, since none of that
     state is what these tests are exercising — they patch the specific
-    functions/globals _handle_place_order reads.
+    runtime dependencies used by OrderSubmissionService.
     """
     runtime_dir = tmp_path_factory.mktemp("ws_server_live_runtime")
     cache_dir = runtime_dir / "cache"

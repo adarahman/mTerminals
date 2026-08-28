@@ -19,7 +19,6 @@ import logging
 import os
 import sys
 import threading
-import uuid
 from datetime import datetime
 from datetime import time as dtime
 from functools import partial
@@ -106,6 +105,7 @@ from server.websocket_payload import compute_diff, json_default as _json_default
 from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa: E402
 from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
 from server.trading_supervision import LiveTradingSupervisor  # noqa: E402
+from server.order_submission import OrderSubmissionService  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
@@ -127,11 +127,7 @@ from server.background_loops import (  # noqa: E402
     NodeRelay,
     ReconciliationLoop,
 )
-from server.order_gateway import (  # noqa: E402
-    LiveOrderGateway,
-    parse_order_intent,
-    validate_order_intent,
-)
+from server.order_gateway import LiveOrderGateway  # noqa: E402
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
@@ -704,121 +700,24 @@ _LIVE_ORDERS = LiveOrderGateway(
     order_store=_LIVE_ORDER_STORE,
 )
 
-
-async def _handle_place_order(payload, _live_gate_acquired=False):
-    """Handles an inbound {"type":"place_order", "payload":{...}} message
-    from dashboard.js's sendWsMessage('place_order', ...).
-
-    Routes to a REAL broker order ONLY if ALL of: LIVE_TRADING_ENABLED=true
-    at process start; the kill-switch file absent; client sent live=true AND
-    confirmed=true (deliberate per-order opt-in via the UI confirm modal —
-    not a global client-side toggle); within the lot ceiling and per-minute
-    rate cap; instrument resolves to a real symboltoken. Everything else —
-    including any resolution failure — falls through to the paper engine
-    unchanged. Prices MARKET orders off runtime_state.LAST_PAYLOAD (the tick already on
-    screen), so the fill the user sees matches the LTP they clicked. Always
-    re-broadcasts portfolio + orders afterward.
-
-    Returns a status dict on EVERY path so _submit_auto_order() can tell a
-    downstream rejection from an actual placement."""
-    intent = parse_order_intent(payload)
-    validation_reason = validate_order_intent(intent)
-    if validation_reason:
-        print(f"[order] REJECTED malformed intent: {validation_reason}", flush=True)
-        current_prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
-        await _PAPER_PORTFOLIO.broadcast(current_prices)
-        return {"status": "rejected", "reason": validation_reason}
-
-    current_prices = _PAPER_PRICE_BOOK.build(runtime_state.LAST_PAYLOAD)
-
-    # Serialize the complete live pre-trade check and submission (see
-    # LiveOrderGateway.order_gate for the TOCTOU this closes).
-    if intent.wants_live and not _live_gate_acquired:
-        async with _LIVE_ORDERS.order_gate():
-            return await _handle_place_order(payload, _live_gate_acquired=True)
-
-    if intent.wants_live:
-        return await _LIVE_ORDERS.place_live_order(
-            intent,
-            current_prices,
-            broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
-            broadcast_alert=_TRADING_SUPERVISOR.publish_reconciliation_alert,
-        )
-
-    # ── Paper trading path ───────────────────────────────────────────
-    key = _instrument_key(
-        intent.symbol, intent.expiry, intent.strike, intent.instrument_type
-    )
-    current_ltp = current_prices.get(key)
-    order = PT_ENGINE.place_order(
-        intent.symbol,
-        intent.side,
-        intent.qty_lots,
-        instrument_type=intent.instrument_type,
-        expiry=intent.expiry,
-        strike=intent.strike,
-        order_type=intent.order_type,
-        limit_price=intent.limit_price,
-        current_ltp=current_ltp,
-        client_order_id=intent.client_order_id,
-    )
-    print(
-        f"[paper-trading] {order.status}: {intent.symbol} {intent.side} "
-        f"{intent.qty_lots} lot(s) {intent.instrument_type} {intent.expiry} "
-        f"{intent.strike} "
-        f"@ {order.fill_price if order.fill_price is not None else intent.limit_price}"
-        + (f" — {order.reject_reason}" if order.reject_reason else ""),
-        flush=True,
-    )
-    await _PAPER_PORTFOLIO.broadcast(current_prices)
-    return {
-        "status": order.status,
-        "reason": order.reject_reason,
-        "order_id": getattr(order, "id", None),
-        "client_order_id": getattr(order, "client_order_id", intent.client_order_id),
-    }
+_ORDER_SUBMISSION = OrderSubmissionService(
+    live_orders=_LIVE_ORDERS,
+    paper_engine=PT_ENGINE,
+    price_book=_PAPER_PRICE_BOOK,
+    portfolio_broadcast=_PAPER_PORTFOLIO.broadcast,
+    reconciliation_alert=lambda result, source: (
+        _TRADING_SUPERVISOR.publish_reconciliation_alert(result, source)
+    ),
+    last_payload=lambda: runtime_state.LAST_PAYLOAD,
+    instrument_key=_instrument_key,
+    report=_REPORT,
+)
 
 
-async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_lots):
-    """Bridge from decision/auto_executor.py into the manual order path —
-    same payload shape as a dashboard click, with live=True/confirmed=True
-    filled in on the algo's behalf; every other check (lot size, rate
-    limit, account_guard exposure/trip state) still runs exactly as for a
-    human-submitted order.
-
-    Raises on rejection so AutoExecutor.maybe_execute() logs the failure
-    (and records it in the auto-trade history feed) instead of reporting a
-    downstream-rejected order as EXECUTED — which is how gate failures
-    AFTER auto_executor's own evaluate() cleared (kill switch flipped,
-    guard tripped, exposure cap hit, resolve failure) used to vanish."""
-    result = await _handle_place_order(
-        {
-            "symbol": symbol,
-            "instrument_type": instrument_type,
-            "expiry": expiry,
-            "strike": strike,
-            "side": side,
-            "order_type": "MARKET",
-            "qty_lots": qty_lots,
-            "client_order_id": "a" + uuid.uuid4().hex[:19],
-            "live": True,
-            "confirmed": True,
-        }
-    )
-    status = (result or {}).get("status")
-    if status != "placed":
-        reason = (result or {}).get("reason") or (
-            f"unexpected status {status!r} from _handle_place_order"
-        )
-        raise RuntimeError(reason)
-    return result
-
-
-# Strategy -> execution bridge — constructed here since it needs
-# _submit_auto_order above. OFF by default (AUTO_STRATEGY_EXECUTION_ENABLED);
+# Strategy -> execution bridge. OFF by default (AUTO_STRATEGY_EXECUTION_ENABLED);
 # independent of LIVE_TRADING_ENABLED (both must be true for an auto order
 # to reach the real broker). See decision/auto_executor.py.
-_AUTO_EXECUTOR = AutoExecutor(_ACCOUNT_GUARD, _submit_auto_order)
+_AUTO_EXECUTOR = AutoExecutor(_ACCOUNT_GUARD, _ORDER_SUBMISSION.submit_auto)
 
 _TRADING_SUPERVISOR = LiveTradingSupervisor(
     account_guard=_ACCOUNT_GUARD,
@@ -1035,7 +934,7 @@ runtime_state.WS_HANDSHAKE = WebSocketHandshakeSender(
 
 
 runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
-    place_order=lambda payload: _handle_place_order(payload),
+    place_order=_ORDER_SUBMISSION.handle,
     cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
     broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
     build_current_prices=_PAPER_PRICE_BOOK.build,
