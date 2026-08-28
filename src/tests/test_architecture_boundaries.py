@@ -86,6 +86,7 @@ def test_composition_root_does_not_own_websocket_security_policy():
     assert "import ipaddress" not in app
     assert "def _peer_is_loopback" not in app
     assert "def _host_is_loopback" not in app
+    assert "def _origin_allowed" not in app
 
 
 def test_composition_root_does_not_build_paper_price_maps():

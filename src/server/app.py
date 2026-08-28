@@ -23,6 +23,7 @@ import time
 import uuid
 from datetime import datetime
 from datetime import time as dtime
+from functools import partial
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -428,10 +429,7 @@ ALLOWED_ORIGINS = build_allowed_origins(
     HTTP_PORT,
     os.environ.get("ALLOWED_ORIGINS", "").split(","),
 )
-
-
-def _origin_allowed(request) -> bool:
-    return origin_allowed(request, ALLOWED_ORIGINS)
+_ORIGIN_POLICY = partial(origin_allowed, allowed_origins=ALLOWED_ORIGINS)
 
 
 # Analytics passes are serialized with provider switches so one pass observes
@@ -519,7 +517,7 @@ _BRIDGE = DashboardBridge(
         "last_payload": runtime_state.LAST_PAYLOAD,
         "index_quotes": runtime_state.INDEX_QUOTES,
     },
-    origin_allowed=_origin_allowed,
+    origin_allowed=_ORIGIN_POLICY,
     json_default=_json_default,
     market_api=market_api,
     futures_fetcher=_fetch_bridge_futures,
@@ -1211,7 +1209,7 @@ runtime_state.WS_QUERY_CONTROLLER = WebSocketQueryController(
 
 
 runtime_state.DASHBOARD_WS_HANDLER = DashboardWebSocketHandler(
-    origin_allowed=lambda request: _origin_allowed(request),
+    origin_allowed=_ORIGIN_POLICY,
     clients=runtime_state.DASHBOARD_CLIENTS,
     connected_count=lambda: len(runtime_state.CONNECTED),
     metrics=runtime_state.METRICS,
