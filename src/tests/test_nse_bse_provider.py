@@ -362,17 +362,17 @@ def test_upstox_canonical_name_maps_ticker_to_full_name(ws_server_live):
 # ── 5+6. Runtime switching without restart, full-baseline reset ──────────
 def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
 
-    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NSE_BSE"))
     assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
 
     # Switch to a broker provider: source + active facade both change.
-    asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("UPSTOX"))
     assert runtime_state.MARKET_SELECTION.data_source == "UPSTOX"
     assert md.get_active_provider() == "UPSTOX"
 
     # And back to the public API.
-    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NSE_BSE"))
     assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
 
@@ -382,7 +382,7 @@ def test_switch_clears_baseline_for_full_republish(ws_server_live, monkeypatch):
     runtime_state.LAST_PAYLOAD = {"symbol": "NIFTY", "chain": []}
     runtime_state.LAST_SENT = {"symbol": "NIFTY", "chain": []}
 
-    asyncio.run(ws_server_live.switch_data_source("KITE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("KITE"))
 
     assert runtime_state.LAST_PAYLOAD is None
     assert runtime_state.LAST_SENT is None
@@ -391,9 +391,9 @@ def test_switch_clears_baseline_for_full_republish(ws_server_live, monkeypatch):
 
 def test_switch_rejects_unknown_and_same_source_is_noop(ws_server_live, monkeypatch):
     with pytest.raises(ValueError):
-        asyncio.run(ws_server_live.switch_data_source("NOT_A_PROVIDER"))
+        asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NOT_A_PROVIDER"))
     before = runtime_state.MARKET_SELECTION.data_source
-    result = asyncio.run(ws_server_live.switch_data_source(before))
+    result = asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch(before))
     assert result is None
 
 
@@ -474,16 +474,16 @@ def test_background_feed_restart_contains_start_failure():
 def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
 
     # Streaming provider active -> its feed is allowed.
-    asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("UPSTOX"))
     assert feed_manager._feed_allowed("UPSTOX") is True
     assert feed_manager._feed_allowed("SMARTAPI") is False
 
     # Polling-only active -> NO broker feed is allowed to broadcast.
-    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NSE_BSE"))
     for provider in ("SMARTAPI", "UPSTOX", "SHOONYA"):
         assert feed_manager._feed_allowed(provider) is False
     # KITE/BREEZE have no websocket client -> never "allowed" either.
-    asyncio.run(ws_server_live.switch_data_source("KITE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("KITE"))
     assert feed_manager._feed_allowed("KITE") is False
 
 
@@ -526,10 +526,10 @@ def test_stop_active_broker_feed_unsubscribes_without_unbound_local_error(
     assert state.tokens is None
 
 def test_stale_feed_broadcast_is_a_noop(ws_server_live, monkeypatch):
-    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
-    asyncio.run(ws_server_live.switch_data_source("UPSTOX"))
-    asyncio.run(ws_server_live.switch_data_source("NSE_BSE"))
-    asyncio.run(ws_server_live.switch_data_source("KITE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NSE_BSE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("UPSTOX"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NSE_BSE"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("KITE"))
 
     broadcast_calls = []
     monkeypatch.setattr(ws_server_live, "broadcast", lambda m: broadcast_calls.append(m))
@@ -550,7 +550,7 @@ def test_switch_away_unsubscribes_feed_without_error(ws_server_live, monkeypatch
     # _stop_active_broker_feed must tolerate not-yet-started feeds and still
     # run its unsubscribe best-effort (no exception).
     ws_server_live.runtime_state.FEEDS["SMARTAPI"].state.stream = None
-    asyncio.run(ws_server_live.switch_data_source("SMARTAPI"))
+    asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("SMARTAPI"))
     for provider in ("SMARTAPI", "UPSTOX", "SHOONYA"):
         ws_server_live.runtime_state.FEEDS[provider].state.stream = None
 
@@ -587,9 +587,9 @@ def test_switch_symbol_unquotes_stale_encoded_symbol(ws_server_live, monkeypatch
     orig_symbol = runtime_state.MARKET_SELECTION.symbol
     orig_expiry = runtime_state.MARKET_SELECTION.expiry
     try:
-        ws_server_live.switch_symbol("zydus%20lifesciences%20ltd")
+        ws_server_live._SYMBOL_SWITCHER.switch("zydus%20lifesciences%20ltd")
         assert runtime_state.MARKET_SELECTION.symbol == "ZYDUS LIFESCIENCES LTD"
-        ws_server_live.switch_symbol("BANKNIFTY")  # clean input still works
+        ws_server_live._SYMBOL_SWITCHER.switch("BANKNIFTY")  # clean input still works
         assert runtime_state.MARKET_SELECTION.symbol == "BANKNIFTY"
     finally:
         runtime_state.MARKET_SELECTION.select_symbol(orig_symbol, orig_expiry)

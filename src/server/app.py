@@ -638,11 +638,6 @@ _SYMBOL_SWITCHER = SymbolSwitcher(
 )
 
 
-def switch_symbol(new_symbol, new_expiry=None):
-    """Compatibility seam for application-owned symbol switching."""
-    return _SYMBOL_SWITCHER.switch(new_symbol, new_expiry)
-
-
 _DATA_SOURCE_SWITCHER = DataSourceSwitcher(
     valid_sources=lambda: _MD_PROVIDER_KEYS,
     current_source=lambda: runtime_state.MARKET_SELECTION.data_source,
@@ -656,11 +651,6 @@ _DATA_SOURCE_SWITCHER = DataSourceSwitcher(
     current_expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
     signal_refresh=runtime_state.SYMBOL_SWITCH_EVENT.set,
 )
-
-
-async def switch_data_source(new_source: str):
-    """Compatibility seam for application-owned provider switching."""
-    return await _DATA_SOURCE_SWITCHER.switch(new_source)
 
 
 async def _broadcast_portfolio(current_prices):
@@ -1145,8 +1135,8 @@ runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
 
 runtime_state.WS_QUERY_CONTROLLER = WebSocketQueryController(
     current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    switch_symbol=lambda symbol, expiry: switch_symbol(symbol, expiry),
-    switch_data_source=lambda source: switch_data_source(source),
+    switch_symbol=_SYMBOL_SWITCHER.switch,
+    switch_data_source=_DATA_SOURCE_SWITCHER.switch,
     current_price_source=lambda: runtime_state.MARKET_SELECTION.price_source,
     set_price_source=runtime_state.MARKET_SELECTION.select_price_source,
     current_futures_expiry=lambda: runtime_state.MARKET_SELECTION.futures_expiry,
