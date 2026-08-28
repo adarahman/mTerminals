@@ -56,7 +56,7 @@ def test_metrics_handler_returns_registry_snapshot(ws_server_live, monkeypatch):
     }
     monkeypatch.setattr(runtime_state.METRICS, "snapshot", lambda: expected)
 
-    response = asyncio.run(module.metrics_handler(None))
+    response = asyncio.run(module.runtime_state.HTTP_ROUTE_HANDLERS.metrics(None))
 
     assert response.status == 200
     assert json.loads(response.text) == expected

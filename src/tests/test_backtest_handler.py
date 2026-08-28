@@ -1,4 +1,4 @@
-"""Unit tests for server/app.py's `backtest_handler` — the /api/backtest
+"""Unit tests for HttpRouteHandlers.backtest — the /api/backtest
 HTTP endpoint the dashboard's backtest results viewer
 (Dashboard/backtest-view.js) calls. Exercises the handler's own JSON
 shaping (summary/trades/equityCurve) and query-param parsing; the actual
@@ -18,7 +18,7 @@ def _run(coro):
 
 
 class _FakeRequest:
-    """Minimal stand-in for aiohttp.web.Request — backtest_handler only
+    """Minimal stand-in for aiohttp.web.Request — the backtest route only
     ever touches request.query.get(...)."""
     def __init__(self, query=None):
         self.query = query or {}
@@ -60,7 +60,7 @@ def test_defaults_to_server_symbol_when_none_given(backtest_env):
     m.runtime_state.MARKET_SELECTION.select_symbol("BANKNIFTY", original_expiry)
 
     try:
-        resp = _run(m.backtest_handler(_FakeRequest()))
+        resp = _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest()))
     finally:
         m.runtime_state.MARKET_SELECTION.select_symbol(
             original_symbol, original_expiry
@@ -73,7 +73,7 @@ def test_defaults_to_server_symbol_when_none_given(backtest_env):
 def test_explicit_symbol_query_param_overrides_server_symbol(backtest_env):
     m, captured = backtest_env
 
-    _run(m.backtest_handler(_FakeRequest({"symbol": "banknifty"})))
+    _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({"symbol": "banknifty"})))
 
     assert captured["symbol"] == "BANKNIFTY"  # upper-cased, same as history_handler's req_symbol handling
 
@@ -81,7 +81,7 @@ def test_explicit_symbol_query_param_overrides_server_symbol(backtest_env):
 def test_query_params_parsed_and_forwarded(backtest_env):
     m, captured = backtest_env
 
-    _run(m.backtest_handler(_FakeRequest({
+    _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({
         "symbol": "NIFTY", "start": "2026-07-01", "end": "2026-07-31",
         "minConfidence": "55", "cooldownSeconds": "120",
         "maxTradesPerSymbolPerDay": "3", "qtyLots": "2",
@@ -100,7 +100,7 @@ def test_query_params_parsed_and_forwarded(backtest_env):
 def test_malformed_int_param_falls_back_to_default(backtest_env):
     m, captured = backtest_env
 
-    _run(m.backtest_handler(_FakeRequest({"minConfidence": "not-a-number"})))
+    _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({"minConfidence": "not-a-number"})))
 
     assert captured["min_confidence"] == 40  # run_backtest's own default
 
@@ -112,7 +112,7 @@ def test_malformed_int_param_falls_back_to_default(backtest_env):
 def test_use_account_guard_boolean_parsing(backtest_env, raw, expected):
     m, captured = backtest_env
 
-    _run(m.backtest_handler(_FakeRequest({"useAccountGuard": raw})))
+    _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({"useAccountGuard": raw})))
 
     assert captured["use_account_guard"] is expected
 
@@ -120,7 +120,7 @@ def test_use_account_guard_boolean_parsing(backtest_env, raw, expected):
 def test_response_shape_includes_summary_trades_and_equity_curve(backtest_env):
     m, _ = backtest_env
 
-    resp = _run(m.backtest_handler(_FakeRequest({"symbol": "NIFTY"})))
+    resp = _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({"symbol": "NIFTY"})))
     body = _json_body(resp)
 
     assert body["symbol"] == "NIFTY"
@@ -135,7 +135,7 @@ def test_response_shape_includes_summary_trades_and_equity_curve(backtest_env):
 def test_equity_curve_is_cumulative_over_closed_trades_in_order(backtest_env):
     m, _ = backtest_env
 
-    resp = _run(m.backtest_handler(_FakeRequest({"symbol": "NIFTY"})))
+    resp = _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({"symbol": "NIFTY"})))
     body = _json_body(resp)
 
     curve = body["equityCurve"]
@@ -152,7 +152,7 @@ def test_run_backtest_exception_returns_500_with_error_message(ws_server_live, m
 
     monkeypatch.setattr(m, "run_backtest", _boom)
 
-    resp = _run(m.backtest_handler(_FakeRequest({"symbol": "NIFTY"})))
+    resp = _run(m.runtime_state.HTTP_ROUTE_HANDLERS.backtest(_FakeRequest({"symbol": "NIFTY"})))
 
     assert resp.status == 500
     assert "no decision snapshots" in _json_body(resp)["error"]

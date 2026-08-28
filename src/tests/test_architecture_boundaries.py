@@ -192,6 +192,20 @@ def test_composition_root_has_no_dashboard_bridge_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_has_no_http_route_handler_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in (
+        "ws_handler",
+        "spot_history_handler",
+        "history_handler",
+        "backtest_handler",
+        "lot_sizes_handler",
+        "metrics_handler",
+        "health_handler",
+    ):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

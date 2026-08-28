@@ -56,7 +56,7 @@ def test_health_handler_uses_service_status_code(ws_server_live, monkeypatch):
         "status": "degraded", "reasons": ["feed stale"]
     })
 
-    response = asyncio.run(module.health_handler(None))
+    response = asyncio.run(module.runtime_state.HTTP_ROUTE_HANDLERS.health(None))
 
     assert response.status == 503
     assert json.loads(response.text)["reasons"] == ["feed stale"]

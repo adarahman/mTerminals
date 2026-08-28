@@ -1171,10 +1171,6 @@ runtime_state.DASHBOARD_WS_HANDLER = DashboardWebSocketHandler(
 )
 
 
-async def ws_handler(request):
-    return await runtime_state.DASHBOARD_WS_HANDLER(request)
-
-
 # ── HTTP handlers (thin adapters; logic lives in server/* modules) ───────
 _HISTORY_API = MarketHistoryApi(
     state=lambda: {
@@ -1188,22 +1184,6 @@ _HISTORY_API = MarketHistoryApi(
     get_index_candles=lambda *args, **kwargs: get_index_candles(*args, **kwargs),
 )
 no_cache_middleware = history_no_cache_middleware
-
-
-async def spot_history_handler(request):
-    return await runtime_state.HTTP_ROUTE_HANDLERS.spot_history(request)
-
-
-async def history_handler(request):
-    return await runtime_state.HTTP_ROUTE_HANDLERS.history(request)
-
-
-async def backtest_handler(request):
-    return await runtime_state.HTTP_ROUTE_HANDLERS.backtest(request)
-
-
-async def lot_sizes_handler(request):
-    return await runtime_state.HTTP_ROUTE_HANDLERS.lot_sizes(request)
 
 
 def _build_health_snapshot(now=None):
@@ -1244,13 +1224,6 @@ def _build_health_snapshot(now=None):
     )
 
 
-async def metrics_handler(request):
-    return await runtime_state.HTTP_ROUTE_HANDLERS.metrics(request)
-
-async def health_handler(request):
-    return await runtime_state.HTTP_ROUTE_HANDLERS.health(request)
-
-
 runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
     history_api=_HISTORY_API,
     backtest_response=handle_backtest,
@@ -1265,15 +1238,15 @@ runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
 
 # ── entry point ──────────────────────────────────────────────────────────
 _HTTP_RUNTIME = build_http_runtime(
-    health=health_handler,
+    health=runtime_state.HTTP_ROUTE_HANDLERS.health,
     broker_health=_broker_health,
-    metrics=metrics_handler,
-    websocket=ws_handler,
+    metrics=runtime_state.HTTP_ROUTE_HANDLERS.metrics,
+    websocket=runtime_state.DASHBOARD_WS_HANDLER,
     bridge_websocket=_BRIDGE.handle,
-    spot_history=spot_history_handler,
-    history=history_handler,
-    backtest=backtest_handler,
-    lot_sizes=lot_sizes_handler,
+    spot_history=runtime_state.HTTP_ROUTE_HANDLERS.spot_history,
+    history=runtime_state.HTTP_ROUTE_HANDLERS.history,
+    backtest=runtime_state.HTTP_ROUTE_HANDLERS.backtest,
+    lot_sizes=runtime_state.HTTP_ROUTE_HANDLERS.lot_sizes,
     host=WS_HOST,
     port=HTTP_PORT,
     symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
