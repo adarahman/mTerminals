@@ -269,6 +269,14 @@ def test_composition_root_delegates_live_trading_runtime_assembly():
     assert "LiveTradingSupervisor(" not in app
 
 
+def test_composition_root_delegates_startup_configuration():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _resolve_default_pipeline_expiry" not in app
+    assert "selection_state.build_market_selection(" not in app
+    assert "_DATA_SOURCE_LABELS =" not in app
+    assert "_initial_data_source" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

@@ -123,6 +123,15 @@ from server.live_trading_runtime import (  # noqa: E402
     LiveTradingConfig,
     build_live_trading_runtime,
 )
+from server.startup_configuration import (  # noqa: E402
+    BSE_SYMBOLS as _BSE_SYMBOLS,
+    EXECUTION_BROKER_LABELS as _EXECUTION_BROKER_LABELS,
+    INDEX_TICKER_SYMBOLS,
+    VIX_TOKEN as _VIX_TOKEN,
+    VIX_TRADINGSYMBOL as _VIX_TRADINGSYMBOL,
+    configure_startup,
+    resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry,
+)
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
@@ -154,146 +163,24 @@ _md_provider_status = broker_services.md_provider_status
 _execution_resolve_option_contract = broker_services.resolve_option_contract
 _SMARTAPI_INDEX_TOKENS = broker_services.SMARTAPI_INDEX_TOKENS
 
-# Which broker's WEBSOCKET tick feed overlays fast leg-level ticks onto the
-# slower NSE/BSE-polled chain — independent of execution_broker (orders) and
-# market_data_provider (REST chain building). Each feed client is imported
-# lazily inside its start adapter below, so deployments that don't use a
-# broker never need that broker's SDK installed just to boot.
-runtime_state.LIVE_FEED_PROVIDER = _broker_settings.live_feed_provider
-
 # This module is also imported by tests and tooling. Preserve server CLI
 # parsing while leaving unrelated host arguments (for example pytest flags)
 # to the embedding process instead of terminating during import.
 ARGS, _HOST_PROCESS_ARGS = build_arg_parser().parse_known_args()
 
-_initial_symbol = ARGS.symbol.strip().upper()
-def _resolve_default_pipeline_expiry(symbol):
-    """Resolve the nearest valid exchange-calendar option expiry."""
-    symbol = (symbol or "").strip().upper()
-    if symbol in {"SENSEX", "BANKEX", "SENSEX50"}:
-        return option_chain_runtime.BSE_EXPIRY_DEFAULT.get(
-            symbol, option_chain_runtime._nearest_Thursday
-        )()
-    return option_chain_runtime._nearest_Tuesday()
-
-
-# Manual price-source selector — "EQ" (default, cash-market spot) is the
-# fixed option-pricing/decision reference; "FUT" is displayed separately
-# (see option_chain_json.py's PRICE_SOURCE docstring for the 3:15-3:30
-# EQ-goes-stale rationale). Legacy ?priceSource= URLs are accepted but no
-# longer alter analytics.
-_initial_price_source = "AUTO"
-# Manual futures-expiry selector — "NEAR" (default), "NEXT", or "FAR".
-# Switched via ?futuresExpiry= on the WS URL (see ws_handler) and read
-# fresh into RuntimeConfig for every analytics pass.
-_initial_futures_expiry = "NEAR"
-_initial_expiry = (
-    ARGS.expiry.strip()
-    if ARGS.expiry
-    else _resolve_default_pipeline_expiry(_initial_symbol)
+_STARTUP_CONFIGURATION = configure_startup(
+    args=ARGS,
+    runtime_state=runtime_state,
+    broker_services_enabled=BROKER_SERVICES_ENABLED,
+    live_feed_provider=_broker_settings.live_feed_provider,
+    activate_provider=_md_set_active_provider,
+    supports_websocket=_provider_supports_websocket,
 )
-runtime_state.POLL_SECONDS = ARGS.poll_seconds
-runtime_state.PIPELINE_TIMEOUT_SECONDS = max(1.0, ARGS.pipeline_timeout_seconds)
-runtime_state.MIN_TICK_RECOMPUTE_SECONDS = ARGS.min_tick_recompute_seconds
-WS_HOST = ARGS.host
-WS_PORT = ARGS.port
-HTTP_PORT = ARGS.http_port
-runtime_state.USE_RELAY = ARGS.relay
-runtime_state.USE_DELTA = not ARGS.no_delta
-runtime_state.USE_INDEX_QUOTES = not ARGS.no_index_quotes
-runtime_state.INDEX_QUOTE_SECONDS = ARGS.index_quote_seconds
-runtime_state.FUNDS_POLL_SECONDS = ARGS.funds_poll_seconds
-runtime_state.PORTFOLIO_POLL_SECONDS = ARGS.portfolio_poll_seconds
-runtime_state.USE_SMARTAPI = BROKER_SERVICES_ENABLED
-runtime_state.STRIKES_EACH_SIDE = (
-    ARGS.strikes_each_side
-    if ARGS.strikes_each_side is not None
-    else (15 if runtime_state.USE_SMARTAPI else 50)
-)
-
-# Label maps — single source of truth for both startup banners and the
-# algo-status panel (previously two divergent if/else chains).
-_DATA_SOURCE_LABELS = {
-    "UPSTOX": "Upstox",
-    "SHOONYA": "Shoonya",
-    "KITE": "Kite",
-    "BREEZE": "Breeze",
-    "KOTAK": "Kotak",
-    "NSE_BSE": "NSE/BSE",
-}
-_EXECUTION_BROKER_LABELS = {
-    "SHOONYA": "Shoonya",
-    "UPSTOX": "Upstox",
-    "KITE": "Zerodha",
-    "BREEZE": "ICICI Direct",
-}
-
-
-# Runtime market-data source — the Dashboard's DATA SOURCE dropdown,
-# switched via ?dataSource= (see switch_data_source) WITHOUT a restart.
-# Process-wide, same as SYMBOL/EXPIRY; also pushed into brokers.market_data's
-# runtime facade so the chain pipeline, index-quote loops, and payload all
-# route consistently.
-_initial_data_source = selection_state._resolve_default_data_source()
-if not runtime_state.USE_SMARTAPI:
-    _initial_data_source = "NSE_BSE"
-_md_set_active_provider(_initial_data_source)
-
-runtime_state.MARKET_SELECTION = selection_state.build_market_selection(
-    symbol=_initial_symbol,
-    expiry=_initial_expiry,
-    data_source=_initial_data_source,
-    price_source=_initial_price_source,
-    futures_expiry=_initial_futures_expiry,
-)
-
-_md_label = _DATA_SOURCE_LABELS.get(runtime_state.MARKET_SELECTION.data_source, "SmartAPI")
-if runtime_state.MARKET_SELECTION.data_source == "NSE_BSE":
-    _chain_source = "NSE/BSE public REST (polling)"
-    _overlay_state = "no websocket overlay"
-elif runtime_state.USE_SMARTAPI:
-    _chain_source = f"{_md_label} REST"
-    if (
-        runtime_state.MARKET_SELECTION.data_source == runtime_state.LIVE_FEED_PROVIDER
-        and _provider_supports_websocket(runtime_state.MARKET_SELECTION.data_source)
-    ):
-        _overlay_state = f"{runtime_state.LIVE_FEED_PROVIDER} websocket overlay ENABLED"
-    else:
-        _overlay_state = "no websocket overlay (REST polling)"
-else:
-    _chain_source = "NSE/BSE public REST (public-only mode)"
-    _overlay_state = "websocket overlay DISABLED (public-only mode)"
-print(
-    f"[feed] chain source: {_chain_source}, "
-    f"analytics recompute ceiling={runtime_state.POLL_SECONDS}s floor={runtime_state.MIN_TICK_RECOMPUTE_SECONDS}s "
-    f"+ {_overlay_state} "
-    f"| index context via market_api.py (20s-cached)",
-    flush=True,
-)
-print(
-    f"[paper-trading] portfolio fast-path broadcast: "
-    f"{'every ' + runtime_state.LIVE_FEED_PROVIDER.title() + ' tick (no throttle)' if runtime_state.PORTFOLIO_POLL_SECONDS <= 0 else f'throttled to >= {runtime_state.PORTFOLIO_POLL_SECONDS}s'}"
-    + (
-        ""
-        if runtime_state.USE_SMARTAPI
-        else " (inactive — public-only mode, falls back to --poll-seconds cadence)"
-    ),
-    flush=True,
-)
-
-# Top-bar ticker strip shows these five, always in this order (see
-# dashboard.js INDEX_TICKER_ORDER — keep the two lists in sync). The active
-# SYMBOL's own quote comes free on every regular tick, so only the OTHER
-# symbols are fetched here; VIX is never the active SYMBOL.
-INDEX_TICKER_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "SENSEX", "INDIA VIX"]
-_BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
-
-# VIX isn't in INDEX_TOKENS (auto-built from AMXIDX ScripMaster rows — VIX
-# doesn't carry that type), so it's pinned manually, same as broker_pipeline
-# .py's _VIX_TOKEN. Re-verify against a fresh ScripMaster dump if quotes go
-# stale/empty; nothing here will warn you if Angel reassigns the token.
-_VIX_TRADINGSYMBOL = "India VIX"
-_VIX_TOKEN = "99926017"  # exch_seg=NSE, verified against live ScripMaster 2026-07-14
+WS_HOST = _STARTUP_CONFIGURATION.host
+WS_PORT = _STARTUP_CONFIGURATION.websocket_port
+HTTP_PORT = _STARTUP_CONFIGURATION.http_port
+print(_STARTUP_CONFIGURATION.feed_summary, flush=True)
+print(_STARTUP_CONFIGURATION.portfolio_summary, flush=True)
 
 runtime_state.DASHBOARD_CLIENTS = WebSocketClientHub()
 # Compatibility alias for diagnostics and existing test seams. Connection
