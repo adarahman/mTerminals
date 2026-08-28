@@ -242,6 +242,17 @@ def test_composition_root_delegates_order_submission():
     assert "validate_order_intent" not in app
 
 
+def test_composition_root_delegates_market_cycle_operations():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in (
+        "_publish_pipeline_status",
+        "_schedule_eod_jobs",
+        "_pipeline_delayed_reason",
+        "_pipeline_delayed_overlay",
+    ):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

@@ -106,6 +106,7 @@ from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa
 from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
 from server.trading_supervision import LiveTradingSupervisor  # noqa: E402
 from server.order_submission import OrderSubmissionService  # noqa: E402
+from server.market_cycle_operations import MarketCycleOperations  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
@@ -448,21 +449,6 @@ runtime_state.MARKET_STREAM_LOCK = asyncio.Lock()
 from server.payload_capture import install_payload_export_capture  # noqa: E402
 
 _PAYLOAD_EXPORT_CAPTURE = install_payload_export_capture()
-
-
-# ── pipeline plumbing ────────────────────────────────────────────────────
-async def _publish_pipeline_status(status, reason="", elapsed=None):
-    """Broadcast analytics availability only when its visible state changes."""
-    previous = (runtime_state.PIPELINE_STATUS.get("status"), runtime_state.PIPELINE_STATUS.get("reason"))
-    runtime_state.PIPELINE_STATUS["status"] = status
-    runtime_state.PIPELINE_STATUS["reason"] = reason
-    runtime_state.PIPELINE_STATUS["elapsedSeconds"] = (
-        round(elapsed, 3) if elapsed is not None else None
-    )
-    if status == "LIVE":
-        runtime_state.PIPELINE_STATUS["lastSuccessAt"] = datetime.now().astimezone().isoformat()
-    if (status, reason) != previous:
-        await broadcast({"type": "pipelineStatus", "payload": dict(runtime_state.PIPELINE_STATUS)})
 
 
 async def broadcast(message):
@@ -810,11 +796,19 @@ _NODE_RELAY = runtime_state.NODE_RELAY
 # ── engine loop ──────────────────────────────────────────────────────────
 _LIVE_FEED_AGGREGATORS = LiveFeedAggregatorRegistry(managers=lambda: runtime_state.FEEDS)
 
-def _schedule_eod_jobs(now):
-    eod_task = asyncio.create_task(asyncio.to_thread(fetch_all_eod, now, True))
-    eod_task.add_done_callback(_eod_task_done)
-    flow_task = asyncio.create_task(asyncio.to_thread(record_today_flow))
-    flow_task.add_done_callback(_flow_task_done)
+
+_MARKET_CYCLE_OPERATIONS = MarketCycleOperations(
+    pipeline_status=runtime_state.PIPELINE_STATUS,
+    broadcast=broadcast,
+    use_broker_services=lambda: runtime_state.USE_SMARTAPI,
+    live_feed_provider=lambda: runtime_state.LIVE_FEED_PROVIDER,
+    data_source=lambda: runtime_state.MARKET_SELECTION.data_source,
+    feed_allowed=feed_manager._feed_allowed,
+    fetch_all_eod=fetch_all_eod,
+    record_today_flow=record_today_flow,
+    eod_task_done=_eod_task_done,
+    flow_task_done=_flow_task_done,
+)
 
 
 _DAILY_MARKET_SCHEDULER = DailyMarketScheduler(
@@ -822,37 +816,16 @@ _DAILY_MARKET_SCHEDULER = DailyMarketScheduler(
     reset_futures_session=lambda: _get_futures_oi_tracker().reset_session(),
     is_trading_day=is_trading_day,
     eod_trigger_time=EOD_TRIGGER_TIME,
-    schedule_eod_jobs=_schedule_eod_jobs,
+    schedule_eod_jobs=_MARKET_CYCLE_OPERATIONS.schedule_eod_jobs,
 )
-
-
-def _pipeline_delayed_reason(timeout_seconds):
-    if runtime_state.USE_SMARTAPI:
-        return (
-            f"REST analytics pass exceeded {timeout_seconds:g}s; "
-            "live prices continue via WebSocket"
-        )
-    return (
-        f"Public REST analytics pass exceeded {timeout_seconds:g}s; "
-        "SmartAPI remains disabled"
-    )
-
-
-def _pipeline_delayed_overlay():
-    if runtime_state.USE_SMARTAPI and feed_manager._feed_allowed(runtime_state.LIVE_FEED_PROVIDER):
-        return f"{runtime_state.LIVE_FEED_PROVIDER} websocket overlay remains active"
-    return f"{runtime_state.MARKET_SELECTION.data_source} REST polling will retry"
-
 
 _MARKET_PIPELINE_SERVICE = MarketPipelineService(
     run_pipeline=_RUN_PIPELINE_SERIALIZED,
-    publish_status=lambda *args, **kwargs: _publish_pipeline_status(
-        *args, **kwargs
-    ),
+    publish_status=_MARKET_CYCLE_OPERATIONS.publish_pipeline_status,
     pipeline_status=runtime_state.PIPELINE_STATUS,
     timeout_seconds=runtime_state.PIPELINE_TIMEOUT_SECONDS,
-    delayed_reason=_pipeline_delayed_reason,
-    delayed_overlay=_pipeline_delayed_overlay,
+    delayed_reason=_MARKET_CYCLE_OPERATIONS.delayed_reason,
+    delayed_overlay=_MARKET_CYCLE_OPERATIONS.delayed_overlay,
 )
 
 
