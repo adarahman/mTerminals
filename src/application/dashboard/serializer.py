@@ -449,7 +449,7 @@ def export_dashboard_json(
         # (fetch hasn't run yet, module missing, or no file for that date).
         "fiiDiiSentiment": _get_cached_fii_dii_sentiment() or {},
         # ── Combined cash+F&O FII/DII bias summary (display only) ──
-        # Same source server/app.py's bridge_loop() computes for the
+        # Same source DashboardBridge.run() computes for the
         # /dashboard-relay feed (fiidii-report.js's fdRenderBias) — cached
         # here on the same once/day cadence so the main dashboard's FII/DII
         # summary card can show it without needing that relay connection.

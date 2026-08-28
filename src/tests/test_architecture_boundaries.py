@@ -186,6 +186,12 @@ def test_composition_root_has_no_index_quote_fetch_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_has_no_dashboard_bridge_wrappers():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    for helper in ("broadcast_bridge", "bridge_ws_handler", "bridge_loop"):
+        assert f"def {helper}" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

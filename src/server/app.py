@@ -518,19 +518,6 @@ _BRIDGE = DashboardBridge(
 )
 BRIDGE_CONNECTED = _BRIDGE.clients
 
-
-async def broadcast_bridge(payload):
-    await _BRIDGE.broadcast(payload)
-
-
-async def bridge_ws_handler(request):
-    return await _BRIDGE.handle(request)
-
-
-async def bridge_loop():
-    await _BRIDGE.run()
-
-
 _PIPELINE_RUNTIME_CONFIGURATOR = PipelineRuntimeConfigurator(
     data_source=lambda: runtime_state.MARKET_SELECTION.data_source,
     activate_provider=_md_set_active_provider,
@@ -1282,7 +1269,7 @@ _HTTP_RUNTIME = build_http_runtime(
     broker_health=_broker_health,
     metrics=metrics_handler,
     websocket=ws_handler,
-    bridge_websocket=bridge_ws_handler,
+    bridge_websocket=_BRIDGE.handle,
     spot_history=spot_history_handler,
     history=history_handler,
     backtest=backtest_handler,
@@ -1299,7 +1286,7 @@ _RUNTIME_SERVICES = ServerRuntimeServices(
     feed_manager=feed_manager,
     host_is_loopback=host_is_loopback,
     index_quotes=_INDEX_QUOTE_LOOP.run,
-    bridge=bridge_loop,
+    bridge=_BRIDGE.run,
     algo_status=_ALGO_STATUS_LOOP.run,
     reconcile=_RECONCILIATION_LOOP.run,
     live_trading_enabled=LIVE_TRADING_ENABLED,
