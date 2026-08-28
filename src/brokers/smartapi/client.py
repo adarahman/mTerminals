@@ -1188,7 +1188,7 @@ def get_batch_quotes_by_token(
     human-readable variant, not the plain short code requested. Token is
     what's actually sent on the request, so it's the one identifier
     guaranteed to round-trip correctly regardless of naming quirks.
-    See fetch_index_quotes_smartapi_sync() in server/app.py for the
+    See IndexQuoteFetcher.provider() in server/index_quotes.py for the
     call site this was added for (2026-08-02) — get_batch_quotes()'s
     tradingSymbol keying silently missed NIFTY/BANKNIFTY/MIDCPNIFTY there
     because their short codes don't match Angel's display names, the same

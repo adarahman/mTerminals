@@ -50,7 +50,6 @@ from server.market_history_api import (  # noqa: E402
     MarketHistoryApi,
     no_cache_middleware as history_no_cache_middleware,
 )
-from server.index_quotes import IndexQuoteFetcher  # noqa: E402
 from application.runtime import (  # noqa: E402
     ApplicationLifecycle,
 )
@@ -624,31 +623,6 @@ _ANALYTICS_PIPELINE_RUNNER = AnalyticsPipelineRunner(
 _RUN_PIPELINE_SERIALIZED = partial(
     _PIPELINE_EXECUTOR.run_blocking, _ANALYTICS_PIPELINE_RUNNER.run_once
 )
-
-
-def _index_quote_fetcher():
-    """Build from the current provider seam (also keeps runtime switches live)."""
-    return IndexQuoteFetcher(
-        state=lambda: {
-            "data_source": runtime_state.MARKET_SELECTION.data_source,
-            "vix_symbol": _VIX_TRADINGSYMBOL,
-            "vix_token": _VIX_TOKEN,
-        },
-        market_data=market_data,
-        market_api=market_api,
-    )
-
-
-def fetch_nse_index_quotes_sync():
-    return _index_quote_fetcher().public_nse()
-
-
-def fetch_bse_index_quote_sync(symbol):
-    return _index_quote_fetcher().public_bse(symbol)
-
-
-def fetch_index_quotes_smartapi_sync():
-    return _index_quote_fetcher().provider()
 
 
 # ── Live feed state ──────────────────────────────────────────────────────

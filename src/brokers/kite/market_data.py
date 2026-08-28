@@ -93,10 +93,9 @@ class KiteMarketData:
 
     def index_tokens(self):
         # Kite has no index token model — index quotes go through
-        # get_spot_quote() (see fetch_index_quotes_smartapi_sync()'s
+        # get_spot_quote() (see IndexQuoteFetcher.provider()'s
         # provider-aware branch for KITE/BREEZE).
         return {}
 
 
 # ── ICICI Breeze provider ────────────────────────────────────────────────
-

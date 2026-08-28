@@ -211,7 +211,7 @@ class Settings:
     # `market_data` singleton (list_expiries/get_atm_chain/find_option_token/
     # index quotes/etc). Defaults to SMARTAPI to preserve existing behavior.
     # NOTE before flipping this to UPSTOX: server/app.py's
-    # fetch_index_quotes_smartapi_sync() calls market_data.get_batch_quotes_by_token()
+    # IndexQuoteFetcher.provider() calls market_data.get_batch_quotes_by_token()
     # and feeds the raw row straight into _map_smartapi_quote(), which parses
     # AngelOne's own field names (ltp, netChange, ...). UpstoxMarketData's
     # get_batch_quotes_by_token() returns Upstox-shaped rows instead, so that

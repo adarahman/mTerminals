@@ -39,6 +39,7 @@ import pytest
 from brokers import market_data as md
 from brokers import market_data_registry as md_registry
 from server import runtime_state, feed_manager
+from server.index_quotes import IndexQuoteFetcher
 from application import selection_state
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -957,14 +958,22 @@ class _FakeSpotMD:
         }
 
 
-def test_index_quotes_provider_aware(ws_server_live, monkeypatch):
-    monkeypatch.setattr(ws_server_live, "market_data", _FakeSpotMD())
+def test_index_quotes_provider_aware(ws_server_live):
+    fetcher = IndexQuoteFetcher(
+        state=lambda: {
+            "data_source": runtime_state.MARKET_SELECTION.data_source,
+            "vix_symbol": "India VIX",
+            "vix_token": "99926017",
+        },
+        market_data=_FakeSpotMD(),
+        market_api=ws_server_live.market_api,
+    )
 
     runtime_state.MARKET_SELECTION.select_data_source("NSE_BSE")
-    assert ws_server_live.fetch_index_quotes_smartapi_sync() == {}
+    assert fetcher.provider() == {}
 
     runtime_state.MARKET_SELECTION.select_data_source("KITE")
-    quotes = ws_server_live.fetch_index_quotes_smartapi_sync()
+    quotes = fetcher.provider()
     # market_api-shaped output index_quote_loop() consumes interchangeably.
     assert set(quotes) == {"NIFTY", "BANKNIFTY", "MIDCPNIFTY", "INDIA VIX", "SENSEX"}
     assert quotes["NIFTY"]["Last Price"] == 24000.0

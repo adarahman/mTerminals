@@ -36,7 +36,7 @@ class UpstoxMarketData:
 
     KNOWN GAP — do not point the `market_data` singleton at this class
     in production without checking server/app.py's
-    fetch_index_quotes_smartapi_sync(): it calls
+    IndexQuoteFetcher.provider(): it calls
     market_data.get_batch_quotes_by_token() and passes the raw row
     straight into _map_smartapi_quote(), which parses AngelOne's own
     field names (ltp, netChange, ...). This adapter's
@@ -358,4 +358,3 @@ class UpstoxMarketData:
             symbol: {"token": key, "exchange": key.split("_", 1)[0]}
             for symbol, key in INDEX_KEYS.items()
         }
-
