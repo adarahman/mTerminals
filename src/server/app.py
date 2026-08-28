@@ -19,7 +19,6 @@ import logging
 import os
 import sys
 import threading
-import time
 import uuid
 from datetime import datetime
 from datetime import time as dtime
@@ -106,14 +105,12 @@ from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
 from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa: E402
 from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
+from server.trading_supervision import LiveTradingSupervisor  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
 from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
-from risk.account_guard import (  # noqa: E402
-    LiveAccountRiskGuard,
-    open_lots_from_positions,
-)
+from risk.account_guard import LiveAccountRiskGuard  # noqa: E402
 from risk.live_order_store import LiveOrderStore  # noqa: E402
 from risk.position_reconciler import PositionReconciler  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
@@ -413,7 +410,7 @@ runtime_state.LAST_ALGO_STATUS = None
 # after a mismatch still sees it.
 runtime_state.LAST_RECONCILIATION_ALERT = None
 # Cache of the most recent live position-book fetch (reconcile_loop's own
-# periodic call). _build_algo_status() reads this for current open lots
+# periodic call). LiveTradingSupervisor reads this for current open lots
 # instead of making its own broker call every 5s; the pre-trade exposure
 # check still fetches fresh. None until live trading is enabled and the
 # first reconcile cycle has completed.
@@ -745,7 +742,7 @@ async def _handle_place_order(payload, _live_gate_acquired=False):
             intent,
             current_prices,
             broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
-            broadcast_alert=_broadcast_reconciliation_alert,
+            broadcast_alert=_TRADING_SUPERVISOR.publish_reconciliation_alert,
         )
 
     # ── Paper trading path ───────────────────────────────────────────
@@ -823,79 +820,30 @@ async def _submit_auto_order(symbol, instrument_type, expiry, strike, side, qty_
 # to reach the real broker). See decision/auto_executor.py.
 _AUTO_EXECUTOR = AutoExecutor(_ACCOUNT_GUARD, _submit_auto_order)
 
-
-def _build_algo_status() -> dict:
-    """Composes the algoStatus broadcast payload — one read-only snapshot of
-    every live-trading/algo safety mechanism's state, so the dashboard shows
-    a single status panel instead of requiring a server-log tail. Calling
-    this never mutates guard/executor state."""
-    guard_status = _ACCOUNT_GUARD.get_status()
-    # current_open_lots pairs with guard_status's max_open_lots so the panel
-    # can show "current / limit". Sourced from if runtime_state.LAST_LIVE_POSITIONS (the
-    # reconcile loop's periodic fetch) — this is a status display, not the
-    # pre-trade exposure check (which still fetches fresh).
-    try:
-        guard_status["current_open_lots"] = (
-            open_lots_from_positions(runtime_state.LAST_LIVE_POSITIONS, PT_LOT_SIZES)
-            if runtime_state.LAST_LIVE_POSITIONS is not None
-            else None
+_TRADING_SUPERVISOR = LiveTradingSupervisor(
+    account_guard=_ACCOUNT_GUARD,
+    auto_executor=_AUTO_EXECUTOR,
+    live_orders=_LIVE_ORDERS,
+    reconciler=_POSITION_RECONCILER,
+    lot_sizes=PT_LOT_SIZES,
+    cached_positions=lambda: runtime_state.LAST_LIVE_POSITIONS,
+    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
+    broker_label=lambda: (
+        "Public Data"
+        if not BROKER_SERVICES_ENABLED
+        else _EXECUTION_BROKER_LABELS.get(
+            _broker_settings.execution_broker, "Angel One"
         )
-    except Exception as e:
-        print(
-            f"[algo-status] could not compute open lots from cached positions: {e}",
-            flush=True,
-        )
-        guard_status["current_open_lots"] = None
-
-    exec_status = _AUTO_EXECUTOR.get_status(runtime_state.MARKET_SELECTION.symbol)
-    exec_status["history"] = _AUTO_EXECUTOR.get_history()[:30]
-
-    return {
-        "broker": (
-            "Public Data"
-            if not BROKER_SERVICES_ENABLED
-            else _EXECUTION_BROKER_LABELS.get(
-                _broker_settings.execution_broker, "Angel One"
-            )
-        ),
-        "liveTradingEnabled": LIVE_TRADING_ENABLED,
-        "killSwitchActive": _LIVE_ORDERS.kill_switch_active(),
-        "maxLotsPerOrder": LIVE_MAX_LOTS_PER_ORDER,
-        "maxOrdersPerMinute": LIVE_MAX_ORDERS_PER_MINUTE,
-        "accountGuard": guard_status,
-        "autoExecutor": exec_status,
-        "symbol": runtime_state.MARKET_SELECTION.symbol,
-    }
-
-
-async def _broadcast_reconciliation_alert(result, source: str):
-    """Turns a non-clean PositionReconciler.check() result into a
-    reconciliationAlert broadcast (previously log-only, so a human watching
-    the dashboard never saw below-trip-threshold mismatches — most resolve
-    themselves next cycle once a fill propagates, but they should still be
-    visible as they happen). No-op on a clean result. `source` distinguishes
-    the fast post-fill check from the periodic sweep, for display context."""
-    if result.clean:
-        return
-    tripped = result.max_abs_diff_lots() >= _POSITION_RECONCILER.trip_lots
-    payload = {
-        "ts": time.time(),
-        "source": source,
-        "tripped": tripped,
-        "tripLots": _POSITION_RECONCILER.trip_lots,
-        "mismatches": [
-            {
-                "symbol": m.symbol,
-                "orderBookLots": m.order_book_lots,
-                "positionLots": m.position_lots,
-                "diffLots": m.diff_lots,
-            }
-            for m in result.mismatches
-        ],
-        "unparseableSymbols": result.unparseable_symbols,
-    }
-    runtime_state.LAST_RECONCILIATION_ALERT = payload
-    await broadcast({"type": "reconciliationAlert", "payload": payload})
+    ),
+    live_trading_enabled=LIVE_TRADING_ENABLED,
+    max_lots_per_order=LIVE_MAX_LOTS_PER_ORDER,
+    max_orders_per_minute=LIVE_MAX_ORDERS_PER_MINUTE,
+    store_alert=lambda payload: setattr(
+        runtime_state, "LAST_RECONCILIATION_ALERT", payload
+    ),
+    broadcast=broadcast,
+    report=_REPORT,
+)
 
 
 # ── background pollers ───────────────────────────────────────────────────
@@ -938,16 +886,14 @@ _RECONCILIATION_LOOP = ReconciliationLoop(
     set_last_positions=lambda value: setattr(
         runtime_state, "LAST_LIVE_POSITIONS", value
     ),
-    broadcast_alert=lambda result, source: _broadcast_reconciliation_alert(
-        result, source=source
-    ),
+    broadcast_alert=_TRADING_SUPERVISOR.publish_reconciliation_alert,
     poll_seconds=POSITION_RECONCILE_SECONDS,
     report=_REPORT,
 )
 
 
 _ALGO_STATUS_LOOP = AlgoStatusLoop(
-    build_status=lambda: _build_algo_status(),
+    build_status=_TRADING_SUPERVISOR.build_status,
     broadcast=broadcast,
     set_last_status=lambda value: setattr(runtime_state, "LAST_ALGO_STATUS", value),
     poll_seconds=runtime_state.ALGO_STATUS_POLL_SECONDS,
@@ -1081,7 +1027,7 @@ runtime_state.WS_HANDSHAKE = WebSocketHandshakeSender(
     algo_status=lambda: (
         runtime_state.LAST_ALGO_STATUS
         if runtime_state.LAST_ALGO_STATUS is not None
-        else _build_algo_status()
+        else _TRADING_SUPERVISOR.build_status()
     ),
     reconciliation_alert=lambda: runtime_state.LAST_RECONCILIATION_ALERT,
     paper_snapshot=_PAPER_PORTFOLIO.handshake_snapshot,

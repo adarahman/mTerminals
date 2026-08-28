@@ -1,4 +1,4 @@
-"""Unit tests for server/app.py's `_broadcast_reconciliation_alert` —
+"""Unit tests for LiveTradingSupervisor reconciliation alerts —
 turns a risk/position_reconciler.py `ReconciliationResult` into the
 {"type":"reconciliationAlert",...} broadcast the dashboard's toast/banner
 (algo-status.js's renderReconciliationAlerts) consumes. Before this
@@ -32,7 +32,7 @@ def recon_env(ws_server_live, monkeypatch):
     async def _fake_broadcast(message):
         sent.append(message)
 
-    monkeypatch.setattr(m, "broadcast", _fake_broadcast)
+    monkeypatch.setattr(m._TRADING_SUPERVISOR, "_broadcast", _fake_broadcast)
     monkeypatch.setattr(m.runtime_state, "LAST_RECONCILIATION_ALERT", None)
     monkeypatch.setattr(m._POSITION_RECONCILER, "trip_lots", 2)
     return m, sent
@@ -42,7 +42,7 @@ def test_clean_result_does_not_broadcast(recon_env):
     m, sent = recon_env
     result = ReconciliationResult(mismatches=[], unparseable_symbols=[])
 
-    _run(m._broadcast_reconciliation_alert(result, source="periodic"))
+    _run(m._TRADING_SUPERVISOR.publish_reconciliation_alert(result, source="periodic"))
 
     assert sent == []
     assert m.runtime_state.LAST_RECONCILIATION_ALERT is None
@@ -55,7 +55,7 @@ def test_below_threshold_mismatch_broadcasts_untripped(recon_env):
         unparseable_symbols=[],
     )
 
-    _run(m._broadcast_reconciliation_alert(result, source="periodic"))
+    _run(m._TRADING_SUPERVISOR.publish_reconciliation_alert(result, source="periodic"))
 
     assert len(sent) == 1
     msg = sent[0]
@@ -80,7 +80,7 @@ def test_at_or_above_threshold_mismatch_marks_tripped(recon_env):
         unparseable_symbols=[],
     )
 
-    _run(m._broadcast_reconciliation_alert(result, source="post_fill"))
+    _run(m._TRADING_SUPERVISOR.publish_reconciliation_alert(result, source="post_fill"))
 
     payload = sent[0]["payload"]
     assert payload["tripped"] is True
@@ -96,7 +96,7 @@ def test_unparseable_symbols_alone_still_broadcasts(recon_env):
     m, sent = recon_env
     result = ReconciliationResult(mismatches=[], unparseable_symbols=["WEIRDSYM"])
 
-    _run(m._broadcast_reconciliation_alert(result, source="periodic"))
+    _run(m._TRADING_SUPERVISOR.publish_reconciliation_alert(result, source="periodic"))
 
     assert len(sent) == 1
     payload = sent[0]["payload"]
@@ -118,7 +118,7 @@ def test_multiple_mismatches_all_included(recon_env):
         unparseable_symbols=[],
     )
 
-    _run(m._broadcast_reconciliation_alert(result, source="periodic"))
+    _run(m._TRADING_SUPERVISOR.publish_reconciliation_alert(result, source="periodic"))
 
     payload = sent[0]["payload"]
     assert {mm["symbol"] for mm in payload["mismatches"]} == {
@@ -138,6 +138,6 @@ def test_last_reconciliation_alert_replayed_to_new_connections_field_shape(recon
         unparseable_symbols=[],
     )
 
-    _run(m._broadcast_reconciliation_alert(result, source="periodic"))
+    _run(m._TRADING_SUPERVISOR.publish_reconciliation_alert(result, source="periodic"))
 
     assert m.runtime_state.LAST_RECONCILIATION_ALERT is sent[0]["payload"]

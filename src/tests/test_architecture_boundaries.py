@@ -228,6 +228,12 @@ def test_composition_root_delegates_health_and_paper_portfolio_logic():
         assert f"def {helper}" not in app
 
 
+def test_composition_root_delegates_live_trading_supervision():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _build_algo_status" not in app
+    assert "def _broadcast_reconciliation_alert" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 
