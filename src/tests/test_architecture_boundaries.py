@@ -164,6 +164,11 @@ def test_composition_root_has_no_engine_cycle_wrapper():
     assert "def engine_loop" not in app
 
 
+def test_composition_root_has_no_print_logging_wrapper():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _print_log" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

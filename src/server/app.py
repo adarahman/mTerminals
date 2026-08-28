@@ -662,15 +662,13 @@ def fetch_index_quotes_smartapi_sync():
 # Each BrokerFeedManager owns its provider's mutable state. The asyncio loop
 # captured by main() lets a runtime switch start a feed that was not active
 # at boot.
-
-def _print_log(message):
-    print(message, flush=True)
+_REPORT = partial(print, flush=True)
 
 
 runtime_state.FEEDS = build_feed_managers(
     default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
     main_loop=lambda: runtime_state.MAIN_LOOP,
-    log=_print_log,
+    log=_REPORT,
 )
 
 
@@ -992,7 +990,7 @@ _INDEX_QUOTE_LOOP = IndexQuoteLoop(
     broadcast=broadcast,
     index_quotes=runtime_state.INDEX_QUOTES,
     poll_seconds=runtime_state.INDEX_QUOTE_SECONDS,
-    report=_print_log,
+    report=_REPORT,
 )
 
 
@@ -1004,7 +1002,7 @@ _FUNDS_POLLER = FundsPoller(
     set_last_funds=lambda value: setattr(runtime_state, "LAST_FUNDS", value),
     poll_seconds=runtime_state.FUNDS_POLL_SECONDS,
     spawn_task=feed_manager._create_background_task,
-    report=_print_log,
+    report=_REPORT,
 )
 
 
@@ -1024,7 +1022,7 @@ _RECONCILIATION_LOOP = ReconciliationLoop(
         result, source=source
     ),
     poll_seconds=POSITION_RECONCILE_SECONDS,
-    report=_print_log,
+    report=_REPORT,
 )
 
 
@@ -1033,14 +1031,14 @@ _ALGO_STATUS_LOOP = AlgoStatusLoop(
     broadcast=broadcast,
     set_last_status=lambda value: setattr(runtime_state, "LAST_ALGO_STATUS", value),
     poll_seconds=runtime_state.ALGO_STATUS_POLL_SECONDS,
-    report=_print_log,
+    report=_REPORT,
 )
 
 
 # ── node relay ───────────────────────────────────────────────────────────
 runtime_state.NODE_RELAY = NodeRelay(
     enabled=runtime_state.USE_RELAY,
-    report=_print_log,
+    report=_REPORT,
 )
 _NODE_RELAY = runtime_state.NODE_RELAY
 
