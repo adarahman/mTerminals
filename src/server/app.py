@@ -67,6 +67,7 @@ from application.market_service import (  # noqa: E402
     SerializedPipelineExecutor,
     SymbolSwitcher,
 )
+from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
 from server.routes import HttpRouteHandlers  # noqa: E402
 from server.http_runtime import build_http_runtime  # noqa: E402
 from server.health_api import (
@@ -492,17 +493,6 @@ async def broadcast(message):
     )
 
 
-# Dashboard-relay protocol and its independent cache/poll loop live in
-# server.bridge. The live coordinator supplies only current process state.
-def _fetch_bridge_futures(symbol, which, use_smartapi):
-    """Composition seam for the bridge's legacy/public futures sources."""
-    if use_smartapi:
-        from application.market_pipeline.futures import fetch_futures_wide
-
-        return fetch_futures_wide(symbol, which=which)
-    return market_api.fetch_public_futures(symbol, which)
-
-
 _BRIDGE = DashboardBridge(
     state=lambda: {
         "symbol": runtime_state.MARKET_SELECTION.symbol,
@@ -514,7 +504,10 @@ _BRIDGE = DashboardBridge(
     origin_allowed=_ORIGIN_POLICY,
     json_default=_json_default,
     market_api=market_api,
-    futures_fetcher=_fetch_bridge_futures,
+    broker_futures_fetcher=lambda symbol, which: fetch_futures_wide(
+        symbol, which=which
+    ),
+    public_futures_fetcher=market_api.fetch_public_futures,
 )
 BRIDGE_CONNECTED = _BRIDGE.clients
 

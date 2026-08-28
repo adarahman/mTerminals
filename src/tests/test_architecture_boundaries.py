@@ -212,6 +212,11 @@ def test_composition_root_has_no_market_selection_service_wrappers():
     assert "def switch_data_source" not in app
 
 
+def test_composition_root_has_no_bridge_futures_router():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "def _fetch_bridge_futures" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

@@ -36,13 +36,15 @@ class DashboardBridge:
         origin_allowed: Callable[[Any], bool],
         json_default: Callable[[Any], Any],
         market_api: Any,
-        futures_fetcher: Callable[[str, str, bool], Any],
+        broker_futures_fetcher: Callable[[str, str], Any],
+        public_futures_fetcher: Callable[[str, str], Any],
     ) -> None:
         self._state = state
         self._origin_allowed = origin_allowed
         self._json_default = json_default
         self._market_api = market_api
-        self._futures_fetcher = futures_fetcher
+        self._broker_futures_fetcher = broker_futures_fetcher
+        self._public_futures_fetcher = public_futures_fetcher
         self._clients = WebSocketClientHub()
         self._sectors = {"value": [], "fetched_at": 0.0}
         self._oi = {"ratio": None, "value": None, "fetched_at": 0.0}
@@ -65,11 +67,12 @@ class DashboardBridge:
     def _fetch_futures(self):
         state = self._state()
         try:
-            frame = self._futures_fetcher(
-                state["symbol"],
-                state["futures_expiry"],
-                state["use_smartapi"],
+            fetch = (
+                self._broker_futures_fetcher
+                if state["use_smartapi"]
+                else self._public_futures_fetcher
             )
+            frame = fetch(state["symbol"], state["futures_expiry"])
             if frame is None or frame.empty or frame.iloc[0]["LTP"] is None:
                 return None
             row = frame.iloc[0]
