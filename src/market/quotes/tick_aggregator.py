@@ -136,7 +136,7 @@ class TickAggregator:
             # Underlying spot tick, not an option leg — no strike to key on,
             # so this doesn't belong in _buffer. Goes out as top-level
             # spot/spotChange/spotChgPct fields instead, matching the exact
-            # shape run_pipeline_once()'s slower NSE/BSE poll already
+            # shape the slower NSE/BSE analytics poll already
             # produces, so nothing on the client (_wsState.spot,
             # priceChart.addTick, etc.) needs to change.
             ltp = tick.get("last_traded_price")

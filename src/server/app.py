@@ -196,7 +196,7 @@ def _resolve_default_pipeline_expiry(symbol):
 _initial_price_source = "AUTO"
 # Manual futures-expiry selector — "NEAR" (default), "NEXT", or "FAR".
 # Switched via ?futuresExpiry= on the WS URL (see ws_handler) and read
-# fresh into RuntimeConfig every tick by run_pipeline_once().
+# fresh into RuntimeConfig for every analytics pass.
 _initial_futures_expiry = "NEAR"
 _initial_expiry = (
     ARGS.expiry.strip()
@@ -447,7 +447,7 @@ runtime_state.TICK_ACTIVITY_EVENT = asyncio.Event()
 # snapshot handoff uses the same lock.
 runtime_state.MARKET_STREAM_LOCK = asyncio.Lock()
 
-# Real-export capture seam: run_pipeline_once() reads the dashboard payload
+# Real-export capture seam: AnalyticsPipelineRunner reads the dashboard payload
 # back out of mTerminals_json's own export, so the pipeline and the WS
 # stream share one serialization path. The wiring now lives in
 # server/payload_capture so this module stays a composition root.
@@ -459,7 +459,7 @@ _PAYLOAD_EXPORT_CAPTURE = install_payload_export_capture()
 # ── pipeline plumbing ────────────────────────────────────────────────────
 async def _run_pipeline_locked():
     """Run exactly one blocking pipeline pass without permitting overlap."""
-    return await _PIPELINE_EXECUTOR.run_blocking(run_pipeline_once)
+    return await _PIPELINE_EXECUTOR.run_blocking(_ANALYTICS_PIPELINE_RUNNER.run_once)
 
 
 async def _publish_pipeline_status(status, reason="", elapsed=None):
@@ -626,11 +626,6 @@ _ANALYTICS_PIPELINE_RUNNER = AnalyticsPipelineRunner(
     invoke=_OPTION_CHAIN_PIPELINE.run,
     captured_payload=lambda: _PAYLOAD_EXPORT_CAPTURE.payload,
 )
-
-
-def run_pipeline_once():
-    """Compatibility seam for application analytics invocation."""
-    return _ANALYTICS_PIPELINE_RUNNER.run_once()
 
 
 def _index_quote_fetcher():

@@ -1,7 +1,7 @@
 """Real-export capture seam for the dashboard payload.
 
 Extracted from server/app.py so the composition root no longer carries the
-capture wiring inline. run_pipeline_once() reads the dashboard payload back
+capture wiring inline. AnalyticsPipelineRunner reads the dashboard payload back
 out of mTerminals_json's own export so the pipeline and the WS stream share
 one serialization path.
 """
@@ -21,7 +21,7 @@ def install_payload_export_capture():
     """Build the capture adapter around the canonical exporter.
 
     Returns the PayloadExportCapture instance so callers (e.g.
-    server/app.py's run_pipeline_once) can reach .clear / .payload.
+    server/app.py's AnalyticsPipelineRunner) can reach .clear / .payload.
     """
     capture = PayloadExportCapture(
         exporter=dashboard_serializer.export_dashboard_json,
