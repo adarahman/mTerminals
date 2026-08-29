@@ -305,6 +305,16 @@ def test_composition_root_delegates_market_runtime_assembly():
     assert "def _schedule_node_relay" not in app
 
 
+def test_composition_root_delegates_server_application_assembly():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "MarketHistoryApi(" not in app
+    assert "RuntimeHealthSnapshot(" not in app
+    assert "HttpRouteHandlers(" not in app
+    assert "build_http_runtime(" not in app
+    assert "ServerRuntimeServices(" not in app
+    assert "ApplicationLifecycle(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

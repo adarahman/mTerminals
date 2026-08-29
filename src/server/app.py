@@ -40,30 +40,13 @@ from server.health import log_transition as _log_server_health_transition  # noq
 from server import feed_lifecycle as _feed_lifecycle  # noqa: E402
 from server import feed_manager  # noqa: E402
 from server.feed_expiry import matches_displayed_expiry as _matches_displayed_expiry  # noqa: E402
-from server.backtest_api import handle_backtest  # noqa: E402
 from server.bridge import DashboardBridge  # noqa: E402
-from server.market_history_api import (  # noqa: E402
-    MarketHistoryApi,
-    no_cache_middleware as history_no_cache_middleware,
-)
-from application.runtime import (  # noqa: E402
-    ApplicationLifecycle,
-)
+from server.market_history_api import no_cache_middleware  # noqa: E402
 from application.market_service import (  # noqa: E402
     DataSourceSwitcher,
     SymbolSwitcher,
 )
 from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
-from server.routes import HttpRouteHandlers  # noqa: E402
-from server.http_runtime import build_http_runtime  # noqa: E402
-from server.health_api import (
-    build_health_snapshot as _build_health_response,
-    health_handler as _health_response,
-    metrics_handler as _metrics_response,
-    broker_health as _broker_health,
-    log_health_transition as _log_health_transition,
-)
-
 from server.websocket_security import (  # noqa: E402
     build_allowed_origins,
     host_is_loopback,
@@ -81,16 +64,15 @@ from application import selection_state  # noqa: E402
 from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
 from server.paper_portfolio import PaperPortfolioService  # noqa: E402
-from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
 from server.analytics_runtime import (  # noqa: E402
     AnalyticsRuntime,
     build_broker_market_adapters,
 )
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import _instrument_key  # noqa: E402
+from backtest.replay import run_backtest  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
 from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
-from backtest.replay import run_backtest  # noqa: E402
 from nse_eod_fetch import fetch_all_eod, is_trading_day  # noqa: E402
 from analytics.nse_fii_dii_flow_fetch import record_today_flow  # noqa: E402
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker  # noqa: E402
@@ -115,12 +97,12 @@ from server.dashboard_transport import (  # noqa: E402
 )
 from server.runtime_bootstrap import initialize_runtime_state  # noqa: E402
 from server.market_runtime_assembly import build_market_runtime  # noqa: E402
+from server.application_assembly import build_server_application  # noqa: E402
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
     report_failed_task as _report_failed_task,
 )
-from server.runtime_services import ServerRuntimeServices, flush_oi_history  # noqa: E402
 logger = logging.getLogger("mterminals.server")
 configure_lot_size_resolver(_smartapi_lot_size)
 
@@ -406,69 +388,31 @@ runtime_state.DASHBOARD_WS_HANDLER = _DASHBOARD_TRANSPORT.handler
 
 
 # ── HTTP handlers (thin adapters; logic lives in server/* modules) ───────
-_HISTORY_API = MarketHistoryApi(
-    state=lambda: {
-        "symbol": runtime_state.MARKET_SELECTION.symbol,
-        "broker_services_enabled": BROKER_SERVICES_ENABLED,
-        "index_tokens": _SMARTAPI_INDEX_TOKENS,
-    },
-    # Resolved at request time so test seams and runtime configuration never
-    # leave the API holding a stale provider function.
-    get_candle_data=lambda *args, **kwargs: get_candle_data(*args, **kwargs),
-    get_index_candles=lambda *args, **kwargs: get_index_candles(*args, **kwargs),
-)
-no_cache_middleware = history_no_cache_middleware
-
-
-_HEALTH_SNAPSHOT = RuntimeHealthSnapshot(
-    runtime_state=runtime_state,
-    feed_allowed=feed_manager._feed_allowed,
-    market_session_status=selection_state._market_session_status,
-    build_snapshot=_build_health_response,
-)
-
-
-runtime_state.HTTP_ROUTE_HANDLERS = HttpRouteHandlers(
-    history_api=_HISTORY_API,
-    backtest_response=handle_backtest,
-    default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    run_backtest=lambda *args, **kwargs: run_backtest(*args, **kwargs),
-    health_response=_health_response,
-    health_snapshot=_HEALTH_SNAPSHOT.build,
-    record_health_transition=lambda snapshot: _log_health_transition(snapshot),
-    metrics_response=_metrics_response,
-    metrics=runtime_state.METRICS,
-)
-
-# ── entry point ──────────────────────────────────────────────────────────
-_HTTP_RUNTIME = build_http_runtime(
-    health=runtime_state.HTTP_ROUTE_HANDLERS.health,
-    broker_health=_broker_health,
-    metrics=runtime_state.HTTP_ROUTE_HANDLERS.metrics,
-    websocket=runtime_state.DASHBOARD_WS_HANDLER,
-    bridge_websocket=_BRIDGE.handle,
-    spot_history=runtime_state.HTTP_ROUTE_HANDLERS.spot_history,
-    history=runtime_state.HTTP_ROUTE_HANDLERS.history,
-    backtest=runtime_state.HTTP_ROUTE_HANDLERS.backtest,
-    lot_sizes=runtime_state.HTTP_ROUTE_HANDLERS.lot_sizes,
-    host=WS_HOST,
-    port=HTTP_PORT,
-    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    middleware=no_cache_middleware,
-)
-
-_RUNTIME_SERVICES = ServerRuntimeServices(
-    host=WS_HOST,
+_SERVER_APPLICATION = build_server_application(
     runtime_state=runtime_state,
     feed_manager=feed_manager,
+    host=WS_HOST,
+    http_port=HTTP_PORT,
+    middleware=no_cache_middleware,
+    dashboard_websocket=runtime_state.DASHBOARD_WS_HANDLER,
+    bridge=_BRIDGE,
+    broker_services_enabled=BROKER_SERVICES_ENABLED,
+    index_tokens=_SMARTAPI_INDEX_TOKENS,
+    get_candle_data=get_candle_data,
+    get_index_candles=get_index_candles,
+    run_backtest_call=lambda *args, **kwargs: run_backtest(*args, **kwargs),
+    feed_allowed=feed_manager._feed_allowed,
+    market_session_status=selection_state._market_session_status,
     host_is_loopback=host_is_loopback,
     index_quotes=_INDEX_QUOTE_LOOP.run,
-    bridge=_BRIDGE.run,
     algo_status=_ALGO_STATUS_LOOP.run,
     reconcile=_RECONCILIATION_LOOP.run,
     live_trading_enabled=LIVE_TRADING_ENABLED,
-    flush_history=flush_oi_history,
 )
+_HISTORY_API = _SERVER_APPLICATION.history_api
+_HEALTH_SNAPSHOT = _SERVER_APPLICATION.health_snapshot
+_HTTP_RUNTIME = _SERVER_APPLICATION.http
+_RUNTIME_SERVICES = _SERVER_APPLICATION.services
 
 # Wire app-level dependencies into the feed orchestration module (kept free
 # of a circular import on the websocket broadcast + paper-trading engine).
@@ -479,22 +423,7 @@ configure_feed_orchestration(
 
 
 async def main():
-    from infrastructure.logging import configure_logging
-
-    lifecycle = ApplicationLifecycle(
-        validate_startup=_RUNTIME_SERVICES.validate_startup,
-        configure_logging=configure_logging,
-        start_http_server=_HTTP_RUNTIME.start,
-        set_main_loop=_RUNTIME_SERVICES.set_main_loop,
-        start_live_services=_RUNTIME_SERVICES.start_live_services,
-        background_jobs=_RUNTIME_SERVICES.background_jobs,
-        create_background_task=feed_manager._create_background_task,
-        run_engine=runtime_state.MARKET_ENGINE_CYCLE.run_forever,
-        background_tasks=lambda: runtime_state.BACKGROUND_TASKS,
-        close_relay=lambda: runtime_state.NODE_RELAY.close(),
-        flush_state=_RUNTIME_SERVICES.flush_state,
-    )
-    await lifecycle.run()
+    await _SERVER_APPLICATION.run()
 
 
 if __name__ == "__main__":
