@@ -28,112 +28,11 @@ import asyncio
 import os
 import threading
 import time
-from dataclasses import dataclass
 from typing import Callable, Optional
-
-import numpy as np
 
 from market.instruments import instrument_from_execution_resolution
 from risk.account_guard import pnl_from_positions, projected_open_lots_from_positions
-
-
-@dataclass(frozen=True)
-class OrderIntent:
-    symbol: str
-    instrument_type: str
-    expiry: str
-    side: str
-    order_type: str
-    qty_lots: int
-    strike: Optional[float]
-    limit_price: Optional[float]
-    client_order_id: object
-    raw: dict
-
-    @property
-    def wants_live(self) -> bool:
-        # Live requires the client to deliberately opt in PER ORDER —
-        # live=true AND confirmed=true (a UI confirm-modal click), not a
-        # global "everything is now live" toggle from the client's side.
-        return bool(self.raw.get("live")) and bool(self.raw.get("confirmed"))
-
-
-def parse_order_intent(payload: dict) -> OrderIntent:
-    """Coerce a raw place_order payload. Malformed numbers become the
-    falsy/None sentinels validation expects — never exceptions."""
-    symbol = (payload.get("symbol") or "").strip().upper()
-    instrument_type = str(payload.get("instrument_type") or "INDEX").strip().upper()
-    expiry = str(payload.get("expiry") or "").strip()
-    side = str(payload.get("side") or "").strip().upper()
-    order_type = str(payload.get("order_type") or "MARKET").strip().upper()
-    client_order_id = payload.get("client_order_id")
-
-    try:
-        qty_value = float(payload.get("qty_lots") or 0)
-        qty_lots = (
-            int(qty_value) if np.isfinite(qty_value) and qty_value.is_integer() else 0
-        )
-    except (TypeError, ValueError):
-        qty_lots = 0
-
-    try:
-        strike_raw = payload.get("strike")
-        strike = None if strike_raw in (None, "") else float(strike_raw)
-        if strike is not None and not np.isfinite(strike):
-            strike = None
-    except (TypeError, ValueError):
-        strike = None
-
-    try:
-        limit_raw = payload.get("limit_price")
-        limit_price = None if limit_raw in (None, "") else float(limit_raw)
-        if limit_price is not None and not np.isfinite(limit_price):
-            limit_price = None
-    except (TypeError, ValueError):
-        limit_price = None
-
-    return OrderIntent(
-        symbol=symbol,
-        instrument_type=instrument_type,
-        expiry=expiry,
-        side=side,
-        order_type=order_type,
-        qty_lots=qty_lots,
-        strike=strike,
-        limit_price=limit_price,
-        client_order_id=client_order_id,
-        raw=payload,
-    )
-
-
-def validate_order_intent(intent: OrderIntent) -> Optional[str]:
-    """Rejection reason for malformed intent, else None.
-
-    The old mapping interpreted every side other than BUY as SELL, so a
-    missing/malformed side could become a real sell order. Malformed intent
-    is rejected before building price keys, touching paper positions,
-    consuming the live rate limit, or calling the broker."""
-    if not intent.symbol:
-        return "symbol is required"
-    if intent.side not in ("BUY", "SELL"):
-        return f"unsupported side {intent.side or '(missing)'}"
-    if intent.instrument_type not in ("CE", "PE", "FUT", "EQ", "INDEX"):
-        return f"unsupported instrument_type {intent.instrument_type}"
-    if intent.order_type not in ("MARKET", "LIMIT"):
-        return f"unsupported order_type {intent.order_type}"
-    if intent.qty_lots < 1:
-        return "qty_lots must be a positive whole number"
-    if intent.instrument_type in ("CE", "PE") and (
-        not intent.expiry or intent.strike is None or intent.strike <= 0
-    ):
-        return "CE/PE orders require a valid expiry and positive strike"
-    if intent.instrument_type == "FUT" and not intent.expiry:
-        return "FUT orders require an expiry"
-    if intent.order_type == "LIMIT" and (
-        intent.limit_price is None or intent.limit_price <= 0
-    ):
-        return "LIMIT orders require a positive finite limit_price"
-    return None
+from server.order_intent import OrderIntent
 
 
 class LiveOrderGateway:

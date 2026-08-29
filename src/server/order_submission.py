@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable
 
-from server.order_gateway import parse_order_intent, validate_order_intent
+from server.order_intent import parse_order_intent, validate_order_intent
 
 
 class OrderSubmissionService:
@@ -75,11 +75,14 @@ class OrderSubmissionService:
             current_ltp=current_prices.get(key),
             client_order_id=intent.client_order_id,
         )
+        displayed_price = (
+            order.fill_price if order.fill_price is not None else intent.limit_price
+        )
         self._report(
             f"[paper-trading] {order.status}: {intent.symbol} {intent.side} "
             f"{intent.qty_lots} lot(s) {intent.instrument_type} {intent.expiry} "
             f"{intent.strike} "
-            f"@ {order.fill_price if order.fill_price is not None else intent.limit_price}"
+            f"@ {displayed_price}"
             + (f" — {order.reject_reason}" if order.reject_reason else "")
         )
         await self._portfolio_broadcast(current_prices)
