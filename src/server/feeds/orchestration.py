@@ -15,12 +15,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime
 
-from server import feed_manager
 from server import runtime_state
-from server.feed_expiry import matches_displayed_expiry as _matches_displayed_expiry
-from server.live_feed_state import merge_live_feed_update
+from server.feeds import live_updates
 
 from server.feeds.smartapi import (  # noqa: E402
     FeedState as _SmartApiFeedState,
@@ -56,19 +53,14 @@ from market.providers.nse_bse import _BSE_SYMBOLS
 from brokers.market_data import market_data
 from server.broker_services import SmartTickStream, EXCHANGE_TYPE
 
-# Injected by the composition root at startup (server/app.py) to avoid a
-# circular import on the websocket broadcast + paper-trading engine.
-_BROADCAST = None
-_PORTFOLIO_BROADCASTER = None
-
 _LOGGER = logging.getLogger("mterminals.server.feeds.orchestration")
 
 
 def configure_feed_orchestration(*, broadcast, portfolio_broadcaster):
     """Bind the app-level dependencies this module calls at runtime."""
-    global _BROADCAST, _PORTFOLIO_BROADCASTER
-    _BROADCAST = broadcast
-    _PORTFOLIO_BROADCASTER = portfolio_broadcaster
+    live_updates.configure(
+        broadcast=broadcast, portfolio_broadcaster=portfolio_broadcaster
+    )
 
 
 def _print_log(message):
@@ -76,15 +68,7 @@ def _print_log(message):
 
 
 def _parse_any_expiry(expiry_str):
-    """Normalize an expiry string to a date, accepting SmartAPI's format
-    ('31JUL2026'), option_chain_json's ('31-Jul-2026'), Upstox's ISO
-    ('2026-07-31'), or Shoonya's ('DD-Mon-YYYY'). None if none match."""
-    for fmt in ("%d%b%Y", "%d-%b-%Y", "%d-%B-%Y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(expiry_str, fmt).date()
-        except (ValueError, TypeError):
-            continue
-    return None
+    return live_updates.parse_expiry(expiry_str)
 
 
 def _matches_current_feed_expiry(current_expiry, payload_expiry_str):
@@ -94,7 +78,9 @@ def _matches_current_feed_expiry(current_expiry, payload_expiry_str):
     guaranteed to agree (NEAR/MONTHLY tab active, etc.); merging ticks for
     the wrong expiry would silently show the wrong contract's prices, so
     this gate must pass before any state merge."""
-    return _matches_displayed_expiry(
+    from server.feed_expiry import matches_displayed_expiry
+
+    return matches_displayed_expiry(
         current_expiry, payload_expiry_str, _parse_any_expiry
     )
 
@@ -175,11 +161,7 @@ def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None
 
 # ── live-tick merge/broadcast (shared by all providers) ──────────────────
 async def _sync_live_feed_and_broadcast(provider, message, matches_expiry_fn):
-    """Apply a normalized provider tick only while that provider is active."""
-    if not feed_manager._feed_allowed(provider):
-        return
-    async with runtime_state.MARKET_STREAM_LOCK:
-        await _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn)
+    await live_updates.sync_and_broadcast(provider, message)
 
 
 async def _smartapi_sync_and_broadcast(message):
@@ -207,54 +189,7 @@ async def _shoonya_sync_and_broadcast(message):
 
 
 async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
-    """Merge a live tick delta into runtime_state.LAST_PAYLOAD/runtime_state.LAST_SENT before
-    broadcasting it.
-
-    Without the merge, a newly-connecting client's "full" snapshot would
-    miss whatever the feed already pushed to existing clients, and the next
-    engine_loop tick could re-broadcast an older NSE-polled value over a
-    fresher feed tick (visible flicker backward). If the feed's expiry
-    doesn't match what's displayed, the chain portion of the delta is
-    STRIPPED before broadcasting: applyDelta() merges keyed chain rows by
-    strike alone with no concept of expiry, and strikes overlap heavily
-    across expiries, so a stale-expiry row would corrupt the displayed
-    contract's LTP/OI. That window opens right after a switch —
-    runtime_state.LAST_PAYLOAD clears immediately but the background unsubscribe hasn't
-    finished. Spot isn't expiry-tied and still broadcasts every time.
-
-    The paper-trading fast path below fires off the same fresh prices the
-    client just received (throttled by runtime_state.PORTFOLIO_POLL_SECONDS to avoid
-    flooding clients during tick bursts), including a pending-LIMIT check
-    so fills don't lag the feed by --poll-seconds."""
-    if _BROADCAST is None:
-        return
-    feed_update_applied = False
-    try:
-        message, feed_update_applied = merge_live_feed_update(
-            message, runtime_state.LAST_PAYLOAD, runtime_state.LAST_SENT, matches_expiry_fn,
-            price_source=runtime_state.MARKET_SELECTION.price_source,
-        )
-    except Exception as e:
-        # Sync is best-effort consistency — never let a sync bug block the
-        # tick from reaching clients.
-        print(f"[live-feed] state sync failed (broadcasting anyway): {e}", flush=True)
-
-    if feed_update_applied and runtime_state.LAST_PAYLOAD is not None:
-        runtime_state.LAST_PAYLOAD_AT = datetime.now().astimezone()
-    await _BROADCAST(message)
-
-    now_ts = time.monotonic()
-    if now_ts - runtime_state.LAST_PORTFOLIO_BROADCAST_TS >= runtime_state.PORTFOLIO_POLL_SECONDS:
-        runtime_state.LAST_PORTFOLIO_BROADCAST_TS = now_ts
-        try:
-            if _PORTFOLIO_BROADCASTER is not None:
-                await _PORTFOLIO_BROADCASTER(runtime_state.LAST_PAYLOAD)
-        except Exception as e:
-            # A paper-trading hiccup must never take down the feed.
-            print(
-                f"[paper-trading] fast-path portfolio broadcast failed: {e}",
-                flush=True,
-            )
+    await live_updates._sync_and_broadcast_locked(message, matches_expiry_fn)
 
 
 # ── provider feed adapters + managers ────────────────────────────────────
