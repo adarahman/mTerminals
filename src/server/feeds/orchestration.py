@@ -17,40 +17,34 @@ import threading
 import time
 
 from server import runtime_state
-from server.feeds import live_updates
+from server.feeds import live_updates, resolution
 
 from server.feeds.smartapi import (  # noqa: E402
     FeedState as _SmartApiFeedState,
-    resolve_chain_tokens as _resolve_smartapi_feed_tokens,
     start_new_feed as _start_smartapi_feed_new,
     stop_feed as _stop_smartapi_feed,
     switch_existing_feed as _switch_smartapi_feed_existing,
 )
 from server.feeds.shoonya import (  # noqa: E402
     FeedState as _ShoonyaFeedState,
-    resolve_chain_tokens as _resolve_shoonya_feed_tokens,
     start_new_feed as _start_shoonya_feed_new,
     stop_feed as _stop_shoonya_feed,
     switch_existing_feed as _switch_shoonya_feed_existing,
 )
 from server.feeds.upstox import (  # noqa: E402
     FeedState as _UpstoxFeedState,
-    resolve_chain_tokens as _resolve_upstox_feed_tokens,
     start_new_feed as _start_upstox_feed_new,
     stop_feed as _stop_upstox_feed,
     switch_existing_feed as _switch_upstox_feed_existing,
 )
 from server.feeds.kotak import (  # noqa: E402
     FeedState as _KotakFeedState,
-    resolve_chain_tokens as _resolve_kotak_feed_tokens,
     start_new_feed as _start_kotak_feed_new,
     stop_feed as _stop_kotak_feed,
     switch_existing_feed as _switch_kotak_feed_existing,
 )
 
 from market.quotes.tick_aggregator import TickAggregator
-from market.providers.nse_bse import _BSE_SYMBOLS
-from brokers.market_data import market_data
 from server.broker_services import SmartTickStream, EXCHANGE_TYPE
 
 _LOGGER = logging.getLogger("mterminals.server.feeds.orchestration")
@@ -108,55 +102,18 @@ def _current_feed_expiry(provider):
     return manager.current_expiry if manager is not None else None
 
 
-def _resolve_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
-    return _resolve_smartapi_feed_tokens(
-        target_symbol,
-        strikes_around_atm,
-        expiry,
-        market_data=market_data,
-        is_bse=lambda symbol: symbol in _BSE_SYMBOLS,
-        parse_expiry=_parse_any_expiry,
-        resolve_futures=_resolve_futures_token,
-        report=_print_log,
+def _resolve_chain_tokens(symbol, strikes_around_atm, expiry=None):
+    return resolution.smartapi(
+        symbol, strikes_around_atm, expiry, report=_print_log
     )
 
 
-def _resolve_futures_token(target_symbol, exchange):
-    """Resolves target_symbol's current-month futures (exchange, token) for
-    the SmartAPI feed's VWAP/volume subscription — SEPARATE from
-    _resolve_live_order_token()'s FUT branch (read-only subscription,
-    lower stakes). NOT WIRED YET: smartapi_client exposes neither a
-    FUTURES_TOKENS dict nor a find_future_token(); returns (None, None)
-    until that's resolved — subscription code treats None as "skip"."""
-    return None, None
+def _resolve_upstox_chain_tokens(symbol, strikes_around_atm, expiry=None):
+    return resolution.upstox(symbol, strikes_around_atm, expiry, report=_print_log)
 
 
-def _resolve_upstox_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
-    return _resolve_upstox_feed_tokens(
-        target_symbol,
-        strikes_around_atm,
-        expiry,
-        is_bse=lambda symbol: symbol in _BSE_SYMBOLS,
-        parse_expiry=_parse_any_expiry,
-        report=_print_log,
-    )
-
-
-def _resolve_shoonya_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
-    """Builds the 'EXCH|TOKEN' subscribe-string set for target_symbol.
-    Talks to brokers/shoonya_market_data.py directly (not through the
-    market_data singleton) so the feed works even when MARKET_DATA_PROVIDER
-    points the singleton elsewhere. Keyed by 'EXCH|TOKEN' — what
-    ShoonyaTickStream.subscribe() expects and what its ticks report back as
-    `token` after stripping the exchange prefix."""
-    return _resolve_shoonya_feed_tokens(
-        target_symbol,
-        strikes_around_atm,
-        expiry,
-        lambda symbol: symbol in _BSE_SYMBOLS,
-        _parse_any_expiry,
-        _print_log,
-    )
+def _resolve_shoonya_chain_tokens(symbol, strikes_around_atm, expiry=None):
+    return resolution.shoonya(symbol, strikes_around_atm, expiry, report=_print_log)
 
 
 # ── live-tick merge/broadcast (shared by all providers) ──────────────────
@@ -312,13 +269,8 @@ def _kotak_feed_matches_displayed_expiry(payload_expiry_str):
 
 
 def _resolve_kotak_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
-    return _resolve_kotak_feed_tokens(
-        target_symbol,
-        strikes_around_atm,
-        expiry,
-        is_bse=lambda symbol: symbol in _BSE_SYMBOLS,
-        parse_expiry=_parse_any_expiry,
-        report=_print_log,
+    return resolution.kotak(
+        target_symbol, strikes_around_atm, expiry, report=_print_log
     )
 
 
