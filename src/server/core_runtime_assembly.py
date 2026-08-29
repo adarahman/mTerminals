@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from application.market_service import DataSourceSwitcher, SymbolSwitcher
+from application.dashboard import serializer as dashboard_serializer
+from infrastructure.payload_capture import PayloadExportCapture
 from server.analytics_runtime import AnalyticsRuntime, build_broker_market_adapters
 from server.bridge import DashboardBridge
 from server.dashboard_transport import DashboardBroadcaster
 from server.feeds.orchestration import build_feed_managers
 from server.paper_portfolio import PaperPortfolioService
-from server.payload_capture import install_payload_export_capture
+
+
+def _build_payload_capture() -> PayloadExportCapture:
+    def load_exported_payload():
+        with open("mTerminals.json") as exported:
+            return json.load(exported)
+
+    return PayloadExportCapture(
+        exporter=dashboard_serializer.export_dashboard_json,
+        fallback_loader=load_exported_payload,
+        export_overrides={"out_path": "mTerminals.json"},
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +62,7 @@ def build_core_runtime(
     feed_manager: Any,
     report: Callable[..., Any],
 ) -> CoreRuntime:
-    capture = install_payload_export_capture()
+    capture = _build_payload_capture()
     broadcaster = DashboardBroadcaster(
         runtime_state=runtime_state,
         encode=encode,
