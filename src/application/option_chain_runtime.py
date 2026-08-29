@@ -28,8 +28,6 @@ from concurrent.futures import (
     TimeoutError as FutureTimeoutError,
     as_completed,
 )
-from datetime import date, datetime, time as dtime
-
 import pandas as pd
 
 from decision.engine import build_engine_result
@@ -40,10 +38,7 @@ from market.expiry.service import (
     _nearest_Tuesday,
     make_expiry_manager,
 )
-from analytics.index_contributors import (
-    SYMBOL_TO_INDEX_BASKET,
-    _compute_index_contributors,
-)
+from analytics.index_contributors import _compute_index_contributors
 from market.instruments.lot_sizes import LOT_SIZES
 
 from market.providers.option_chain import PublicOptionChainAdapter
@@ -54,6 +49,7 @@ from oi.oi_analysis import (
     read_last_json_snapshot,
 )
 from application.pipeline_config import RuntimeConfig
+from application.market_pipeline.spot_selection import select_runtime_spot
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
@@ -331,104 +327,7 @@ def _build_expiry_bundle(
 # =====================================================================
 
 
-def _select_runtime_spot(df, spot, df_fut, all_indices, runtime_config):
-    """Choose the price actually fed into analytics.
-
-    AUTO is intentionally broker-neutral: when a broker cash/index quote is
-    available, it is the best freshness check against NSE's option-chain
-    underlyingValue. A material mismatch means the NSE field is stale. If no
-    live cash quote exists, AUTO falls back to futures during the final cash
-    session window — and ONLY that window (15:15-15:30 on an actual trading
-    day). EQ/FUT remain explicit force modes.
-
-    Bug fixed here: the FUT fallback used to be `now.time() >= dtime(15,15)`
-    with no upper bound and no trading-day check, so once past 15:15 it
-    stayed true for the rest of the day, every evening, and every non-
-    trading day (weekends/holidays) indefinitely — not just the narrow
-    close window the docstring describes. Combined with live_cash
-    legitimately being 0 whenever no live feed is connected (market
-    closed), AUTO would then permanently select FUT any time the
-    dashboard was viewed outside 9:15-15:15, showing the same futures
-    price in both the main spot readout and the FUT ticker pill with no
-    way to self-correct until a live feed reconnected.
-    """
-    source = runtime_config.price_source.strip().upper()
-    eq = float(spot or 0.0)
-
-    def _live_index_quote(symbol):
-        for row in all_indices or []:
-            if str(row.get("Symbol", "")).strip().upper() != symbol.upper():
-                continue
-            for key in ("Last Price", "ltp", "LTP", "last_price"):
-                try:
-                    value = float(row.get(key))
-                except (TypeError, ValueError):
-                    continue
-                if value > 0:
-                    return value
-        return 0.0
-
-    def _futures_ltp(frame):
-        if frame is None or getattr(frame, "empty", True):
-            return 0.0
-        row = frame.iloc[0]
-        for key in ("LTP", "ltp", "Last Price", "last_price", "lastPrice"):
-            try:
-                value = float(row.get(key))
-            except (TypeError, ValueError):
-                continue
-            if value > 0:
-                return value
-        return 0.0
-
-    from nse_eod_fetch import is_trading_day as _is_trading_day
-
-    live_cash = (
-        _live_index_quote(runtime_config.symbol)
-        if runtime_config.broker_enabled
-        else 0.0
-    )
-    fut_ltp = _futures_ltp(df_fut)
-    selected = eq
-    used = "EQ"
-
-    if source == "FUT":
-        if fut_ltp > 0:
-            selected, used = fut_ltp, "FUT"
-    elif source == "AUTO":
-        # A broker cash/index quote is a direct freshness reference. 0.05%
-        # is deliberately wider than ordinary quote noise but far smaller
-        # than the stale-vs-live moves seen when NSE's field stops updating.
-        if live_cash > 0 and (eq <= 0 or abs(live_cash - eq) / max(eq, 1.0) > 0.0005):
-            selected, used = live_cash, "LIVE_EQ"
-        elif live_cash > 0 and eq <= 0:
-            selected, used = live_cash, "LIVE_EQ"
-        elif (
-            dtime(15, 15) <= datetime.now().time() <= dtime(15, 30)
-            and _is_trading_day(datetime.now())
-            and fut_ltp > 0
-        ):
-            selected, used = fut_ltp, "FUT"
-
-    if selected <= 0:
-        raise RuntimeError(
-            f"No usable spot price for {runtime_config.symbol}: "
-            f"EQ={eq}, FUT={fut_ltp}"
-        )
-
-    if used != "EQ":
-        df = df.copy()
-        df["Spot"] = selected
-        logger.warning(
-            "[price-source] %s -> %s for %s (EQ=%s, live=%s, FUT=%s)",
-            source,
-            used,
-            runtime_config.symbol,
-            eq,
-            live_cash or None,
-            fut_ltp or None,
-        )
-    return df, selected, used
+_select_runtime_spot = select_runtime_spot
 
 
 def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=None):

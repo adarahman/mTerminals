@@ -35,7 +35,8 @@ def test_futures_reference_never_replaces_option_spot():
     source = (
         Path(__file__).resolve().parents[1]
         / "application"
-        / "option_chain_runtime.py"
+        / "market_pipeline"
+        / "spot_selection.py"
     ).read_text()
     assert 'if used != "EQ":' in source
     assert 'df["Spot"] = selected' in source
