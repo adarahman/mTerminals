@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from collections.abc import Callable
+from datetime import date, datetime
 
 from server import feed_manager, runtime_state
-from server.feed_expiry import matches_displayed_expiry
 from server.live_feed_state import merge_live_feed_update
 
 
@@ -28,6 +28,19 @@ def parse_expiry(expiry_str):
         except (ValueError, TypeError):
             continue
     return None
+
+
+def matches_displayed_expiry(
+    streamed_expiry: str | None,
+    payload_expiry: str | None,
+    parse: Callable[[str], date | None] = parse_expiry,
+) -> bool:
+    """True only when a streamed tick belongs to the displayed expiry."""
+    if not streamed_expiry or not payload_expiry:
+        return False
+    streamed_date = parse(streamed_expiry)
+    payload_date = parse(payload_expiry)
+    return streamed_date is not None and streamed_date == payload_date
 
 
 def matches_current_expiry(provider, payload_expiry_str):

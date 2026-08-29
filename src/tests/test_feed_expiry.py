@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from server.feed_expiry import matches_displayed_expiry
+from server.feeds.live_updates import matches_displayed_expiry
 
 
 def _parse(value):
