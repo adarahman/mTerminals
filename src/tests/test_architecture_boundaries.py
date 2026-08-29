@@ -295,6 +295,16 @@ def test_composition_root_delegates_runtime_bootstrap():
     assert "runtime_state.SYMBOL_SWITCH_EVENT =" not in app
 
 
+def test_composition_root_delegates_market_runtime_assembly():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "IndexQuoteLoop(" not in app
+    assert "FundsPoller(" not in app
+    assert "ReconciliationLoop(" not in app
+    assert "MarketEngineCycle(" not in app
+    assert "def _schedule_auto_execution" not in app
+    assert "def _schedule_node_relay" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

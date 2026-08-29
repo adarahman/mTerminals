@@ -50,14 +50,7 @@ from application.runtime import (  # noqa: E402
     ApplicationLifecycle,
 )
 from application.market_service import (  # noqa: E402
-    CanonicalPayloadPublisher,
-    DailyMarketScheduler,
     DataSourceSwitcher,
-    LiveFeedAggregatorRegistry,
-    MarketEngineCycle,
-    MarketPipelineService,
-    MarketTickPacer,
-    OiBaselineSynchronizer,
     SymbolSwitcher,
 )
 from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
@@ -89,7 +82,6 @@ from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
 from server.paper_portfolio import PaperPortfolioService  # noqa: E402
 from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
-from server.market_cycle_operations import MarketCycleOperations  # noqa: E402
 from server.analytics_runtime import (  # noqa: E402
     AnalyticsRuntime,
     build_broker_market_adapters,
@@ -104,13 +96,6 @@ from analytics.nse_fii_dii_flow_fetch import record_today_flow  # noqa: E402
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker  # noqa: E402
 from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
 from server.cli_args import build_arg_parser  # noqa: E402
-from server.background_loops import (  # noqa: E402
-    AlgoStatusLoop,
-    FundsPoller,
-    IndexQuoteLoop,
-    NodeRelay,
-    ReconciliationLoop,
-)
 from server.live_trading_runtime import (  # noqa: E402
     LiveTradingConfig,
     build_live_trading_runtime,
@@ -129,6 +114,7 @@ from server.dashboard_transport import (  # noqa: E402
     build_dashboard_transport,
 )
 from server.runtime_bootstrap import initialize_runtime_state  # noqa: E402
+from server.market_runtime_assembly import build_market_runtime  # noqa: E402
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
@@ -356,158 +342,44 @@ _TRADING_SUPERVISOR = _LIVE_TRADING_RUNTIME.supervisor
 _resolve_live_order_token = _LIVE_TRADING_RUNTIME.resolve_token
 
 
-# ── background pollers ───────────────────────────────────────────────────
-# Pushes {"type":"indexQuotes",...}; dashboard.js's generic handler lands it
-# at wsState.indexQuotes, which paper-trading.js reads once Live mode is on.
-# (VIX is never the active SYMBOL, so it's always included in "others".)
-_INDEX_QUOTE_LOOP = IndexQuoteLoop(
-    enabled=runtime_state.USE_INDEX_QUOTES,
-    symbols=INDEX_TICKER_SYMBOLS,
-    active_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    get_spot_quote=market_data.get_spot_quote,
-    broadcast=broadcast,
-    index_quotes=runtime_state.INDEX_QUOTES,
-    poll_seconds=runtime_state.INDEX_QUOTE_SECONDS,
-    report=_REPORT,
-)
-
-
-# Pushes {"type":"funds",...}; dashboard.js's generic handler lands it at
-# wsState.funds, which paper-trading.js reads once Live mode is on.
-_FUNDS_POLLER = FundsPoller(
+_MARKET_RUNTIME = build_market_runtime(
+    runtime_state=runtime_state,
+    market_data=market_data,
     get_funds=smartapi_get_funds,
-    broadcast=broadcast,
-    set_last_funds=lambda value: setattr(runtime_state, "LAST_FUNDS", value),
-    poll_seconds=runtime_state.FUNDS_POLL_SECONDS,
-    spawn_task=feed_manager._create_background_task,
-    report=_REPORT,
-)
-
-
-# Gated on LIVE_TRADING_ENABLED at the main()/task-creation call site (with
-# live trading off there's nothing real to reconcile), but NOT tied to the
-# Live-mode UI toggle — silent drift happens whether or not anyone
-# currently has the pill on.
-_RECONCILIATION_LOOP = ReconciliationLoop(
     get_order_book=smartapi_get_order_book,
     get_positions=smartapi_get_positions,
-    reconciler=_POSITION_RECONCILER,
+    position_reconciler=_POSITION_RECONCILER,
+    position_reconcile_seconds=POSITION_RECONCILE_SECONDS,
+    trading_supervisor=_TRADING_SUPERVISOR,
+    auto_executor=_AUTO_EXECUTOR,
     lot_sizes=PT_LOT_SIZES,
-    set_last_positions=lambda value: setattr(
-        runtime_state, "LAST_LIVE_POSITIONS", value
-    ),
-    broadcast_alert=_TRADING_SUPERVISOR.publish_reconciliation_alert,
-    poll_seconds=POSITION_RECONCILE_SECONDS,
-    report=_REPORT,
-)
-
-
-_ALGO_STATUS_LOOP = AlgoStatusLoop(
-    build_status=_TRADING_SUPERVISOR.build_status,
+    index_symbols=INDEX_TICKER_SYMBOLS,
     broadcast=broadcast,
-    set_last_status=lambda value: setattr(runtime_state, "LAST_ALGO_STATUS", value),
-    poll_seconds=runtime_state.ALGO_STATUS_POLL_SECONDS,
     report=_REPORT,
-)
-
-
-# ── node relay ───────────────────────────────────────────────────────────
-runtime_state.NODE_RELAY = NodeRelay(
-    enabled=runtime_state.USE_RELAY,
-    report=_REPORT,
-)
-_NODE_RELAY = runtime_state.NODE_RELAY
-
-# ── engine loop ──────────────────────────────────────────────────────────
-_LIVE_FEED_AGGREGATORS = LiveFeedAggregatorRegistry(managers=lambda: runtime_state.FEEDS)
-
-
-_MARKET_CYCLE_OPERATIONS = MarketCycleOperations(
-    pipeline_status=runtime_state.PIPELINE_STATUS,
-    broadcast=broadcast,
-    use_broker_services=lambda: runtime_state.USE_SMARTAPI,
-    live_feed_provider=lambda: runtime_state.LIVE_FEED_PROVIDER,
-    data_source=lambda: runtime_state.MARKET_SELECTION.data_source,
+    spawn_task=feed_manager._create_background_task,
+    active_feed_managers=lambda: runtime_state.FEEDS,
     feed_allowed=feed_manager._feed_allowed,
     fetch_all_eod=fetch_all_eod,
     record_today_flow=record_today_flow,
     eod_task_done=_eod_task_done,
     flow_task_done=_flow_task_done,
-)
-
-
-_DAILY_MARKET_SCHEDULER = DailyMarketScheduler(
-    option_aggregators=_LIVE_FEED_AGGREGATORS.active,
     reset_futures_session=lambda: _get_futures_oi_tracker().reset_session(),
     is_trading_day=is_trading_day,
     eod_trigger_time=EOD_TRIGGER_TIME,
-    schedule_eod_jobs=_MARKET_CYCLE_OPERATIONS.schedule_eod_jobs,
-)
-
-_MARKET_PIPELINE_SERVICE = MarketPipelineService(
     run_pipeline=_RUN_PIPELINE_SERIALIZED,
-    publish_status=_MARKET_CYCLE_OPERATIONS.publish_pipeline_status,
-    pipeline_status=runtime_state.PIPELINE_STATUS,
-    timeout_seconds=runtime_state.PIPELINE_TIMEOUT_SECONDS,
-    delayed_reason=_MARKET_CYCLE_OPERATIONS.delayed_reason,
-    delayed_overlay=_MARKET_CYCLE_OPERATIONS.delayed_overlay,
-)
-
-
-_OI_BASELINE_SYNCHRONIZER = OiBaselineSynchronizer(
-    aggregators=_LIVE_FEED_AGGREGATORS.active
-)
-
-runtime_state.CANONICAL_PAYLOAD_PUBLISHER = CanonicalPayloadPublisher(
-    stream_lock=runtime_state.MARKET_STREAM_LOCK,
-    use_delta=lambda: runtime_state.USE_DELTA,
-    previous_payload=lambda: runtime_state.LAST_SENT,
-    store_payload=runtime_state.store_canonical_payload,
-    store_previous_payload=runtime_state.store_previous_payload,
-    broadcast=lambda message: broadcast(message),
-    compute_diff=lambda previous, current: compute_diff(previous, current),
-)
-
-
-runtime_state.MARKET_TICK_PACER = MarketTickPacer(
-    poll_seconds=runtime_state.POLL_SECONDS,
-    minimum_recompute_seconds=runtime_state.MIN_TICK_RECOMPUTE_SECONDS,
-    symbol_switch_event=runtime_state.SYMBOL_SWITCH_EVENT,
-    tick_activity_event=runtime_state.TICK_ACTIVITY_EVENT,
-)
-
-
-def _schedule_auto_execution(decision):
-    feed_manager._create_background_task(
-        _AUTO_EXECUTOR.maybe_execute(
-            decision, runtime_state.MARKET_SELECTION.symbol, runtime_state.MARKET_SELECTION.expiry
-        ),
-        "auto_executor",
-    )
-
-
-def _schedule_node_relay(payload):
-    feed_manager._create_background_task(runtime_state.NODE_RELAY.post(payload), "node_relay")
-
-
-runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
-    reset_daily_sessions=_DAILY_MARKET_SCHEDULER.reset_sessions,
-    trigger_eod=_DAILY_MARKET_SCHEDULER.trigger_eod,
-    collect_pipeline=_MARKET_PIPELINE_SERVICE.collect,
-    observe_pipeline=lambda success, elapsed: runtime_state.METRICS.observe_pipeline(
-        success, elapsed
-    ),
+    compute_diff=compute_diff,
     market_session_status=selection_state._market_session_status,
-    schedule_auto_execution=_schedule_auto_execution,
-    seed_oi_baselines=_OI_BASELINE_SYNCHRONIZER.synchronize,
-    publish_payload=runtime_state.CANONICAL_PAYLOAD_PUBLISHER.publish,
-    schedule_node_relay=_schedule_node_relay,
-    connected_count=lambda: len(runtime_state.CONNECTED),
-    build_current_prices=_PAPER_PRICE_BOOK.build,
-    check_pending_orders=lambda prices: PT_ENGINE.check_pending_orders(prices),
-    broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
-    pace=runtime_state.MARKET_TICK_PACER.wait,
+    paper_price_book=_PAPER_PRICE_BOOK,
+    paper_engine=PT_ENGINE,
+    paper_portfolio=_PAPER_PORTFOLIO,
 )
+_INDEX_QUOTE_LOOP = _MARKET_RUNTIME.index_quotes
+_FUNDS_POLLER = _MARKET_RUNTIME.funds
+_RECONCILIATION_LOOP = _MARKET_RUNTIME.reconciliation
+_ALGO_STATUS_LOOP = _MARKET_RUNTIME.algo_status
+_NODE_RELAY = _MARKET_RUNTIME.node_relay
+_DAILY_MARKET_SCHEDULER = _MARKET_RUNTIME.scheduler
+_MARKET_PIPELINE_SERVICE = _MARKET_RUNTIME.pipeline
 
 
 _DASHBOARD_TRANSPORT = build_dashboard_transport(
