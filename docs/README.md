@@ -30,14 +30,14 @@ aligned with them.
 
 The package is aligned to the observed project structure:
 
-- Backend: `decision/`, `oi/`, `analytics/`, `risk/`, `brokers/`, `storage/`,
-  `strategy/`, `ml/`, plus orchestration modules such as `engine.py`.
+- Backend: layered packages under `src/`, including `application/`, `server/`,
+  `brokers/`, `decision/`, `oi/`, `analytics/`, `risk/`, and `storage/`.
 - Frontend: `Dashboard/`, `OptionChain/`, `OIFlow/`, `PriceChart/`,
   `shared/state`, `shared/stores`, `shared/services`, `shared/utils`.
 - Existing infrastructure: `MarketStore`, `WSManager`, `PanelManager`,
   event bus, targeted DOM utilities, dashboard chain renderer, build scripts.
 - Build: `frontend/build.mjs` + `frontend/gen_html.mjs`.
-- Live transport: `ws_server_live.py`.
+- Process entry point: `python -m main`; composition root: `server/app.py`.
 
 The v1.6.0 package is implementation-aligned. Any remaining target language is
 an explicitly identified optimization or migration, not an unqualified claim

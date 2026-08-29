@@ -10,21 +10,25 @@
 ## Current backend
 
 ```text
-backend/
+src/
+├─ main.py       process entry point
+├─ server/       composition, HTTP/WebSocket transport, runtime services
+├─ application/  use cases, pipeline coordination, payload assembly
 ├─ brokers/      external broker/API integration
 ├─ storage/      caches/infrastructure
 ├─ oi/           option/OI/capital analytics
 ├─ analytics/    regime/FII-DII/smart-money analytics
 ├─ decision/     signals/confidence/strategy selection/executor
 ├─ risk/         account guard/reconciliation/risk meters
+├─ execution/    paper/live execution services
 ├─ strategy/     strategy definitions
 ├─ ml/           training/inference tooling
 ├─ backtest/     replay/snapshot logging
 └─ tests/
 ```
 
-This flat package layout is explicitly supported by current `pyproject.toml`;
-a `src/` migration is not required merely for style.
+The `src/` migration is complete. Runtime commands set `PYTHONPATH=src`, and
+`src/main.py` delegates to the composition root in `src/server/app.py`.
 
 ## Current frontend
 
@@ -52,5 +56,5 @@ frontend/
 
 Generated `frontend/dist/`, caches, databases, logs, `.env`, model artifacts
 and runtime payloads are not editable source and remain ignored. Tests live
-beside their runtime (`backend/tests`, `frontend/tools`, `frontend/e2e`), while
+beside their runtime (`src/tests`, `frontend/tools`, `frontend/e2e`), while
 cross-cutting architecture documents remain under `docs/`.

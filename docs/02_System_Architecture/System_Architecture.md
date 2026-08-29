@@ -18,7 +18,7 @@ separable and independently testable.
 ```text
 Broker/NSE Sources
       ↓
-Python backend + ws_server_live.py
+`src/main.py` → `server/app.py` composition root
       ↓
 JSON / WebSocket
       ↓

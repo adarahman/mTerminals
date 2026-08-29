@@ -7,7 +7,7 @@
 
 ## Before starting production
 
-Run `.venv/bin/python backend/operational_readiness.py preflight` before every
+Run `PYTHONPATH=src .venv/bin/python -m operational_readiness preflight` before every
 restart. For an intentional REST-only start, set `BROKER_SERVICES_ENABLED=false`
 in the deployment configuration. The command
 fails if required credentials are absent, runtime storage is not writable, or
@@ -15,7 +15,7 @@ the HTTP port is occupied. It warns when live trading is enabled.
 
 ## After starting production
 
-Run `.venv/bin/python backend/operational_readiness.py smoke`. This requires an
+Run `PYTHONPATH=src .venv/bin/python -m operational_readiness smoke`. This requires an
 HTTP 200 response with `status: ok`. During a feed incident, inspect `/health`
 reasons and confirm the Dashboard feed state agrees with that endpoint.
 

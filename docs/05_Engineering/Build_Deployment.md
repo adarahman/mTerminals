@@ -75,21 +75,20 @@ From the repository root, verify the exact candidate before restart:
 ```bash
 git status --short
 git rev-parse --short HEAD
-.venv/bin/python backend/operational_readiness.py preflight
+PYTHONPATH=src .venv/bin/python -m operational_readiness preflight
+PYTHONPATH=src .venv/bin/python -m pytest
 
-cd backend
-../.venv/bin/python -m pytest
-
-cd ../frontend
+cd frontend
 npm run test:health-status
 npm run test:feed-recovery
 npm run build
+cd ..
 ```
 
-After restarting `ws_server_live.py`, verify:
+After restarting `PYTHONPATH=src .venv/bin/python -m main`, verify:
 
 ```bash
-.venv/bin/python backend/operational_readiness.py smoke
+PYTHONPATH=src .venv/bin/python -m operational_readiness smoke
 curl -i http://127.0.0.1:5500/health
 curl -sS http://127.0.0.1:5500/metrics
 ```
@@ -111,7 +110,7 @@ Rollback is a code operation, not a runtime-data restore. Preserve
 `runtime/`, paper-trading data and caches unless a separate, reviewed data
 recovery is required.
 
-1. Stop `ws_server_live.py` so no process writes state during the switch.
+1. Stop the `python -m main` process so no state is written during the switch.
 2. Confirm the worktree is clean with `git status --short`.
 3. Record the failed release commit with `git rev-parse HEAD`.
 4. Switch to the last known-good release, for example

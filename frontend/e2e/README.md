@@ -1,7 +1,7 @@
 # Browser end-to-end tests
 
 These tests exercise the production frontend served by the running
-`ws_server_live.py` process.
+`PYTHONPATH=src python -m main` process.
 
 1. Build the frontend after source changes with `npm run build`.
 2. Run `npm run test:e2e` from `frontend/`.
