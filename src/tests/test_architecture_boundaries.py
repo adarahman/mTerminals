@@ -315,6 +315,16 @@ def test_composition_root_delegates_server_application_assembly():
     assert "ApplicationLifecycle(" not in app
 
 
+def test_composition_root_delegates_core_runtime_assembly():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "DashboardBroadcaster(" not in app
+    assert "PaperPortfolioService(" not in app
+    assert "DashboardBridge(" not in app
+    assert "AnalyticsRuntime(" not in app
+    assert "SymbolSwitcher(" not in app
+    assert "DataSourceSwitcher(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

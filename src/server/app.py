@@ -40,12 +40,7 @@ from server.health import log_transition as _log_server_health_transition  # noq
 from server import feed_lifecycle as _feed_lifecycle  # noqa: E402
 from server import feed_manager  # noqa: E402
 from server.feed_expiry import matches_displayed_expiry as _matches_displayed_expiry  # noqa: E402
-from server.bridge import DashboardBridge  # noqa: E402
 from server.market_history_api import no_cache_middleware  # noqa: E402
-from application.market_service import (  # noqa: E402
-    DataSourceSwitcher,
-    SymbolSwitcher,
-)
 from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
 from server.websocket_security import (  # noqa: E402
     build_allowed_origins,
@@ -54,7 +49,6 @@ from server.websocket_security import (  # noqa: E402
 )
 from server.feeds.orchestration import (  # noqa: E402
     _smartapi_sync_and_broadcast,
-    build_feed_managers,
     configure_feed_orchestration,
 )
 from market.providers import nse_bse_client as market_api  # noqa: E402
@@ -63,11 +57,6 @@ from application import option_chain_runtime  # noqa: E402
 from application import selection_state  # noqa: E402
 from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
-from server.paper_portfolio import PaperPortfolioService  # noqa: E402
-from server.analytics_runtime import (  # noqa: E402
-    AnalyticsRuntime,
-    build_broker_market_adapters,
-)
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
 from execution.paper_trading import _instrument_key  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
@@ -91,13 +80,11 @@ from server.startup_configuration import (  # noqa: E402
     configure_startup,
     resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry,
 )
-from server.dashboard_transport import (  # noqa: E402
-    DashboardBroadcaster,
-    build_dashboard_transport,
-)
+from server.dashboard_transport import build_dashboard_transport  # noqa: E402
 from server.runtime_bootstrap import initialize_runtime_state  # noqa: E402
 from server.market_runtime_assembly import build_market_runtime  # noqa: E402
 from server.application_assembly import build_server_application  # noqa: E402
+from server.core_runtime_assembly import build_core_runtime  # noqa: E402
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
@@ -177,113 +164,39 @@ ALLOWED_ORIGINS = build_allowed_origins(
 _ORIGIN_POLICY = partial(origin_allowed, allowed_origins=ALLOWED_ORIGINS)
 
 
-# Real-export capture seam: AnalyticsPipelineRunner reads the dashboard payload
-# back out of mTerminals_json's own export, so the pipeline and the WS
-# stream share one serialization path. The wiring now lives in
-# server/payload_capture so this module stays a composition root.
-from server.payload_capture import install_payload_export_capture  # noqa: E402
-
-_PAYLOAD_EXPORT_CAPTURE = install_payload_export_capture()
-
-
-_DASHBOARD_BROADCASTER = DashboardBroadcaster(
+_REPORT = partial(print, flush=True)
+_CORE_RUNTIME = build_core_runtime(
     runtime_state=runtime_state,
-    encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
-    report=lambda message: print(message, flush=True),
-)
-broadcast = _DASHBOARD_BROADCASTER.broadcast
-
-
-_PAPER_PORTFOLIO = PaperPortfolioService(
-    engine=PT_ENGINE,
-    price_book=_PAPER_PRICE_BOOK,
+    args=ARGS,
+    paper_engine=PT_ENGINE,
+    paper_price_book=_PAPER_PRICE_BOOK,
     instrument_key=_instrument_key,
-    broadcast=broadcast,
-    last_payload=lambda: runtime_state.LAST_PAYLOAD,
-)
-
-
-_BRIDGE = DashboardBridge(
-    state=lambda: {
-        "symbol": runtime_state.MARKET_SELECTION.symbol,
-        "futures_expiry": runtime_state.MARKET_SELECTION.futures_expiry,
-        "use_smartapi": runtime_state.USE_SMARTAPI,
-        "last_payload": runtime_state.LAST_PAYLOAD,
-        "index_quotes": runtime_state.INDEX_QUOTES,
-    },
     origin_allowed=_ORIGIN_POLICY,
     json_default=_json_default,
+    encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
     market_api=market_api,
     broker_futures_fetcher=lambda symbol, which: fetch_futures_wide(
         symbol, which=which
     ),
-    public_futures_fetcher=market_api.fetch_public_futures,
-)
-BRIDGE_CONNECTED = _BRIDGE.clients
-
-_ANALYTICS_RUNTIME = AnalyticsRuntime(
-    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
-    data_source=lambda: runtime_state.MARKET_SELECTION.data_source,
-    price_source=lambda: runtime_state.MARKET_SELECTION.price_source,
-    futures_expiry=lambda: runtime_state.MARKET_SELECTION.futures_expiry,
-    strikes_each_side=lambda: runtime_state.STRIKES_EACH_SIDE,
     activate_provider=_md_set_active_provider,
     resolve_default_expiry=_resolve_default_pipeline_expiry,
-    apply_config=lambda config: None,
-    clear_capture=_PAYLOAD_EXPORT_CAPTURE.clear,
-    captured_payload=lambda: _PAYLOAD_EXPORT_CAPTURE.payload,
-    export_dashboard=_PAYLOAD_EXPORT_CAPTURE.export,
     invoke_analytics=option_chain_runtime.main,
-    broker_adapters=(
-        build_broker_market_adapters() if runtime_state.USE_SMARTAPI else None
-    ),
-    extra_chains=ARGS.extra_chains,
-    strict_expiry=ARGS.strict_expiry,
-    no_virtual_oi=ARGS.no_virtual_oi,
-)
-_RUN_PIPELINE_SERIALIZED = _ANALYTICS_RUNTIME.run
-
-
-# ── Live feed state ──────────────────────────────────────────────────────
-# Each BrokerFeedManager owns its provider's mutable state. The asyncio loop
-# captured by main() lets a runtime switch start a feed that was not active
-# at boot.
-_REPORT = partial(print, flush=True)
-
-
-runtime_state.FEEDS = build_feed_managers(
-    default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    main_loop=lambda: runtime_state.MAIN_LOOP,
-    log=_REPORT,
-)
-
-
-# ── feed orchestration dispatch (broker-neutral) ─────────────────────────
-_SYMBOL_SWITCHER = SymbolSwitcher(
-    current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    current_expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
-    commit_selection=feed_manager._commit_symbol_selection,
-    signal_refresh=runtime_state.SYMBOL_SWITCH_EVENT.set,
-    live_feed_enabled=lambda: runtime_state.USE_SMARTAPI,
-    live_feed_provider=lambda: runtime_state.LIVE_FEED_PROVIDER,
-    restart_feed=feed_manager._restart_live_feed,
-)
-
-
-_DATA_SOURCE_SWITCHER = DataSourceSwitcher(
-    valid_sources=lambda: _MD_PROVIDER_KEYS,
-    current_source=lambda: runtime_state.MARKET_SELECTION.data_source,
-    execution_gate=_ANALYTICS_RUNTIME.execution_gate,
-    activate_provider=_md_set_active_provider,
-    stop_feed=feed_manager._stop_active_broker_feed,
-    commit_source=feed_manager._commit_data_source,
+    broker_services_enabled=runtime_state.USE_SMARTAPI,
+    provider_keys=_MD_PROVIDER_KEYS,
     supports_websocket=_provider_supports_websocket,
-    restart_feed=feed_manager._restart_live_feed,
-    current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    current_expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
-    signal_refresh=runtime_state.SYMBOL_SWITCH_EVENT.set,
+    feed_manager=feed_manager,
+    report=_REPORT,
 )
+_PAYLOAD_EXPORT_CAPTURE = _CORE_RUNTIME.payload_capture
+_DASHBOARD_BROADCASTER = _CORE_RUNTIME.broadcaster
+broadcast = _CORE_RUNTIME.broadcast
+_PAPER_PORTFOLIO = _CORE_RUNTIME.paper_portfolio
+_BRIDGE = _CORE_RUNTIME.bridge
+BRIDGE_CONNECTED = _BRIDGE.clients
+_ANALYTICS_RUNTIME = _CORE_RUNTIME.analytics
+_RUN_PIPELINE_SERIALIZED = _ANALYTICS_RUNTIME.run
+_SYMBOL_SWITCHER = _CORE_RUNTIME.symbol_switcher
+_DATA_SOURCE_SWITCHER = _CORE_RUNTIME.data_source_switcher
 
 
 _LIVE_TRADING_RUNTIME = build_live_trading_runtime(
