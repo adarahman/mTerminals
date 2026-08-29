@@ -333,6 +333,15 @@ def test_composition_root_delegates_runtime_stack_assembly():
     assert "build_server_application(" not in app
 
 
+def test_composition_root_delegates_process_bootstrap():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "build_arg_parser(" not in app
+    assert "configure_startup(" not in app
+    assert "initialize_runtime_state(" not in app
+    assert "LiveTradingConfig.from_environment(" not in app
+    assert "build_allowed_origins(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

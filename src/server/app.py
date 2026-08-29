@@ -15,9 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
-from functools import partial
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -35,10 +33,6 @@ from server import broker_services  # noqa: E402  (imports config + brokers.*)
 from server import feed_manager  # noqa: E402
 from server.market_history_api import no_cache_middleware  # noqa: E402
 from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
-from server.websocket_security import (  # noqa: E402
-    build_allowed_origins,
-    origin_allowed,
-)
 from server.feeds.orchestration import _smartapi_sync_and_broadcast  # noqa: E402,F401
 from market.providers import nse_bse_client as market_api  # noqa: E402
 from application import option_chain_runtime  # noqa: E402
@@ -47,75 +41,47 @@ from server.websocket_payload import json_default as _json_default  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402,F401
 from execution.paper_trading import _instrument_key  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
-from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
 from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
 from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
-from server.cli_args import build_arg_parser  # noqa: E402
-from server.live_trading_runtime import LiveTradingConfig  # noqa: E402
-from server.startup_configuration import (  # noqa: E402
-    configure_startup,
-    resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry,
-)
-from server.runtime_bootstrap import initialize_runtime_state  # noqa: E402
+from server.startup_configuration import resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry  # noqa: E402
 from server.core_runtime_assembly import build_core_runtime  # noqa: E402
 from server.runtime_stack import build_runtime_stack  # noqa: E402
+from server.process_bootstrap import bootstrap_process  # noqa: E402
 logger = logging.getLogger("mterminals.server")
-configure_lot_size_resolver(_smartapi_lot_size)
 
 BROKER_SERVICES_ENABLED = broker_services.BROKER_SERVICES_ENABLED
 _MD_PROVIDER_KEYS = broker_services.MD_PROVIDER_KEYS
 _md_set_active_provider = broker_services.md_set_active_provider
 
-# This module is also imported by tests and tooling. Preserve server CLI
-# parsing while leaving unrelated host arguments (for example pytest flags)
-# to the embedding process instead of terminating during import.
-ARGS, _HOST_PROCESS_ARGS = build_arg_parser().parse_known_args()
-
-_STARTUP_CONFIGURATION = configure_startup(
-    args=ARGS,
+_PROCESS_BOOTSTRAP = bootstrap_process(
+    project_root=PROJECT_ROOT,
     runtime_state=runtime_state,
-    broker_services_enabled=BROKER_SERVICES_ENABLED,
-    live_feed_provider=_broker_settings.live_feed_provider,
-    activate_provider=_md_set_active_provider,
+    broker_services=broker_services,
+    broker_settings=_broker_settings,
+    instrument_key=_instrument_key,
+    lot_size_resolver=_smartapi_lot_size,
     supports_websocket=_provider_supports_websocket,
 )
+ARGS = _PROCESS_BOOTSTRAP.args
+_HOST_PROCESS_ARGS = _PROCESS_BOOTSTRAP.host_process_args
+_STARTUP_CONFIGURATION = _PROCESS_BOOTSTRAP.startup
 WS_HOST = _STARTUP_CONFIGURATION.host
 WS_PORT = _STARTUP_CONFIGURATION.websocket_port
 HTTP_PORT = _STARTUP_CONFIGURATION.http_port
-print(_STARTUP_CONFIGURATION.feed_summary, flush=True)
-print(_STARTUP_CONFIGURATION.portfolio_summary, flush=True)
-
-_RUNTIME_BOOTSTRAP = initialize_runtime_state(
-    runtime_state=runtime_state,
-    instrument_key=_instrument_key,
-)
+_RUNTIME_BOOTSTRAP = _PROCESS_BOOTSTRAP.runtime
 PT_ENGINE = _RUNTIME_BOOTSTRAP.paper_engine
 _PAPER_PRICE_BOOK = _RUNTIME_BOOTSTRAP.paper_price_book
 EOD_TRIGGER_TIME = _RUNTIME_BOOTSTRAP.eod_trigger_time
 
-_LIVE_TRADING_CONFIG = LiveTradingConfig.from_environment(PROJECT_ROOT)
+_LIVE_TRADING_CONFIG = _PROCESS_BOOTSTRAP.live_trading
 LIVE_TRADING_ENABLED = _LIVE_TRADING_CONFIG.enabled
 LIVE_TRADING_KILL_SWITCH_FILE = _LIVE_TRADING_CONFIG.kill_switch_file
 LIVE_MAX_LOTS_PER_ORDER = _LIVE_TRADING_CONFIG.max_lots_per_order
 LIVE_MAX_ORDERS_PER_MINUTE = _LIVE_TRADING_CONFIG.max_orders_per_minute
 POSITION_RECONCILE_SECONDS = _LIVE_TRADING_CONFIG.reconcile_seconds
-_LIVE_TRADING_CONFIG.report(lambda message: print(message, flush=True))
-
-# ── WebSocket origin allowlist ──────────────────────────────────────────
-# Browsers do NOT apply same-origin restrictions to WebSocket handshakes,
-# so without this ANY page in the same browser could drive the socket,
-# including submitting orders (cross-site WebSocket hijacking). Origin-less
-# requests are accepted only from a loopback peer, so a remote client can't
-# bypass the browser-origin allowlist by omitting Origin.
-ALLOWED_ORIGINS = build_allowed_origins(
-    WS_HOST,
-    HTTP_PORT,
-    os.environ.get("ALLOWED_ORIGINS", "").split(","),
-)
-_ORIGIN_POLICY = partial(origin_allowed, allowed_origins=ALLOWED_ORIGINS)
-
-
-_REPORT = partial(print, flush=True)
+ALLOWED_ORIGINS = _PROCESS_BOOTSTRAP.allowed_origins
+_ORIGIN_POLICY = _PROCESS_BOOTSTRAP.origin_policy
+_REPORT = _PROCESS_BOOTSTRAP.report
 _CORE_RUNTIME = build_core_runtime(
     runtime_state=runtime_state,
     args=ARGS,
