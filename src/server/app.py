@@ -74,10 +74,6 @@ from server.health_api import (
 )
 
 from server.websocket_clients import WebSocketClientHub  # noqa: E402
-from server.websocket import DashboardWebSocketHandler  # noqa: E402
-from server.websocket_handshake import WebSocketHandshakeSender  # noqa: E402
-from server.websocket_messages import WebSocketMessageRouter  # noqa: E402
-from server.websocket_query import WebSocketQueryController  # noqa: E402
 from server.websocket_security import (  # noqa: E402
     build_allowed_origins,
     host_is_loopback,
@@ -131,6 +127,10 @@ from server.startup_configuration import (  # noqa: E402
     VIX_TRADINGSYMBOL as _VIX_TRADINGSYMBOL,
     configure_startup,
     resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry,
+)
+from server.dashboard_transport import (  # noqa: E402
+    DashboardBroadcaster,
+    build_dashboard_transport,
 )
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
@@ -293,26 +293,12 @@ from server.payload_capture import install_payload_export_capture  # noqa: E402
 _PAYLOAD_EXPORT_CAPTURE = install_payload_export_capture()
 
 
-async def broadcast(message):
-    if isinstance(message, dict) and message.get("type") == "full":
-        runtime_state.BASELINE_SEQ += 1
-        payload = message.get("payload") or {}
-        runtime_state.BASELINE_ID = (
-            f"{payload.get('symbol', '')}:{payload.get('expiry', '')}:{runtime_state.BASELINE_SEQ}"
-        )
-        message = {**message, "version": runtime_state.BASELINE_ID}
-    elif isinstance(message, dict) and message.get("type") == "delta":
-        if runtime_state.BASELINE_ID is None:
-            print(
-                "[ws] dropping delta without an established full-snapshot baseline",
-                flush=True,
-            )
-            return
-        message = {**message, "baseVersion": runtime_state.BASELINE_ID}
-    msg_str = orjson.dumps(message, default=_json_default).decode()
-    await runtime_state.DASHBOARD_CLIENTS.broadcast(
-        msg_str, on_error=lambda error: print(f"[ws] Error broadcasting: {error}")
-    )
+_DASHBOARD_BROADCASTER = DashboardBroadcaster(
+    runtime_state=runtime_state,
+    encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
+    report=lambda message: print(message, flush=True),
+)
+broadcast = _DASHBOARD_BROADCASTER.broadcast
 
 
 _PAPER_PORTFOLIO = PaperPortfolioService(
@@ -599,64 +585,27 @@ runtime_state.MARKET_ENGINE_CYCLE = MarketEngineCycle(
 )
 
 
-# ── websocket handler ────────────────────────────────────────────────────
-runtime_state.WS_HANDSHAKE = WebSocketHandshakeSender(
-    encode=lambda message: orjson.dumps(
-        message, default=_json_default
-    ).decode(),
-    market_lock=runtime_state.MARKET_STREAM_LOCK,
-    market_payload=lambda: runtime_state.LAST_PAYLOAD,
-    baseline_version=lambda: runtime_state.BASELINE_ID,
-    index_quotes=lambda: runtime_state.INDEX_QUOTES,
-    pipeline_status=lambda: runtime_state.PIPELINE_STATUS,
-    funds=lambda: runtime_state.LAST_FUNDS,
-    algo_status=lambda: (
-        runtime_state.LAST_ALGO_STATUS
-        if runtime_state.LAST_ALGO_STATUS is not None
-        else _TRADING_SUPERVISOR.build_status()
-    ),
-    reconciliation_alert=lambda: runtime_state.LAST_RECONCILIATION_ALERT,
-    paper_snapshot=_PAPER_PORTFOLIO.handshake_snapshot,
-)
-
-
-runtime_state.WS_MESSAGE_ROUTER = WebSocketMessageRouter(
+_DASHBOARD_TRANSPORT = build_dashboard_transport(
+    runtime_state=runtime_state,
+    encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
+    decode=orjson.loads,
+    origin_allowed=_ORIGIN_POLICY,
     place_order=_ORDER_SUBMISSION.handle,
     cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
-    broadcast_portfolio=_PAPER_PORTFOLIO.broadcast,
+    portfolio_broadcast=_PAPER_PORTFOLIO.broadcast,
     build_current_prices=_PAPER_PRICE_BOOK.build,
-    last_payload=lambda: runtime_state.LAST_PAYLOAD,
-    start_funds_polling=lambda: _FUNDS_POLLER.start(),
-    stop_funds_polling=lambda: _FUNDS_POLLER.stop(),
-)
-
-
-runtime_state.WS_QUERY_CONTROLLER = WebSocketQueryController(
-    current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
+    start_funds_polling=_FUNDS_POLLER.start,
+    stop_funds_polling=_FUNDS_POLLER.stop,
     switch_symbol=_SYMBOL_SWITCHER.switch,
     switch_data_source=_DATA_SOURCE_SWITCHER.switch,
-    current_price_source=lambda: runtime_state.MARKET_SELECTION.price_source,
-    set_price_source=runtime_state.MARKET_SELECTION.select_price_source,
-    current_futures_expiry=lambda: runtime_state.MARKET_SELECTION.futures_expiry,
-    set_futures_expiry=runtime_state.MARKET_SELECTION.select_futures_expiry,
-    invalidate_market_baseline=runtime_state.invalidate_market_baseline,
-)
-
-
-runtime_state.DASHBOARD_WS_HANDLER = DashboardWebSocketHandler(
-    origin_allowed=_ORIGIN_POLICY,
-    clients=runtime_state.DASHBOARD_CLIENTS,
-    connected_count=lambda: len(runtime_state.CONNECTED),
-    metrics=runtime_state.METRICS,
-    query_controller=runtime_state.WS_QUERY_CONTROLLER,
-    send_handshake=runtime_state.WS_HANDSHAKE.send,
-    has_market_payload=lambda: runtime_state.LAST_PAYLOAD is not None,
-    decode=orjson.loads,
-    dispatch_message=runtime_state.WS_MESSAGE_ROUTER.dispatch,
-    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    expiry=lambda: runtime_state.MARKET_SELECTION.expiry,
+    build_algo_status=_TRADING_SUPERVISOR.build_status,
+    paper_snapshot=_PAPER_PORTFOLIO.handshake_snapshot,
     logger=logger,
 )
+runtime_state.WS_HANDSHAKE = _DASHBOARD_TRANSPORT.handshake
+runtime_state.WS_MESSAGE_ROUTER = _DASHBOARD_TRANSPORT.message_router
+runtime_state.WS_QUERY_CONTROLLER = _DASHBOARD_TRANSPORT.query_controller
+runtime_state.DASHBOARD_WS_HANDLER = _DASHBOARD_TRANSPORT.handler
 
 
 # ── HTTP handlers (thin adapters; logic lives in server/* modules) ───────

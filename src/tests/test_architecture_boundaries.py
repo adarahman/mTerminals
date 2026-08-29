@@ -277,6 +277,15 @@ def test_composition_root_delegates_startup_configuration():
     assert "_initial_data_source" not in app
 
 
+def test_composition_root_delegates_dashboard_transport():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "async def broadcast" not in app
+    assert "WebSocketHandshakeSender(" not in app
+    assert "WebSocketMessageRouter(" not in app
+    assert "WebSocketQueryController(" not in app
+    assert "DashboardWebSocketHandler(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 
