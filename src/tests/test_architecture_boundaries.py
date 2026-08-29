@@ -325,6 +325,14 @@ def test_composition_root_delegates_core_runtime_assembly():
     assert "DataSourceSwitcher(" not in app
 
 
+def test_composition_root_delegates_runtime_stack_assembly():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "build_live_trading_runtime(" not in app
+    assert "build_market_runtime(" not in app
+    assert "build_dashboard_transport(" not in app
+    assert "build_server_application(" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 

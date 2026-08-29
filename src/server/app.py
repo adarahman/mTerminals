@@ -14,11 +14,9 @@ configuration from the application layer.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import sys
-import threading
 from functools import partial
 from pathlib import Path
 
@@ -29,91 +27,44 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 # `PYTHONPATH=src python3 -m main` does.
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
-import aiohttp
 import orjson
-from aiohttp import web
 from server import runtime_state
 
 from infrastructure.config import settings as _broker_settings  # noqa: E402
 from server import broker_services  # noqa: E402  (imports config + brokers.*)
-from server.health import log_transition as _log_server_health_transition  # noqa: E402
-from server import feed_lifecycle as _feed_lifecycle  # noqa: E402
 from server import feed_manager  # noqa: E402
-from server.feed_expiry import matches_displayed_expiry as _matches_displayed_expiry  # noqa: E402
 from server.market_history_api import no_cache_middleware  # noqa: E402
 from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
 from server.websocket_security import (  # noqa: E402
     build_allowed_origins,
-    host_is_loopback,
     origin_allowed,
 )
-from server.feeds.orchestration import (  # noqa: E402
-    _smartapi_sync_and_broadcast,
-    configure_feed_orchestration,
-)
+from server.feeds.orchestration import _smartapi_sync_and_broadcast  # noqa: E402,F401
 from market.providers import nse_bse_client as market_api  # noqa: E402
 from application import option_chain_runtime  # noqa: E402
 
-from application import selection_state  # noqa: E402
-from server.live_feed_state import merge_live_feed_update  # noqa: E402
-from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
-from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
+from server.websocket_payload import json_default as _json_default  # noqa: E402
+from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402,F401
 from execution.paper_trading import _instrument_key  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
 from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
-from nse_eod_fetch import fetch_all_eod, is_trading_day  # noqa: E402
-from analytics.nse_fii_dii_flow_fetch import record_today_flow  # noqa: E402
-from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker  # noqa: E402
 from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
 from server.cli_args import build_arg_parser  # noqa: E402
-from server.live_trading_runtime import (  # noqa: E402
-    LiveTradingConfig,
-    build_live_trading_runtime,
-)
+from server.live_trading_runtime import LiveTradingConfig  # noqa: E402
 from server.startup_configuration import (  # noqa: E402
-    BSE_SYMBOLS as _BSE_SYMBOLS,
-    EXECUTION_BROKER_LABELS as _EXECUTION_BROKER_LABELS,
-    INDEX_TICKER_SYMBOLS,
-    VIX_TOKEN as _VIX_TOKEN,
-    VIX_TRADINGSYMBOL as _VIX_TRADINGSYMBOL,
     configure_startup,
     resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry,
 )
-from server.dashboard_transport import build_dashboard_transport  # noqa: E402
 from server.runtime_bootstrap import initialize_runtime_state  # noqa: E402
-from server.market_runtime_assembly import build_market_runtime  # noqa: E402
-from server.application_assembly import build_server_application  # noqa: E402
 from server.core_runtime_assembly import build_core_runtime  # noqa: E402
-from server.task_callbacks import (  # noqa: E402
-    eod_task_done as _eod_task_done,
-    flow_task_done as _flow_task_done,
-    report_failed_task as _report_failed_task,
-)
+from server.runtime_stack import build_runtime_stack  # noqa: E402
 logger = logging.getLogger("mterminals.server")
 configure_lot_size_resolver(_smartapi_lot_size)
 
-# Broker SDK surface (see server/broker_services.py). Aliased back to the
-# historical underscored names so existing test seams keep working.
 BROKER_SERVICES_ENABLED = broker_services.BROKER_SERVICES_ENABLED
-market_data = broker_services.market_data
-smartapi_place_order = broker_services.smartapi_place_order
-smartapi_get_order_book = broker_services.smartapi_get_order_book
-smartapi_get_positions = broker_services.smartapi_get_positions
-smartapi_get_funds = broker_services.smartapi_get_funds
-get_candle_data = broker_services.get_candle_data
-get_index_candles = broker_services.get_index_candles
-SmartTickStream = broker_services.SmartTickStream
-TickAggregator = broker_services.TickAggregator
-EXCHANGE_TYPE = broker_services.EXCHANGE_TYPE
 _MD_PROVIDER_KEYS = broker_services.MD_PROVIDER_KEYS
-_MD_PROVIDER_CAPABILITIES = broker_services.MD_PROVIDER_CAPABILITIES
-_md_get_active_provider = broker_services.md_get_active_provider
-_md_provider_has_credentials = broker_services.md_provider_has_credentials
 _md_set_active_provider = broker_services.md_set_active_provider
-_md_provider_status = broker_services.md_provider_status
-_execution_resolve_option_contract = broker_services.resolve_option_contract
-_SMARTAPI_INDEX_TOKENS = broker_services.SMARTAPI_INDEX_TOKENS
 
 # This module is also imported by tests and tooling. Preserve server CLI
 # parsing while leaving unrelated host arguments (for example pytest flags)
@@ -199,35 +150,28 @@ _SYMBOL_SWITCHER = _CORE_RUNTIME.symbol_switcher
 _DATA_SOURCE_SWITCHER = _CORE_RUNTIME.data_source_switcher
 
 
-_LIVE_TRADING_RUNTIME = build_live_trading_runtime(
-    config=_LIVE_TRADING_CONFIG,
-    bse_symbols=_BSE_SYMBOLS,
-    resolve_option_contract=_execution_resolve_option_contract,
-    find_option_token=market_data.find_option_token,
-    place_order=smartapi_place_order,
-    get_positions=smartapi_get_positions,
-    get_order_book=smartapi_get_order_book,
-    lot_sizes=PT_LOT_SIZES,
+_RUNTIME_STACK = build_runtime_stack(
+    runtime_state=runtime_state,
+    core_runtime=_CORE_RUNTIME,
+    live_trading_config=_LIVE_TRADING_CONFIG,
     paper_engine=PT_ENGINE,
-    price_book=_PAPER_PRICE_BOOK,
-    portfolio_broadcast=_PAPER_PORTFOLIO.broadcast,
-    last_payload=lambda: runtime_state.LAST_PAYLOAD,
-    instrument_key=_instrument_key,
-    cached_positions=lambda: runtime_state.LAST_LIVE_POSITIONS,
-    symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
-    broker_label=lambda: (
-        "Public Data"
-        if not BROKER_SERVICES_ENABLED
-        else _EXECUTION_BROKER_LABELS.get(
-            _broker_settings.execution_broker, "Angel One"
-        )
-    ),
-    store_alert=lambda payload: setattr(
-        runtime_state, "LAST_RECONCILIATION_ALERT", payload
-    ),
-    broadcast=broadcast,
+    paper_price_book=_PAPER_PRICE_BOOK,
+    eod_trigger_time=EOD_TRIGGER_TIME,
+    position_reconcile_seconds=POSITION_RECONCILE_SECONDS,
+    host=WS_HOST,
+    http_port=HTTP_PORT,
+    middleware=no_cache_middleware,
+    origin_allowed=_ORIGIN_POLICY,
+    encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
+    decode=orjson.loads,
+    broker_services=broker_services,
+    broker_settings=_broker_settings,
+    feed_manager=feed_manager,
+    logger=logger,
     report=_REPORT,
+    run_backtest_call=lambda *args, **kwargs: run_backtest(*args, **kwargs),
 )
+_LIVE_TRADING_RUNTIME = _RUNTIME_STACK.live_trading
 _ACCOUNT_GUARD = _LIVE_TRADING_RUNTIME.account_guard
 _POSITION_RECONCILER = _LIVE_TRADING_RUNTIME.position_reconciler
 _LIVE_ORDERS = _LIVE_TRADING_RUNTIME.orders
@@ -237,37 +181,7 @@ _TRADING_SUPERVISOR = _LIVE_TRADING_RUNTIME.supervisor
 _resolve_live_order_token = _LIVE_TRADING_RUNTIME.resolve_token
 
 
-_MARKET_RUNTIME = build_market_runtime(
-    runtime_state=runtime_state,
-    market_data=market_data,
-    get_funds=smartapi_get_funds,
-    get_order_book=smartapi_get_order_book,
-    get_positions=smartapi_get_positions,
-    position_reconciler=_POSITION_RECONCILER,
-    position_reconcile_seconds=POSITION_RECONCILE_SECONDS,
-    trading_supervisor=_TRADING_SUPERVISOR,
-    auto_executor=_AUTO_EXECUTOR,
-    lot_sizes=PT_LOT_SIZES,
-    index_symbols=INDEX_TICKER_SYMBOLS,
-    broadcast=broadcast,
-    report=_REPORT,
-    spawn_task=feed_manager._create_background_task,
-    active_feed_managers=lambda: runtime_state.FEEDS,
-    feed_allowed=feed_manager._feed_allowed,
-    fetch_all_eod=fetch_all_eod,
-    record_today_flow=record_today_flow,
-    eod_task_done=_eod_task_done,
-    flow_task_done=_flow_task_done,
-    reset_futures_session=lambda: _get_futures_oi_tracker().reset_session(),
-    is_trading_day=is_trading_day,
-    eod_trigger_time=EOD_TRIGGER_TIME,
-    run_pipeline=_RUN_PIPELINE_SERIALIZED,
-    compute_diff=compute_diff,
-    market_session_status=selection_state._market_session_status,
-    paper_price_book=_PAPER_PRICE_BOOK,
-    paper_engine=PT_ENGINE,
-    paper_portfolio=_PAPER_PORTFOLIO,
-)
+_MARKET_RUNTIME = _RUNTIME_STACK.market
 _INDEX_QUOTE_LOOP = _MARKET_RUNTIME.index_quotes
 _FUNDS_POLLER = _MARKET_RUNTIME.funds
 _RECONCILIATION_LOOP = _MARKET_RUNTIME.reconciliation
@@ -277,63 +191,12 @@ _DAILY_MARKET_SCHEDULER = _MARKET_RUNTIME.scheduler
 _MARKET_PIPELINE_SERVICE = _MARKET_RUNTIME.pipeline
 
 
-_DASHBOARD_TRANSPORT = build_dashboard_transport(
-    runtime_state=runtime_state,
-    encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
-    decode=orjson.loads,
-    origin_allowed=_ORIGIN_POLICY,
-    place_order=_ORDER_SUBMISSION.handle,
-    cancel_order=lambda order_id: PT_ENGINE.cancel_order(order_id),
-    portfolio_broadcast=_PAPER_PORTFOLIO.broadcast,
-    build_current_prices=_PAPER_PRICE_BOOK.build,
-    start_funds_polling=_FUNDS_POLLER.start,
-    stop_funds_polling=_FUNDS_POLLER.stop,
-    switch_symbol=_SYMBOL_SWITCHER.switch,
-    switch_data_source=_DATA_SOURCE_SWITCHER.switch,
-    build_algo_status=_TRADING_SUPERVISOR.build_status,
-    paper_snapshot=_PAPER_PORTFOLIO.handshake_snapshot,
-    logger=logger,
-)
-runtime_state.WS_HANDSHAKE = _DASHBOARD_TRANSPORT.handshake
-runtime_state.WS_MESSAGE_ROUTER = _DASHBOARD_TRANSPORT.message_router
-runtime_state.WS_QUERY_CONTROLLER = _DASHBOARD_TRANSPORT.query_controller
-runtime_state.DASHBOARD_WS_HANDLER = _DASHBOARD_TRANSPORT.handler
-
-
-# ── HTTP handlers (thin adapters; logic lives in server/* modules) ───────
-_SERVER_APPLICATION = build_server_application(
-    runtime_state=runtime_state,
-    feed_manager=feed_manager,
-    host=WS_HOST,
-    http_port=HTTP_PORT,
-    middleware=no_cache_middleware,
-    dashboard_websocket=runtime_state.DASHBOARD_WS_HANDLER,
-    bridge=_BRIDGE,
-    broker_services_enabled=BROKER_SERVICES_ENABLED,
-    index_tokens=_SMARTAPI_INDEX_TOKENS,
-    get_candle_data=get_candle_data,
-    get_index_candles=get_index_candles,
-    run_backtest_call=lambda *args, **kwargs: run_backtest(*args, **kwargs),
-    feed_allowed=feed_manager._feed_allowed,
-    market_session_status=selection_state._market_session_status,
-    host_is_loopback=host_is_loopback,
-    index_quotes=_INDEX_QUOTE_LOOP.run,
-    algo_status=_ALGO_STATUS_LOOP.run,
-    reconcile=_RECONCILIATION_LOOP.run,
-    live_trading_enabled=LIVE_TRADING_ENABLED,
-)
+_DASHBOARD_TRANSPORT = _RUNTIME_STACK.dashboard
+_SERVER_APPLICATION = _RUNTIME_STACK.application
 _HISTORY_API = _SERVER_APPLICATION.history_api
 _HEALTH_SNAPSHOT = _SERVER_APPLICATION.health_snapshot
 _HTTP_RUNTIME = _SERVER_APPLICATION.http
 _RUNTIME_SERVICES = _SERVER_APPLICATION.services
-
-# Wire app-level dependencies into the feed orchestration module (kept free
-# of a circular import on the websocket broadcast + paper-trading engine).
-configure_feed_orchestration(
-    broadcast=broadcast,
-    portfolio_broadcaster=_PAPER_PORTFOLIO.broadcast_from_feed,
-)
-
 
 async def main():
     await _SERVER_APPLICATION.run()
