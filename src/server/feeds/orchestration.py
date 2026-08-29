@@ -61,47 +61,6 @@ def _print_log(message):
     print(message, flush=True)
 
 
-def _parse_any_expiry(expiry_str):
-    return live_updates.parse_expiry(expiry_str)
-
-
-def _matches_current_feed_expiry(current_expiry, payload_expiry_str):
-    """True only if the expiry the feed is streaming is the SAME expiry the
-    dashboard is displaying right now. The feed's own expiry is picked
-    independently of the application runtime's selected expiry and they aren't
-    guaranteed to agree (NEAR/MONTHLY tab active, etc.); merging ticks for
-    the wrong expiry would silently show the wrong contract's prices, so
-    this gate must pass before any state merge."""
-    from server.feed_expiry import matches_displayed_expiry
-
-    return matches_displayed_expiry(
-        current_expiry, payload_expiry_str, _parse_any_expiry
-    )
-
-
-def _smartapi_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(
-        _current_feed_expiry("SMARTAPI"), payload_expiry_str
-    )
-
-
-def _upstox_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(
-        _current_feed_expiry("UPSTOX"), payload_expiry_str
-    )
-
-
-def _shoonya_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(
-        _current_feed_expiry("SHOONYA"), payload_expiry_str
-    )
-
-
-def _current_feed_expiry(provider):
-    manager = runtime_state.FEEDS.get(provider)
-    return manager.current_expiry if manager is not None else None
-
-
 def _resolve_chain_tokens(symbol, strikes_around_atm, expiry=None):
     return resolution.smartapi(
         symbol, strikes_around_atm, expiry, report=_print_log
@@ -116,37 +75,10 @@ def _resolve_shoonya_chain_tokens(symbol, strikes_around_atm, expiry=None):
     return resolution.shoonya(symbol, strikes_around_atm, expiry, report=_print_log)
 
 
-# ── live-tick merge/broadcast (shared by all providers) ──────────────────
-async def _sync_live_feed_and_broadcast(provider, message, matches_expiry_fn):
-    await live_updates.sync_and_broadcast(provider, message)
-
-
-async def _smartapi_sync_and_broadcast(message):
-    """Compatibility callback for SmartAPI's normalized tick stream."""
-    await _sync_live_feed_and_broadcast(
-        "SMARTAPI", message, _smartapi_feed_matches_displayed_expiry
-    )
-
-
-async def _upstox_sync_and_broadcast(message):
-    """Upstox analog — same shared merge logic, gated on Upstox's own expiry
-    tracker. Feeds are mutually exclusive (runtime_state.LIVE_FEED_PROVIDER picks one);
-    runtime_state.MARKET_STREAM_LOCK serializes regardless."""
-    await _sync_live_feed_and_broadcast(
-        "UPSTOX", message, _upstox_feed_matches_displayed_expiry
-    )
-
-
-async def _shoonya_sync_and_broadcast(message):
-    """Shoonya analog — same shared merge logic, gated on Shoonya's own
-    expiry tracker ('DD-Mon-YYYY')."""
-    await _sync_live_feed_and_broadcast(
-        "SHOONYA", message, _shoonya_feed_matches_displayed_expiry
-    )
-
-
-async def _live_feed_sync_and_broadcast_locked(message, matches_expiry_fn):
-    await live_updates._sync_and_broadcast_locked(message, matches_expiry_fn)
+# Compatibility exports used by the composition root and existing tests.
+_smartapi_sync_and_broadcast = live_updates.smartapi
+_upstox_sync_and_broadcast = live_updates.upstox
+_shoonya_sync_and_broadcast = live_updates.shoonya
 
 
 # ── provider feed adapters + managers ────────────────────────────────────
@@ -262,24 +194,13 @@ def _shoonya_feed_stop(state):
 
 
 # ── Kotak Neo feed adapters ────────────────────────────────────────────────
-def _kotak_feed_matches_displayed_expiry(payload_expiry_str):
-    return _matches_current_feed_expiry(
-        _current_feed_expiry("KOTAK"), payload_expiry_str
-    )
-
-
 def _resolve_kotak_chain_tokens(target_symbol, strikes_around_atm, expiry=None):
     return resolution.kotak(
         target_symbol, strikes_around_atm, expiry, report=_print_log
     )
 
 
-async def _kotak_sync_and_broadcast(message):
-    """Kotak Neo analog — shared merge logic, gated on Kotak's own expiry
-    tracker."""
-    await _sync_live_feed_and_broadcast(
-        "KOTAK", message, _kotak_feed_matches_displayed_expiry
-    )
+_kotak_sync_and_broadcast = live_updates.kotak
 
 
 def _kotak_feed_start(state, loop, symbol, strikes_around_atm, expiry):

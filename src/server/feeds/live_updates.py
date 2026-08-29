@@ -46,6 +46,22 @@ async def sync_and_broadcast(provider, message):
         )
 
 
+async def smartapi(message):
+    await sync_and_broadcast("SMARTAPI", message)
+
+
+async def upstox(message):
+    await sync_and_broadcast("UPSTOX", message)
+
+
+async def shoonya(message):
+    await sync_and_broadcast("SHOONYA", message)
+
+
+async def kotak(message):
+    await sync_and_broadcast("KOTAK", message)
+
+
 async def _sync_and_broadcast_locked(message, matches_expiry):
     if _BROADCAST is None:
         return
