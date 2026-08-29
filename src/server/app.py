@@ -19,8 +19,6 @@ import logging
 import os
 import sys
 import threading
-from datetime import datetime
-from datetime import time as dtime
 from functools import partial
 from pathlib import Path
 
@@ -73,7 +71,6 @@ from server.health_api import (
     log_health_transition as _log_health_transition,
 )
 
-from server.websocket_clients import WebSocketClientHub  # noqa: E402
 from server.websocket_security import (  # noqa: E402
     build_allowed_origins,
     host_is_loopback,
@@ -87,11 +84,10 @@ from server.feeds.orchestration import (  # noqa: E402
 from market.providers import nse_bse_client as market_api  # noqa: E402
 from application import option_chain_runtime  # noqa: E402
 
-from operational_metrics import OperationalMetrics  # noqa: E402
 from application import selection_state  # noqa: E402
 from server.live_feed_state import merge_live_feed_update  # noqa: E402
 from server.websocket_payload import compute_diff, json_default as _json_default  # noqa: E402
-from server.paper_portfolio import PaperPortfolioService, PaperPriceBook  # noqa: E402
+from server.paper_portfolio import PaperPortfolioService  # noqa: E402
 from server.health_runtime import RuntimeHealthSnapshot  # noqa: E402
 from server.market_cycle_operations import MarketCycleOperations  # noqa: E402
 from server.analytics_runtime import (  # noqa: E402
@@ -99,7 +95,7 @@ from server.analytics_runtime import (  # noqa: E402
     build_broker_market_adapters,
 )
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402
-from execution.paper_trading import PaperTradingEngine, _instrument_key  # noqa: E402
+from execution.paper_trading import _instrument_key  # noqa: E402
 from market.instruments.lot_sizes import configure_lot_size_resolver  # noqa: E402
 from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
@@ -132,6 +128,7 @@ from server.dashboard_transport import (  # noqa: E402
     DashboardBroadcaster,
     build_dashboard_transport,
 )
+from server.runtime_bootstrap import initialize_runtime_state  # noqa: E402
 from server.task_callbacks import (  # noqa: E402
     eod_task_done as _eod_task_done,
     flow_task_done as _flow_task_done,
@@ -182,57 +179,13 @@ HTTP_PORT = _STARTUP_CONFIGURATION.http_port
 print(_STARTUP_CONFIGURATION.feed_summary, flush=True)
 print(_STARTUP_CONFIGURATION.portfolio_summary, flush=True)
 
-runtime_state.DASHBOARD_CLIENTS = WebSocketClientHub()
-# Compatibility alias for diagnostics and existing test seams. Connection
-# ownership lives in runtime_state.DASHBOARD_CLIENTS rather than this server module.
-runtime_state.CONNECTED = runtime_state.DASHBOARD_CLIENTS.clients
-runtime_state.LAST_PAYLOAD = None
-runtime_state.LAST_PAYLOAD_AT = None
-runtime_state.LAST_SENT = None
-runtime_state.BASELINE_SEQ = 0
-runtime_state.BASELINE_ID = None
-runtime_state.PROCESS_STARTED_AT = datetime.now().astimezone()
-runtime_state.LAST_HEALTH_LOG_STATE = None
-# Compatibility aliases retained during the runtime-state migration. Tests,
-# diagnostics, and older extensions still inspect these names directly.
-runtime_state.PIPELINE_STATUS = {
-    "status": "STARTING",
-    "reason": "Analytics pipeline has not completed yet",
-    "startedAt": None,
-    "lastSuccessAt": None,
-    "elapsedSeconds": None,
-}
-runtime_state.METRICS = OperationalMetrics(started_at=runtime_state.PROCESS_STARTED_AT)
-# Most recent real-account funds snapshot — handed to newly-connected
-# clients the same way runtime_state.LAST_PAYLOAD/INDEX_QUOTES are, so the top-bar Fund
-# pill doesn't sit at "n/a" until the next poll. Cleared by
-# stop_funds_polling() so a reconnect while polling is stopped is never
-# handed a stale real-money figure.
-runtime_state.LAST_FUNDS = None
-
-# Paper trading — single engine instance for the whole process, backed by
-# SQLite (paper_trading.db) so positions/orders survive a restart. All
-# access happens on the main asyncio thread (ws_handler for place_order,
-# MarketEngineCycle for mark-to-market/broadcast), so no extra locking is needed
-# around the sqlite3 connection.
-PT_ENGINE = PaperTradingEngine()
-
-# PaperPriceBook only sees one symbol's chain per tick. This
-# cache holds the last known price per instrument_key across symbol
-# switches, so a leg on a non-active symbol keeps its LTP instead of going
-# blank ("—") the moment the dashboard switches symbols.
-runtime_state.LAST_KNOWN_LEG_PRICES: dict = {}
-_PAPER_PRICE_BOOK = PaperPriceBook(
-    runtime_state.LAST_KNOWN_LEG_PRICES,
-    _instrument_key,
+_RUNTIME_BOOTSTRAP = initialize_runtime_state(
+    runtime_state=runtime_state,
+    instrument_key=_instrument_key,
 )
-
-# Throttle for the fast-path portfolio broadcast fired from the live-tick
-# sync path (see runtime_state.PORTFOLIO_POLL_SECONDS) — separate from the market cycle's
-# runtime_state.POLL_SECONDS-paced broadcast, which still runs as the slower fallback
-# (covers public-only mode and feed-reconnect gaps).
-runtime_state.LAST_PORTFOLIO_BROADCAST_TS = 0.0
-EOD_TRIGGER_TIME = dtime(15, 45)  # shortly after NSE cash close (15:30)
+PT_ENGINE = _RUNTIME_BOOTSTRAP.paper_engine
+_PAPER_PRICE_BOOK = _RUNTIME_BOOTSTRAP.paper_price_book
+EOD_TRIGGER_TIME = _RUNTIME_BOOTSTRAP.eod_trigger_time
 
 _LIVE_TRADING_CONFIG = LiveTradingConfig.from_environment(PROJECT_ROOT)
 LIVE_TRADING_ENABLED = _LIVE_TRADING_CONFIG.enabled
@@ -241,22 +194,6 @@ LIVE_MAX_LOTS_PER_ORDER = _LIVE_TRADING_CONFIG.max_lots_per_order
 LIVE_MAX_ORDERS_PER_MINUTE = _LIVE_TRADING_CONFIG.max_orders_per_minute
 POSITION_RECONCILE_SECONDS = _LIVE_TRADING_CONFIG.reconcile_seconds
 _LIVE_TRADING_CONFIG.report(lambda message: print(message, flush=True))
-
-# Algo status panel refresh cadence. Deliberately NOT tick-cadence — this
-# is supervisory/status info and _ACCOUNT_GUARD.get_status() does a SQLite
-# read per call, so it runs on its own slow loop.
-runtime_state.ALGO_STATUS_POLL_SECONDS = int(os.environ.get("runtime_state.ALGO_STATUS_POLL_SECONDS", "5"))
-runtime_state.LAST_ALGO_STATUS = None
-# Most recent non-clean PositionReconciler.check(), broadcast as
-# reconciliationAlert and handed to new connections so a dashboard opened
-# after a mismatch still sees it.
-runtime_state.LAST_RECONCILIATION_ALERT = None
-# Cache of the most recent live position-book fetch (reconcile_loop's own
-# periodic call). LiveTradingSupervisor reads this for current open lots
-# instead of making its own broker call every 5s; the pre-trade exposure
-# check still fetches fresh. None until live trading is enabled and the
-# first reconcile cycle has completed.
-runtime_state.LAST_LIVE_POSITIONS = None
 
 # ── WebSocket origin allowlist ──────────────────────────────────────────
 # Browsers do NOT apply same-origin restrictions to WebSocket handshakes,
@@ -271,18 +208,6 @@ ALLOWED_ORIGINS = build_allowed_origins(
 )
 _ORIGIN_POLICY = partial(origin_allowed, allowed_origins=ALLOWED_ORIGINS)
 
-
-runtime_state.INDEX_QUOTES = {}  # {"BANKNIFTY": {"spot":.., "spotChgPct":..}, ...}
-runtime_state.SYMBOL_SWITCH_EVENT = asyncio.Event()
-# Set (thread-safely) by TickAggregator's flush loop on every real tick
-# flush. MarketEngineCycle waits on this OR runtime_state.SYMBOL_SWITCH_EVENT, bounded by
-# runtime_state.MIN_TICK_RECOMPUTE_SECONDS (floor) and runtime_state.POLL_SECONDS (ceiling).
-runtime_state.TICK_ACTIVITY_EVENT = asyncio.Event()
-# Serializes the canonical full/delta stream and its backing snapshots.
-# compute_diff runs in a worker thread; without this lock the async tick
-# path could mutate runtime_state.LAST_SENT/runtime_state.LAST_PAYLOAD mid-traversal. New-client
-# snapshot handoff uses the same lock.
-runtime_state.MARKET_STREAM_LOCK = asyncio.Lock()
 
 # Real-export capture seam: AnalyticsPipelineRunner reads the dashboard payload
 # back out of mTerminals_json's own export, so the pipeline and the WS

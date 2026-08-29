@@ -286,6 +286,15 @@ def test_composition_root_delegates_dashboard_transport():
     assert "DashboardWebSocketHandler(" not in app
 
 
+def test_composition_root_delegates_runtime_bootstrap():
+    app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
+    assert "WebSocketClientHub(" not in app
+    assert "OperationalMetrics(" not in app
+    assert "PaperTradingEngine(" not in app
+    assert "runtime_state.PIPELINE_STATUS =" not in app
+    assert "runtime_state.SYMBOL_SWITCH_EVENT =" not in app
+
+
 def test_brokers_do_not_depend_on_decision_strategy_or_risk():
     assert_layer_excludes("brokers", {"decision", "strategy", "risk"})
 
