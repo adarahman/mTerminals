@@ -26,12 +26,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import threading
-import time
 from typing import Callable, Optional
 
 from market.instruments import instrument_from_execution_resolution
 from risk.account_guard import pnl_from_positions, projected_open_lots_from_positions
+from server.live_order_controls import LiveOrderControls
 from server.order_intent import OrderIntent
 
 
@@ -65,17 +64,16 @@ class LiveOrderGateway:
         self._guard = account_guard
         self._reconciler = position_reconciler
         self._resolve_token = resolve_token
+        # Retained as a patchable broker boundary for tests and runtime adapters.
         self._place_order = place_order
         self._get_positions = get_positions
         self._get_order_book = get_order_book
-        self._store = order_store
-        self._results_max = results_max
         self._log = log
-        self._order_timestamps: list = []  # sliding rate window, main-thread only
-        self._submit_lock = threading.Lock()
-        self._results: dict = {}
-        self._gate: Optional[asyncio.Lock] = None
-        self._gate_loop = None
+        self._controls = LiveOrderControls(
+            place_order=lambda *args, **kwargs: self._place_order(*args, **kwargs),
+            order_store=order_store,
+            results_max=results_max,
+        )
 
     # ── primitives ───────────────────────────────────────────────────
     def kill_switch_active(self) -> bool:
@@ -85,49 +83,21 @@ class LiveOrderGateway:
         """Sliding 60s window cap, independent of the broker's own quota —
         a tighter self-imposed ceiling limiting the blast radius of a
         runaway client/bug, not an attempt to maximize throughput."""
-        now = time.monotonic()
-        cutoff = now - 60
-        timestamps = self._order_timestamps
-        while timestamps and timestamps[0] < cutoff:
-            timestamps.pop(0)
-        if len(timestamps) >= self.max_orders_per_minute:
-            return False
-        timestamps.append(now)
-        return True
+        return self._controls.rate_limit_allows(self.max_orders_per_minute)
 
     def completed_order(self, client_order_id):
         """A previously completed live submission, if any."""
-        with self._submit_lock:
-            cached = self._results.get(client_order_id)
-            if cached is not None:
-                return cached
-            persisted = self._store.get(client_order_id)
-            if persisted is not None:
-                self._results[client_order_id] = persisted
-            return persisted
+        return self._controls.completed_order(client_order_id)
 
     def submit_idempotent(self, client_order_id, *args, **kwargs):
         """Serialize submissions and collapse retries by client ID."""
-        with self._submit_lock:
-            existing = self._results.get(client_order_id)
-            if existing is not None:
-                return existing, True
-            order_id = self._place_order(*args, **kwargs, order_tag=client_order_id)
-            order_id = self._store.record(client_order_id, order_id)
-            self._results[client_order_id] = order_id
-            while len(self._results) > self._results_max:
-                self._results.pop(next(iter(self._results)))
-            return order_id, False
+        return self._controls.submit_idempotent(client_order_id, *args, **kwargs)
 
     def order_gate(self) -> asyncio.Lock:
         """One live-order critical section per event loop. Tests create
         multiple short-lived loops, so the lock is recreated when the
         active loop changes."""
-        loop = asyncio.get_running_loop()
-        if self._gate is None or self._gate_loop is not loop:
-            self._gate = asyncio.Lock()
-            self._gate_loop = loop
-        return self._gate
+        return self._controls.order_gate()
 
     # ── the live path ────────────────────────────────────────────────
     def _identity_check(self, client_order_id):
