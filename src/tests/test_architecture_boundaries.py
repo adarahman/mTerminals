@@ -154,6 +154,19 @@ def test_market_service_does_not_own_provider_or_symbol_switching():
     assert "class SymbolSwitcher" not in service
 
 
+def test_market_service_does_not_own_tick_cycle_services():
+    service = (BACKEND / "application" / "market_service.py").read_text(
+        encoding="utf-8"
+    )
+    for class_name in (
+        "CanonicalPayloadPublisher",
+        "MarketTickPacer",
+        "MarketEngineCycle",
+        "OiBaselineSynchronizer",
+    ):
+        assert f"class {class_name}" not in service
+
+
 def test_option_chain_runtime_delegates_market_context_normalization():
     runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
         encoding="utf-8"

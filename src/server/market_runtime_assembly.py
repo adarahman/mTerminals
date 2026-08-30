@@ -7,14 +7,16 @@ from dataclasses import dataclass
 from datetime import time
 from typing import Any
 
-from application.market_service import (
+from application.market_cycle import (
     CanonicalPayloadPublisher,
-    DailyMarketScheduler,
-    LiveFeedAggregatorRegistry,
     MarketEngineCycle,
-    MarketPipelineService,
     MarketTickPacer,
     OiBaselineSynchronizer,
+)
+from application.market_service import (
+    DailyMarketScheduler,
+    LiveFeedAggregatorRegistry,
+    MarketPipelineService,
 )
 from server.background_loops import (
     AlgoStatusLoop,
