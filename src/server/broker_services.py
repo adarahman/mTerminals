@@ -3,13 +3,11 @@
 Importing broker modules initializes SDKs and the instrument master, so in
 public-only mode they are never imported and every exported callable fails
 closed instead of silently logging in. The broker adapter registry is still
-imported lazily by the pipeline (option_chain_json._fetch_and_parse); the
-stubs here exist so ws_server_live's own helpers and the DATA SOURCE
+imported lazily by the option-chain pipeline; the stubs here let server
+composition and the DATA SOURCE
 dropdown/reporting work in public-only mode too.
 
-Export names are the same surface the old inline block in ws_server_live
-exposed; the coordinator aliases them back to their historical underscored
-names so existing test seams keep working.
+Export names form the stable broker-service boundary consumed by the server.
 """
 from infrastructure.config import settings as broker_settings
 

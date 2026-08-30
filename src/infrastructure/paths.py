@@ -15,20 +15,20 @@ Everything regenerable/accumulative now lives under runtime/, one level
 up from any package, addressed through this module instead of each
 writer recomputing its own path.
 
-NOTE (2026-07-31): runtime/ used to sit *inside* the backend/ package
-(backend/runtime/cache/...), which meant the package directory wasn't
+NOTE (2026-07-31): runtime/ used to sit *inside* the former backend package,
+which meant the package directory wasn't
 just source -- 40MB+ of accumulated cache/history data lived inside it
 too, and any tool that treats "the package directory" as "the source
-tree" had to know to skip it. runtime/ is now a sibling of backend/, one
-level up, so the package directory contains only source. Set the
+tree" had to know to skip it. runtime/ is now a sibling of src/, one level
+up, so the package directory contains only source. Set the
 RUNTIME_DIR environment variable to override the location entirely
 (e.g. in a deployment where you want it under /var/lib/... instead).
 """
 
 import os
 
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
+SOURCE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(SOURCE_DIR)
 RUNTIME_DIR = os.getenv("RUNTIME_DIR", os.path.join(PROJECT_ROOT, "runtime"))
 CACHE_DIR = os.path.join(RUNTIME_DIR, "cache")
 

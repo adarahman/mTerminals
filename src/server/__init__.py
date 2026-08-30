@@ -1,1 +1,1 @@
-"""Transport-facing server services used by :mod:`ws_server_live`."""
+"""Transport-facing services assembled by :mod:`server.app`."""

@@ -1,6 +1,8 @@
-"""ws_server_live's command-line surface, separated so the (long) help
-texts don't bury the coordinator's wiring. parse_args() still runs at
-ws_server_live import time — that module is the process entry point."""
+"""Command-line surface for the server composition root.
+
+Keeping the detailed help text here prevents it from burying ``server.app``'s
+dependency wiring.
+"""
 
 import argparse
 

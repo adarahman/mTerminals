@@ -30,19 +30,14 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from infrastructure.paths import BACKEND_DIR, PROJECT_ROOT, RUNTIME_DIR
+from infrastructure.paths import PROJECT_ROOT, RUNTIME_DIR, SOURCE_DIR
 
-try:  # ws_server_live adds backend/ to sys.path; package tests may not.
+try:
     from brokers.provider_registry import EXECUTION_PROVIDER_KEYS
-except ModuleNotFoundError:  # pragma: no cover - depends on launch style
-    try:
-        from backend.brokers.provider_registry import EXECUTION_PROVIDER_KEYS
-    except ModuleNotFoundError:
-        # Keep config.py portable for deployment preflight and isolated tests
-        # that intentionally copy only configuration dependencies.
-        EXECUTION_PROVIDER_KEYS = frozenset(
-            {"SMARTAPI", "UPSTOX", "KITE", "SHOONYA", "BREEZE"}
-        )
+except ModuleNotFoundError:  # pragma: no cover - isolated deployment preflight
+    EXECUTION_PROVIDER_KEYS = frozenset(
+        {"SMARTAPI", "UPSTOX", "KITE", "SHOONYA", "BREEZE"}
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +51,14 @@ def _env_bool(name: str, default: bool) -> bool:
 
 # .env location has been ambiguous across this codebase's own history:
 # brokers/smartapi_client.py's dirname(dirname(abspath(__file__))) math
-# actually resolved to backend/.env, but its own comment claimed the
+# actually resolved to the source directory's .env, but its own comment claimed the
 # project root (one level up), and README.md instructs "project root"
 # too. Rather than guess a single path again, check both, in order, and
 # log which one (if either) was actually found -- so a missing/misplaced
 # .env shows up immediately in the log instead of surfacing later as an
 # opaque AuthenticationError.
 _ENV_CANDIDATES = [
-    os.path.join(BACKEND_DIR, ".env"),
+    os.path.join(SOURCE_DIR, ".env"),
     os.path.join(PROJECT_ROOT, ".env"),
 ]
 

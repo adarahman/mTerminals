@@ -8,10 +8,7 @@ Behavior-preserving refactor of the former import-time-heavy module:
   _merge_volume_value, _build_extra_chains, ...) — each independently
   readable/testable; control flow and ordering inside each stage match the
   previous monolith exactly.
-- The expiry-manager compatibility re-exports remain available
-  (BSE_EXPIRY_DEFAULT/_nearest_Thursday/_nearest_Tuesday/
-  _generate_bse_expiry_series) that ws_server_live reads THROUGH this
-  module.
+- Expiry generation is delegated to ``market.expiry.service``.
 
 Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 """
@@ -61,10 +58,8 @@ from storage.caches import TTLSlot
 
 logger = logging.getLogger(__name__)
 
-# Expiry-date generation helpers live in expiry_manager.py (Step 5a of the
-# v4 migration plan); lot-size resolution in lot_sizes.py (5b); index
-# contributors in index_contributors.py (5c). They are re-exported above —
-# ws_server_live reads BSE_EXPIRY_DEFAULT/_nearest_* THROUGH this module.
+# Expiry-date generation, lot-size resolution, and index contributors live in
+# their respective market/analytics services.
 
 _BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
 _EXPIRY_RESOLVER = ExpiryResolutionService()
