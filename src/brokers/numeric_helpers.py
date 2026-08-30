@@ -1,5 +1,5 @@
 """
-common_helpers.py
+numeric_helpers.py
 ------------------
 Small pure-function helpers duplicated verbatim across broker adapters
 (brokers/smartapi/client.py, brokers/kite/client.py,
