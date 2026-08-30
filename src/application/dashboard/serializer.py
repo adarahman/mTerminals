@@ -9,8 +9,6 @@ from oi.capital_metrics import compute_chain_metrics
 from infrastructure.json_writer import encode_json, write_json
 from application.payload_builders.signals import build_signals
 from application.payload_builders.common import (
-    compact_number as fmt_k,
-    formatted_number as fmt_num,
     integer as _to_int,
     nullable_rounded_number as _nullable_r,
     rounded_number as _r,

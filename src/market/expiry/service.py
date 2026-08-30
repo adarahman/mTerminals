@@ -36,8 +36,7 @@ Usage
 
 from __future__ import annotations
 
-import calendar
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 

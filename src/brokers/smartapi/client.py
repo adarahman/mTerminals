@@ -641,11 +641,6 @@ def _load_scrip_master():
             return data
         raise
 
-    _scrip_master_cache.set(data, fetched_at=now)
-    _build_scrip_indexes(data)
-    logger.info(f"[smartapi_client] ScripMaster downloaded and cached ({len(data)} rows)")
-    return data
-
 
 INDEX_TOKENS = _build_index_tokens()
 
