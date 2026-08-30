@@ -29,6 +29,7 @@ import requests
 
 from storage.caches import TTLKeyCache, TTLSlot
 from infrastructure.paths import CACHE_DIR
+from market.instruments.strike_intervals import STRIKE_INTERVALS
 
 logger = logging.getLogger(__name__)
 
@@ -1077,16 +1078,9 @@ def get_full_option_chain(underlying, expiry_ddmmmyyyy, strikes, exchange="NFO")
     return rows
 
 
-STRIKE_INTERVALS = {
-    "NIFTY": 50,
-    "BANKNIFTY": 100,
-    "FINNIFTY": 50,
-    "MIDCPNIFTY": 25,
-    "SENSEX": 100,
-    "BANKEX": 100,
-    "SENSEX50": 50,
-
-}
+# STRIKE_INTERVALS (imported above from market.instruments.strike_intervals,
+# the canonical table shared with the Breeze/Shoonya/Kotak adapters) is used
+# by _get_strike_interval() below.
 
 
 _stock_strike_interval_cache = {}  # underlying -> interval, derived from ScripMaster

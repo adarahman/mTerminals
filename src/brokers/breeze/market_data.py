@@ -56,6 +56,7 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
 
 from brokers.breeze.client import _session, _unwrap, _iso_expiry, BrokerError, derivative_stock_code
 from brokers.breeze.client import resolve_option_contract as _cache_contract
+from market.instruments.strike_intervals import STRIKE_INTERVALS as _STRIKE_INTERVALS
 
 logger = logging.getLogger(__name__)
 
@@ -74,17 +75,11 @@ def _warning_once(key: str, message: str, *args) -> None:
         _last_warning_at[key] = now
     logger.warning(message, *args)
 
-# Same physical strike spacing SmartAPI's STRIKE_INTERVALS uses — kept as
-# an independent copy rather than importing brokers.smartapi.client (that
-# module imports the SmartApi SDK at module top level, which would make a
-# Breeze-only deployment depend on smartapi-python being installed just to
-# read a constants dict). This is the same category of duplication as the
-# two LOT_SIZES dicts already tracked as a dedup TODO elsewhere in this
-# codebase — flagged here rather than silently repeated.
-_STRIKE_INTERVALS = {
-    "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
-    "MIDCPNIFTY": 25, "SENSEX": 100, "BANKEX": 100,
-}
+# _STRIKE_INTERVALS (imported above from market.instruments.strike_intervals,
+# the canonical table shared with the SmartAPI/Shoonya/Kotak adapters) — see
+# that module for why this is a standalone module rather than importing
+# brokers.smartapi.client directly (that would pull in the smartapi-python
+# SDK just to read a constants dict).
 
 # Underlyings with a Breeze stock_code identical to their NSE/BSE name —
 # confirmed directly against Breeze's own place_order()/get_quotes() docs

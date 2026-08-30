@@ -87,21 +87,18 @@ except ModuleNotFoundError:  # pragma: no cover - depends on launch style
 
 from brokers.shoonya.client import _session, resolve_option_contract as _resolve_contract
 from brokers.shoonya.client import BrokerError
+from market.instruments.strike_intervals import STRIKE_INTERVALS as _STRIKE_INTERVALS
 
 logger = logging.getLogger(__name__)
 
-# Same physical strike spacing SmartAPI's STRIKE_INTERVALS uses — kept as
-# an independent copy rather than importing brokers.smartapi.client (that
-# module imports the SmartApi SDK at top level, which would make a
-# Shoonya-only deployment depend on smartapi-python being installed just
-# to read a constants dict). Same category of duplication already tracked
-# as a dedup TODO elsewhere in this codebase (two LOT_SIZES dicts, two
-# Black-Scholes implementations) — flagged here rather than silently
-# repeated a third time.
-_STRIKE_INTERVALS = {
-    "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
-    "MIDCPNIFTY": 25, "SENSEX": 100, "BANKEX": 100,
-}
+# _STRIKE_INTERVALS (imported above from market.instruments.strike_intervals,
+# the canonical table shared with the SmartAPI/Breeze/Kotak adapters) — see
+# that module for why this is standalone rather than importing
+# brokers.smartapi.client directly (that would pull in the smartapi-python
+# SDK just to read a constants dict). The two-Black-Scholes-implementations
+# duplication mentioned in earlier revisions of this comment is a separate,
+# still-open item — not addressed by this change.
+
 
 # tsym suffix grammar: DDMMMYY (7 chars) followed by 'C'/'P'/'F'.
 _EXPIRY_PREFIX_RE = re.compile(r"^(\d{2}[A-Z]{3}\d{2})([CPF])")
