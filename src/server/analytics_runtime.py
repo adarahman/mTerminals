@@ -6,11 +6,11 @@ from collections.abc import Callable
 from typing import Any
 
 from analytics.option_chain_pipeline import OptionChainPipeline
-from application.market_service import (
+from application.analytics_service import (
     AnalyticsPipelineRunner,
     PipelineRuntimeConfigurator,
-    SerializedPipelineExecutor,
 )
+from application.market_service import SerializedPipelineExecutor
 from brokers.expiry_adapter import BrokerExpiryAdapter
 from brokers.option_chain_adapter import BrokerOptionChainAdapter
 from market.option_chain.runtime_adapters import BrokerMarketAdapters

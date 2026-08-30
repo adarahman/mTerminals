@@ -3,8 +3,11 @@ import threading
 import time
 from datetime import datetime, time as datetime_time
 
-from application.market_service import (
+from application.analytics_service import (
     AnalyticsPipelineRunner,
+    PipelineRuntimeConfigurator,
+)
+from application.market_service import (
     CanonicalPayloadPublisher,
     DailyMarketScheduler,
     DataSourceSwitcher,
@@ -13,7 +16,6 @@ from application.market_service import (
     MarketPipelineService,
     MarketTickPacer,
     OiBaselineSynchronizer,
-    PipelineRuntimeConfigurator,
     SerializedPipelineExecutor,
     SymbolSwitcher,
 )

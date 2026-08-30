@@ -138,6 +138,14 @@ def test_composition_root_has_no_market_cycle_service_wrappers():
         assert f"def {helper}" not in app
 
 
+def test_market_service_does_not_own_analytics_configuration_or_execution():
+    service = (BACKEND / "application" / "market_service.py").read_text(
+        encoding="utf-8"
+    )
+    assert "class AnalyticsPipelineRunner" not in service
+    assert "class PipelineRuntimeConfigurator" not in service
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (
