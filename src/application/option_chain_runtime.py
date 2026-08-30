@@ -20,18 +20,11 @@ from decision.engine import build_engine_result
 from market.expiry.service import (
     _generate_bse_expiry_series,
     _nearest_Tuesday,
-    make_expiry_manager,
 )
-from analytics.index_contributors import _compute_index_contributors
 from market.instruments.lot_sizes import LOT_SIZES
 
 from market.providers.option_chain import PublicOptionChainAdapter
-from oi.oi_analysis import (
-    append_json_history,
-    build_oi_history,
-    compute_dte,
-    read_last_json_snapshot,
-)
+from oi.oi_analysis import compute_dte
 from application.pipeline_config import RuntimeConfig
 from application.market_pipeline.spot_selection import select_runtime_spot
 from application.market_pipeline.context import assemble_market_context
@@ -41,6 +34,7 @@ from application.market_pipeline.resources import (
     RetirableExecutorPool,
 )
 from application.market_pipeline.extra_chains import ExtraChainService
+from application.market_pipeline.snapshot import AnalyticsSnapshotService
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
@@ -380,22 +374,6 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
     )
 
 
-def _make_expiry_manager_or_none(expiry_dates):
-    """Build the ExpiryManager unconditionally (pure computation off the
-    already-fetched expiry_dates, no network cost). Previously it was only
-    built inside the extra-chains block, so its verified NEAR/MONTHLY dates
-    never reached build_engine_result() — calendar-spread legs fell back to
-    placeholder labels and the frontend guessed dates from array position,
-    which can land on a stale/wrong entry depending on raw order."""
-    em = None
-    if expiry_dates:
-        try:
-            em = make_expiry_manager(expiry_dates)
-        except Exception as e:
-            logger.warning(f"[ExpiryManager] Context skip ({e})")
-    return em
-
-
 _CHAIN_FALLBACK_MAX_AGE_SECONDS = 300.0
 _CHAIN_SNAPSHOTS = ChainSnapshotStore(
     max_age_seconds=_CHAIN_FALLBACK_MAX_AGE_SECONDS,
@@ -408,46 +386,10 @@ _EXTRA_CHAINS = ExtraChainService(
     executor_pool=_MARKET_IO_POOL,
     logger=logger,
 )
-
-
-def _calendar_spread_expiries(em):
-    """Calendar spread convention: sell the active expiry (front week/month
-    already being traded), buy the next MONTHLY expiry — both real, verified,
-    future-filtered dates from ExpiryManager. Falls back to "" (→ engine's
-    "NEAR"/"FAR" text placeholders) only if em wasn't available at all."""
-    if em is None:
-        return "", ""
-    far = (
-        em.context.monthly.date_str
-        if em.context.monthly
-        else em.context.far.date_str
-        if em.context.far
-        else ""
-    )
-    return em.context.current.date_str, far
-
-
-def _patch_bse_spot_change(ctx_dict, all_indices, runtime_config):
-    """SENSEX never appears in df_idx (fetch_all_indices()/DEFAULT_INDICES
-    is NSE-only), so engine.py's spot_change/spot_chg_pct lookup falls back
-    to 0 when SENSEX is the ACTIVE symbol. Patch from the BSE quote already
-    fetched in the fan-out instead of touching engine.py's NSE lookup."""
-    if runtime_config.symbol not in _BSE_SYMBOLS:
-        return
-    quote = next(
-        (
-            q
-            for q in all_indices
-            if q.get("Symbol") == runtime_config.symbol
-        ),
-        None,
-    )
-    if not quote:
-        return
-    if quote.get("Change") is not None:
-        ctx_dict["spot_change"] = quote["Change"]
-    if quote.get("% Change") is not None:
-        ctx_dict["spot_chg_pct"] = quote["% Change"]
+_SNAPSHOT_SERVICE = AnalyticsSnapshotService(
+    extra_chains=_EXTRA_CHAINS,
+    logger=logger,
+)
 
 
 # =====================================================================
@@ -476,104 +418,14 @@ def main(
         md = _gather_market_data(
             exchange, runtime_config, broker_adapters, timings=timings
         )
-        df, spot = md["df"], md["spot"]
-
-        _quote_keys = ("ticker", "vix", "sensex") + tuple(
-            k for k in timings if k.startswith("publicBse:")
+        _SNAPSHOT_SERVICE.build_and_export(
+            market_data=md,
+            runtime_config=runtime_config,
+            exchange=exchange,
+            broker_adapters=broker_adapters,
+            timings=timings,
+            export_dashboard=export_dashboard,
         )
-        timings["quotes"] = round(
-            max([timings.get(k, 0.0) for k in _quote_keys] or [0.0]), 4
-        )
-
-        resolved_expiry = (
-            runtime_config.expiry
-            if exchange == "BSE"
-            else md["resolved"]
-        )
-
-        if spot == 0 or spot is None:
-            logger.error("Error: Invalid Spot Price. Core calculations aborted.")
-            return
-
-        # NOTE (2026-07-04): the per-tick joblib.load() of a VirtualOI
-        # coordinator that happened here every poll was dead code — its
-        # result was never passed anywhere. The real coordinator lives in
-        # mTerminals_json.py as a module-level _VOI_COORDINATOR, loaded
-        # once per process; --no-virtual-oi flows through export_dashboard_json().
-
-        df_idx = md["df_idx"]
-        all_indices = md["all_indices"]
-
-        # Derived from df_idx (already fetched, no new network call) —
-        # empty list for symbols with no matching NSE index basket (BSE).
-        contributors = _compute_index_contributors(
-            df_idx, runtime_config.symbol, spot
-        )
-
-        dte = compute_dte(resolved_expiry)
-        df_clean = (
-            df.dropna(subset=["StrikePrice"])
-            .drop_duplicates(subset=["StrikePrice"])
-            .sort_values("StrikePrice")
-            .copy()
-        )
-
-        em = _make_expiry_manager_or_none(md["expiry_dates"])
-        extra_chains = _EXTRA_CHAINS.build(
-            em, runtime_config, broker_adapters, timings=timings
-        )
-
-        # Fallback to local JSON snap logs for historical OI analysis.
-        prev_json_poll = read_last_json_snapshot(runtime_config.symbol)
-        history_df = build_oi_history(
-            df_clean, runtime_config.symbol, prev_poll=prev_json_poll
-        )
-        append_json_history(history_df)
-
-        _near_expiry_str, _far_expiry_str = _calendar_spread_expiries(em)
-
-        _engine_start = time.monotonic()
-        engine_result = build_engine_result(
-            df=df,
-            df_clean=df_clean,
-            df_idx=df_idx,
-            df_fut=md["df_fut"],
-            df_full_history=history_df,
-            symbol=runtime_config.symbol,
-            expiry=resolved_expiry,
-            dte=dte,
-            lot_size=LOT_SIZES.get(runtime_config.symbol, 65),
-            n_strikes_each_side=runtime_config.strikes_each_side,
-            india_vix=md["india_vix"],
-            india_vix_chg_pct=md["india_vix_chg_pct"],
-            near_expiry=_near_expiry_str,
-            far_expiry=_far_expiry_str,
-        )
-        timings["engine"] = round(time.monotonic() - _engine_start, 4)
-
-        ctx_dict = engine_result.to_ctx_dict()
-        _patch_bse_spot_change(ctx_dict, all_indices, runtime_config)
-
-        export_dashboard(
-            df_clean=df_clean,
-            master=engine_result.master,
-            ctx_dict=ctx_dict,
-            SYMBOL=runtime_config.symbol,
-            EXPIRY=resolved_expiry,
-            dte=dte,
-            engine_result=engine_result,
-            out_path="mTerminals.json",
-            expiry_dates=md["expiry_dates"],
-            extra_chains=extra_chains if extra_chains else None,
-            use_virtual_oi=not runtime_config.no_virtual_oi,
-            contributors=contributors,
-            all_indices=all_indices,
-            price_source=md["price_source_used"],
-            futures_expiry=runtime_config.futures_expiry,
-            pipeline_timings=timings,
-        )
-        print()
-        logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 
     except TimeoutError:
         # The server runner distinguishes a recoverable cold-start miss from

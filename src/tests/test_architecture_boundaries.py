@@ -198,6 +198,15 @@ def test_startup_configuration_uses_canonical_expiry_service():
     assert "from market.expiry.service import" in startup
 
 
+def test_option_chain_runtime_delegates_snapshot_calculation_and_export():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "read_last_json_snapshot(" not in runtime
+    assert "export_dashboard(" not in runtime
+    assert "AnalyticsSnapshotService(" in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (
