@@ -151,7 +151,8 @@ def test_option_chain_runtime_delegates_market_context_normalization():
         encoding="utf-8"
     )
     assert "def _merge_volume_value" not in runtime
-    assert "assemble_market_context(" in runtime
+    assert "assemble_market_context(" not in runtime
+    assert "MarketInputService(" in runtime
 
 
 def test_option_chain_runtime_does_not_own_index_refresh_state():
@@ -215,6 +216,15 @@ def test_option_chain_runtime_delegates_chain_fetch_and_bundle_construction():
     assert "def _build_expiry_bundle" not in runtime
     assert "def _canon_symbol" not in runtime
     assert "ChainAnalyticsService(" in runtime
+
+
+def test_option_chain_runtime_delegates_market_input_gathering():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def _gather_market_data" not in runtime
+    assert "ConcurrentMarketDataGatherer(" not in runtime
+    assert "MarketInputService(" in runtime
 
 
 def test_composition_root_has_no_websocket_service_wrappers():
