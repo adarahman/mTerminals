@@ -1,0 +1,43 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 5d79f9a..e4a4e5e 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -56,14 +56,14 @@ jobs:
+     runs-on: ubuntu-latest
+     defaults:
+       run:
+-        working-directory: backend
++        working-directory: src
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+         with:
+           python-version: '3.12'
+           cache: pip
+-          cache-dependency-path: backend/pyproject.toml
++          cache-dependency-path: src/pyproject.toml
+       - run: python -m pip install --upgrade pip 'setuptools>=83'
+       - run: python -m pip install -e '.[dev]'
+       - run: python -m pip_audit --local --progress-spinner=off
+diff --git a/src/application/market_pipeline/futures.py b/src/application/market_pipeline/futures.py
+index ecce320..b9330c7 100644
+--- a/src/application/market_pipeline/futures.py
++++ b/src/application/market_pipeline/futures.py
+@@ -3,6 +3,9 @@ from datetime import date, datetime
+ 
+ import pandas as pd
+ 
++from application.market_pipeline.utils import (
++    _canon_underlying,
++)
+ from brokers.market_data_registry import market_data
+ from brokers.smartapi.client import (
+     safe_float,
+@@ -11,6 +14,7 @@ from brokers.smartapi.client import (
+ 
+ from market.expiry.instrument_expiries import (
+     from_instrument_expiry as _from_smartapi_expiry,
++    to_instrument_expiry as _to_smartapi_expiry,
+ )
+ 
+ logger = logging.getLogger(__name__)

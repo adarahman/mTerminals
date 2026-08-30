@@ -3,6 +3,9 @@ from datetime import date, datetime
 
 import pandas as pd
 
+from application.market_pipeline.utils import (
+    _canon_underlying,
+)
 from brokers.market_data_registry import market_data
 from brokers.smartapi.client import (
     safe_float,
@@ -11,6 +14,7 @@ from brokers.smartapi.client import (
 
 from market.expiry.instrument_expiries import (
     from_instrument_expiry as _from_smartapi_expiry,
+    to_instrument_expiry as _to_smartapi_expiry,
 )
 
 logger = logging.getLogger(__name__)
