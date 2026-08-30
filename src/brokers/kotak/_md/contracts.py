@@ -82,9 +82,7 @@ def _contracts_for(underlying: str) -> list[dict]:
     return [row for row in _load_fo_scrips(segment) if row.get("name") == underlying.upper()]
 
 
-def _round_to_strike(price, underlying):
-    interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
-    return int(round(price / interval) * interval)
+from brokers.common_helpers import round_to_strike as _round_to_strike  # noqa: E402  (was a local copy; see common_helpers.py)
 
 
 def _parse_expiry_date(expiry_iso: str):
