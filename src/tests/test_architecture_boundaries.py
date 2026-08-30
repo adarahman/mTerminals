@@ -207,6 +207,16 @@ def test_option_chain_runtime_delegates_snapshot_calculation_and_export():
     assert "AnalyticsSnapshotService(" in runtime
 
 
+def test_option_chain_runtime_delegates_chain_fetch_and_bundle_construction():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def _fetch_and_parse" not in runtime
+    assert "def _build_expiry_bundle" not in runtime
+    assert "def _canon_symbol" not in runtime
+    assert "ChainAnalyticsService(" in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (

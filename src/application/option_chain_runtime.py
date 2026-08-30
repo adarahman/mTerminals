@@ -16,15 +16,11 @@ Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 import logging
 import time
 from collections.abc import Callable
-from decision.engine import build_engine_result
 from market.expiry.service import (
-    _generate_bse_expiry_series,
     _nearest_Tuesday,
 )
-from market.instruments.lot_sizes import LOT_SIZES
 
 from market.providers.option_chain import PublicOptionChainAdapter
-from oi.oi_analysis import compute_dte
 from application.pipeline_config import RuntimeConfig
 from application.market_pipeline.spot_selection import select_runtime_spot
 from application.market_pipeline.context import assemble_market_context
@@ -35,13 +31,10 @@ from application.market_pipeline.resources import (
 )
 from application.market_pipeline.extra_chains import ExtraChainService
 from application.market_pipeline.snapshot import AnalyticsSnapshotService
+from application.market_pipeline.chain_service import ChainAnalyticsService
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
-from market.option_chain.service import (
-    ExpiryResolutionService,
-    OptionChainFetchService,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +42,8 @@ logger = logging.getLogger(__name__)
 # their respective market/analytics services.
 
 _BSE_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
-_EXPIRY_RESOLVER = ExpiryResolutionService()
 _PUBLIC_MARKET = PublicOptionChainAdapter()
+_CHAIN_SERVICE = ChainAnalyticsService(public_market=_PUBLIC_MARKET)
 
 
 def _exchange_for_symbol(symbol: str) -> str:
@@ -128,133 +121,6 @@ _INDEX_SNAPSHOTS = IndexSnapshotCache(
 # =====================================================================
 
 
-def _fetch_bse_chain_no_smartapi(symbol, expiry_dash):
-    """Compatibility wrapper for the canonical public BSE adapter."""
-    return _PUBLIC_MARKET.fetch_bse_chain(symbol, expiry_dash)
-
-
-def _canon_symbol(symbol, runtime_config, broker_adapters=None):
-    """Map a full-company-name symbol to the exchange ticker once, so every
-    downstream consumer uses one consistent key: the chain DataFrame's Symbol
-    column, _day_open_oi()/NSE-anchor keys, LOT_SIZES lookups and
-    build_engine_result()'s own symbol filter must all agree or OI /
-    ChgOI / lot-size scaling silently diverge. Idempotent for tickers.
-    No-op in public-only mode."""
-    raw = (symbol or "").strip().upper()
-    if not runtime_config.broker_enabled or not raw:
-        return raw
-    if broker_adapters is None:
-        raise RuntimeError("broker adapters are required in broker mode")
-    return broker_adapters.canonicalize_symbol(raw)
-
-
-def _fetch_and_parse(
-    symbol,
-    expiry,
-    exchange,
-    strict_expiry=False,
-    runtime_config=None,
-    broker_adapters=None,
-):
-    runtime_config = runtime_config or _DEFAULT_RUNTIME_CONFIG
-    symbol = _canon_symbol(symbol, runtime_config, broker_adapters)
-
-    service = OptionChainFetchService(
-        canonicalize_symbol=(
-            broker_adapters.canonicalize_symbol
-            if runtime_config.broker_enabled
-            else lambda value: (value or "").strip().upper()
-        ),
-        fetch_broker_chain=(
-            broker_adapters.fetch_chain
-            if runtime_config.broker_enabled
-            else lambda *args: None
-        ),
-        list_broker_expiries=(
-            broker_adapters.list_expiries
-            if runtime_config.broker_enabled
-            else lambda *args: []
-        ),
-        fetch_public_bse_chain=_fetch_bse_chain_no_smartapi,
-        fetch_public_nse_payload=_PUBLIC_MARKET.fetch_nse_payload,
-        parse_public_nse_payload=_PUBLIC_MARKET.parse_nse_payload,
-        fetch_bse_quote=_PUBLIC_MARKET.fetch_bse_quote,
-        generate_bse_expiries=_generate_bse_expiry_series,
-        expiry_resolver=_EXPIRY_RESOLVER,
-    )
-    request = MarketDataRequestPlan(
-        symbol=symbol,
-        option_expiry=expiry,
-        option_exchange=exchange,
-        strict_expiry=strict_expiry,
-        futures_expiry=runtime_config.futures_expiry,
-        broker_enabled=runtime_config.broker_enabled,
-    )
-    return service.fetch(
-        request, strikes_each_side=runtime_config.strikes_each_side
-    )
-
-
-def _build_expiry_bundle(
-    symbol,
-    expiry,
-    exchange="NSE",
-    strict_expiry=False,
-    runtime_config=None,
-    broker_adapters=None,
-    **engine_kwargs,
-):
-    runtime_config = runtime_config or _DEFAULT_RUNTIME_CONFIG
-    symbol = _canon_symbol(symbol, runtime_config, broker_adapters)
-    if exchange == "BSE":
-        df, spot, _ = _fetch_and_parse(
-            symbol,
-            expiry,
-            exchange,
-            strict_expiry,
-            runtime_config,
-            broker_adapters,
-        )
-        resolved = expiry
-    else:
-        df, spot, resolved, _ = _fetch_and_parse(
-            symbol,
-            expiry,
-            exchange,
-            strict_expiry,
-            runtime_config,
-            broker_adapters,
-        )
-
-    df_clean = (
-        df.dropna(subset=["StrikePrice"])
-        .drop_duplicates(subset=["StrikePrice"])
-        .sort_values("StrikePrice")
-        .copy()
-    )
-    dte = compute_dte(resolved)
-
-    engine_kwargs.pop(
-        "velocity_window_minutes", None
-    )  # dead param; discarded so it can't leak through **engine_kwargs below
-    engine_result = build_engine_result(
-        df=df,
-        df_clean=df_clean,
-        df_idx=None,
-        df_fut=None,
-        df_full_history=None,
-        symbol=symbol,
-        expiry=resolved,
-        dte=dte,
-        lot_size=engine_kwargs.pop("lot_size", LOT_SIZES.get(symbol, 65)),
-        n_strikes_each_side=engine_kwargs.pop(
-            "n_strikes_each_side", runtime_config.strikes_each_side
-        ),
-        **engine_kwargs,
-    )
-    return df_clean, engine_result.master, engine_result.to_ctx_dict(), dte, resolved
-
-
 # =====================================================================
 # PIPELINE STAGES
 # =====================================================================
@@ -295,13 +161,13 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
     )
 
     def fetch_chain(plan):
-        value = _fetch_and_parse(
+        value = _CHAIN_SERVICE.fetch(
             plan.symbol,
             plan.option_expiry,
             plan.option_exchange,
-            plan.strict_expiry,
-            runtime_config,
-            broker_adapters,
+            strict_expiry=plan.strict_expiry,
+            runtime_config=runtime_config,
+            broker_adapters=broker_adapters,
         )
         _CHAIN_SNAPSHOTS.remember(chain_cache_key, value)
         return value
@@ -381,7 +247,7 @@ _CHAIN_SNAPSHOTS = ChainSnapshotStore(
 )
 _MARKET_IO_POOL = RetirableExecutorPool(max_workers=8)
 _EXTRA_CHAINS = ExtraChainService(
-    build_bundle=_build_expiry_bundle,
+    build_bundle=_CHAIN_SERVICE.build_expiry_bundle,
     exchange_for_symbol=_exchange_for_symbol,
     executor_pool=_MARKET_IO_POOL,
     logger=logger,

@@ -740,9 +740,10 @@ def test_canon_symbol_resolves_full_name_for_lot_and_engine_keys(monkeypatch):
         def canonicalize_symbol(symbol):
             return {"ADANI ENERGY SOLUTION LTD": "ADANIENSOL"}.get(symbol, symbol)
 
-    assert ocj._canon_symbol("ADANI ENERGY SOLUTION LTD", config, Adapters()) == "ADANIENSOL"
-    assert ocj._canon_symbol("NIFTY", config, Adapters()) == "NIFTY"
-    assert ocj._canon_symbol("ADANIENSOL", config, Adapters()) == "ADANIENSOL"
+    canonicalize = ocj._CHAIN_SERVICE.canonicalize
+    assert canonicalize("ADANI ENERGY SOLUTION LTD", config, Adapters()) == "ADANIENSOL"
+    assert canonicalize("NIFTY", config, Adapters()) == "NIFTY"
+    assert canonicalize("ADANIENSOL", config, Adapters()) == "ADANIENSOL"
 
 
 def test_upstox_oi_normalized_from_shares_to_lots(monkeypatch):
