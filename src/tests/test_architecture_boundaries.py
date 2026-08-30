@@ -146,6 +146,14 @@ def test_market_service_does_not_own_analytics_configuration_or_execution():
     assert "class PipelineRuntimeConfigurator" not in service
 
 
+def test_market_service_does_not_own_provider_or_symbol_switching():
+    service = (BACKEND / "application" / "market_service.py").read_text(
+        encoding="utf-8"
+    )
+    assert "class DataSourceSwitcher" not in service
+    assert "class SymbolSwitcher" not in service
+
+
 def test_option_chain_runtime_delegates_market_context_normalization():
     runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
         encoding="utf-8"

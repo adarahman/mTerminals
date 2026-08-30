@@ -7,17 +7,16 @@ from application.analytics_service import (
     AnalyticsPipelineRunner,
     PipelineRuntimeConfigurator,
 )
+from application.market_switching import DataSourceSwitcher, SymbolSwitcher
 from application.market_service import (
     CanonicalPayloadPublisher,
     DailyMarketScheduler,
-    DataSourceSwitcher,
     LiveFeedAggregatorRegistry,
     MarketEngineCycle,
     MarketPipelineService,
     MarketTickPacer,
     OiBaselineSynchronizer,
     SerializedPipelineExecutor,
-    SymbolSwitcher,
 )
 
 

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from application.market_service import DataSourceSwitcher, SymbolSwitcher
+from application.market_switching import DataSourceSwitcher, SymbolSwitcher
 from application.dashboard import serializer as dashboard_serializer
 from infrastructure.payload_capture import PayloadExportCapture
 from server.analytics_runtime import AnalyticsRuntime, build_broker_market_adapters
