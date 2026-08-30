@@ -8,6 +8,7 @@ every live poll — this test would have caught that without needing the network
 from unittest.mock import patch
 
 from application.pipeline_config import RuntimeConfig
+from application.market_pipeline.resources import RetirableExecutorPool
 import application.option_chain_runtime as ocr
 
 
@@ -50,16 +51,21 @@ def test_gather_wiring_passes_executor_to_constructor_only():
     assert calls["gather"]["timings"] == {}
 
 
-def test_timed_out_executor_is_retired_without_waiting(monkeypatch):
+def test_timed_out_executor_is_retired_without_waiting():
     calls = []
 
     class Executor:
         def shutdown(self, **kwargs):
             calls.append(kwargs)
 
-    monkeypatch.setattr(ocr, "_MARKET_IO_EXECUTOR", Executor())
+    pool = RetirableExecutorPool(
+        max_workers=8,
+        factory=lambda **_kwargs: Executor(),
+        register_shutdown=lambda _shutdown: None,
+    )
+    first = pool.get()
+    pool.retire()
+    second = pool.get()
 
-    ocr._reset_market_io_executor()
-
-    assert ocr._MARKET_IO_EXECUTOR is None
+    assert first is not second
     assert calls == [{"wait": False, "cancel_futures": True}]

@@ -163,6 +163,16 @@ def test_option_chain_runtime_does_not_own_index_refresh_state():
     assert "IndexSnapshotCache(" in runtime
 
 
+def test_option_chain_runtime_does_not_own_pipeline_resource_globals():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_MARKET_IO_EXECUTOR" not in runtime
+    assert "_chain_snapshot_cache" not in runtime
+    assert "RetirableExecutorPool(" in runtime
+    assert "ChainSnapshotStore(" in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (

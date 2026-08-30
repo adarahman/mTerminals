@@ -1,16 +1,20 @@
 import pandas as pd
+import logging
 
-from application import option_chain_runtime as runtime
+from application.market_pipeline.resources import ChainSnapshotStore
 
 
-def test_chain_snapshot_fallback_is_bounded_and_copied(monkeypatch):
-    monkeypatch.setattr(runtime, "_chain_snapshot_cache", {})
+def test_chain_snapshot_fallback_is_bounded_and_copied():
+    store = ChainSnapshotStore(
+        max_age_seconds=300.0,
+        logger=logging.getLogger(__name__),
+    )
     key = ("KOTAK", "NIFTY", "01-Sep-2026", "NSE", False)
     original = (pd.DataFrame([{"StrikePrice": 25000}]), 25000.0, "01-Sep-2026", [])
 
-    runtime._remember_chain_snapshot(key, original, now=100.0)
+    store.remember(key, original, now=100.0)
     timings = {}
-    cached = runtime._load_chain_snapshot(
+    cached = store.load(
         key,
         source="KOTAK",
         timings=timings,
@@ -25,8 +29,8 @@ def test_chain_snapshot_fallback_is_bounded_and_copied(monkeypatch):
     assert timings["chainStaleAgeSeconds"] == 10.0
     assert "10.0s-old KOTAK snapshot" in timings["chainStaleReason"]
 
-    assert runtime._load_chain_snapshot(
+    assert store.load(
         key,
         source="KOTAK",
-        now=100.0 + runtime._CHAIN_FALLBACK_MAX_AGE_SECONDS + 1,
+        now=401.0,
     ) is None

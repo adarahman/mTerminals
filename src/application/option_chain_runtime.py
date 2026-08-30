@@ -14,18 +14,10 @@ Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 """
 
 import argparse
-import atexit
-import copy
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import (
-    ThreadPoolExecutor,
-    TimeoutError as FutureTimeoutError,
-    as_completed,
-)
-import pandas as pd
-
+from concurrent.futures import TimeoutError as FutureTimeoutError, as_completed
 from decision.engine import build_engine_result
 from market.expiry.service import (
     BSE_EXPIRY_DEFAULT,
@@ -48,6 +40,10 @@ from application.pipeline_config import RuntimeConfig
 from application.market_pipeline.spot_selection import select_runtime_spot
 from application.market_pipeline.context import assemble_market_context
 from application.market_pipeline.index_cache import IndexSnapshotCache
+from application.market_pipeline.resources import (
+    ChainSnapshotStore,
+    RetirableExecutorPool,
+)
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
@@ -330,11 +326,11 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
             runtime_config,
             broker_adapters,
         )
-        _remember_chain_snapshot(chain_cache_key, value)
+        _CHAIN_SNAPSHOTS.remember(chain_cache_key, value)
         return value
 
     def fallback_chain(_plan):
-        return _load_chain_snapshot(
+        return _CHAIN_SNAPSHOTS.load(
             chain_cache_key,
             source=source,
             timings=timings,
@@ -375,7 +371,7 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
             fetch_public_bse_quote=_PUBLIC_MARKET.fetch_bse_quote,
             public_bse_symbols=_PUBLIC_MARKET.bse_symbols,
             fallback_chain=fallback_chain,
-            executor=_get_market_io_executor(),
+            executor=_MARKET_IO_POOL.get(),
             operation_timeout_seconds=(
                 runtime_config.operation_timeout_seconds or 15.0
             ),
@@ -384,13 +380,13 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
         # Running Python threads cannot be forcibly stopped. Retire this pool
         # so a broker SDK call that ignores its deadline cannot consume worker
         # capacity from every later analytics tick.
-        _reset_market_io_executor()
+        _MARKET_IO_POOL.retire()
         raise
 
     if "chain" in gathered.stale_operations:
         # The timed-out thread may still be blocked inside a broker SDK call.
         # Retire its pool so later ticks start with fresh worker capacity.
-        _reset_market_io_executor()
+        _MARKET_IO_POOL.retire()
 
     return assemble_market_context(
         gathered=gathered,
@@ -424,62 +420,12 @@ def _make_expiry_manager_or_none(expiry_dates):
 _EXTRA_CHAIN_CACHE_TTL_SECONDS = 45.0
 _EXTRA_CHAIN_OPERATION_TIMEOUT_SECONDS = 15.0
 _extra_chain_cache: dict = {}
-_chain_snapshot_cache: dict = {}
 _CHAIN_FALLBACK_MAX_AGE_SECONDS = 300.0
-
-
-def _remember_chain_snapshot(key, value, *, now=None) -> None:
-    frame = value[0] if isinstance(value, tuple) and value else None
-    if isinstance(frame, pd.DataFrame) and not frame.empty:
-        _chain_snapshot_cache[key] = (
-            time.monotonic() if now is None else now,
-            copy.deepcopy(value),
-        )
-
-
-def _load_chain_snapshot(key, *, source, timings=None, now=None):
-    cached = _chain_snapshot_cache.get(key)
-    if cached is None:
-        return None
-    cached_at, value = cached
-    current = time.monotonic() if now is None else now
-    age = current - cached_at
-    if age > _CHAIN_FALLBACK_MAX_AGE_SECONDS:
-        return None
-    reason = (
-        f"Option chain refresh timed out; using {age:.1f}s-old "
-        f"{source} snapshot"
-    )
-    if timings is not None:
-        timings["chainStale"] = 1
-        timings["chainStaleAgeSeconds"] = round(age, 3)
-        timings["chainStaleReason"] = reason
-    logger.warning("[chain:stale-fallback] %s", reason)
-    return copy.deepcopy(value)
-
-
-# One process-level I/O executor reused across polls instead of spinning up a
-# fresh ThreadPoolExecutor on every gather / extra-chain rebuild. Created
-# lazily on first use (not at import) so tests and tooling that merely import
-# this module don't pay for a thread pool.
-_MARKET_IO_EXECUTOR = None
-
-
-def _get_market_io_executor() -> ThreadPoolExecutor:
-    global _MARKET_IO_EXECUTOR
-    if _MARKET_IO_EXECUTOR is None:
-        _MARKET_IO_EXECUTOR = ThreadPoolExecutor(max_workers=8)
-        atexit.register(_MARKET_IO_EXECUTOR.shutdown)
-    return _MARKET_IO_EXECUTOR
-
-
-def _reset_market_io_executor() -> None:
-    """Retire the shared pool after a timed-out, non-cancellable operation."""
-    global _MARKET_IO_EXECUTOR
-    executor = _MARKET_IO_EXECUTOR
-    _MARKET_IO_EXECUTOR = None
-    if executor is not None:
-        executor.shutdown(wait=False, cancel_futures=True)
+_CHAIN_SNAPSHOTS = ChainSnapshotStore(
+    max_age_seconds=_CHAIN_FALLBACK_MAX_AGE_SECONDS,
+    logger=logger,
+)
+_MARKET_IO_POOL = RetirableExecutorPool(max_workers=8)
 
 
 def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
@@ -528,7 +474,7 @@ def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
                 futs = {}
                 for slot_name, slot, key in to_build:
                     submitted_at = time.monotonic()
-                    f = _get_market_io_executor().submit(
+                    f = _MARKET_IO_POOL.get().submit(
                         _build_expiry_bundle,
                         symbol,
                         slot.date_str,
@@ -566,7 +512,7 @@ def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
                                 timings["extra" + slot_name] = round(
                                     time.monotonic() - submitted_at, 4
                                 )
-                    _reset_market_io_executor()
+                    _MARKET_IO_POOL.retire()
     except Exception as e:
         logger.warning(f"[ExtraChains] Skip ({e})")
     return extra_chains
