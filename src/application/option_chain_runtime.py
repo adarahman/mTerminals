@@ -17,7 +17,6 @@ import argparse
 import atexit
 import copy
 import logging
-import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import (
@@ -48,6 +47,7 @@ from oi.oi_analysis import (
 from application.pipeline_config import RuntimeConfig
 from application.market_pipeline.spot_selection import select_runtime_spot
 from application.market_pipeline.context import assemble_market_context
+from application.market_pipeline.index_cache import IndexSnapshotCache
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
@@ -55,7 +55,6 @@ from market.option_chain.service import (
     ExpiryResolutionService,
     OptionChainFetchService,
 )
-from storage.caches import TTLSlot
 
 logger = logging.getLogger(__name__)
 
@@ -133,47 +132,11 @@ _DEFAULT_RUNTIME_CONFIG = RuntimeConfig(
 # real NSE HTTP volume without touching anything downstream (same
 # DataFrame, refreshed less often).
 DF_IDX_TTL_SECONDS = 20
-_DF_IDX_CACHE = TTLSlot(ttl_seconds=DF_IDX_TTL_SECONDS, clock="epoch")
-_DF_IDX_REFRESH_LOCK = threading.Lock()
-_DF_IDX_REFRESHING = False
-
-
-def _refresh_df_idx_background():
-    """Runs off the tick's critical path — see _fetch_all_indices_cached."""
-    global _DF_IDX_REFRESHING
-    try:
-        _DF_IDX_CACHE.set(_PUBLIC_MARKET.fetch_indices())
-    except Exception as e:
-        logger.error(f"[_refresh_df_idx_background] fetch_all_indices failed: {e}")
-    finally:
-        with _DF_IDX_REFRESH_LOCK:
-            _DF_IDX_REFRESHING = False
-
-
-def _fetch_all_indices_cached():
-    """Stale-while-revalidate: on TTL expiry, kick off the 6-way NSE refresh
-    in a background thread and return the last known value immediately,
-    instead of blocking this tick's pipeline on it. Only the very first
-    call (cold start, nothing cached yet) blocks."""
-    global _DF_IDX_REFRESHING
-
-    if _DF_IDX_CACHE.value is None:
-        _DF_IDX_CACHE.set(_PUBLIC_MARKET.fetch_indices())
-        return _DF_IDX_CACHE.value
-
-    if not _DF_IDX_CACHE.is_fresh():
-        with _DF_IDX_REFRESH_LOCK:
-            already_refreshing = _DF_IDX_REFRESHING
-            if not already_refreshing:
-                _DF_IDX_REFRESHING = True
-        if not already_refreshing:
-            threading.Thread(
-                target=_refresh_df_idx_background,
-                daemon=True,
-                name="df_idx_refresh",
-            ).start()
-
-    return _DF_IDX_CACHE.value
+_INDEX_SNAPSHOTS = IndexSnapshotCache(
+    fetch=_PUBLIC_MARKET.fetch_indices,
+    ttl_seconds=DF_IDX_TTL_SECONDS,
+    logger=logger,
+)
 
 
 # =====================================================================
@@ -392,7 +355,7 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
         gathered = ConcurrentMarketDataGatherer(
             fetch_chain=fetch_chain,
             fetch_futures=fetch_futures,
-            fetch_indices=_fetch_all_indices_cached,
+            fetch_indices=_INDEX_SNAPSHOTS.get,
             warm_broker_batch=(
                 broker_adapters.warm_batch if request.broker_enabled else None
             ),

@@ -154,6 +154,15 @@ def test_option_chain_runtime_delegates_market_context_normalization():
     assert "assemble_market_context(" in runtime
 
 
+def test_option_chain_runtime_does_not_own_index_refresh_state():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_DF_IDX_REFRESHING" not in runtime
+    assert "_DF_IDX_REFRESH_LOCK" not in runtime
+    assert "IndexSnapshotCache(" in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (
