@@ -647,6 +647,7 @@ class PipelineRuntimeConfigurator:
         price_source=None,
         futures_expiry=None,
         strikes_each_side=None,
+        operation_timeout_seconds=None,
     ) -> RuntimeConfig:
         source = self._data_source()
         self._activate_provider(source)
@@ -660,6 +661,7 @@ class PipelineRuntimeConfigurator:
             futures_expiry=futures_expiry,
             strikes_each_side=strikes_each_side,
             use_smartapi=(source != "NSE_BSE"),
+            operation_timeout_seconds=operation_timeout_seconds,
         )
         self._apply_config(config)
         return config

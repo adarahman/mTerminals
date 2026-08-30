@@ -63,6 +63,7 @@ def test_core_runtime_assembles_dashboard_analytics_feeds_and_switchers(monkeypa
         supports_websocket=lambda _provider: False,
         feed_manager=feed_manager,
         report=lambda *_args: None,
+        pipeline_timeout_seconds=8.0,
     )
 
     assert state.FEEDS == {"SMARTAPI": state.FEEDS["SMARTAPI"]}

@@ -61,6 +61,7 @@ def build_core_runtime(
     supports_websocket: Callable[[str], bool],
     feed_manager: Any,
     report: Callable[..., Any],
+    pipeline_timeout_seconds: float,
 ) -> CoreRuntime:
     capture = _build_payload_capture()
     broadcaster = DashboardBroadcaster(
@@ -110,6 +111,7 @@ def build_core_runtime(
         extra_chains=args.extra_chains,
         strict_expiry=args.strict_expiry,
         no_virtual_oi=args.no_virtual_oi,
+        operation_timeout_seconds=max(0.5, pipeline_timeout_seconds - 0.5),
     )
     runtime_state.FEEDS = build_feed_managers(
         default_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,

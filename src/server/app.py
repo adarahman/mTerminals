@@ -115,6 +115,7 @@ _CORE_RUNTIME = build_core_runtime(
     supports_websocket=_provider_supports_websocket,
     feed_manager=feed_manager,
     report=_REPORT,
+    pipeline_timeout_seconds=runtime_state.PIPELINE_TIMEOUT_SECONDS,
 )
 _PAYLOAD_EXPORT_CAPTURE = _CORE_RUNTIME.payload_capture
 _DASHBOARD_BROADCASTER = _CORE_RUNTIME.broadcaster

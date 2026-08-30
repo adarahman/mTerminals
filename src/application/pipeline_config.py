@@ -40,6 +40,7 @@ class RuntimeConfig:
     # the nearest one itself). None = leave option_chain_json's current
     # value alone, matching every other field's semantics here.
     futures_expiry: Optional[str] = None
+    operation_timeout_seconds: Optional[float] = None
 
     @property
     def broker_enabled(self) -> Optional[bool]:
@@ -80,3 +81,8 @@ class RuntimeConfig:
                     "futures_expiry must be NEAR, NEXT, or FAR"
                 )
             object.__setattr__(self, "futures_expiry", futures_expiry)
+        if (
+            self.operation_timeout_seconds is not None
+            and self.operation_timeout_seconds <= 0
+        ):
+            raise ValueError("operation_timeout_seconds must be positive")

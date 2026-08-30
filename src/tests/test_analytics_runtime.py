@@ -41,6 +41,7 @@ def _runtime(**overrides):
         "extra_chains": False,
         "strict_expiry": True,
         "no_virtual_oi": True,
+        "operation_timeout_seconds": 7.5,
     }
     defaults.update(overrides)
     return AnalyticsRuntime(**defaults), state
@@ -61,6 +62,7 @@ def test_configure_current_owns_complete_runtime_policy():
     assert config.futures_expiry == "NEAR"
     assert config.strikes_each_side == 15
     assert config.use_smartapi is True
+    assert config.operation_timeout_seconds == 7.5
 
 
 def test_diagnostic_config_uses_current_provider_and_default_expiry():

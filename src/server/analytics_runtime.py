@@ -73,6 +73,7 @@ class AnalyticsRuntime:
         extra_chains: bool,
         strict_expiry: bool,
         no_virtual_oi: bool,
+        operation_timeout_seconds: float,
     ) -> None:
         self._symbol = symbol
         self._expiry = expiry
@@ -82,6 +83,7 @@ class AnalyticsRuntime:
         self._extra_chains = extra_chains
         self._strict_expiry = strict_expiry
         self._no_virtual_oi = no_virtual_oi
+        self._operation_timeout_seconds = operation_timeout_seconds
         self._configurator = PipelineRuntimeConfigurator(
             data_source=data_source,
             activate_provider=activate_provider,
@@ -109,6 +111,7 @@ class AnalyticsRuntime:
             symbol=symbol,
             expiry=expiry,
             strikes_each_side=self._strikes_each_side(),
+            operation_timeout_seconds=self._operation_timeout_seconds,
         )
 
     def configure_current(self):
@@ -121,6 +124,7 @@ class AnalyticsRuntime:
             price_source=self._price_source(),
             futures_expiry=self._futures_expiry(),
             strikes_each_side=self._strikes_each_side(),
+            operation_timeout_seconds=self._operation_timeout_seconds,
         )
 
     async def run(self):

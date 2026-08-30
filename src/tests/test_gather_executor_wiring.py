@@ -5,7 +5,6 @@ ConcurrentMarketDataGatherer *constructor*, not as a keyword to gather()
 (which does not accept it). A previous change passed it to gather() and broke
 every live poll — this test would have caught that without needing the network.
 """
-import pytest
 from unittest.mock import patch
 
 from application.pipeline_config import RuntimeConfig
@@ -34,6 +33,7 @@ def test_gather_wiring_passes_executor_to_constructor_only():
         use_smartapi=False,
         strict_expiry=False,
         futures_expiry="NEAR",
+        operation_timeout_seconds=7.5,
     )
     with patch.object(ocr, "ConcurrentMarketDataGatherer", RecorderGatherer):
         try:
@@ -44,6 +44,7 @@ def test_gather_wiring_passes_executor_to_constructor_only():
     assert "init" in calls and "gather" in calls
     # executor must reach the constructor (shared, persistent pool)
     assert "executor" in calls["init"]
+    assert calls["init"]["operation_timeout_seconds"] == 7.5
     # and must NOT be forwarded to gather(), which has no such parameter
     assert "executor" not in calls["gather"]
     assert calls["gather"]["timings"] == {}

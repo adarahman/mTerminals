@@ -47,6 +47,7 @@ def test_runtime_config_is_immutable_and_normalizes_enums():
         ("strikes_each_side", True),
         ("price_source", "CASH"),
         ("futures_expiry", "WEEKLY"),
+        ("operation_timeout_seconds", 0),
     ],
 )
 def test_runtime_config_rejects_invalid_values(field, value):

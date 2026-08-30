@@ -100,6 +100,7 @@ _DEFAULT_RUNTIME_CONFIG = RuntimeConfig(
     use_smartapi=_DEFAULT_USE_SMARTAPI,
     price_source="AUTO",
     futures_expiry="NEAR",
+    operation_timeout_seconds=15.0,
 )
 
 # Underlying price source fed into df["Spot"] (and downstream into every
@@ -411,6 +412,9 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
             public_bse_symbols=_PUBLIC_MARKET.bse_symbols,
             fallback_chain=fallback_chain,
             executor=_get_market_io_executor(),
+            operation_timeout_seconds=(
+                runtime_config.operation_timeout_seconds or 15.0
+            ),
         ).gather(request, timings=timings)
     except TimeoutError:
         # Running Python threads cannot be forcibly stopped. Retire this pool
