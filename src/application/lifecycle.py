@@ -1,4 +1,5 @@
 """Application startup, background execution, and shutdown orchestration."""
+
 from __future__ import annotations
 
 import asyncio

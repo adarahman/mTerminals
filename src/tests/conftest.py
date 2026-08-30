@@ -94,7 +94,7 @@ def ws_server_live(tmp_path_factory):
 
     os.environ["RUNTIME_DIR"] = str(runtime_dir)
     os.environ.pop("LIVE_TRADING_ENABLED", None)  # module reads this once at import; keep it off
-    sys.argv = ["run_server.py"]
+    sys.argv = ["main.py"]
     for p in (PROJECT_ROOT, BACKEND_DIR):
         if p not in sys.path:
             sys.path.insert(0, p)

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from application.runtime import ApplicationLifecycle
+from application.lifecycle import ApplicationLifecycle
 from server.backtest_api import handle_backtest
 from server.health_api import (
     broker_health,

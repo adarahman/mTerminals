@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from application.runtime import build_background_jobs
+from application.lifecycle import build_background_jobs
 
 
 def flush_oi_history() -> None:

@@ -1,6 +1,6 @@
 import asyncio
 
-from application.runtime import ApplicationLifecycle, build_background_jobs
+from application.lifecycle import ApplicationLifecycle, build_background_jobs
 
 
 def test_lifecycle_starts_services_and_shuts_down_every_owner():

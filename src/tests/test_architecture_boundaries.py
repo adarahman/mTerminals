@@ -142,6 +142,10 @@ def test_generic_market_service_module_is_removed():
     assert not (BACKEND / "application" / "market_service.py").exists()
 
 
+def test_generic_application_runtime_module_is_removed():
+    assert not (BACKEND / "application" / "runtime.py").exists()
+
+
 def test_option_chain_runtime_delegates_market_context_normalization():
     runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
         encoding="utf-8"
