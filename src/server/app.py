@@ -32,7 +32,6 @@ from infrastructure.config import settings as _broker_settings  # noqa: E402
 from server import broker_services  # noqa: E402  (imports config + brokers.*)
 from server import feed_manager  # noqa: E402
 from server.market_history_api import no_cache_middleware  # noqa: E402
-from application.market_pipeline.futures import fetch_futures_wide  # noqa: E402
 from server.feeds.orchestration import _smartapi_sync_and_broadcast  # noqa: E402,F401
 from market.providers import nse_bse_client as market_api  # noqa: E402
 from application import option_chain_runtime  # noqa: E402
@@ -41,13 +40,28 @@ from server.websocket_payload import json_default as _json_default  # noqa: E402
 from execution.paper_trading import LOT_SIZES as PT_LOT_SIZES  # noqa: E402,F401
 from execution.paper_trading import _instrument_key  # noqa: E402
 from backtest.replay import run_backtest  # noqa: E402
-from brokers.smartapi.instruments import get_lot_size as _smartapi_lot_size  # noqa: E402
 from brokers.provider_registry import supports_websocket as _provider_supports_websocket  # noqa: E402
 from server.startup_configuration import resolve_default_pipeline_expiry as _resolve_default_pipeline_expiry  # noqa: E402
 from server.core_runtime_assembly import build_core_runtime  # noqa: E402
 from server.runtime_stack import build_runtime_stack  # noqa: E402
 from server.process_bootstrap import bootstrap_process  # noqa: E402
 logger = logging.getLogger("mterminals.server")
+
+
+def _broker_lot_size(symbol):
+    """Load broker instrument metadata only when a live lookup is requested."""
+    if not broker_services.BROKER_SERVICES_ENABLED:
+        raise RuntimeError("broker lot-size resolver is disabled")
+    from brokers.smartapi.instruments import get_lot_size
+
+    return get_lot_size(symbol)
+
+
+def _fetch_broker_futures(symbol, which):
+    """Keep broker-heavy futures modules outside public-only startup."""
+    from application.market_pipeline.futures import fetch_futures_wide
+
+    return fetch_futures_wide(symbol, which=which)
 
 BROKER_SERVICES_ENABLED = broker_services.BROKER_SERVICES_ENABLED
 _MD_PROVIDER_KEYS = broker_services.MD_PROVIDER_KEYS
@@ -59,7 +73,7 @@ _PROCESS_BOOTSTRAP = bootstrap_process(
     broker_services=broker_services,
     broker_settings=_broker_settings,
     instrument_key=_instrument_key,
-    lot_size_resolver=_smartapi_lot_size,
+    lot_size_resolver=_broker_lot_size,
     supports_websocket=_provider_supports_websocket,
 )
 ARGS = _PROCESS_BOOTSTRAP.args
@@ -92,9 +106,7 @@ _CORE_RUNTIME = build_core_runtime(
     json_default=_json_default,
     encode=lambda message: orjson.dumps(message, default=_json_default).decode(),
     market_api=market_api,
-    broker_futures_fetcher=lambda symbol, which: fetch_futures_wide(
-        symbol, which=which
-    ),
+    broker_futures_fetcher=_fetch_broker_futures,
     activate_provider=_md_set_active_provider,
     resolve_default_expiry=_resolve_default_pipeline_expiry,
     invoke_analytics=option_chain_runtime.main,

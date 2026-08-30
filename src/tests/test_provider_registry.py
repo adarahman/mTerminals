@@ -16,10 +16,10 @@ def test_market_data_uses_canonical_provider_metadata():
 
 
 def test_streaming_and_execution_capabilities_are_explicit():
-    assert STREAMING_PROVIDER_KEYS == {"SMARTAPI", "UPSTOX", "SHOONYA"}
+    assert STREAMING_PROVIDER_KEYS == {"SMARTAPI", "UPSTOX", "SHOONYA", "KOTAK"}
     assert EXECUTION_PROVIDER_KEYS == {
         "SMARTAPI", "UPSTOX", "SHOONYA", "KITE", "BREEZE"
     }
-    assert supports_websocket("KOTAK") is False
+    assert supports_websocket("KOTAK") is True
     assert supports_websocket("NSE_BSE") is False
     assert supports_websocket("shoonya") is True

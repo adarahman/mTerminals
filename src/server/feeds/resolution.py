@@ -1,8 +1,8 @@
 """Provider-neutral token resolution adapters for websocket feeds."""
 from __future__ import annotations
 
-from brokers.market_data import market_data
 from market.providers.nse_bse import _BSE_SYMBOLS
+from server.broker_services import market_data
 from server.feeds import live_updates
 from server.feeds.kotak import resolve_chain_tokens as resolve_kotak_tokens
 from server.feeds.shoonya import resolve_chain_tokens as resolve_shoonya_tokens
