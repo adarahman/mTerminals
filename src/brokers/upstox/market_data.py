@@ -1,8 +1,11 @@
 """Broker-neutral market-data adapter for Upstox."""
+import logging
 from datetime import date, datetime
 from typing import Optional
 
-from market.providers.nse_bse import resolve_exchange_for_symbol
+from market.providers.nse_bse import _public_futures_quote, resolve_exchange_for_symbol
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_float(value):
@@ -283,7 +286,19 @@ class UpstoxMarketData:
         cands = [(row, _parse_expiry(row)) for row in cands]
         cands = [(row, exp) for row, exp in cands if exp is not None]
         if not cands:
-            return None
+            # Unlike Kite/Shoonya/Breeze (always public) and Kotak (native,
+            # with an explicit public fallback), this method used to return
+            # None here with no recovery — any name-canonicalization miss
+            # or instrument-dump gap silently starved the decision engine
+            # of a futures reading for Upstox specifically. Fall back to
+            # the shared NSE/BSE public quote, flagged via FutSource, same
+            # as Kotak's adapter does.
+            logger.warning(
+                "[upstox_market_data] no native FUT contract for %s (resolved "
+                "name=%r) — falling back to public NSE/BSE futures quote",
+                underlying, name_u,
+            )
+            return _public_futures_quote(underlying, which=which)
         cands.sort(key=lambda pair: pair[1])
         today = datetime.combine(date.today(), datetime.min.time())
         live = [(row, exp) for row, exp in cands if exp >= today] or cands
@@ -298,7 +313,13 @@ class UpstoxMarketData:
         )
         q = quotes.get(fut.get("trading_symbol")) if quotes else None
         if not q:
-            return None
+            logger.warning(
+                "[upstox_market_data] resolved FUT contract %s for %s but "
+                "batch-quote lookup returned nothing — falling back to "
+                "public NSE/BSE futures quote",
+                fut.get("trading_symbol"), underlying,
+            )
+            return _public_futures_quote(underlying, which=which)
 
         spot_quote = self.get_spot_quote(underlying)
         spot = spot_quote["ltp"] if spot_quote else 0.0

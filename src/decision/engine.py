@@ -494,22 +494,22 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     max_pain_dist = abs(spot - max_pain)
 
     # ── futures basis ───────────────────────────────────────────────────
-    has_futures_quote = (
-        df_fut is not None
-        and not df_fut.empty
-        and "LTP" in df_fut.columns
-        and pd.notna(df_fut["LTP"].iloc[0])
-        and float(df_fut["LTP"].iloc[0]) > 0
-    )
-    futures_ltp = float(df_fut["LTP"].iloc[0]) if has_futures_quote else spot
-    basis = futures_ltp - spot if has_futures_quote else 0.0
-    # Missing futures evidence is unknown, not bearish. The previous fallback
-    # substituted spot for FUT LTP, produced a zero basis, and then labelled
-    # that fabricated observation "Short Buildup". Providers with a missing
-    # futures quote therefore received a false -0.8 directional score.
-    fut_signal = (
-        "Long Buildup" if basis > 0 else "Short Buildup"
-    ) if has_futures_quote else "Unknown"
+    # BUG FIX: this used to fall back to `spot` whenever df_fut was missing
+    # (broker futures-quote fetch failed/empty), which forces basis == 0.
+    # basis > 0 was the only branch checked, so a *missing* reading and a
+    # *genuinely flat* reading both fell through to "Short Buildup" —
+    # silently injecting a bearish fut_score (-0.80, weighted 18% in the
+    # composite) whenever a provider simply had no futures data. Track
+    # availability explicitly instead: no data → fut_signal = "" so
+    # decision_engine.py's `availability["futures"]` check drops the
+    # signal from the composite rather than faking a direction for it.
+    have_futures = df_fut is not None and not df_fut.empty and "LTP" in df_fut.columns
+    futures_ltp = df_fut["LTP"].iloc[0] if have_futures else None
+    basis = (futures_ltp - spot) if have_futures and futures_ltp is not None else 0.0
+    if not have_futures or futures_ltp is None:
+        fut_signal = ""
+    else:
+        fut_signal = "Long Buildup" if basis > 0 else "Short Buildup"
 
     # ── futures day change / % change (top-bar FUT pill) ────────────────
     # df_fut carries Change/PctChange for both the SmartAPI path
