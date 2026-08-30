@@ -146,6 +146,14 @@ def test_market_service_does_not_own_analytics_configuration_or_execution():
     assert "class PipelineRuntimeConfigurator" not in service
 
 
+def test_option_chain_runtime_delegates_market_context_normalization():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def _merge_volume_value" not in runtime
+    assert "assemble_market_context(" in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (

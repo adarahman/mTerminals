@@ -47,6 +47,7 @@ from oi.oi_analysis import (
 )
 from application.pipeline_config import RuntimeConfig
 from application.market_pipeline.spot_selection import select_runtime_spot
+from application.market_pipeline.context import assemble_market_context
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
@@ -428,83 +429,13 @@ def _gather_market_data(exchange, runtime_config, broker_adapters=None, timings=
         # Retire its pool so later ticks start with fresh worker capacity.
         _reset_market_io_executor()
 
-    if request.option_exchange == "BSE":
-        df, spot, expiry_dates = gathered.chain
-        resolved = request.option_expiry
-    else:
-        df, spot, resolved, expiry_dates = gathered.chain
-
-    df_fut = gathered.futures
-    if isinstance(df_fut, dict):
-        df_fut = pd.DataFrame([df_fut])
-    elif df_fut is None:
-        df_fut = pd.DataFrame()
-    df_idx = gathered.indices
-
-    if request.broker_enabled:
-        _live_vix, _live_vix_chg_pct = gathered.vix
-        sensex_quote = gathered.sensex_quote
-        ticker_payload = gathered.ticker_payload
-        bse_quotes = []
-    else:
-        _live_vix, _live_vix_chg_pct, ticker_payload = (
-            _PUBLIC_MARKET.unified_market_data(df_idx)
-        )
-        bse_quotes = [quote for quote in gathered.public_bse_quotes if quote]
-        sensex_quote = next(
-            (quote for quote in bse_quotes if quote.get("Symbol") == "SENSEX"),
-            None,
-        )
-
-    _live_vix = _live_vix or 0.0
-    all_indices = list(ticker_payload)
-    if sensex_quote:
-        all_indices.append(sensex_quote)
-    if not request.broker_enabled:
-        all_indices.extend(
-            quote for quote in bse_quotes if quote.get("Symbol") != "SENSEX"
-        )
-
-    _merge_volume_value(all_indices, df_idx)
-    df, spot, price_source_used = _select_runtime_spot(
-        df, spot, df_fut, all_indices, runtime_config
+    return assemble_market_context(
+        gathered=gathered,
+        request=request,
+        runtime_config=runtime_config,
+        unified_public_market_data=_PUBLIC_MARKET.unified_market_data,
+        select_spot=_select_runtime_spot,
     )
-
-    return {
-        "df": df,
-        "spot": spot,
-        "price_source_used": price_source_used,
-        "resolved": resolved,
-        "expiry_dates": expiry_dates,
-        "df_fut": df_fut,
-        "df_idx": df_idx,
-        "india_vix": _live_vix,
-        "india_vix_chg_pct": _live_vix_chg_pct,
-        "all_indices": all_indices,
-    }
-
-
-def _merge_volume_value(all_indices, df_idx):
-    """Merge real Volume/Value from df_idx (already fetched — no new network
-    call). get_unified_market_data()'s /api/allIndices source reports
-    Volume/Value hardcoded to 0 on index rows (an index isn't itself traded),
-    but df_idx comes from equity-stock-indices, which includes each index's
-    own aggregate row with real session-cumulative totals (the numbers NSE's
-    live-market page shows). Matched on Symbol — already the same
-    INDEX_RENAME'd string on both sides. Frontend: dashboard.js's price
-    chart reads Value/Volume off allIndices to compute a running VWAP."""
-    if df_idx is not None and not df_idx.empty and "Symbol" in df_idx.columns:
-        vol_map = (
-            df_idx.dropna(subset=["Volume"])
-            .drop_duplicates(subset=["Symbol"], keep="first")
-            .set_index("Symbol")[["Volume", "Value"]]
-            .to_dict("index")
-        )
-        for entry in all_indices:
-            row = vol_map.get(entry.get("Symbol"))
-            if row:
-                entry["Volume"] = row["Volume"]
-                entry["Value"] = row["Value"]
 
 
 def _make_expiry_manager_or_none(expiry_dates):
