@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from application import option_chain_runtime, selection_state
+from application import selection_state
+from market.expiry.service import (
+    BSE_EXPIRY_DEFAULT,
+    _nearest_Thursday,
+    _nearest_Tuesday,
+)
 
 DATA_SOURCE_LABELS = {
     "UPSTOX": "Upstox",
@@ -37,10 +42,8 @@ def resolve_default_pipeline_expiry(symbol: str) -> str:
     """Resolve the nearest valid exchange-calendar option expiry."""
     symbol = (symbol or "").strip().upper()
     if symbol in BSE_SYMBOLS:
-        return option_chain_runtime.BSE_EXPIRY_DEFAULT.get(
-            symbol, option_chain_runtime._nearest_Thursday
-        )()
-    return option_chain_runtime._nearest_Tuesday()
+        return BSE_EXPIRY_DEFAULT.get(symbol, _nearest_Thursday)()
+    return _nearest_Tuesday()
 
 
 @dataclass(frozen=True, slots=True)

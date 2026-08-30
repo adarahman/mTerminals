@@ -1,4 +1,3 @@
-from application.pipeline_config import RuntimeConfig
 from application import option_chain_runtime
 
 
@@ -22,21 +21,6 @@ def test_option_chain_runtime_has_no_mutable_selection_globals():
     assert not hasattr(option_chain_runtime, "set_runtime_config")
 
 
-def test_cli_parser_returns_runtime_config_without_module_mutation():
-    config, interval = option_chain_runtime._apply_cli_overrides(
-        [
-            "--symbol",
-            "BANKNIFTY",
-            "--expiry",
-            "25-Aug-2026",
-            "--interval",
-            "3",
-            "--strict-expiry",
-        ]
-    )
-
-    assert isinstance(config, RuntimeConfig)
-    assert config.symbol == "BANKNIFTY"
-    assert config.expiry == "25-Aug-2026"
-    assert config.strict_expiry is True
-    assert interval == 3
+def test_option_chain_runtime_is_not_a_stranded_executable_entrypoint():
+    assert not hasattr(option_chain_runtime, "_build_arg_parser")
+    assert not hasattr(option_chain_runtime, "_apply_cli_overrides")

@@ -182,6 +182,22 @@ def test_option_chain_runtime_delegates_extra_expiry_construction():
     assert "ExtraChainService(" in runtime
 
 
+def test_option_chain_runtime_is_not_a_second_process_entrypoint():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'if __name__ == "__main__"' not in runtime
+    assert "argparse" not in runtime
+
+
+def test_startup_configuration_uses_canonical_expiry_service():
+    startup = (BACKEND / "server" / "startup_configuration.py").read_text(
+        encoding="utf-8"
+    )
+    assert "option_chain_runtime" not in startup
+    assert "from market.expiry.service import" in startup
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (

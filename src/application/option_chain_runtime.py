@@ -1,9 +1,9 @@
 """Lightweight JSON options pipeline (refactored).
 
-Behavior-preserving refactor of the former import-time-heavy module:
+Refactor of the former import-time-heavy module:
 
-- CLI arguments are parsed ONLY when run as a script (__main__), never at
-  import. Hosts pass one RuntimeConfig directly to main().
+- Hosts pass one RuntimeConfig directly to main(); executable process setup
+  belongs to the canonical ``main`` module and ``server.app`` composition root.
 - main() delegates market input gathering, normalization, and secondary-expiry
   bundle construction to focused application services, each independently
   readable/testable; control flow and ordering inside each stage match the
@@ -13,15 +13,12 @@ Behavior-preserving refactor of the former import-time-heavy module:
 Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 """
 
-import argparse
 import logging
 import time
 from collections.abc import Callable
 from decision.engine import build_engine_result
 from market.expiry.service import (
-    BSE_EXPIRY_DEFAULT,
     _generate_bse_expiry_series,
-    _nearest_Thursday,
     _nearest_Tuesday,
     make_expiry_manager,
 )
@@ -66,11 +63,8 @@ def _exchange_for_symbol(symbol: str) -> str:
     return "BSE" if symbol in _BSE_SYMBOLS else "NSE"
 
 
-# ─── Runtime configuration (module globals, host-mutable) ────────────
-# Initialized to host-friendly constants; the standalone CLI overwrites
-# them in _apply_cli_overrides() (see __main__). NOTHING here touches
-# sys.argv at import time — that was the old behavior and forced every
-# importing host to hide argv mid-import.
+# ─── Default runtime configuration ──────────────────────────────────
+# Used only when an embedding caller omits an explicit RuntimeConfig.
 #
 # NOTE: authenticated broker mode is enabled by default unless
 # BROKER_SERVICES_ENABLED=false. ``use_smartapi`` is the legacy configuration
@@ -205,17 +199,6 @@ def _fetch_and_parse(
     return service.fetch(
         request, strikes_each_side=runtime_config.strikes_each_side
     )
-
-
-def _resolve_expiry(data, requested_expiry, strict=False):
-    resolved = _EXPIRY_RESOLVER.resolve_public_payload(
-        data, requested_expiry, strict=strict
-    )
-    if resolved != requested_expiry:
-        logger.info(
-            f"[Expiry] '{requested_expiry}' empty → selected: '{resolved}'"
-        )
-    return resolved
 
 
 def _build_expiry_bundle(
@@ -602,94 +585,4 @@ def main(
             runtime_config.symbol,
             runtime_config.expiry,
             exc,
-        )
-
-
-# =====================================================================
-# STANDALONE CLI — argv is parsed HERE and nowhere else
-# =====================================================================
-
-
-def _build_arg_parser(default_expiry=None):
-    parser = argparse.ArgumentParser(prog="option_chain_json", add_help=True)
-    parser.add_argument("--exchange", default="NSE", choices=["NSE", "BSE"])
-    parser.add_argument("--symbol", default="NIFTY")
-    parser.add_argument("--interval", default=0, type=int)
-    parser.add_argument(
-        "--no-extra-chains",
-        action="store_true",
-        help="Disable multi-expiry chains for faster performance",
-    )
-    parser.add_argument(
-        "--strict-expiry",
-        action="store_true",
-        help="Don't auto-resolve to different expiry if requested expiry has no data",
-    )
-    parser.add_argument(
-        "--no-virtual-oi",
-        action="store_true",
-        help="Disable VirtualOI model inference for faster performance",
-    )
-    if default_expiry is not None:
-        # Second parse stage: --expiry's default depends on --symbol's
-        # value (BSE indices expire Thursdays, NSE Tuesdays), mirroring
-        # the original two-pass parse_known_args() behavior exactly.
-        parser.add_argument("--expiry", default=default_expiry, help="Expiry DD-Mmm-YYYY")
-    return parser
-
-
-def _log_init_banner(runtime_config, exchange, loop_interval):
-    logger.info("=== LIGHTWEIGHT JSON OPTIONS PIPELINE INITIALIZATION ===")
-    logger.info(
-        f"    Exchange: {exchange} | Symbol: {runtime_config.symbol} | "
-        f"Expiry: {runtime_config.expiry}"
-    )
-    logger.info(
-        f"    Loop    : "
-        f"{'every ' + str(loop_interval) + ' min' if loop_interval > 0 else 'single run'}\n"
-    )
-
-
-def _apply_cli_overrides(argv=None):
-    """Parse standalone CLI inputs into an explicit runtime configuration."""
-    pre, _ = _build_arg_parser().parse_known_args(argv)
-    sym = (pre.symbol or "NIFTY").strip().upper()
-    default_expiry = (
-        BSE_EXPIRY_DEFAULT.get(sym, _nearest_Thursday)()
-        if sym in _BSE_SYMBOLS
-        else _nearest_Tuesday()
-    )
-    args, _unknown = _build_arg_parser(default_expiry).parse_known_args(argv)
-
-    runtime_config = RuntimeConfig(
-        symbol=args.symbol.strip().upper(),
-        expiry=args.expiry.strip(),
-        no_extra_chains=args.no_extra_chains,
-        strict_expiry=args.strict_expiry,
-        no_virtual_oi=args.no_virtual_oi,
-        strikes_each_side=_DEFAULT_RUNTIME_CONFIG.strikes_each_side,
-        use_smartapi=_DEFAULT_RUNTIME_CONFIG.use_smartapi,
-        price_source=_DEFAULT_RUNTIME_CONFIG.price_source,
-        futures_expiry=_DEFAULT_RUNTIME_CONFIG.futures_expiry,
-    )
-    exchange = args.exchange.strip().upper()
-    _log_init_banner(runtime_config, exchange, args.interval)
-    return runtime_config, args.interval
-
-
-if __name__ == "__main__":
-    _cli_runtime_config, _loop_interval = _apply_cli_overrides()
-    if _loop_interval > 0:
-        logger.info(
-            f"[Loop] Active monitoring interval: {_loop_interval} min. "
-            "Use Ctrl+C to terminate.\n"
-        )
-        while True:
-            raise RuntimeError(
-                "standalone analytics execution requires a composed exporter"
-            )
-            time.sleep(_loop_interval * 60)
-    else:
-        raise RuntimeError(
-            "standalone analytics execution requires a composed exporter"
         )
