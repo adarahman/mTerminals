@@ -10,7 +10,7 @@ from application.analytics_service import (
     AnalyticsPipelineRunner,
     PipelineRuntimeConfigurator,
 )
-from application.market_service import SerializedPipelineExecutor
+from application.pipeline_execution import SerializedPipelineExecutor
 from brokers.expiry_adapter import BrokerExpiryAdapter
 from brokers.option_chain_adapter import BrokerOptionChainAdapter
 from market.option_chain.runtime_adapters import BrokerMarketAdapters

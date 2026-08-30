@@ -14,9 +14,11 @@ from application.market_cycle import (
     MarketTickPacer,
     OiBaselineSynchronizer,
 )
-from application.market_service import (
+from application.market_schedule import (
     DailyMarketScheduler,
     LiveFeedAggregatorRegistry,
+)
+from application.pipeline_execution import (
     MarketPipelineService,
     SerializedPipelineExecutor,
 )

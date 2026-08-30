@@ -138,33 +138,8 @@ def test_composition_root_has_no_market_cycle_service_wrappers():
         assert f"def {helper}" not in app
 
 
-def test_market_service_does_not_own_analytics_configuration_or_execution():
-    service = (BACKEND / "application" / "market_service.py").read_text(
-        encoding="utf-8"
-    )
-    assert "class AnalyticsPipelineRunner" not in service
-    assert "class PipelineRuntimeConfigurator" not in service
-
-
-def test_market_service_does_not_own_provider_or_symbol_switching():
-    service = (BACKEND / "application" / "market_service.py").read_text(
-        encoding="utf-8"
-    )
-    assert "class DataSourceSwitcher" not in service
-    assert "class SymbolSwitcher" not in service
-
-
-def test_market_service_does_not_own_tick_cycle_services():
-    service = (BACKEND / "application" / "market_service.py").read_text(
-        encoding="utf-8"
-    )
-    for class_name in (
-        "CanonicalPayloadPublisher",
-        "MarketTickPacer",
-        "MarketEngineCycle",
-        "OiBaselineSynchronizer",
-    ):
-        assert f"class {class_name}" not in service
+def test_generic_market_service_module_is_removed():
+    assert not (BACKEND / "application" / "market_service.py").exists()
 
 
 def test_option_chain_runtime_delegates_market_context_normalization():
