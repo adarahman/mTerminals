@@ -173,6 +173,15 @@ def test_option_chain_runtime_does_not_own_pipeline_resource_globals():
     assert "ChainSnapshotStore(" in runtime
 
 
+def test_option_chain_runtime_delegates_extra_expiry_construction():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def _build_extra_chains" not in runtime
+    assert "_extra_chain_cache" not in runtime
+    assert "ExtraChainService(" in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (

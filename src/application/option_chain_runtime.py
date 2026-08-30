@@ -4,8 +4,8 @@ Behavior-preserving refactor of the former import-time-heavy module:
 
 - CLI arguments are parsed ONLY when run as a script (__main__), never at
   import. Hosts pass one RuntimeConfig directly to main().
-- main() is decomposed into stage helpers (_gather_market_data,
-  _merge_volume_value, _build_extra_chains, ...) — each independently
+- main() delegates market input gathering, normalization, and secondary-expiry
+  bundle construction to focused application services, each independently
   readable/testable; control flow and ordering inside each stage match the
   previous monolith exactly.
 - Expiry generation is delegated to ``market.expiry.service``.
@@ -17,7 +17,6 @@ import argparse
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import TimeoutError as FutureTimeoutError, as_completed
 from decision.engine import build_engine_result
 from market.expiry.service import (
     BSE_EXPIRY_DEFAULT,
@@ -44,6 +43,7 @@ from application.market_pipeline.resources import (
     ChainSnapshotStore,
     RetirableExecutorPool,
 )
+from application.market_pipeline.extra_chains import ExtraChainService
 from market.option_chain.requests import MarketDataRequestPlan
 from market.option_chain.gatherer import ConcurrentMarketDataGatherer
 from market.option_chain.runtime_adapters import BrokerMarketAdapters
@@ -413,109 +413,18 @@ def _make_expiry_manager_or_none(expiry_dates):
     return em
 
 
-# Extra-expiry analytics are expensive (full chain fetch + engine). Cache each
-# rebuilt bundle per (symbol, slot, expiry date) and reuse it until it goes
-# stale or the symbol/expiry rolls, so a 6-10s poll does not re-run the entire
-# analytics engine for NEAR/MONTHLY every single tick.
-_EXTRA_CHAIN_CACHE_TTL_SECONDS = 45.0
-_EXTRA_CHAIN_OPERATION_TIMEOUT_SECONDS = 15.0
-_extra_chain_cache: dict = {}
 _CHAIN_FALLBACK_MAX_AGE_SECONDS = 300.0
 _CHAIN_SNAPSHOTS = ChainSnapshotStore(
     max_age_seconds=_CHAIN_FALLBACK_MAX_AGE_SECONDS,
     logger=logger,
 )
 _MARKET_IO_POOL = RetirableExecutorPool(max_workers=8)
-
-
-def _build_extra_chains(em, runtime_config, broker_adapters=None, timings=None):
-    """NEAR and MONTHLY extra-expiry bundles, built concurrently (they're
-    independent of each other) and throttled.
-
-    A rebuilt bundle is cached per (symbol, slot, expiry date) and reused until
-    it goes stale (TTL) or the symbol/expiry rolls — this avoids re-running the
-    full option-chain fetch + analytics engine for the extra expiries on every
-    poll, the single biggest source of redundant pipeline work. Empty dict when
-    disabled or nothing pending."""
-    extra_chains = {}
-    if em is None or runtime_config.no_extra_chains:
-        return extra_chains
-    symbol = runtime_config.symbol
-    now = time.monotonic()
-    # Bound the cache: drop entries for any symbol other than the active one
-    # (only one symbol is live per process at a time).
-    if _extra_chain_cache:
-        for _k in [k for k in _extra_chain_cache if k[0] != symbol]:
-            del _extra_chain_cache[_k]
-    try:
-        slots = [
-            (slot_name, slot)
-            for slot_name, slot in [
-                ("NEAR", em.context.near),
-                ("MONTHLY", em.context.monthly),
-            ]
-            if slot and slot.date_str != str(runtime_config.expiry)
-        ]
-        if slots:
-            to_build = []
-            for slot_name, slot in slots:
-                key = (symbol, slot_name, slot.date_str)
-                cached = _extra_chain_cache.get(key)
-                if (
-                    cached is not None
-                    and (now - cached[0]) < _EXTRA_CHAIN_CACHE_TTL_SECONDS
-                ):
-                    extra_chains[slot.date_str] = cached[1]
-                    if timings is not None:
-                        timings["extra" + slot_name] = 0.0
-                else:
-                    to_build.append((slot_name, slot, key))
-            if to_build:
-                futs = {}
-                for slot_name, slot, key in to_build:
-                    submitted_at = time.monotonic()
-                    f = _MARKET_IO_POOL.get().submit(
-                        _build_expiry_bundle,
-                        symbol,
-                        slot.date_str,
-                        _exchange_for_symbol(symbol),
-                        runtime_config=runtime_config,
-                        broker_adapters=broker_adapters,
-                    )
-                    futs[f] = (slot_name, slot, key, submitted_at)
-                try:
-                    completed = as_completed(
-                        futs, timeout=_EXTRA_CHAIN_OPERATION_TIMEOUT_SECONDS
-                    )
-                    for f in completed:
-                        slot_name, slot, key, submitted_at = futs[f]
-                        try:
-                            n_df, n_master, n_ctx, n_dte, _ = f.result()
-                            value = (n_df, n_master, n_ctx, n_dte)
-                            extra_chains[slot.date_str] = value
-                            _extra_chain_cache[key] = (now, value)
-                        except Exception as e:
-                            logger.warning(f"[{slot_name}] Skip extra bundle ({e})")
-                        if timings is not None:
-                            timings["extra" + slot_name] = round(
-                                time.monotonic() - submitted_at, 4
-                            )
-                except FutureTimeoutError:
-                    for f, (slot_name, _slot, _key, submitted_at) in futs.items():
-                        if not f.done():
-                            f.cancel()
-                            logger.warning(
-                                "[%s] Skip extra bundle (operation timed out)",
-                                slot_name,
-                            )
-                            if timings is not None:
-                                timings["extra" + slot_name] = round(
-                                    time.monotonic() - submitted_at, 4
-                                )
-                    _MARKET_IO_POOL.retire()
-    except Exception as e:
-        logger.warning(f"[ExtraChains] Skip ({e})")
-    return extra_chains
+_EXTRA_CHAINS = ExtraChainService(
+    build_bundle=_build_expiry_bundle,
+    exchange_for_symbol=_exchange_for_symbol,
+    executor_pool=_MARKET_IO_POOL,
+    logger=logger,
+)
 
 
 def _calendar_spread_expiries(em):
@@ -627,7 +536,7 @@ def main(
         )
 
         em = _make_expiry_manager_or_none(md["expiry_dates"])
-        extra_chains = _build_extra_chains(
+        extra_chains = _EXTRA_CHAINS.build(
             em, runtime_config, broker_adapters, timings=timings
         )
 
@@ -683,7 +592,7 @@ def main(
         print()
         logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 
-    except FutureTimeoutError:
+    except TimeoutError:
         # The server runner distinguishes a recoverable cold-start miss from
         # consecutive timeouts. Preserve that signal across this boundary.
         raise
