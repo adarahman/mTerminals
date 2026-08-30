@@ -1,3 +1,5 @@
+import inspect
+
 from application import option_chain_runtime
 
 
@@ -24,3 +26,11 @@ def test_option_chain_runtime_has_no_mutable_selection_globals():
 def test_option_chain_runtime_is_not_a_stranded_executable_entrypoint():
     assert not hasattr(option_chain_runtime, "_build_arg_parser")
     assert not hasattr(option_chain_runtime, "_apply_cli_overrides")
+
+
+def test_option_chain_runtime_requires_explicit_runtime_configuration():
+    parameter = inspect.signature(option_chain_runtime.main).parameters[
+        "runtime_config"
+    ]
+    assert parameter.default is inspect.Parameter.empty
+    assert not hasattr(option_chain_runtime, "_DEFAULT_RUNTIME_CONFIG")

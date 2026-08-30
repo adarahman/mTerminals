@@ -227,6 +227,14 @@ def test_option_chain_runtime_delegates_market_input_gathering():
     assert "MarketInputService(" in runtime
 
 
+def test_option_chain_runtime_does_not_load_process_configuration():
+    runtime = (BACKEND / "application" / "option_chain_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "infrastructure.config" not in runtime
+    assert "_DEFAULT_RUNTIME_CONFIG" not in runtime
+
+
 def test_composition_root_has_no_websocket_service_wrappers():
     app = (BACKEND / "server" / "app.py").read_text(encoding="utf-8")
     for helper in (

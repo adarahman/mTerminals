@@ -16,10 +16,6 @@ Pipeline helpers consume the explicit pass-scoped RuntimeConfig.
 import logging
 import time
 from collections.abc import Callable
-from market.expiry.service import (
-    _nearest_Tuesday,
-)
-
 from market.providers.option_chain import PublicOptionChainAdapter
 from application.pipeline_config import RuntimeConfig
 from application.market_pipeline.index_cache import IndexSnapshotCache
@@ -45,56 +41,6 @@ _CHAIN_SERVICE = ChainAnalyticsService(public_market=_PUBLIC_MARKET)
 
 def _exchange_for_symbol(symbol: str) -> str:
     return "BSE" if symbol in _BSE_SYMBOLS else "NSE"
-
-
-# ─── Default runtime configuration ──────────────────────────────────
-# Used only when an embedding caller omits an explicit RuntimeConfig.
-#
-# NOTE: authenticated broker mode is enabled by default unless
-# BROKER_SERVICES_ENABLED=false. ``use_smartapi`` is the legacy configuration
-# spelling; runtime code uses RuntimeConfig.broker_enabled because the active
-# provider may be SmartAPI, Upstox, Shoonya, Kite, Breeze, or Kotak.
-try:
-    from infrastructure.config import settings as _broker_settings
-except ImportError:  # pragma: no cover - standalone legacy invocation
-    _broker_settings = None
-_DEFAULT_USE_SMARTAPI = (
-    _broker_settings.broker_services_enabled
-    if _broker_settings is not None
-    else True
-)
-
-_DEFAULT_RUNTIME_CONFIG = RuntimeConfig(
-    symbol="NIFTY",
-    expiry=_nearest_Tuesday(),
-    no_extra_chains=False,
-    strict_expiry=False,
-    no_virtual_oi=False,
-    strikes_each_side=15,
-    use_smartapi=_DEFAULT_USE_SMARTAPI,
-    price_source="AUTO",
-    futures_expiry="NEAR",
-    operation_timeout_seconds=15.0,
-)
-
-# Underlying price source fed into df["Spot"] (and downstream into every
-# engine.py bs_* Greeks call, wall selection, PCR, etc.):
-#   "AUTO" (default) — keep the option-chain EQ spot while it is healthy,
-#         but replace it with the active broker's live cash/index quote when
-#         EQ is stale. If no live cash quote is available, use the selected
-#         futures LTP near/after the close window. This prevents a stale NSE
-#         underlyingValue from freezing every downstream analytic.
-#   "EQ" — force the option-chain response's underlyingValue.
-#   "FUT" — force the selected near-month futures LTP. Futures are not
-#         basis-adjusted back toward EQ.
-# Runtime-configurable through RuntimeConfig.
-
-# Which monthly futures contract PRICE_SOURCE="FUT" resolves to — "NEAR"
-# (current month, default), "NEXT", or "FAR". See fetch_futures_wide()'s
-# docstring (broker_pipeline.py): this used to silently reuse the options
-# chain's own (often weekly) expiry as the futures filter, matching only on
-# the monthly week and returning empty futures every other week. Manual
-# only, through RuntimeConfig.
 
 
 # ─── df_idx TTL cache ────────────────────────────────────────────────
@@ -153,7 +99,7 @@ _SNAPSHOT_SERVICE = AnalyticsSnapshotService(
 
 
 def main(
-    runtime_config: RuntimeConfig | None = None,
+    runtime_config: RuntimeConfig,
     broker_adapters: BrokerMarketAdapters | None = None,
     export_dashboard: Callable | None = None,
 ):
@@ -162,7 +108,6 @@ def main(
     All helpers consume this pass-scoped value; no module selection state is
     mutated between runs.
     """
-    runtime_config = runtime_config or _DEFAULT_RUNTIME_CONFIG
     if export_dashboard is None:
         raise RuntimeError("dashboard exporter must be injected")
     exchange = _exchange_for_symbol(runtime_config.symbol)
