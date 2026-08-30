@@ -608,15 +608,27 @@ class AnalyticsPipelineRunner:
         self._clear_capture = clear_capture
         self._invoke = invoke
         self._captured_payload = captured_payload
+        self._consecutive_timeouts = 0
 
     def run_once(self):
         runtime_config = self._configure()
         self._clear_capture()
         try:
             self._invoke(runtime_config)
+        except TimeoutError as exc:
+            self._consecutive_timeouts += 1
+            if self._consecutive_timeouts == 1:
+                print(
+                    f"[pipeline] warm-up snapshot deferred: {exc}",
+                    flush=True,
+                )
+            else:
+                print(f"[pipeline] FAILED: {exc}", flush=True)
+            return None
         except Exception as exc:
             print(f"[pipeline] FAILED: {exc}", flush=True)
             return None
+        self._consecutive_timeouts = 0
         return self._captured_payload()
 
 

@@ -843,6 +843,10 @@ def main(
         print()
         logger.info("SUCCESS: JSON Framework updated snapshot successfully.")
 
+    except FutureTimeoutError:
+        # The server runner distinguishes a recoverable cold-start miss from
+        # consecutive timeouts. Preserve that signal across this boundary.
+        raise
     except Exception as exc:
         logger.error(
             "analytics tick failed for %s %s: %s",

@@ -486,6 +486,32 @@ def test_analytics_runner_contains_legacy_failure():
     assert runner.run_once() is None
 
 
+def test_analytics_runner_defers_first_timeout_and_escalates_repeats(capsys):
+    outcomes = iter(
+        [TimeoutError("chain"), TimeoutError("chain"), None, TimeoutError("chain")]
+    )
+
+    def invoke(_config):
+        outcome = next(outcomes)
+        if outcome is not None:
+            raise outcome
+
+    runner = AnalyticsPipelineRunner(
+        configure=lambda: None,
+        clear_capture=lambda: None,
+        invoke=invoke,
+        captured_payload=lambda: {"ok": True},
+    )
+
+    assert runner.run_once() is None
+    assert "warm-up snapshot deferred: chain" in capsys.readouterr().out
+    assert runner.run_once() is None
+    assert "[pipeline] FAILED: chain" in capsys.readouterr().out
+    assert runner.run_once() == {"ok": True}
+    assert runner.run_once() is None
+    assert "warm-up snapshot deferred: chain" in capsys.readouterr().out
+
+
 def test_pipeline_runtime_configurator_builds_and_applies_default_config():
     activated = []
     applied = []
