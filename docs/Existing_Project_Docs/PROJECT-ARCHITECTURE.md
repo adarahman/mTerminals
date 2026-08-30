@@ -405,8 +405,8 @@ nothing tracked risk *across* orders over a trading day.
 
 **Integration points in `ws_server_live.py`'s `_handle_place_order`:**
 - `_ACCOUNT_GUARD = LiveAccountRiskGuard(LIVE_TRADING_KILL_SWITCH_FILE)` — instantiated once at module load, right next to the existing kill-switch file definition, so both mechanisms write to the **same** file (one kill switch, not two).
-- Pre-trade: `is_tripped()` check, then (if a lot size was resolved) a fresh `smartapi_get_positions()` call feeds `open_lots_from_positions()` → `check_new_order()`.
-- Post-fill (in the `finally` block, so it runs whether the order succeeded or failed): another `smartapi_get_positions()` call feeds `pnl_from_positions()` → `update_pnl()`.
+- Pre-trade: `is_tripped()` check, then (if a lot size was resolved) a fresh configured-broker `get_positions()` call feeds `open_lots_from_positions()` → `check_new_order()`.
+- Post-fill (in the `finally` block, so it runs whether the order succeeded or failed): another configured-broker `get_positions()` call feeds `pnl_from_positions()` → `update_pnl()`.
 - A trip touches `LIVE_TRADING_KILL_SWITCH_FILE` directly — it does **not** auto-clear on a new trading day even though the guard's own SQLite state resets daily; a human has to remove the file after reviewing what tripped it.
 
 Tests: `backend/tests/test_account_guard.py` (16 cases — trip conditions, streak reset, persistence across instances, fail-closed parsing).

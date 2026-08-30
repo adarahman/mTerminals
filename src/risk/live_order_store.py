@@ -9,12 +9,20 @@ from datetime import datetime, timezone
 from infrastructure.paths import CACHE_DIR
 
 
-DB_PATH = os.path.join(CACHE_DIR, "live_order_idempotency.db")
-
-
 class LiveOrderStore:
-    def __init__(self, db_path: str = DB_PATH, max_entries: int = 500):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None, max_entries: int = 500):
+        # Resolve the default when the store is constructed, rather than when
+        # this module is imported. Tests and deployments may set RUNTIME_DIR
+        # before assembling the application but after another module imported
+        # this class; an import-time default would remain pinned to the old
+        # cache directory.
+        runtime_cache = os.path.join(
+            os.getenv("RUNTIME_DIR", os.path.dirname(CACHE_DIR)), "cache"
+        )
+        self.db_path = db_path or os.path.join(
+            runtime_cache, "live_order_idempotency.db"
+        )
+        os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
         self.max_entries = max(1, int(max_entries))
         self._init_schema()
 

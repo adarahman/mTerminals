@@ -31,6 +31,7 @@ def create_app(routes: ServerRoutes, config: ServerConfig) -> web.Application:
     app.router.add_get("/api/history", routes.history)
     app.router.add_get("/api/backtest", routes.backtest)
     app.router.add_get("/api/lot-sizes", routes.lot_sizes)
+    app.router.add_get("/api/symbols", routes.symbols)
     app.router.add_get("/api/broker-health", routes.broker_health)
     app.router.add_static("/", path=config.frontend_dir, name="static")
     return app

@@ -371,12 +371,6 @@ def fetch_option_chain_wide(
                 "tradingsymbol": symbol,
             }
 
-        if opt_type and strike_val in strikes:
-            strike_lookup[(strike_val, opt_type)] = {
-                "token": row["token"],
-                "tradingsymbol": symbol,
-            }
-
     pairs = [(info["tradingsymbol"], info["token"]) for info in strike_lookup.values()]
     quotes = market_data.get_batch_quotes(
         exchange, pairs, mode="FULL"

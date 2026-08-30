@@ -6,7 +6,7 @@ Fully unifies column names into standard snake_case without spaces.
 """
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -388,7 +388,7 @@ def _ensure_history_loaded(log_path):
     original_len = len(df)
     if (log_path == JSON_HISTORY_LOG_PATH and not df.empty
             and "snapshot_time" in df.columns):
-        cutoff = pd.Timestamp.now() - pd.Timedelta(minutes=VELOCITY_RETENTION_MINUTES)
+        cutoff = pd.Timestamp.now() - timedelta(minutes=VELOCITY_RETENTION_MINUTES)
         timestamps = pd.to_datetime(df["snapshot_time"], errors="coerce")
         df = df[timestamps >= cutoff].copy()
 
@@ -432,7 +432,7 @@ def append_json_history(
     existing = _HISTORY_MEM.df
     combined = pd.concat([existing, history_df], ignore_index=True) if not existing.empty else history_df
 
-    cutoff = pd.Timestamp.now() - pd.Timedelta(minutes=max_age_minutes)
+    cutoff = pd.Timestamp.now() - timedelta(minutes=max_age_minutes)
     combined = combined[combined["snapshot_time"] >= cutoff]
 
     _HISTORY_MEM.replace(combined)

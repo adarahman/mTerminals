@@ -494,9 +494,22 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     max_pain_dist = abs(spot - max_pain)
 
     # ── futures basis ───────────────────────────────────────────────────
-    futures_ltp = df_fut["LTP"].iloc[0] if df_fut is not None and not df_fut.empty and "LTP" in df_fut.columns else spot
-    basis = futures_ltp - spot
-    fut_signal = "Long Buildup" if basis > 0 else "Short Buildup"
+    has_futures_quote = (
+        df_fut is not None
+        and not df_fut.empty
+        and "LTP" in df_fut.columns
+        and pd.notna(df_fut["LTP"].iloc[0])
+        and float(df_fut["LTP"].iloc[0]) > 0
+    )
+    futures_ltp = float(df_fut["LTP"].iloc[0]) if has_futures_quote else spot
+    basis = futures_ltp - spot if has_futures_quote else 0.0
+    # Missing futures evidence is unknown, not bearish. The previous fallback
+    # substituted spot for FUT LTP, produced a zero basis, and then labelled
+    # that fabricated observation "Short Buildup". Providers with a missing
+    # futures quote therefore received a false -0.8 directional score.
+    fut_signal = (
+        "Long Buildup" if basis > 0 else "Short Buildup"
+    ) if has_futures_quote else "Unknown"
 
     # ── futures day change / % change (top-bar FUT pill) ────────────────
     # df_fut carries Change/PctChange for both the SmartAPI path

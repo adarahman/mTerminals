@@ -32,6 +32,7 @@ def test_server_application_assembles_http_health_and_runtime_services():
         algo_status=lambda: None,
         reconcile=lambda: None,
         live_trading_enabled=False,
+        get_fno_symbols=lambda: {"indices": ["NIFTY"], "stocks": []},
     )
 
     assert state.HTTP_ROUTE_HANDLERS is not None

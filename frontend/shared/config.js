@@ -43,7 +43,6 @@ const Config = {
     history: `${_fileHttpOrigin}/api/history`,
     symbols: `${_fileHttpOrigin}/api/symbols`,
     lotSizes: `${_fileHttpOrigin}/api/lot-sizes`,
-    setIndex: `${_fileHttpOrigin}/api/set_index`,
   },
 
   refresh: {

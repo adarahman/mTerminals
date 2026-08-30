@@ -37,6 +37,10 @@ def _handlers(calls):
         record_health_transition="transition",
         metrics_response=metrics,
         metrics="metrics-object",
+        symbols=lambda: {
+            "indices": ["NIFTY", "SENSEX"],
+            "stocks": ["RELIANCE", "NIFTY"],
+        },
     )
 
 
@@ -46,6 +50,15 @@ def test_history_routes_delegate_to_history_service():
     assert asyncio.run(handlers.spot_history("request")) == ("spot", "request")
     assert asyncio.run(handlers.history("request")) == ("history", "request")
     assert asyncio.run(handlers.lot_sizes("request")) == ("lots", "request")
+
+
+def test_symbols_route_flattens_deduplicates_and_sorts_universe():
+    handlers = _handlers([])
+
+    response = asyncio.run(handlers.symbols("request"))
+
+    assert response.status == 200
+    assert response.text == '["NIFTY", "RELIANCE", "SENSEX"]'
 
 
 def test_operational_routes_receive_injected_dependencies():

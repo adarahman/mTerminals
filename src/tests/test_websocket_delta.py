@@ -1,4 +1,7 @@
-def test_keyed_delta_contains_only_changed_row_fields(ws_server_live):
+from server.websocket_payload import compute_diff
+
+
+def test_keyed_delta_contains_only_changed_row_fields():
     old = {
         "chain": [
             {"strike": 24000, "ceLTP": 100.0, "ceOI": 500, "ceGamma": 0.002},
@@ -12,7 +15,7 @@ def test_keyed_delta_contains_only_changed_row_fields(ws_server_live):
         ]
     }
 
-    delta = ws_server_live.compute_diff(old, new)
+    delta = compute_diff(old, new)
 
     assert delta == {
         "chain": {
@@ -23,7 +26,7 @@ def test_keyed_delta_contains_only_changed_row_fields(ws_server_live):
     }
 
 
-def test_keyed_delta_preserves_row_field_and_row_removals(ws_server_live):
+def test_keyed_delta_preserves_row_field_and_row_removals():
     old = {
         "chain": [
             {"strike": 24000, "ceLTP": 100.0, "temporary": True},
@@ -32,10 +35,9 @@ def test_keyed_delta_preserves_row_field_and_row_removals(ws_server_live):
     }
     new = {"chain": [{"strike": 24000, "ceLTP": 100.0}]}
 
-    delta = ws_server_live.compute_diff(old, new)
+    delta = compute_diff(old, new)
 
     assert delta["chain"]["changed"] == [
         {"strike": 24000, "_removed": ["temporary"]}
     ]
     assert delta["chain"]["_removed_keys"] == [24100]
-

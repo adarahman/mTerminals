@@ -58,6 +58,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Optional
 
 import pandas as pd
@@ -80,12 +81,14 @@ _ACTION_INSTRUMENT_SIDE = {
 # for a position that should have squared off at the real 15:30 close.
 MARKET_OPEN_TIME = "09:15:00"
 MARKET_CLOSE_TIME = "15:30:00"
+MARKET_OPEN_OFFSET = timedelta(hours=9, minutes=15)
+MARKET_CLOSE_OFFSET = timedelta(hours=15, minutes=30)
 MAX_FILL_LOOKAHEAD_SECONDS = 60
 
 
 def _in_market_hours(ts: pd.Timestamp) -> bool:
     day = ts.normalize()
-    return (day + pd.Timedelta(MARKET_OPEN_TIME)) <= ts <= (day + pd.Timedelta(MARKET_CLOSE_TIME))
+    return (day + MARKET_OPEN_OFFSET) <= ts <= (day + MARKET_CLOSE_OFFSET)
 
 
 class _NoOpGuard:
@@ -215,7 +218,7 @@ class LtpHistory:
         after = g[g["snapshot_time"] >= ts]
         if max_lookahead_seconds is not None:
             after = after[
-                after["snapshot_time"] <= ts + pd.Timedelta(seconds=max_lookahead_seconds)
+                after["snapshot_time"] <= ts + timedelta(seconds=max_lookahead_seconds)
             ]
         if after.empty:
             return None
@@ -371,8 +374,8 @@ async def run_backtest(
             # the real close price — see replay.py module history for the
             # 23:10 PM tick that motivated this.
             entry_day = pd.Timestamp(position.entry_time).normalize()
-            session_start = entry_day + pd.Timedelta(MARKET_OPEN_TIME)
-            session_end = entry_day + pd.Timedelta(MARKET_CLOSE_TIME)
+            session_start = entry_day + MARKET_OPEN_OFFSET
+            session_end = entry_day + MARKET_CLOSE_OFFSET
             priced = ltp.last_price_before(position.expiry, position.strike, position.instrument_type, ts,
                                             session_start=session_start, session_end=session_end)
         else:
@@ -437,7 +440,7 @@ async def run_backtest(
 
     if open_position is not None:
         last_ts = pd.Timestamp(snapshots[-1]["snapshot_time"])
-        _settle(open_position, last_ts + pd.Timedelta(seconds=1), reason="data_exhausted")
+        _settle(open_position, last_ts + timedelta(seconds=1), reason="data_exhausted")
 
     return result
 

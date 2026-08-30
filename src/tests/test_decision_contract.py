@@ -46,6 +46,23 @@ def test_missing_required_input_degrades_and_disables_execution():
     assert "Required decision evidence" in result["strategyCaution"]
 
 
+def test_missing_futures_quote_is_not_scored_as_bearish_evidence():
+    result = DecisionEngine().evaluate(
+        _engine_result(fut_signal="Unknown", basis=0), {}
+    ).to_dict()
+
+    futures = next(
+        contributor
+        for contributor in result["contributors"]
+        if contributor["key"] == "futures"
+    )
+    assert futures["available"] is False
+    assert futures["score"] is None
+    assert "futures" in result["missingInputs"]
+    assert result["degraded"] is True
+    assert result["bias"] == "BULLISH"
+
+
 def test_directional_setup_fails_closed_below_execution_confidence():
     # Expiry-day decay can leave the weighted direction intact while reducing
     # confidence below the execution boundary. The headline must not continue

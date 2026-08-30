@@ -8,6 +8,7 @@ from typing import Any
 
 from analytics.nse_fii_dii_flow_fetch import record_today_flow
 from application import selection_state
+from application.dashboard_market_metadata import get_fno_symbols
 from execution.paper_trading import LOT_SIZES, _instrument_key
 from nse_eod_fetch import fetch_all_eod, is_trading_day
 from oi.futures_oi_tracker import get_tracker
@@ -61,9 +62,9 @@ def build_runtime_stack(
         bse_symbols=BSE_SYMBOLS,
         resolve_option_contract=broker_services.resolve_option_contract,
         find_option_token=broker_services.market_data.find_option_token,
-        place_order=broker_services.smartapi_place_order,
-        get_positions=broker_services.smartapi_get_positions,
-        get_order_book=broker_services.smartapi_get_order_book,
+        place_order=broker_services.place_order,
+        get_positions=broker_services.get_positions,
+        get_order_book=broker_services.get_order_book,
         lot_sizes=LOT_SIZES,
         paper_engine=paper_engine,
         price_book=paper_price_book,
@@ -88,9 +89,9 @@ def build_runtime_stack(
     market = build_market_runtime(
         runtime_state=runtime_state,
         market_data=broker_services.market_data,
-        get_funds=broker_services.smartapi_get_funds,
-        get_order_book=broker_services.smartapi_get_order_book,
-        get_positions=broker_services.smartapi_get_positions,
+        get_funds=broker_services.get_funds,
+        get_order_book=broker_services.get_order_book,
+        get_positions=broker_services.get_positions,
         position_reconciler=live.position_reconciler,
         position_reconcile_seconds=position_reconcile_seconds,
         trading_supervisor=live.supervisor,
@@ -157,6 +158,7 @@ def build_runtime_stack(
         algo_status=market.algo_status.run,
         reconcile=market.reconciliation.run,
         live_trading_enabled=live_trading_config.enabled,
+        get_fno_symbols=get_fno_symbols,
     )
     configure_feed_orchestration(
         broadcast=core_runtime.broadcast,

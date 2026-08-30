@@ -140,7 +140,7 @@ def resolvable(live_env, monkeypatch):
 
 
 # ── Rejection chain — each of these must fall through WITHOUT ever
-#    calling smartapi_place_order ────────────────────────────────────────
+#    calling the configured execution adapter ───────────────────────────
 
 def test_live_trading_disabled_rejects_explicit_live_order_without_paper_fallback(live_env, monkeypatch):
     """An order that explicitly asked for live=true, confirmed=true is a

@@ -24,7 +24,13 @@ def test_sensex_chain_uses_bse_fo_scrip_master_and_quotes(monkeypatch):
     def quotes(*, instrument_tokens, quote_type):
         calls.append(("quotes", instrument_tokens))
         return [
-            {"exchange_token": item["instrument_token"], "ltp": 100.0}
+            {
+                "exchange_token": item["instrument_token"],
+                "ltp": 105.0,
+                "ohlc": {"close": 100.0},
+                "volume": 5000,
+                "last_volume": 2,
+            }
             for item in instrument_tokens
         ]
 
@@ -38,6 +44,9 @@ def test_sensex_chain_uses_bse_fo_scrip_master_and_quotes(monkeypatch):
     assert calls[0] == ("master", "bse_fo")
     assert calls[1][1][0]["exchange_segment"] == "bse_fo"
     assert {row["type"] for row in chain["rows"]} == {"CE", "PE"}
+    assert all(row["net_change"] == 5.0 for row in chain["rows"])
+    assert all(row["pct_change"] == 5.0 for row in chain["rows"])
+    assert all(row["volume"] == 5000 for row in chain["rows"])
 
 
 def test_bfo_pipe_delimited_scrip_master_is_parsed():

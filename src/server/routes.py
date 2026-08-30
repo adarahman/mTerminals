@@ -16,6 +16,7 @@ class ServerRoutes:
     history: Callable[..., Any]
     backtest: Callable[..., Any]
     lot_sizes: Callable[..., Any]
+    symbols: Callable[..., Any]
 
 class HttpRouteHandlers:
     """Adapt HTTP requests to injected server services."""
@@ -32,7 +33,7 @@ class HttpRouteHandlers:
         record_health_transition,
         metrics_response,
         metrics,
-        
+        symbols,
     ):
         self._history_api = history_api
         self._backtest_response = backtest_response
@@ -43,6 +44,7 @@ class HttpRouteHandlers:
         self._record_health_transition = record_health_transition
         self._metrics_response = metrics_response
         self._metrics = metrics
+        self._symbols = symbols
 
 
     async def spot_history(self, request):
@@ -53,6 +55,18 @@ class HttpRouteHandlers:
 
     async def lot_sizes(self, request):
         return await self._history_api.lot_sizes(request)
+
+    async def symbols(self, _request):
+        from aiohttp import web
+
+        universe = self._symbols() or {}
+        values = [
+            str(symbol).strip().upper()
+            for group in ("indices", "stocks")
+            for symbol in (universe.get(group) or [])
+            if str(symbol).strip()
+        ]
+        return web.json_response(sorted(set(values)))
 
     async def backtest(self, request):
         return await self._backtest_response(

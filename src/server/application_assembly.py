@@ -71,6 +71,7 @@ def build_server_application(
     algo_status: Callable[..., Any],
     reconcile: Callable[..., Any],
     live_trading_enabled: bool,
+    get_fno_symbols: Callable[[], Any],
 ) -> ServerApplication:
     history_api = MarketHistoryApi(
         state=lambda: {
@@ -97,6 +98,7 @@ def build_server_application(
         record_health_transition=log_health_transition,
         metrics_response=metrics_handler,
         metrics=runtime_state.METRICS,
+        symbols=get_fno_symbols,
     )
     runtime_state.HTTP_ROUTE_HANDLERS = handlers
     http = build_http_runtime(
@@ -109,6 +111,7 @@ def build_server_application(
         history=handlers.history,
         backtest=handlers.backtest,
         lot_sizes=handlers.lot_sizes,
+        symbols=handlers.symbols,
         host=host,
         port=http_port,
         symbol=lambda: runtime_state.MARKET_SELECTION.symbol,

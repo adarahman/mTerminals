@@ -31,10 +31,10 @@ if BROKER_SERVICES_ENABLED:
     from brokers.connection import get_execution_adapter
 
     _execution_adapter = get_execution_adapter(broker_settings.execution_broker)
-    smartapi_place_order = _execution_adapter.place_order
-    smartapi_get_order_book = _execution_adapter.get_order_book
-    smartapi_get_positions = _execution_adapter.get_positions
-    smartapi_get_funds = _execution_adapter.get_funds
+    place_order = _execution_adapter.place_order
+    get_order_book = _execution_adapter.get_order_book
+    get_positions = _execution_adapter.get_positions
+    get_funds = _execution_adapter.get_funds
     resolve_option_contract = getattr(_execution_adapter, "resolve_option_contract", None)
     from brokers.smartapi.client import INDEX_TOKENS as SMARTAPI_INDEX_TOKENS  # noqa: F401
     from brokers.smartapi.history import get_candle_data, get_index_candles  # noqa: F401
@@ -78,10 +78,10 @@ else:
         get_spot_quote = staticmethod(_disabled)
 
     market_data = _DisabledMarketData()
-    smartapi_place_order = _disabled
-    smartapi_get_order_book = _disabled
-    smartapi_get_positions = _disabled
-    smartapi_get_funds = _disabled
+    place_order = _disabled
+    get_order_book = _disabled
+    get_positions = _disabled
+    get_funds = _disabled
     resolve_option_contract = None
     get_index_candles = _disabled
     get_candle_data = _disabled

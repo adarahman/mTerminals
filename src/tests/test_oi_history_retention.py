@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pandas as pd
 
 from oi import oi_analysis
@@ -29,8 +31,8 @@ def test_live_velocity_history_is_bounded_to_recent_window(tmp_path, monkeypatch
     oi_analysis.append_json_history(
         pd.concat(
             [
-                _snapshot(now - pd.Timedelta(minutes=36)),
-                _snapshot(now - pd.Timedelta(minutes=34), strike=24550),
+                _snapshot(now - timedelta(minutes=36)),
+                _snapshot(now - timedelta(minutes=34), strike=24550),
             ],
             ignore_index=True,
         ),

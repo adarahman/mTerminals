@@ -77,8 +77,9 @@ def test_structured_formatter_includes_uniform_broker_fields():
     assert payload["operation"] == "connection"
 
 
-def test_health_transition_logging_is_deduplicated(ws_server_live, monkeypatch, caplog):
-    module = ws_server_live
+def test_health_transition_logging_is_deduplicated(monkeypatch, caplog):
+    from operational_metrics import OperationalMetrics
+    from server import health_api, runtime_state
     snapshot = {
         "status": "degraded",
         "reasons": ["feed stale"],
@@ -88,11 +89,12 @@ def test_health_transition_logging_is_deduplicated(ws_server_live, monkeypatch, 
             "expiry": "13-Aug-2026", "ageSeconds": 30.0,
         },
     }
-    monkeypatch.setattr(module, "_LAST_HEALTH_LOG_STATE", None)
+    monkeypatch.setattr(runtime_state, "LAST_HEALTH_LOG_STATE", None)
+    monkeypatch.setattr(runtime_state, "METRICS", OperationalMetrics())
 
     with caplog.at_level(logging.INFO, logger="mterminals.server"):
-        module._log_health_transition(snapshot)
-        module._log_health_transition(snapshot)
+        health_api.log_health_transition(snapshot)
+        health_api.log_health_transition(snapshot)
 
     matching = [r for r in caplog.records if getattr(r, "event", None) == "health.transition"]
     assert len(matching) == 1

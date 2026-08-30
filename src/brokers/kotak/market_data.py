@@ -136,44 +136,47 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     out = []
     for m in matches:
         q = quote_by_token.get(m["token"]) or {}
+        ltp = float(q.get("ltp") or q.get("last_traded_price") or 0)
+        close = _ohlc_val(q, "close", alt_key=None)
+        net_change = q.get("net_change")
+        if net_change is None:
+            net_change = q.get("change")
+        if net_change is None and ltp and close:
+            net_change = ltp - float(close)
+        pct_change = q.get("per_change")
+        if pct_change is None:
+            pct_change = q.get("percent_change")
+        if pct_change is None:
+            pct_change = q.get("net_change_percentage")
+        if pct_change is None and net_change is not None and close:
+            pct_change = float(net_change) / float(close) * 100.0
         out.append(
             {
                 "strike": m["strike"],
                 "type": m["option_type"],
                 "tradingsymbol": m["tradingsymbol"],
                 "token": m["token"],
-                "ltp": float(
-                    q.get("ltp")
-                    or q.get("last_traded_price")
-                    or 0
-                ),
+                "ltp": ltp,
                 "open": _ohlc_val(q, "open"),
                 "high": _ohlc_val(q, "high"),
                 "low": _ohlc_val(q, "low"),
-                "close": _ohlc_val(q, "close", alt_key=None),
+                "close": close,
                 "oi": float(
                     q.get("open_int")
                     or q.get("open_interest")
                     or 0
                 ),
                 "volume": float(
-                    q.get("last_volume")
-                    or q.get("volume")
+                    q.get("volume")
+                    or q.get("volume_traded_today")
+                    or q.get("last_volume")
                     or 0
                 ),
                 # Neo response shapes vary by SDK version: v2 commonly
                 # uses `change`, while others expose `net_change`. Preserve
                 # an explicit zero rather than treating it as missing.
-                "net_change": (
-                    q.get("net_change")
-                    if q.get("net_change") is not None
-                    else q.get("change")
-                ),
-                "pct_change": (
-                    q.get("per_change")
-                    if q.get("per_change") is not None
-                    else q.get("net_change_percentage")
-                ),
+                "net_change": net_change,
+                "pct_change": pct_change,
                 "lot_size": m["lot_size"],
             }
         )

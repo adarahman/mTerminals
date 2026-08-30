@@ -15,6 +15,7 @@ import urllib.parse as urlparse
 
 from dotenv import load_dotenv, set_key
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -57,31 +58,41 @@ def build_driver(headless: bool) -> webdriver.Chrome:
     options = webdriver.ChromeOptions()
     if headless:
         options.add_argument("--headless=new")
-    else:
-        options.add_experimental_option("detach", True)
 
+    # cache_valid_range avoids hitting the network to check for a new
+    # driver version on every run; it reuses the cached driver for 7 days.
     return webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
+        service=Service(ChromeDriverManager(cache_valid_range=7).install()),
         options=options,
     )
 
 
 def fill_login_form(driver: webdriver.Chrome, user_id: str, password: str) -> None:
     wait = WebDriverWait(driver, FORM_WAIT_SECONDS)
+
     try:
-        log.info("Filling Breeze User ID...")
         userid_field = wait.until(EC.presence_of_element_located((By.XPATH, USERID_XPATH)))
-        userid_field.send_keys(user_id)
+    except Exception as exc:
+        log.warning("Could not locate User ID field (%s). Login page may have changed — continue manually.", exc)
+        return
+    log.info("Filling Breeze User ID...")
+    userid_field.send_keys(user_id)
 
-        log.info("Filling password...")
+    try:
         password_field = wait.until(EC.presence_of_element_located((By.XPATH, PASSWORD_XPATH)))
-        password_field.send_keys(password)
+    except Exception as exc:
+        log.warning("Could not locate password field (%s). Continue manually.", exc)
+        return
+    log.info("Filling password...")
+    password_field.send_keys(password)
 
-        log.info("Submitting login...")
+    try:
         submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, SUBMIT_XPATH)))
         submit_button.click()
     except Exception as exc:
-        log.warning("Automatic fill failed (%s). Login page may have changed — continue manually.", exc)
+        log.warning("Could not click submit (%s). Continue manually.", exc)
+        return
+    log.info("Submitted login.")
 
 
 def wait_for_api_session(driver: webdriver.Chrome, timeout: int) -> str | None:
@@ -92,7 +103,14 @@ def wait_for_api_session(driver: webdriver.Chrome, timeout: int) -> str | None:
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        current_url = driver.current_url
+        try:
+            current_url = driver.current_url
+        except WebDriverException as exc:
+            # Transient — can happen mid-navigation while the page unloads.
+            log.debug("Transient error reading current_url: %s", exc)
+            time.sleep(OTP_POLL_INTERVAL_SECONDS)
+            continue
+
         if "apisession=" in current_url.lower():
             log.info("Redirect detected: %s", current_url)
             params = urlparse.parse_qs(urlparse.urlparse(current_url).query)
@@ -107,13 +125,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Breeze login automation")
     parser.add_argument("--headless", action="store_true", help="Run Chrome headless (you'll still need another way to enter the OTP)")
     parser.add_argument("--timeout", type=int, default=OTP_REDIRECT_TIMEOUT_SECONDS, help="Seconds to wait for OTP redirect")
+    parser.add_argument("--keep-open", action="store_true", help="Leave the Chrome window open after the session token is captured")
     args = parser.parse_args()
 
     api_key, user_id, password = load_credentials()
     login_url = LOGIN_URL_TMPL.format(api_key=urlparse.quote(api_key))
 
     log.info("Opening Breeze login...")
-    log.info(login_url)
+    log.info(LOGIN_URL_TMPL.format(api_key="***REDACTED***"))
 
     driver = build_driver(headless=args.headless)
     try:
@@ -130,7 +149,7 @@ def main() -> None:
             log.error("apisession not found")
             sys.exit(1)
     finally:
-        if args.headless:
+        if not args.keep_open:
             driver.quit()
 
 

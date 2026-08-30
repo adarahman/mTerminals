@@ -288,16 +288,31 @@ def test_canonicalize_underlying_alias_table_is_resolved_directly():
             _COMMON_UNDERLYING_ALIASES[full], full
 
 
-def test_resolves_full_company_name_via_upstox_master_reference():
+def test_resolves_full_company_name_via_upstox_master_reference(monkeypatch):
     # The Angel ScripMaster stores the exchange ticker in the `name` field
     # and never carries full company names, so free-text inputs like
     # "ADANI ENERGY SOLUTION LTD" can't be reverse-engineered from Angel alone.
     # _resolve_company_name_to_ticker consults Upstox's unauthenticated
     # instrument dump (EQ rows: name + clean trading_symbol) as a reference.
+    from brokers.upstox import client as upstox_client
     from brokers.upstox.client import (
         _resolve_company_name_to_ticker,
-        _COMPANY_NAME_TO_TICKER_CACHE,
     )
+
+    rows = [
+        {
+            "instrument_type": "EQ",
+            "name": "ADANI ENERGY SOLUTION LTD",
+            "trading_symbol": "ADANIENSOL",
+        },
+        {
+            "instrument_type": "EQ",
+            "name": "MARUTI SUZUKI INDIA LTD.",
+            "trading_symbol": "MARUTI",
+        },
+    ]
+    monkeypatch.setattr(upstox_client, "_COMPANY_NAME_TO_TICKER_CACHE", None)
+    monkeypatch.setattr(upstox_client, "_load_instrument_dump", lambda _scope: rows)
 
     assert _resolve_company_name_to_ticker("ADANI ENERGY SOLUTION LTD") == "ADANIENSOL"
     # Trailing-punctuation variant ("MARUTI SUZUKI INDIA LTD.") is treated
@@ -306,7 +321,7 @@ def test_resolves_full_company_name_via_upstox_master_reference():
     # Short/ambiguous tickers are refused rather than misrouted.
     assert _resolve_company_name_to_ticker("LT") is None
     assert _resolve_company_name_to_ticker("") is None
-    assert _COMPANY_NAME_TO_TICKER_CACHE is not None
+    assert upstox_client._COMPANY_NAME_TO_TICKER_CACHE is not None
 
 
 def test_upstox_find_equity_token_resolves_full_company_name(ws_server_live):
@@ -359,9 +374,73 @@ def test_upstox_canonical_name_maps_ticker_to_full_name(ws_server_live):
     assert _canonical_name("INFY", rows) == "INFOSYS LIMITED"
 
 
-# ── 5+6. Runtime switching without restart, full-baseline reset ──────────
-def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
+def test_upstox_chain_preserves_or_derives_option_price_change(monkeypatch):
+    from brokers.upstox import client as upstox
 
+    rows = [
+        {
+            "instrument_type": "CE",
+            "name": "NIFTY",
+            "expiry": "2026-08-31",
+            "strike_price": 24000,
+            "instrument_key": "NSE_FO|CE",
+            "trading_symbol": "NIFTYCE",
+            "lot_size": 65,
+        },
+        {
+            "instrument_type": "PE",
+            "name": "NIFTY",
+            "expiry": "2026-08-31",
+            "strike_price": 24000,
+            "instrument_key": "NSE_FO|PE",
+            "trading_symbol": "NIFTYPE",
+            "lot_size": 65,
+        },
+    ]
+    monkeypatch.setattr(upstox, "get_spot_quote", lambda _symbol: {"last_price": 24000})
+    monkeypatch.setattr(upstox, "_load_instrument_dump", lambda _scope: rows)
+    monkeypatch.setattr(
+        upstox,
+        "get_quotes",
+        lambda _keys: {
+            "ce": {
+                "instrument_token": "NSE_FO|CE",
+                "last_price": 105.0,
+                "ohlc": {"close": 100.0},
+                "oi": 6500,
+                "volume": 500,
+            },
+            "pe": {
+                "instrument_token": "NSE_FO|PE",
+                "last_price": 95.0,
+                "close": 100.0,
+                "oi": 6500,
+                "volume": 400,
+            },
+        },
+    )
+
+    chain = upstox.get_atm_chain("NIFTY", "2026-08-31", strikes_around_atm=0)
+    by_side = {row["type"]: row for row in chain["rows"]}
+
+    assert by_side["CE"]["net_change"] == 5.0
+    assert by_side["CE"]["pct_change"] == 5.0
+    assert by_side["PE"]["net_change"] == -5.0
+    assert by_side["PE"]["pct_change"] == -5.0
+
+
+# ── 5+6. Runtime switching without restart, full-baseline reset ──────────
+def _allow_runtime_provider_switch(monkeypatch, switcher):
+    """Exercise switching choreography without authenticating real brokers."""
+    def activate(name):
+        monkeypatch.setattr(md_registry, "_active_provider_name", name)
+        return True
+
+    monkeypatch.setattr(switcher, "_activate_provider", activate)
+
+
+def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
+    _allow_runtime_provider_switch(monkeypatch, ws_server_live._DATA_SOURCE_SWITCHER)
     asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("NSE_BSE"))
     assert runtime_state.MARKET_SELECTION.data_source == "NSE_BSE"
     assert md.get_active_provider() == "NSE_BSE"
@@ -378,7 +457,7 @@ def test_runtime_switch_without_restart(ws_server_live, monkeypatch):
 
 
 def test_switch_clears_baseline_for_full_republish(ws_server_live, monkeypatch):
-
+    _allow_runtime_provider_switch(monkeypatch, ws_server_live._DATA_SOURCE_SWITCHER)
     runtime_state.LAST_PAYLOAD = {"symbol": "NIFTY", "chain": []}
     runtime_state.LAST_SENT = {"symbol": "NIFTY", "chain": []}
 
@@ -472,7 +551,7 @@ def test_background_feed_restart_contains_start_failure():
 
 
 def test_feed_allowed_gates_stale_feeds(ws_server_live, monkeypatch):
-
+    _allow_runtime_provider_switch(monkeypatch, ws_server_live._DATA_SOURCE_SWITCHER)
     # Streaming provider active -> its feed is allowed.
     asyncio.run(ws_server_live._DATA_SOURCE_SWITCHER.switch("UPSTOX"))
     assert feed_manager._feed_allowed("UPSTOX") is True
@@ -679,10 +758,14 @@ class _FakeChainMD:
 
 def test_chain_pipeline_routes_by_active_provider(monkeypatch):
     from application.market_pipeline import option_chain as spa
+    from brokers import market_data_registry
 
     fake = _FakeChainMD()
     monkeypatch.setattr(spa, "market_data", fake)
-    md.set_active_provider("BREEZE")
+    active_provider = "BREEZE"
+    monkeypatch.setattr(
+        market_data_registry, "get_active_provider", lambda: active_provider
+    )
 
     df = spa.fetch_option_chain_wide("NIFTY", "31-Jul-2026", strikes_around_atm=2)
     assert isinstance(df, pd.DataFrame) and not df.empty
@@ -690,7 +773,7 @@ def test_chain_pipeline_routes_by_active_provider(monkeypatch):
     assert fake.batch_calls == 0  # Breeze chain rows already carry ltp/oi
 
     # Kite adds a live-quote overlay pass over instrument-metadata rows.
-    md.set_active_provider("KITE")
+    active_provider = "KITE"
     df_kite = spa.fetch_option_chain_wide("NIFTY", "31-Jul-2026", strikes_around_atm=2)
     assert isinstance(df_kite, pd.DataFrame) and not df_kite.empty
     assert fake.batch_calls == 1
@@ -713,7 +796,9 @@ def test_chain_pipeline_canonicalizes_full_name_underlying(monkeypatch):
     # leaked through.
     from application.market_pipeline import option_chain as spa
 
-    md.set_active_provider("BREEZE")
+    from brokers import market_data_registry
+
+    monkeypatch.setattr(market_data_registry, "get_active_provider", lambda: "BREEZE")
     monkeypatch.setattr(spa, "market_data", _FakeChainMD())
     monkeypatch.setattr(spa, "_seed_day_anchor_from_nse", lambda *a, **k: None)
 
@@ -770,7 +855,9 @@ def test_upstox_oi_normalized_from_shares_to_lots(monkeypatch):
                 ],
             }
 
-    md.set_active_provider("UPSTOX")
+    from brokers import market_data_registry
+
+    monkeypatch.setattr(market_data_registry, "get_active_provider", lambda: "UPSTOX")
     monkeypatch.setattr(spa, "market_data", _FakeUpstoxChainMD())
     monkeypatch.setattr(spa, "_seed_day_anchor_from_nse", lambda *a, **k: None)
     today = spa.date.today()
@@ -806,7 +893,9 @@ def test_shoonya_oi_normalized_from_shares_to_lots(monkeypatch):
                 ],
             }
 
-    md.set_active_provider("SHOONYA")
+    from brokers import market_data_registry
+
+    monkeypatch.setattr(market_data_registry, "get_active_provider", lambda: "SHOONYA")
     monkeypatch.setattr(spa, "market_data", _FakeShoonyaChainMD())
     monkeypatch.setattr(spa, "_seed_day_anchor_from_nse", lambda *a, **k: None)
     today = spa.date.today()
@@ -844,7 +933,9 @@ def test_breeze_oi_normalized_from_shares_to_lots(monkeypatch):
                 ],
             }
 
-    md.set_active_provider("BREEZE")
+    from brokers import market_data_registry
+
+    monkeypatch.setattr(market_data_registry, "get_active_provider", lambda: "BREEZE")
     monkeypatch.setattr(spa, "market_data", _FakeBreezeChainMD())
     monkeypatch.setattr(spa, "_lot_size", lambda underlying: 75)
     monkeypatch.setattr(spa, "_seed_day_anchor_from_nse", lambda *a, **k: None)

@@ -848,6 +848,21 @@ def get_atm_chain(
     out_rows = []
     for r in legs:
         q = by_key.get(r.get("instrument_key"), {})
+        ohlc = q.get("ohlc") or {}
+        ltp = q.get("last_price")
+        close = q.get("close")
+        if close is None:
+            close = ohlc.get("close")
+        net_change = q.get("net_change")
+        if net_change is None:
+            net_change = q.get("change")
+        if net_change is None and ltp is not None and close not in (None, 0):
+            net_change = float(ltp) - float(close)
+        pct_change = q.get("percent_change")
+        if pct_change is None:
+            pct_change = q.get("net_change_percentage")
+        if pct_change is None and net_change is not None and close not in (None, 0):
+            pct_change = float(net_change) / float(close) * 100.0
         out_rows.append(
             {
                 "strike": float(r.get("strike_price")),
@@ -855,9 +870,12 @@ def get_atm_chain(
                 "instrument_key": r.get("instrument_key"),
                 "trading_symbol": _row_symbol(r),
                 "lot_size": r.get("lot_size"),
-                "ltp": q.get("last_price"),
+                "ltp": ltp,
                 "oi": q.get("oi"),
                 "volume": q.get("volume"),
+                "close": close,
+                "net_change": net_change,
+                "pct_change": pct_change,
             }
         )
     out_rows.sort(key=lambda x: (x["strike"], x["type"]))

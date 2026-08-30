@@ -20,6 +20,7 @@ def test_build_http_runtime_maps_handlers_and_configuration():
         history=_handler,
         backtest=_handler,
         lot_sizes=_handler,
+        symbols=_handler,
         host="127.0.0.1",
         port=5500,
         symbol=lambda: selection["symbol"],
@@ -30,6 +31,7 @@ def test_build_http_runtime_maps_handlers_and_configuration():
     assert runtime.routes.broker_health is _handler
     assert runtime.routes.bridge_websocket is _handler
     assert runtime.routes.lot_sizes is _handler
+    assert runtime.routes.symbols is _handler
     assert runtime.config.host == "127.0.0.1"
     assert runtime.config.port == 5500
     assert runtime.config.symbol == "NIFTY"
@@ -56,6 +58,7 @@ def test_http_runtime_starts_with_assembled_dependencies():
         history=_handler,
         backtest=_handler,
         lot_sizes=_handler,
+        symbols=_handler,
         host="localhost",
         port=5500,
         symbol=lambda: "NIFTY",

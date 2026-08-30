@@ -14,9 +14,9 @@ def test_velocity_history_prunes_stale_rows_during_initial_load(tmp_path, monkey
     now = pd.Timestamp.now()
     pd.DataFrame([
         {"Symbol": "NIFTY", "Expiry": "10-Aug-2026", "StrikePrice": 24000,
-         "snapshot_time": now - pd.Timedelta(hours=8)},
+         "snapshot_time": now - timedelta(hours=8)},
         {"Symbol": "NIFTY", "Expiry": "10-Aug-2026", "StrikePrice": 24100,
-         "snapshot_time": now - pd.Timedelta(minutes=5)},
+         "snapshot_time": now - timedelta(minutes=5)},
     ]).to_parquet(path, index=False)
     monkeypatch.setattr(oi_analysis, "JSON_HISTORY_LOG_PATH", str(path))
     monkeypatch.setattr(oi_analysis, "_HISTORY_MEM", DirtyFrameStore())
@@ -54,4 +54,3 @@ def test_decision_snapshot_log_prunes_rows_outside_retention(tmp_path, monkeypat
     rows = snapshot_logger.load_decision_snapshots("NIFTY", db_path=path)
     assert len(rows) == 1
     assert rows[0]["snapshot_time"] != old_time
-

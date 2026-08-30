@@ -2,19 +2,19 @@ import asyncio
 import logging
 
 
-def test_background_task_failure_is_logged_and_released(ws_server_live, caplog):
-    module = ws_server_live
+def test_background_task_failure_is_logged_and_released(caplog):
+    from server import feed_manager, runtime_state
 
     async def scenario():
         async def fail():
             raise RuntimeError("supervised boom")
 
         with caplog.at_level(logging.ERROR, logger="mterminals.server"):
-            task = module._create_background_task(fail(), "test_subsystem")
+            task = feed_manager._create_background_task(fail(), "test_subsystem")
             await asyncio.gather(task, return_exceptions=True)
             await asyncio.sleep(0)  # allow the completion callback to run
 
-        assert task not in module._BACKGROUND_TASKS
+        assert task not in runtime_state.BACKGROUND_TASKS
 
     asyncio.run(scenario())
 
@@ -29,15 +29,15 @@ def test_background_task_failure_is_logged_and_released(ws_server_live, caplog):
     assert matching[0].exc_info is not None
 
 
-def test_cancelled_background_task_is_not_logged_as_failure(ws_server_live, caplog):
-    module = ws_server_live
+def test_cancelled_background_task_is_not_logged_as_failure(caplog):
+    from server import feed_manager, runtime_state
 
     async def scenario():
-        task = module._create_background_task(asyncio.sleep(60), "cancelled_test")
+        task = feed_manager._create_background_task(asyncio.sleep(60), "cancelled_test")
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)
-        assert task not in module._BACKGROUND_TASKS
+        assert task not in runtime_state.BACKGROUND_TASKS
 
     with caplog.at_level(logging.ERROR, logger="mterminals.server"):
         asyncio.run(scenario())
@@ -47,4 +47,3 @@ def test_cancelled_background_task_is_not_logged_as_failure(ws_server_live, capl
         and getattr(record, "subsystem", None) == "cancelled_test"
         for record in caplog.records
     )
-
