@@ -1,12 +1,16 @@
 // ============================================================
 // advanced-analytics-view.js
 // "Advanced Analytics" — one collapsed-by-default <details class="card">
-// on the main dashboard, tucking six remaining deep-dive views behind
+// on the main dashboard, tucking three remaining deep-dive views behind
 // a single expand so the always-visible dashboard stays readable for new
 // users:
-//   0. Conviction Multiplier  3. Per-strike Greeks
-//   1. GEX table              4. Capital Confirmation
-//   2. OI Velocity            5. Futures-Options Divergence
+//   0. Conviction Multiplier
+//   1. Capital Confirmation
+//   2. Futures-Options Divergence
+// GEX table, OI Velocity, and Per-strike Greeks sub-cards were built but
+// never wired into buildAdvancedAnalyticsHtml below, so their dead helpers
+// were removed. Those details remain available in the Greeks & GEX and OI
+// Flow surfaces.
 // Each sub-card is a compact, self-contained read built off data already
 // on the payload / already computed elsewhere (chain, greeks, oiVelocity,
 // volOiRatios) — no new backend fields required. Where a fuller view
@@ -28,9 +32,8 @@
 // (scenario-analysis-view.js) — three of the four destinations §2.3
 // names (Volatility / Scenario Analysis / Probability / Cross-Market).
 // A future Cross-Market destination has no candidate content yet in this
-// codebase, so nothing is pending extraction for it. GEX table /
-// OI Velocity / Per-strike Greeks / Capital Confirmation /
-// Futures-Options Divergence don't map cleanly to any of the four named
+// codebase, so nothing is pending extraction for it. Capital Confirmation
+// and Futures-Options Divergence do not map cleanly to any of the four named
 // destinations and stay here for now — this is likely close to Advanced
 // Analytics' final shape unless a genuinely new question emerges.
 //

@@ -201,8 +201,3 @@ class UiControls {
 }
 
 }
-
-// Unused standalone instance, pre-existing before this extraction (the
-// live UI is always driven through app.ui — see dashboard.js's App class).
-// Kept as-is: this file is a verbatim move, not a behavior change.
-const ui = new UiControls();
