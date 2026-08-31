@@ -46,7 +46,6 @@ mTerminals.json
 profile.out
 *.zip
 *.zip
-**/.DS_Store
 
 # Runtime-generated cache (instrument masters, OI/FII-DII snapshots, etc).
 # Keeps the directory structure tracked via .gitkeep without committing the
@@ -57,6 +56,8 @@ runtime/**/*.csv
 !runtime/**/.gitkeep
 !runtime/shoonya_api/
 !runtime/shoonya_api/**
+runtime/shoonya_api//.DS_Store
+
 
 # Scratch token-minting / connectivity scripts (not part of the app)
 /kite_access_token.py
