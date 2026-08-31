@@ -49,6 +49,12 @@ import logging
 from brokers.kotak.client import _session
 
 logger = logging.getLogger(__name__)
+
+# Keep quote URLs comfortably below Neo's practical multi-instrument limit.
+# A normal 21-strike option window contains 42 legs; sending all of them in
+# one path-style request can return an empty/partial payload and leave wall OI
+# stale. Smaller batches consistently return the current exchange OI.
+_CHAIN_QUOTE_BATCH_SIZE = 20
 from ._md.constants import (
     _STRIKE_INTERVALS,
     _INDEX_NAMES,
@@ -118,20 +124,44 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     if not matches:
         return None
 
-    # Batch-quote all CE+PE tokens in one quotes() call.
+    # Quote CE+PE tokens in bounded batches. Neo encodes every token into the
+    # request URL, so a whole 42-leg window in one request is unreliable.
     tokens = [{"instrument_token": m["token"], "exchange_segment": segment} for m in matches]
-    try:
-        qresult = _session.client.quotes(instrument_tokens=tokens, quote_type="all")
-        qrows = _unwrap_quotes(qresult)
-    except Exception as exc:
-        logger.warning("[kotak_market_data] batch quote failed: %s", exc)
-        qrows = []
+    qrows = []
+    for start in range(0, len(tokens), _CHAIN_QUOTE_BATCH_SIZE):
+        batch = tokens[start:start + _CHAIN_QUOTE_BATCH_SIZE]
+        try:
+            qresult = _session.client.quotes(
+                instrument_tokens=batch,
+                quote_type="all",
+            )
+            qrows.extend(_unwrap_quotes(qresult))
+        except Exception as exc:
+            logger.warning(
+                "[kotak_market_data] chain quote batch %d-%d failed: %s",
+                start + 1,
+                start + len(batch),
+                exc,
+            )
     quote_by_token = {}
 
     for q in qrows:
         tok = _quote_token(q)
         if tok:
             quote_by_token[tok] = q
+
+    # Never publish a partly refreshed chain: zero-filled missing legs can
+    # select the wrong wall and overwrite a previously good snapshot. Let the
+    # shared pipeline fall back to NSE/BSE instead.
+    expected_tokens = {str(m["token"]) for m in matches}
+    missing_tokens = expected_tokens - set(quote_by_token)
+    if missing_tokens:
+        logger.warning(
+            "[kotak_market_data] incomplete chain quote: received %d/%d legs",
+            len(expected_tokens) - len(missing_tokens),
+            len(expected_tokens),
+        )
+        return None
 
     out = []
     for m in matches:

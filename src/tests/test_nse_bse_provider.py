@@ -950,6 +950,40 @@ def test_breeze_oi_normalized_from_shares_to_lots(monkeypatch):
     assert float(row["CE_ChgOI"]) == pytest.approx(400.0 - 300.0)  # 100 lots
 
 
+def test_kotak_oi_normalized_from_quantity_to_lots(monkeypatch):
+    """Kotak Neo open_int is underlying quantity, like exchange OI."""
+    from application.market_pipeline import option_chain as spa
+    from brokers import market_data_registry
+
+    class _FakeKotakChainMD:
+        def get_atm_chain(self, underlying, expiry, strikes_around_atm=10, exchange="NFO"):
+            return {
+                "underlying": underlying,
+                "spot": 24000.0,
+                "atm_strike": 24000,
+                "expiry": expiry,
+                "rows": [
+                    {
+                        "strike": 24000, "type": "CE",
+                        "tradingsymbol": "NIFTY26JUL24000CE", "token": "1",
+                        "lot_size": 75,
+                        "ltp": 120.0, "oi": 75000.0, "volume": 500,
+                    },
+                ],
+            }
+
+    monkeypatch.setattr(market_data_registry, "get_active_provider", lambda: "KOTAK")
+    monkeypatch.setattr(spa, "market_data", _FakeKotakChainMD())
+    monkeypatch.setattr(spa, "_seed_day_anchor_from_nse", lambda *a, **k: None)
+    today = spa.date.today()
+    spa._day_open_oi[("NIFTY", "31-Jul-2026", 24000, "CE")] = (today, 900.0)
+
+    df = spa.fetch_option_chain_wide("NIFTY", "31-Jul-2026", strikes_around_atm=1)
+    row = df.iloc[0]
+    assert float(row["CE_OI"]) == pytest.approx(1000.0)
+    assert float(row["CE_ChgOI"]) == pytest.approx(100.0)
+
+
 
 def test_broker_auth_failure_falls_back_to_public_nse_bse(monkeypatch):
     """Broker chain failure falls back to public NSE/BSE without re-scaling OI."""

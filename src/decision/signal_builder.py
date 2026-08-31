@@ -189,6 +189,13 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
         out.verdicts["maxPain"] = "Not computed"
         return 0.0
 
+    # Max Pain is a contextual expiry estimate, not a reliable standalone
+    # directional predictor. Outside the final two sessions it contributes
+    # no direction; near expiry its influence is deliberately capped.
+    if dte > 2:
+        out.verdicts["maxPain"] = f"₹{max_pain:,.0f} — context only ({dte}d to expiry)"
+        return 0.0
+
     gap  = spot - max_pain          # positive = spot above pain
     direction = "above" if gap > 0 else "below"
 
@@ -204,7 +211,7 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
         out.verdicts["maxPain"] = (f"₹{max_pain:,.0f} — Spot ₹{dist:.0f} {direction} · "
                                    f"mild mean-reversion pressure")
         raw = -gap / T.MP_GRAVITY   # negative = above pain = mild bearish pull
-        return max(-0.40, min(0.40, raw))
+        return max(-0.15, min(0.15, raw))
 
     else:
         severity = "warn" if dist > 150 else "info"
@@ -214,7 +221,7 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
             f"Spot ₹{dist:.0f} {direction} Max Pain — strong reversion before expiry",
             severity, 8, "max-pain:gravity"))
         raw = -gap / (dist + 1e-9)
-        return max(-1.0, min(1.0, raw))
+        return max(-0.25, min(0.25, raw))
 
 
 def score_oi_velocity(vel_df, spot: float, step: int,
@@ -405,6 +412,10 @@ def score_smart_money(smart_money_top, spot: float, atm: float,
 
     Score range [-1, +1]. Returns 0.0 when smart_money_top is None/empty.
     """
+    # Turnover and OI do not reveal whether initiators bought or wrote the
+    # option. Until aggressor-side/order-flow data is available this metric
+    # must remain descriptive and must not contribute directional score.
+    return 0.0
     if smart_money_top is None:
         return 0.0
     try:

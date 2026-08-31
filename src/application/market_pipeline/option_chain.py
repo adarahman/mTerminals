@@ -254,6 +254,7 @@ def fetch_option_chain_wide(
             )
             ltp = safe_float(row.get("ltp"))
             oi_now = safe_float(row.get("oi"))
+            volume_now = safe_float(row.get("volume"))
             # OI unit normalization — the DataFrame/_chg_oi() convention is
             # LOTS (contracts), same as NSE's anchor: build_master_table_nse()
             # re-multiplies by lot_size downstream to quantity for display.
@@ -264,37 +265,19 @@ def fetch_option_chain_wide(
             # 23200 CE, i.e. ~32469 lots at lot_size 75) — feeding raw share
             # counts through would make CE_OI/PE_OI lot_size× too large AND,
             # mixed against NSE's lot anchor inside _chg_oi(), turn ChgOI
-            # into garbage. Convert to lots using the broker's own lot_size
-            # when the row carries it. Kotak's quotes() open_interest is
-            # treated the same way pending live verification in the Kotak
-            # smoke test (see kotak_market_data.py's docstring caveats).
+            # into garbage. Convert those providers to lots using the
+            # broker's own lot_size when the row carries it.
+            #
+            # Kotak Neo's REST `open_int` is also underlying quantity (the
+            # same unit as exchange OI), so it needs the same conversion.
             if provider in ("UPSTOX", "SHOONYA", "KITE", "BREEZE", "KOTAK"):
                 lot_size = row.get("lot_size") or _lot_size(underlying)
                 if lot_size:
-                    raw_oi_before_lot_div = oi_now
                     oi_now = oi_now / lot_size
-                    # DIAGNOSTIC (temporary): the /lot_size assumption above
-                    # is documented as "pending live verification" for Kotak
-                    # specifically (unlike Upstox/Kite/Shoonya/Breeze, whose
-                    # share-quantity convention is confirmed against SDK
-                    # docs). If Kotak's open_interest is actually already in
-                    # lots, this division shrinks it a second time, producing
-                    # an implausibly small in-lots OI (a live index ATM
-                    # strike should be hundreds-to-thousands of lots, not
-                    # single digits) and, downstream, a garbage ChgOI/PCR
-                    # once diffed against the NSE-lot-anchored previous
-                    # close. Log once per strike/side so real ticks can
-                    # confirm or rule this out; remove once verified either
-                    # way and the docstring caveat is resolved.
-                    if provider == "KOTAK" and raw_oi_before_lot_div and oi_now < 5:
-                        logger.warning(
-                            "[kotak_oi_units] suspiciously small post-lot-div OI for "
-                            "%s %s %s: raw=%.2f lot_size=%s -> %.4f lots — Kotak's "
-                            "open_interest may already be in lots, not shares "
-                            "(see option_chain.py's OI unit normalization note)",
-                            underlying, strike_val, side,
-                            raw_oi_before_lot_div, lot_size, oi_now,
-                        )
+                    # These broker quote feeds expose derivatives volume as
+                    # traded underlying quantity. The analytics contract is
+                    # contracts/lots, so normalize volume alongside OI.
+                    volume_now = volume_now / lot_size
             chg_oi = _chg_oi(underlying, expiry_dash, strike_val, side, oi_now)
             prev_oi = float(oi_now or 0.0) - chg_oi
             rec[f"{side}_OI"] = oi_now
@@ -302,7 +285,7 @@ def fetch_option_chain_wide(
             rec[f"{side}_PctChgOI"] = (
                 round((chg_oi / prev_oi) * 100.0, 2) if prev_oi > 0 else 0.0
             )
-            rec[f"{side}_Volume"] = row.get("volume")
+            rec[f"{side}_Volume"] = volume_now
             rec[f"{side}_IV"] = (
                 round(
                     solve_iv(

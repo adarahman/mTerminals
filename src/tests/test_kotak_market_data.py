@@ -49,6 +49,44 @@ def test_sensex_chain_uses_bse_fo_scrip_master_and_quotes(monkeypatch):
     assert all(row["volume"] == 5000 for row in chain["rows"])
 
 
+def test_chain_quotes_are_chunked_and_incomplete_payload_is_rejected(monkeypatch):
+    from brokers.kotak import market_data as kotak
+
+    rows = [
+        {
+            "name": "NIFTY", "tradingsymbol": f"NIFTY{i}CE", "token": str(i),
+            "option_type": "CE", "strike": 24000 + i * 50,
+            "expiry": "01-Sep-2026", "lot_size": 65,
+        }
+        for i in range(21)
+    ]
+    calls = []
+
+    def quotes(*, instrument_tokens, quote_type):
+        calls.append(instrument_tokens)
+        return [
+            {"exchange_token": item["instrument_token"], "ltp": 1, "open_int": 65}
+            for item in instrument_tokens
+        ]
+
+    monkeypatch.setattr(kotak, "_contracts_for", lambda _underlying: rows)
+    monkeypatch.setattr(kotak, "_spot_quote", lambda _symbol: {"ltp": 24500.0})
+    monkeypatch.setattr(kotak, "_session", SimpleNamespace(client=SimpleNamespace(quotes=quotes)))
+
+    chain = kotak.get_atm_chain("NIFTY", "01-Sep-2026", strikes_around_atm=10)
+    assert chain is not None
+    assert [len(batch) for batch in calls] == [20, 1]
+
+    def incomplete_quotes(*, instrument_tokens, quote_type):
+        return []
+
+    monkeypatch.setattr(
+        kotak, "_session",
+        SimpleNamespace(client=SimpleNamespace(quotes=incomplete_quotes)),
+    )
+    assert kotak.get_atm_chain("NIFTY", "01-Sep-2026", strikes_around_atm=10) is None
+
+
 def test_bfo_pipe_delimited_scrip_master_is_parsed():
     from brokers.kotak import market_data as kotak
 

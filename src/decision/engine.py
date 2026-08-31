@@ -506,10 +506,11 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     have_futures = df_fut is not None and not df_fut.empty and "LTP" in df_fut.columns
     futures_ltp = df_fut["LTP"].iloc[0] if have_futures else None
     basis = (futures_ltp - spot) if have_futures and futures_ltp is not None else 0.0
-    if not have_futures or futures_ltp is None:
-        fut_signal = ""
-    else:
-        fut_signal = "Long Buildup" if basis > 0 else "Short Buildup"
+    # Do not infer position build-up from basis. A future trading above spot
+    # is contango, not evidence that OI is increasing; the real futures
+    # regime is assigned below after price change and futures-OI change are
+    # both available.
+    fut_signal = ""
 
     # ── futures day change / % change (top-bar FUT pill) ────────────────
     # df_fut carries Change/PctChange for both the SmartAPI path
@@ -581,6 +582,12 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
         price_chg_pct=day_chg_pct, fut_oi_chg_pct=fut_oi_chg_pct,
         has_oi_data=_has_fut_oi_data,
     )
+    regime_label = market_regime.get("regime", "Indeterminate")
+    if regime_label != "Indeterminate":
+        # Keep the legacy public field name because the dashboard and
+        # DecisionEngine consume it, but feed it the correctly classified
+        # Price x Futures-OI regime.
+        fut_signal = regime_label
 
     # ── VIX regime ───────────────────────────────────────────────────────
     # india_vix is always caller-supplied now (market_api.get_unified_market_data(),
@@ -601,7 +608,10 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
 
     # ── OI velocity (5/15/30-min windows, from the accumulated parquet
     # history — see oi_analysis.get_oi_velocity) ───────────────────────────
-    vel_df = get_oi_velocity(df_clean, symbol, expiry, windows=(5, 15, 30), lot_size=lot_size)
+    vel_df = get_oi_velocity(
+        df_clean, symbol, expiry, windows=(5, 15, 30), lot_size=lot_size,
+        provider=str(df_clean.attrs.get("data_provider", "")),
+    )
 
     # ── strategies / scenario P&L / risk meters / smart money ──────────────
     # AFTER:

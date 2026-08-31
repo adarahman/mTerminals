@@ -48,3 +48,22 @@ def test_live_velocity_history_is_bounded_to_recent_window(tmp_path, monkeypatch
 def test_live_store_does_not_reuse_legacy_archive_path():
     assert oi_analysis.JSON_HISTORY_LOG_PATH != oi_analysis.LEGACY_OI_HISTORY_LOG_PATH
     assert oi_analysis.JSON_HISTORY_LOG_PATH.endswith("oi_velocity_history.parquet")
+
+
+def test_velocity_never_compares_different_brokers(tmp_path, monkeypatch):
+    log_path = tmp_path / "velocity.parquet"
+    monkeypatch.setattr(oi_analysis, "_HISTORY_MEM", DirtyFrameStore())
+    old = _snapshot(pd.Timestamp.now() - timedelta(minutes=5))
+    old["Provider"] = "BREEZE"
+    oi_analysis.append_json_history(
+        old, log_path=str(log_path), flush_interval_seconds=3600
+    )
+    current = pd.DataFrame([{
+        "StrikePrice": 24500, "Expiry": "2026-08-13",
+        "CE_OI": 500, "PE_OI": 600, "CE_LTP": 9, "PE_LTP": 13,
+    }])
+    result = oi_analysis.get_oi_velocity(
+        current, "NIFTY", "2026-08-13", windows=(5,), lot_size=1,
+        log_path=str(log_path), provider="KOTAK",
+    )
+    assert result.empty

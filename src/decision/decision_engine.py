@@ -104,8 +104,8 @@ class DecisionEngine:
         # ── Conflict detection ────────────────────────────────────────────────
         # A conflict exists when directional sub-scores point opposite ways strongly
         weights = {
-            "pcr": 0.26, "engine_bias": 0.26, "futures": 0.18,
-            "max_pain": 0.12, "oi_velocity": 0.10, "smart_money": 0.08,
+            "pcr": 0.30, "engine_bias": 0.30, "futures": 0.20,
+            "max_pain": 0.05, "oi_velocity": 0.15,
         }
         availability = {
             "pcr": total_pcr > 0,
@@ -125,7 +125,7 @@ class DecisionEngine:
             "oi_velocity": "OI velocity", "smart_money": "Volume / OI confirmation",
         }
         required = {"pcr", "engine_bias", "futures", "max_pain"}
-        out.missing_inputs = [key for key, available in availability.items() if not available]
+        out.missing_inputs = [key for key in weights if not availability[key]]
         critical_missing = any(key in required for key in out.missing_inputs)
         out.degraded = critical_missing
         out.evidence_coverage = round(sum(
@@ -143,7 +143,9 @@ class DecisionEngine:
         directional_scores = [score_map[key] for key in weights if availability[key]]
         pos = sum(1 for s in directional_scores if s > 0.15)
         neg = sum(1 for s in directional_scores if s < -0.15)
-        conflict = pos >= 2 and neg >= 2
+        pos_weight = sum(weights[k] for k in weights if availability[k] and score_map[k] > 0.15)
+        neg_weight = sum(weights[k] for k in weights if availability[k] and score_map[k] < -0.15)
+        conflict = pos_weight >= 0.20 and neg_weight >= 0.20
         if conflict:
             out.conflict_flag = True
             out.active_signals.append(ActiveSignal(
@@ -160,6 +162,15 @@ class DecisionEngine:
                 if availability[key])
         )
         composite = max(-1.0, min(1.0, composite))
+
+        # A moderate/strong call against an established session move needs
+        # explicit momentum evidence, which this engine does not yet carry.
+        # Fail closed to neutral instead of recommending a countertrend trade.
+        spot_move = float(getattr(er, "spot_chg_pct", 0.0) or 0.0)
+        if spot_move <= -0.25 and composite > 0.15:
+            composite = 0.149
+        elif spot_move >= 0.25 and composite < -0.15:
+            composite = -0.149
 
         out._debug = {
             "pcr_score":  round(pcr_score,  3),

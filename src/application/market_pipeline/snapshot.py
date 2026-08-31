@@ -89,6 +89,9 @@ class AnalyticsSnapshotService:
             .sort_values("StrikePrice")
             .copy()
         )
+        from brokers.market_data_registry import get_active_provider
+        data_provider = get_active_provider()
+        clean_frame.attrs["data_provider"] = data_provider
         expiry_manager = self._expiry_manager(market_data["expiry_dates"])
         extra_chains = self._extra_chains.build(
             expiry_manager,
@@ -100,6 +103,8 @@ class AnalyticsSnapshotService:
         history = self._history_builder(
             clean_frame, runtime_config.symbol, prev_poll=previous
         )
+        if hasattr(history, "columns"):
+            history["Provider"] = data_provider
         self._history_appender(history)
         near_expiry, far_expiry = self._calendar_spread_expiries(expiry_manager)
 

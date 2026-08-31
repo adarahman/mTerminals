@@ -34,14 +34,43 @@ here, not just a stopgap until a better seed arrives.
 from __future__ import annotations
 
 import threading
+import json
+import os
+from datetime import date
+from infrastructure.paths import CACHE_DIR
 
 __all__ = ["FuturesOITracker", "get_tracker"]
 
 
 class FuturesOITracker:
-    def __init__(self):
+    def __init__(self, persist_path=None):
         self._session_oi = {}   # contract_symbol -> baseline OI, fixed for the session
         self._lock = threading.Lock()
+        self._persist_path = persist_path
+        self._session_date = date.today().isoformat()
+        self._load()
+
+    def _load(self):
+        if not self._persist_path or not os.path.exists(self._persist_path):
+            return
+        try:
+            with open(self._persist_path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if payload.get("date") == self._session_date:
+                self._session_oi = {
+                    str(k): float(v) for k, v in payload.get("baselines", {}).items()
+                }
+        except (OSError, ValueError, TypeError):
+            self._session_oi = {}
+
+    def _save(self):
+        if not self._persist_path:
+            return
+        os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
+        tmp = self._persist_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"date": self._session_date, "baselines": self._session_oi}, handle)
+        os.replace(tmp, self._persist_path)
 
     def reset_session(self):
         """Call at actual trading-day rollover (same hook as
@@ -52,6 +81,8 @@ class FuturesOITracker:
         docstring)."""
         with self._lock:
             self._session_oi.clear()
+            self._session_date = date.today().isoformat()
+            self._save()
 
     def update(self, contract: str, oi: "float | int | None") -> dict:
         """Call once per pipeline tick with the current futures contract's
@@ -77,6 +108,7 @@ class FuturesOITracker:
             if baseline is None:
                 self._session_oi[contract] = oi
                 baseline = oi
+                self._save()
 
         fut_oi_chg = oi - baseline
         fut_oi_chg_pct = (fut_oi_chg / baseline * 100.0) if baseline > 0 else 0.0
@@ -88,7 +120,7 @@ class FuturesOITracker:
 # in server/app.py), so engine.py and server/app.py's day-rollover
 # hook share the same tracker without needing it threaded through every
 # call signature.
-_TRACKER = FuturesOITracker()
+_TRACKER = FuturesOITracker(os.path.join(CACHE_DIR, "futures_oi_baseline.json"))
 
 
 def get_tracker() -> FuturesOITracker:

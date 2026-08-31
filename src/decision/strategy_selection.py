@@ -143,7 +143,7 @@ def suggest_strategy(
             leg(atm +   step, "CE", "SELL", ce_ltp),
             leg(atm + 2*step, "CE", "BUY",  ce_wing if ce_wing is not None else 0.0),
         ]
-        net = ce_ltp   # net credit ≈ short leg (long leg OTM cost deducted caller-side)
+        net = ce_ltp - ce_wing if ce_wing is not None else None
 
     elif bias == "BEARISH":
         if iv_rank >= T.IV_MID:
@@ -159,7 +159,7 @@ def suggest_strategy(
                 leg(atm +   step, "CE", "SELL", ce_ltp),
                 leg(atm + 2*step, "CE", "BUY",  ce_wing if ce_wing is not None else 0.0),
             ]
-            net = ce_ltp
+            net = ce_ltp - ce_wing if ce_wing is not None else None
 
     elif bias == "BULLISH" and strength == "STRONG":
         name = "Bull Put Spread"
@@ -167,7 +167,7 @@ def suggest_strategy(
             leg(atm -   step, "PE", "SELL", pe_ltp),
             leg(atm - 2*step, "PE", "BUY",  pe_wing if pe_wing is not None else 0.0),
         ]
-        net = pe_ltp
+        net = pe_ltp - pe_wing if pe_wing is not None else None
 
     else:   # BULLISH MODERATE
         if iv_rank >= T.IV_MID:
@@ -183,7 +183,7 @@ def suggest_strategy(
                 leg(atm -   step, "PE", "SELL", pe_ltp),
                 leg(atm - 2*step, "PE", "BUY",  pe_wing if pe_wing is not None else 0.0),
             ]
-            net = pe_ltp
+            net = pe_ltp - pe_wing if pe_wing is not None else None
 
     net = round(net, 2) if net is not None else None
     max_profit = round(net * lot_size, 2) if (net is not None and net > 0) else None

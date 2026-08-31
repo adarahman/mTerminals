@@ -190,3 +190,32 @@ def test_unknown_window_returns_zero_not_all_rows():
     ])
     out = DecisionResult()
     assert score_oi_velocity(vel_df, spot=24100, step=50, out=out, window=30) == 0.0
+
+
+def test_falling_price_with_rising_futures_oi_is_short_buildup():
+    from analytics.market_regime import classify_market_regime
+
+    result = classify_market_regime(-0.47, 0.60, has_oi_data=True)
+    assert result["regime"] == "Short Build-up"
+
+
+def test_falling_price_with_falling_futures_oi_is_long_unwinding():
+    from analytics.market_regime import classify_market_regime
+
+    result = classify_market_regime(-0.47, -0.60, has_oi_data=True)
+    assert result["regime"] == "Long Unwinding"
+
+
+def test_spread_credit_deducts_hedge_premium():
+    from decision.strategy_selection import suggest_strategy
+
+    name, strategy = suggest_strategy(
+        "BULLISH", "MODERATE", 24050, 50,
+        ce_ltp=70, pe_ltp=44.85, lot_size=65,
+        expiry="01-Sep-2026", dte=1, vix_tag="LOW", iv_rank=35,
+        wing_ltp={"pe_buy": 22.35, "ce_buy": 10},
+    )
+    assert name == "Bull Put Spread"
+    assert strategy["netPremium"] == 22.5
+    assert strategy["maxProfit"] == 1462.5
+    assert strategy["maxLoss"] == 1787.5

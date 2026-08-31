@@ -469,7 +469,7 @@ def flush_history_to_disk(log_path=JSON_HISTORY_LOG_PATH):
 # been accumulating tick-by-tick all along, so real multi-timestamp
 # history is actually available for the lookback.
 def get_oi_velocity(current_df, symbol, expiry, windows=(5, 15, 30), lot_size=1,
-                     log_path=JSON_HISTORY_LOG_PATH):
+                     log_path=JSON_HISTORY_LOG_PATH, provider=""):
     """
     current_df: live df_clean-style chain (StrikePrice/CE_OI/PE_OI/CE_LTP/
         PE_LTP/Expiry columns) for `symbol`/`expiry`, right now.
@@ -497,6 +497,12 @@ def get_oi_velocity(current_df, symbol, expiry, windows=(5, 15, 30), lot_size=1,
         return pd.DataFrame()
 
     hist = hist[(hist["Symbol"] == symbol) & (hist["Expiry"] == expiry)]
+    if provider:
+        # Never turn differences between broker snapshots into fake OI
+        # velocity. Legacy rows without provenance are intentionally ignored.
+        if "Provider" not in hist.columns:
+            return pd.DataFrame()
+        hist = hist[hist["Provider"] == provider]
     if hist.empty or "snapshot_time" not in hist.columns:
         return pd.DataFrame()
 

@@ -28,10 +28,10 @@ def test_decision_contract_has_provenance_and_visible_evidence():
 
     assert result["decisionTimestamp"] == "2026-08-08T10:00:00+05:30"
     assert result["stateVersion"].startswith("NIFTY:")
-    assert result["evidenceCoverage"] == 82
+    assert result["evidenceCoverage"] == 85
     assert result["degraded"] is False
-    assert result["missingInputs"] == ["oi_velocity", "smart_money"]
-    assert len(result["contributors"]) == 6
+    assert result["missingInputs"] == ["oi_velocity"]
+    assert len(result["contributors"]) == 5
     assert result["tradeGrade"] == "A"
     assert result["importantLevels"]["atm"] == 24000
 
@@ -74,6 +74,14 @@ def test_directional_setup_fails_closed_below_execution_confidence():
     assert result["suggestedStrike"] is None
     assert "below execution threshold" in result["action"]
     assert result["executeRecommended"] is False
+
+
+def test_falling_session_cannot_emit_moderate_bullish_trade():
+    result = DecisionEngine().evaluate(
+        _engine_result(spot_chg_pct=-0.50), {}
+    ).to_dict()
+    assert result["biasStrength"] == "WEAK"
+    assert result["actionType"] == "WAIT"
 
 
 def test_evidence_coverage_reduces_confidence():
