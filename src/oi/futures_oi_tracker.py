@@ -80,9 +80,16 @@ class FuturesOITracker:
         the new contract symbol just has no baseline yet, see class
         docstring)."""
         with self._lock:
+            today = date.today().isoformat()
+            # On process restart the persisted same-day baseline has already
+            # been restored. The scheduler's first in-memory rollover check
+            # must not erase it merely because the scheduler itself is new.
+            if self._session_date == today and self._session_oi:
+                return False
             self._session_oi.clear()
-            self._session_date = date.today().isoformat()
+            self._session_date = today
             self._save()
+            return True
 
     def update(self, contract: str, oi: "float | int | None") -> dict:
         """Call once per pipeline tick with the current futures contract's

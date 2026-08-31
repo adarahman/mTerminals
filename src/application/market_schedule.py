@@ -38,10 +38,11 @@ class DailyMarketScheduler:
                 f"{now.date()}",
                 flush=True,
             )
-        self._reset_futures_session()
+        futures_reset = self._reset_futures_session()
         print(
-            f"[futures_oi] Reset futures OI session baseline for new trading "
-            f"day {now.date()}",
+            f"[futures_oi] "
+            f"{'Reset futures OI session baseline for new trading day' if futures_reset is not False else 'Retained persisted futures OI baseline for'} "
+            f"{now.date()}",
             flush=True,
         )
 
