@@ -52,11 +52,11 @@ profile.out
 # generated payloads themselves — those get regenerated on every run.
 runtime/**
 runtime/**/*.csv
+runtime/shoonya_api//.DS_Store
 !runtime/**/
 !runtime/**/.gitkeep
 !runtime/shoonya_api/
 !runtime/shoonya_api/**
-runtime/shoonya_api//.DS_Store
 
 
 # Scratch token-minting / connectivity scripts (not part of the app)
