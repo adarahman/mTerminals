@@ -805,6 +805,18 @@ def get_fno_underlyings(force_refresh=False):
 
 
 # ── 4. Market data fetchers ────────────────────────────────────────────────
+def _spot_quote(symbol, data):
+    """Normalize one SmartAPI LTP/OHLC row to the shared spot-quote shape."""
+    return {
+        "symbol": symbol,
+        "ltp": safe_float(data.get("ltp")),
+        "open": safe_float(data.get("open")),
+        "high": safe_float(data.get("high")),
+        "low": safe_float(data.get("low")),
+        "close": safe_float(data.get("close")),
+    }
+
+
 def get_index_quote(symbol):
     """LTP + basic OHLC for an index (NIFTY, BANKNIFTY, SENSEX, ...).
 
@@ -832,14 +844,7 @@ def get_index_quote(symbol):
         return None
 
     d = result["data"]
-    quote = {
-        "symbol": symbol,
-        "ltp": safe_float(d.get("ltp")),
-        "open": safe_float(d.get("open")),
-        "high": safe_float(d.get("high")),
-        "low": safe_float(d.get("low")),
-        "close": safe_float(d.get("close")),
-    }
+    quote = _spot_quote(symbol, d)
     _quote_cache_set(symbol, quote)
     return quote
 
@@ -898,14 +903,7 @@ def get_index_quotes_batch(symbols):
                 )
                 out[sym] = None
                 continue
-            quote = {
-                "symbol": sym,
-                "ltp": safe_float(d.get("ltp")),
-                "open": safe_float(d.get("open")),
-                "high": safe_float(d.get("high")),
-                "low": safe_float(d.get("low")),
-                "close": safe_float(d.get("close")),
-            }
+            quote = _spot_quote(sym, d)
             _quote_cache_set(sym, quote)
             out[sym] = quote
 
@@ -955,14 +953,7 @@ def get_equity_quote(symbol):
         return None
 
     d = result["data"]
-    quote = {
-        "symbol": symbol,
-        "ltp": safe_float(d.get("ltp")),
-        "open": safe_float(d.get("open")),
-        "high": safe_float(d.get("high")),
-        "low": safe_float(d.get("low")),
-        "close": safe_float(d.get("close")),
-    }
+    quote = _spot_quote(symbol, d)
     _quote_cache_set(symbol, quote)
     return quote
 

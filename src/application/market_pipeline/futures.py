@@ -1,5 +1,6 @@
 import logging
-from datetime import date, datetime
+from datetime import datetime
+from collections.abc import Callable, Iterable
 
 import pandas as pd
 
@@ -17,76 +18,32 @@ from application.market_pipeline.utils import _canon_underlying
 
 logger = logging.getLogger(__name__)
 
-def _get_futures_contract(
+
+def _futures_candidates(
+    rows: Iterable[dict],
+    *,
     underlying: str,
-    expiry_dash: str | None = None,
-    exchange: str = "NFO",
-    which: str = "NEAR",
-) -> dict | None:
-    """which is only consulted when expiry_dash is None (i.e. "give me
-    a monthly slot by relative position" instead of "give me this exact
-    date") — NEAR/NEXT/FAR map to the 1st/2nd/3rd soonest listed FUTIDX
-    expiry. Clamped to whatever's actually listed (FAR silently becomes
-    NEXT or NEAR if a 3rd month isn't listed yet) rather than returning
-    None for an out-of-range request — a caller asking for "the far
-    month" shouldn't get nothing just because NSE hasn't listed it yet.
-
-    instrumenttype covers BOTH "FUTIDX" (index futures — NIFTY/BANKNIFTY)
-    and "FUTSTK" (single-stock futures — RELIANCE/etc.) — reusing
-    smartapi_instruments._FNO_FUT_TYPES rather than a separate literal,
-    since that's the same set get_lot_size() and the F&O lot-size table
-    already treat as "this is a futures contract" elsewhere in this
-    codebase. Previously filtered to "FUTIDX" only, so this always
-    silently returned None (empty futures fetch, PRICE_SOURCE=FUT
-    quietly no-op'd back to EQ) for any single-stock underlying.
-
-    Rows with an unparseable `expiry` are skipped rather than raising —
-    one malformed row in a ~160k-row master shouldn't take down futures
-    resolution for every underlying.
-
-    For the relative-position (`which`) path only, already-expired
-    contracts are dropped before indexing. _load_scrip_master() has a
-    stale-cache fallback (network failure -> reuse yesterday's file on
-    disk) — without this filter, hitting that fallback on or after a
-    contract's expiry date would resolve NEAR to a dead contract instead
-    of rolling to what should now be NEAR. The exact-date path
-    (expiry_dash set) is left unfiltered: nothing in this codebase calls
-    it with a value today, but a future caller doing a historical/backtest
-    lookup should still be able to ask for a specific past expiry."""
-    from brokers.smartapi.instruments import _FNO_FUT_TYPES
-
-    def _parse_expiry(row):
-        try:
-            return datetime.strptime(row["expiry"], "%d%b%Y")
-        except (KeyError, ValueError, TypeError):
-            return None
-
-    data = _load_scrip_master()
-    name_u = _canon_underlying(underlying)
-    cands = [
-        row
-        for row in data
-        if row.get("exch_seg") == exchange
-        and row.get("name") == name_u
-        and row.get("instrumenttype") in _FNO_FUT_TYPES
-    ]
-    cands = [(row, _parse_expiry(row)) for row in cands]
-    cands = [(row, exp) for row, exp in cands if exp is not None]
-    if not cands:
-        return None
-    cands.sort(key=lambda pair: pair[1])
-    if expiry_dash:
-        target = _to_smartapi_expiry(expiry_dash)
-        matches = [row for row, _exp in cands if row["expiry"] == target]
-        if not matches:
-            return None
-        return matches[0]
-    today = datetime.combine(date.today(), datetime.min.time())
-    live = [(row, exp) for row, exp in cands if exp >= today] or cands
-    idx = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which, 0)
-    idx = min(idx, len(live) - 1)
-    return live[idx][0]
-
+    instrument_type_key: str,
+    instrument_types: set[str] | frozenset[str],
+    parse_expiry: Callable[[dict], datetime | None],
+    exchange_key: str | None = None,
+    exchange: str | None = None,
+) -> list[tuple[dict, datetime]]:
+    """Return matching futures instruments with valid expiries, oldest first."""
+    candidates: list[tuple[dict, datetime]] = []
+    underlying_u = underlying.upper()
+    for row in rows:
+        if exchange_key and row.get(exchange_key) != exchange:
+            continue
+        if (row.get("name") or "").upper() != underlying_u:
+            continue
+        if row.get(instrument_type_key) not in instrument_types:
+            continue
+        parsed_expiry = parse_expiry(row)
+        if parsed_expiry is not None:
+            candidates.append((row, parsed_expiry))
+    candidates.sort(key=lambda pair: pair[1])
+    return candidates
 
 def fetch_futures_wide(
     underlying: str,
@@ -100,8 +57,8 @@ def fetch_futures_wide(
     NOT pass the options chain's EXPIRY here (previously done at both
     option_chain_json.py call sites). NIFTY/BANKNIFTY futures are listed
     monthly; options are often weekly. Passing a weekly options expiry
-    as expiry_dash makes _get_futures_contract()'s exact-match filter
-    empty on every week that isn't the monthly expiry week, silently
+    as expiry_dash makes exact-date contract resolution empty on every
+    week that isn't the monthly expiry week, silently
     returning an empty DataFrame the rest of the month. Leave expiry_dash
     None and use `which` (NEAR/NEXT/FAR) to pick a monthly slot by
     relative position instead — see option_chain_json.py's FUTURES_EXPIRY.
@@ -179,18 +136,15 @@ def _fetch_futures_exact_date_upstox(
                 except ValueError:
                     return None
 
-    cands = [
-        row
-        for row in data
-        if row.get("instrument_type") == "FUT"
-        and (row.get("name") or "").upper() == name_u
-    ]
-    cands = [(row, _parse_expiry(row)) for row in cands]
-    cands = [(row, exp) for row, exp in cands if exp is not None]
+    cands = _futures_candidates(
+        data,
+        underlying=name_u,
+        instrument_type_key="instrument_type",
+        instrument_types={"FUT"},
+        parse_expiry=_parse_expiry,
+    )
     if not cands:
         return pd.DataFrame()
-    cands.sort(key=lambda pair: pair[1])
-
     try:
         target = datetime.strptime(expiry_dash, "%d-%b-%Y")
     except ValueError:
@@ -269,18 +223,17 @@ def _fetch_futures_exact_date_smartapi(
 
     data = _load_scrip_master()
     name_u = _canon_underlying(underlying)
-    cands = [
-        row
-        for row in data
-        if row.get("exch_seg") == exchange
-        and row.get("name") == name_u
-        and row.get("instrumenttype") in _FNO_FUT_TYPES
-    ]
-    cands = [(row, _parse_expiry(row)) for row in cands]
-    cands = [(row, exp) for row, exp in cands if exp is not None]
+    cands = _futures_candidates(
+        data,
+        underlying=name_u,
+        instrument_type_key="instrumenttype",
+        instrument_types=_FNO_FUT_TYPES,
+        parse_expiry=_parse_expiry,
+        exchange_key="exch_seg",
+        exchange=exchange,
+    )
     if not cands:
         return pd.DataFrame()
-    cands.sort(key=lambda pair: pair[1])
     target = _to_smartapi_expiry(expiry_dash)
     matches = [row for row, _exp in cands if row["expiry"] == target]
     if not matches:

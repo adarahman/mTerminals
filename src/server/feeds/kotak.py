@@ -13,6 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from server.feeds.startup import start_resolved_feed
+
 
 @dataclass
 class FeedState:
@@ -106,33 +108,17 @@ def start_new_feed(
     report: Callable[[str], None],
 ) -> bool:
     """Create one Kotak socket and subscribe it to the resolved chain."""
-    resolved = resolve(target_symbol, strikes_around_atm, expiry)
-    if resolved is None:
-        return False
-    instrument_meta, resolved_expiry, _index_key = resolved
-
-    state.loop = loop
-    state.aggregator = aggregator_factory(
-        instrument_meta,
-        loop,
-        sync_callback,
-        tick_event=tick_event,
+    return start_resolved_feed(
+        state, loop, target_symbol, strikes_around_atm, expiry,
+        resolve, aggregator_factory, sync_callback, tick_event, stream_factory,
+        spawn_thread, wait_for_connection, report,
+        build_subscriptions=_build_subscribe_payload,
+        stream_kwargs={"mode": "full"},
+        format_started=lambda count, symbol, _index, resolved_expiry: (
+            f"[kotak] Streaming {count} {symbol} option legs "
+            f"(expiry {resolved_expiry})"
+        ),
     )
-    state.aggregator.start()
-    state.stream = stream_factory(on_tick=state.aggregator.on_tick, mode="full")
-    state.stream.connect()
-    spawn_thread(target=state.stream.run_forever_with_reconnect, daemon=True).start()
-    wait_for_connection(2)
-
-    payload = _build_subscribe_payload(instrument_meta)
-    state.stream.subscribe(payload)
-    state.instruments = payload
-    state.current_expiry = resolved_expiry
-    report(
-        f"[kotak] Streaming {len(payload)} {target_symbol} option legs "
-        f"(expiry {resolved_expiry})"
-    )
-    return True
 
 
 def switch_existing_feed(

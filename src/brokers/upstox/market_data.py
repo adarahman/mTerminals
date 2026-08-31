@@ -23,6 +23,32 @@ def _upstox_instrument_key(value) -> str | None:
     return None
 
 
+def _resolve_quote_batch(symbol_token_pairs):
+    """Resolve opaque inputs to Upstox keys and fetch one indexed quote batch."""
+    from brokers.upstox.client import get_quotes, index_instrument_key
+
+    resolved = []
+    for tradingsymbol, original_token in symbol_token_pairs:
+        instrument_key = (
+            _upstox_instrument_key(original_token)
+            or index_instrument_key(tradingsymbol)
+        )
+        if instrument_key:
+            resolved.append((tradingsymbol, original_token, instrument_key))
+
+    if not resolved:
+        return [], {}
+
+    quotes = get_quotes([instrument_key for _, _, instrument_key in resolved])
+    by_key = {}
+    for response_key, quote in quotes.items():
+        by_key[str(response_key)] = quote
+        instrument_token = quote.get("instrument_token")
+        if instrument_token:
+            by_key[str(instrument_token)] = quote
+    return resolved, by_key
+
+
 class UpstoxMarketData:
     """Adapter over brokers.upstox.client, implementing the same
     MarketData protocol SmartApiMarketData does.
@@ -138,45 +164,9 @@ class UpstoxMarketData:
         # pass those tokens directly to Upstox.
         del exchange, mode
 
-        from brokers.upstox.client import (
-            get_quotes as _up_get_quotes,
-            index_instrument_key,
-        )
-
         if not symbol_token_pairs:
             return {}
-
-        resolved = []
-
-        for tradingsymbol, original_token in symbol_token_pairs:
-            instrument_key = (
-                _upstox_instrument_key(original_token)
-                or index_instrument_key(tradingsymbol)
-            )
-
-            if instrument_key:
-                resolved.append(
-                    (tradingsymbol, original_token, instrument_key)
-                )
-
-        if not resolved:
-            return {}
-
-        quotes = _up_get_quotes(
-            [instrument_key for _, _, instrument_key in resolved]
-        )
-
-        # Upstox responses commonly expose instrument_token containing the
-        # actual instrument_key. Build a lookup from both response key and
-        # instrument_token so either response shape works.
-        by_key = {}
-
-        for response_key, quote in quotes.items():
-            by_key[str(response_key)] = quote
-
-            instrument_token = quote.get("instrument_token")
-            if instrument_token:
-                by_key[str(instrument_token)] = quote
+        resolved, by_key = _resolve_quote_batch(symbol_token_pairs)
 
         results = {}
 
@@ -199,42 +189,9 @@ class UpstoxMarketData:
         # each symbol to an Upstox-specific instrument_key internally.
         del exchange, mode
 
-        from brokers.upstox.client import (
-            get_quotes as _up_get_quotes,
-            index_instrument_key,
-        )
-
         if not symbol_token_pairs:
             return {}
-
-        resolved = []
-
-        for tradingsymbol, original_token in symbol_token_pairs:
-            instrument_key = (
-                _upstox_instrument_key(original_token)
-                or index_instrument_key(tradingsymbol)
-            )
-
-            if instrument_key:
-                resolved.append(
-                    (tradingsymbol, original_token, instrument_key)
-                )
-
-        if not resolved:
-            return {}
-
-        quotes = _up_get_quotes(
-            [instrument_key for _, _, instrument_key in resolved]
-        )
-
-        by_key = {}
-
-        for response_key, quote in quotes.items():
-            by_key[str(response_key)] = quote
-
-            instrument_token = quote.get("instrument_token")
-            if instrument_token:
-                by_key[str(instrument_token)] = quote
+        resolved, by_key = _resolve_quote_batch(symbol_token_pairs)
 
         results = {}
 
