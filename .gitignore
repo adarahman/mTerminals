@@ -7,7 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
+node_modulesa
 dist
 dist-ssr
 *.local
@@ -41,22 +41,18 @@ quant_warehouse/
 *.pkl
 *.db
 mTerminals.json
-mTerminals/_scrip_master_cache.json
 .env
 .aider*
 profile.out
-backend/_scrip_master_cache.json
-backend/_scrip_master_cache.json
-backend/_scrip_master_cache.json
-backend/nse_fii_dii_flow_history.csv
 *.zip
 *.zip
-backend/brokers/_scrip_master_cache.json
+**/.DS_Store
 
 # Runtime-generated cache (instrument masters, OI/FII-DII snapshots, etc).
 # Keeps the directory structure tracked via .gitkeep without committing the
 # generated payloads themselves — those get regenerated on every run.
 runtime/**
+runtime/**/*.csv
 !runtime/**/
 !runtime/**/.gitkeep
 !runtime/shoonya_api/
@@ -64,8 +60,7 @@ runtime/**
 
 # Scratch token-minting / connectivity scripts (not part of the app)
 /kite_access_token.py
-/kite_access_token copy.py
-/breeze_access_token.py
+/breeze_inspect.py
 /test_connection.py
 
 # Shoonya instrument-master downloads (refreshed manually from api.shoonya.com)
