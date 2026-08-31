@@ -84,6 +84,7 @@ class DecisionEngine:
         vol_oi_ratios  = getattr(er, "vol_oi_ratios", {}) or {}
         # Smart money top strikes (DataFrame | None)
         smart_money_top = getattr(er, "smart_money_top", None)
+        futures_oi = float(getattr(er, "fut_oi", 0.0) or 0.0)
 
         # ── Sub-scores  (all in [-1, +1]; positive = bullish) ─────────────────
         pcr_score  = score_pcr(total_pcr)
@@ -110,7 +111,9 @@ class DecisionEngine:
         availability = {
             "pcr": total_pcr > 0,
             "engine_bias": bool(bias_str.strip()),
-            "futures": bool(fut_signal.strip()) and fut_signal.strip().lower() not in ("none", "unknown", "—"),
+            # A valid futures quote with flat OI is neutral evidence, not a
+            # missing required input. Only absence of futures OI degrades.
+            "futures": futures_oi > 0,
             "max_pain": spot > 0 and max_pain > 0,
             "oi_velocity": vel_df is not None and not getattr(vel_df, "empty", False),
             "smart_money": smart_money_top is not None and not getattr(smart_money_top, "empty", False),

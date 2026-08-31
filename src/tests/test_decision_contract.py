@@ -14,7 +14,7 @@ def _engine_result(**overrides):
         bias="Bullish", fut_signal="Long Buildup", ce_premium=120,
         pe_premium=110, atm_theta=-8, vel_df=None, vol_oi_ratios={},
         smart_money_top=None, trade_grade="A", trap_warn="None",
-        wing_premiums=None,
+        wing_premiums=None, fut_oi=1000,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -48,7 +48,7 @@ def test_missing_required_input_degrades_and_disables_execution():
 
 def test_missing_futures_quote_is_not_scored_as_bearish_evidence():
     result = DecisionEngine().evaluate(
-        _engine_result(fut_signal="Unknown", basis=0), {}
+        _engine_result(fut_signal="Unknown", basis=0, fut_oi=0), {}
     ).to_dict()
 
     futures = next(
@@ -61,6 +61,17 @@ def test_missing_futures_quote_is_not_scored_as_bearish_evidence():
     assert "futures" in result["missingInputs"]
     assert result["degraded"] is True
     assert result["bias"] == "BULLISH"
+
+
+def test_flat_futures_oi_is_neutral_but_not_missing():
+    result = DecisionEngine().evaluate(
+        _engine_result(fut_signal="", fut_oi=1000), {}
+    ).to_dict()
+    futures = next(c for c in result["contributors"] if c["key"] == "futures")
+    assert futures["available"] is True
+    assert futures["score"] == 0.0
+    assert "futures" not in result["missingInputs"]
+    assert result["degraded"] is False
 
 
 def test_directional_setup_fails_closed_below_execution_confidence():

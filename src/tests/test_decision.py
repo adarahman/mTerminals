@@ -206,6 +206,11 @@ def test_falling_price_with_falling_futures_oi_is_long_unwinding():
     assert result["regime"] == "Long Unwinding"
 
 
+def test_basis_cannot_create_futures_direction_without_regime():
+    assert score_futures("", basis=200) == 0.0
+    assert score_futures("Unknown", basis=-200) == 0.0
+
+
 def test_spread_credit_deducts_hedge_premium():
     from decision.strategy_selection import suggest_strategy
 

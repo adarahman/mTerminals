@@ -79,9 +79,11 @@ def score_futures(fut_signal: str, basis: float) -> float:
     elif "short buildup"    in sig: score = -0.80
     elif "long unwinding"   in sig: score = -0.60
     else:                           score =  0.0
-    # Basis premium/discount as secondary confirmation (±0.1 nudge)
-    if   basis > 30:  score = min( 1.0, score + 0.10)
-    elif basis < -30: score = max(-1.0, score - 0.10)
+    # Basis premium/discount may confirm a real Price x OI regime, but must
+    # never manufacture direction when that regime is neutral/indeterminate.
+    if score != 0.0:
+        if   basis > 30:  score = min( 1.0, score + 0.10)
+        elif basis < -30: score = max(-1.0, score - 0.10)
     return score
 
 
