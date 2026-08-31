@@ -7,7 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modulesa
+node_modules
 dist
 dist-ssr
 *.local
@@ -37,26 +37,21 @@ mTerminals/logs/
 data/
 model_registry/
 quant_warehouse/
-*.parquet
-*.pkl
-*.db
-mTerminals.json
 .env
 .aider*
 profile.out
 *.zip
-*.zip
+*.bak
 
 # Runtime-generated cache (instrument masters, OI/FII-DII snapshots, etc).
 # Keeps the directory structure tracked via .gitkeep without committing the
 # generated payloads themselves — those get regenerated on every run.
 runtime/**
 runtime/**/*.csv
-runtime/shoonya_api//.DS_Store
 !runtime/**/.gitkeep
 !runtime/shoonya_api/
 !runtime/shoonya_api/**
-
+runtime/shoonya_api/**/.DS_Store
 
 # Scratch token-minting / connectivity scripts (not part of the app)
 /kite_access_token.py
