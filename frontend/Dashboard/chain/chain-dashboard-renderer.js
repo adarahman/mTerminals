@@ -264,7 +264,7 @@ ChainView.prototype.renderDashboard = function(d) {
   const velByStrike={};
   if(velBlock&&velBlock.rows)velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
   const velMax=Math.max(...chain.map(r=>{const vr=velByStrike[r.strike]||{};return Math.max(Math.abs(vr.ceDOI||0),Math.abs(vr.peDOI||0));}),1);
-  h += buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity);
+  h += buildOiFlowSummaryHtml(chain, atm, velByStrike, d.oiVelocity, d);
 
   // ── OPTIONS CHAIN ──
   // The dense Option Chain table itself lives as a static block outside

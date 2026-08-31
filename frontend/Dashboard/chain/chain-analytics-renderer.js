@@ -411,7 +411,7 @@ ChainView.prototype._rerenderChainPanels = function() {
   // #oi-flow-summary-card wrapper — outerHTML (not innerHTML) so the
   // dataset-diff cache stays meaningful (it lives on the element itself,
   // which outerHTML replaces wholesale).
-  patchOuterHtmlIfChanged('oi-flow-summary-card', () => buildOiFlowSummaryHtml(chain, atm, velByStrike, _data.oiVelocity));
+  patchOuterHtmlIfChanged('oi-flow-summary-card', () => buildOiFlowSummaryHtml(chain, atm, velByStrike, _data.oiVelocity, _data));
 
   // 4b. Greeks Alerts card (gamma flip / short-gamma regime / theta decay)
   // — now lives in the row2 Tier-2 row alongside Chain Summary and

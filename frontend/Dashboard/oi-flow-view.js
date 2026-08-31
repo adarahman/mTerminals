@@ -231,7 +231,7 @@ class OiFlowView {
   return { ceStrike, ceVal, peStrike, peVal, lbl, lblPe };
 }
 
-  buildOiFlowSummaryHtml(chain, atm, velByStrike, oiVelocity){
+  buildOiFlowSummaryHtml(chain, atm, velByStrike, oiVelocity, dashboardData){
   if(!chain || !chain.length){
     return `
   <div class="oic-card" id="oi-flow-summary-card">
@@ -274,11 +274,11 @@ class OiFlowView {
   // leg at a time by the live overlay, so summing them mid-patch produces
   // a short-lived but incorrect total. Older payloads remain compatible
   // through the row-derived fallback.
-  const backendCeFlow = Number(d.totalCeCapitalFlow);
-  const backendPeFlow = Number(d.totalPeCapitalFlow);
+  const backendCeFlow = Number(dashboardData?.totalCeCapitalFlow);
+  const backendPeFlow = Number(dashboardData?.totalPeCapitalFlow);
   const totalCeFlow = Number.isFinite(backendCeFlow) ? backendCeFlow : totalFlow('ce');
   const totalPeFlow = Number.isFinite(backendPeFlow) ? backendPeFlow : totalFlow('pe');
-  const backendNetFlow = Number(d.netCapitalFlow);
+  const backendNetFlow = Number(dashboardData?.netCapitalFlow);
   const netCapitalFlow = Number.isFinite(backendNetFlow)
     ? backendNetFlow
     : totalCeFlow == null || totalPeFlow == null ? null : totalPeFlow-totalCeFlow;
