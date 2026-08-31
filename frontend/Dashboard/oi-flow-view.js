@@ -250,9 +250,38 @@ class OiFlowView {
     const ce = nullableTotal(ceField), pe = nullableTotal(peField);
     return ce == null && pe == null ? null : (ce || 0) + (pe || 0);
   };
-  const totalCeFlow = nullableTotal('ceCapitalFlow');
-  const totalPeFlow = nullableTotal('peCapitalFlow');
-  const netCapitalFlow = totalCeFlow == null || totalPeFlow == null ? null : totalPeFlow-totalCeFlow;
+  // Some provider snapshots carry valid ChgOI and LTP but leave the
+  // precomputed capital-flow field at its numeric placeholder zero. Since
+  // the canonical definition is exactly ChgOI × LTP, recover it from the
+  // same serialized row instead of presenting a false zero. A genuine
+  // zero remains zero when ChgOI itself is zero.
+  const capitalFlowFor = (row, side) => {
+    const prefix = side === 'ce' ? 'ce' : 'pe';
+    const supplied = Number(row[`${prefix}CapitalFlow`]);
+    const chgOi = Number(row[`${prefix}ChgOI`]);
+    const ltp = Number(row[`${prefix}LTP`]);
+    if(Number.isFinite(chgOi) && chgOi !== 0 && Number.isFinite(ltp)){
+      const derived = chgOi * ltp;
+      if(!Number.isFinite(supplied) || supplied === 0) return derived;
+    }
+    return Number.isFinite(supplied) ? supplied : null;
+  };
+  const totalFlow = side => {
+    const values = chain.map(row => capitalFlowFor(row, side)).filter(value => value != null);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  };
+  // Prefer the engine's atomic rollups. Per-row fields can be patched one
+  // leg at a time by the live overlay, so summing them mid-patch produces
+  // a short-lived but incorrect total. Older payloads remain compatible
+  // through the row-derived fallback.
+  const backendCeFlow = Number(d.totalCeCapitalFlow);
+  const backendPeFlow = Number(d.totalPeCapitalFlow);
+  const totalCeFlow = Number.isFinite(backendCeFlow) ? backendCeFlow : totalFlow('ce');
+  const totalPeFlow = Number.isFinite(backendPeFlow) ? backendPeFlow : totalFlow('pe');
+  const backendNetFlow = Number(d.netCapitalFlow);
+  const netCapitalFlow = Number.isFinite(backendNetFlow)
+    ? backendNetFlow
+    : totalCeFlow == null || totalPeFlow == null ? null : totalPeFlow-totalCeFlow;
   const totalPremiumLocked = nullablePair('cePremiumLocked', 'pePremiumLocked');
   const totalPremiumTurnover = nullablePair('cePremiumTurnover', 'pePremiumTurnover');
   const totalNotionalExposure = nullablePair('ceNotionalExposure', 'peNotionalExposure');
@@ -264,9 +293,9 @@ class OiFlowView {
   const topCapitalPct = topCapital && totalPremiumLocked > 0 ? topCapital.value / totalPremiumLocked * 100 : null;
   let topCeFlow = null, topPeFlow = null;
   chain.forEach((r) => {
-    const ceFlow = Number(r.ceCapitalFlow), peFlow = Number(r.peCapitalFlow);
-    if (r.ceCapitalFlow != null && Number.isFinite(ceFlow) && (!topCeFlow || Math.abs(ceFlow) > Math.abs(topCeFlow.value))) topCeFlow = {strike:r.strike, value:ceFlow};
-    if (r.peCapitalFlow != null && Number.isFinite(peFlow) && (!topPeFlow || Math.abs(peFlow) > Math.abs(topPeFlow.value))) topPeFlow = {strike:r.strike, value:peFlow};
+    const ceFlow = capitalFlowFor(r, 'ce'), peFlow = capitalFlowFor(r, 'pe');
+    if (ceFlow != null && (!topCeFlow || Math.abs(ceFlow) > Math.abs(topCeFlow.value))) topCeFlow = {strike:r.strike, value:ceFlow};
+    if (peFlow != null && (!topPeFlow || Math.abs(peFlow) > Math.abs(topPeFlow.value))) topPeFlow = {strike:r.strike, value:peFlow};
   });
   const fmtCapital = (v, signed=true) => {
     if(v==null || isNaN(v)) return '—';

@@ -110,12 +110,6 @@ function chainCombinedSignal(ceSignal, peSignal){
   return _combinedSignalWithPrefix(ceSignal, peSignal, 'sig-');
 }
 
-// ── INDEX TICKER STRIP (NIFTY / BANKNIFTY / MIDCPNIFTY / SENSEX) ──
-// Fixed left-to-right order — NIFTY always first, regardless of which
-// symbol the dashboard is currently connected to. Only .idx-pill.active
-// (a highlight ring) reflects selection state; position never does.
-const INDEX_TICKER_ORDER = ['NIFTY','BANKNIFTY','MIDCPNIFTY','SENSEX'];
-
 // Reads live quotes from d.indexQuotes = { NIFTY:{spot,spotChange,spotChgPct}, ... }
 // pushed by ws_server_live.py's index_quote_loop() (see INDEX_QUOTES there —
 // key names must match exactly, this was previously reading a `chgPct`

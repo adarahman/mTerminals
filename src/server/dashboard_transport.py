@@ -25,6 +25,7 @@ class DashboardBroadcaster:
         self._state = runtime_state
         self._encode = encode
         self._report = report
+        self._reported_missing_baseline = False
 
     async def broadcast(self, message: Any) -> None:
         if isinstance(message, dict) and message.get("type") == "full":
@@ -35,11 +36,15 @@ class DashboardBroadcaster:
                 f"{self._state.BASELINE_SEQ}"
             )
             message = {**message, "version": self._state.BASELINE_ID}
+            self._reported_missing_baseline = False
         elif isinstance(message, dict) and message.get("type") == "delta":
             if self._state.BASELINE_ID is None:
-                self._report(
-                    "[ws] dropping delta without an established full-snapshot baseline"
-                )
+                if not self._reported_missing_baseline:
+                    self._report(
+                        "[ws] dropping deltas until a full-snapshot baseline "
+                        "is established"
+                    )
+                    self._reported_missing_baseline = True
                 return
             message = {**message, "baseVersion": self._state.BASELINE_ID}
         await self._state.DASHBOARD_CLIENTS.broadcast(

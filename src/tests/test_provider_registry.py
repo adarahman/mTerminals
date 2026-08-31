@@ -1,6 +1,6 @@
 """Static provider metadata must agree across broker-routing boundaries."""
 
-from brokers import market_data
+from brokers import market_data, market_data_registry
 from brokers.provider_registry import (
     EXECUTION_PROVIDER_KEYS,
     PROVIDER_KEYS,
@@ -22,4 +22,17 @@ def test_streaming_and_execution_capabilities_are_explicit():
     }
     assert supports_websocket("KOTAK") is True
     assert supports_websocket("NSE_BSE") is False
+
+
+def test_failed_provider_health_uses_longer_backoff():
+    now = 1_000.0
+    failed = (now - 600, {"ready": False})
+    ready = (now - 600, {"ready": True})
+
+    assert market_data_registry._health_cache_is_fresh(
+        failed, now, active=False
+    )
+    assert not market_data_registry._health_cache_is_fresh(
+        ready, now, active=False
+    )
     assert supports_websocket("shoonya") is True

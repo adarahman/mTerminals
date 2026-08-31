@@ -1,6 +1,6 @@
 """Broker-neutral market-data adapter for Kotak Neo."""
-from datetime import datetime
 
+from brokers.expiry_format import to_compact_expiry, to_dash_expiry
 from market.providers.nse_bse import _public_futures_quote
 
 
@@ -24,26 +24,13 @@ class KotakMarketData:
     def _to_dash(expiry):
         """'31JUL2026' | '31-Jul-2026' | '2026-07-31' -> '31-Jul-2026'
         (brokers.kotak.market_data's native expiry convention)."""
-        if not expiry:
-            return expiry
-        for fmt in ("%d-%b-%Y", "%d%b%Y", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(str(expiry), fmt).strftime("%d-%b-%Y")
-            except ValueError:
-                continue
-        raise ValueError(f"Unsupported expiry format: {expiry!r}")
+        return to_dash_expiry(expiry)
 
     @staticmethod
     def _to_ddmmmyyyy(expiry_dash):
         """'31-Jul-2026' -> '31JUL2026' (upper-cased, matching the
         Protocol's SmartAPI convention)."""
-        if not expiry_dash:
-            return expiry_dash
-        return (
-            datetime.strptime(str(expiry_dash), "%d-%b-%Y")
-            .strftime("%d%b%Y")
-            .upper()
-        )
+        return to_compact_expiry(expiry_dash)
 
     def list_expiries(self, underlying, exchange="NFO"):
         from brokers.kotak.market_data import list_expiries as _kk_list_expiries
@@ -133,4 +120,3 @@ class KotakMarketData:
         from brokers.kotak.market_data import index_tokens as _kk_index_tokens
 
         return _kk_index_tokens()
-

@@ -53,5 +53,18 @@ def test_delta_without_baseline_is_dropped():
 
     assert state.DASHBOARD_CLIENTS.messages == []
     assert reports == [
-        "[ws] dropping delta without an established full-snapshot baseline"
+        "[ws] dropping deltas until a full-snapshot baseline is established"
     ]
+
+
+def test_missing_baseline_warning_is_emitted_only_once_per_gap():
+    broadcaster, state, reports = _broadcaster()
+
+    async def exercise():
+        await broadcaster.broadcast({"type": "delta", "payload": {"spot": 1}})
+        await broadcaster.broadcast({"type": "delta", "payload": {"spot": 2}})
+
+    asyncio.run(exercise())
+
+    assert state.DASHBOARD_CLIENTS.messages == []
+    assert len(reports) == 1

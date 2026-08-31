@@ -254,7 +254,9 @@ def test_canonicalize_underlying_maps_company_names(ws_server_live):
     assert _canonical_underlying("ADANI ENERGY SOLUTION LTD") == "ADANIENSOL"
     assert _canonical_underlying("NIPPON L I A M LTD") == "INDNIPPON"
     assert _canonical_underlying("NIFTY") == "NIFTY"
-    assert "25AUG2026" in list_expiries("ZYDUS LIFESCIENCES LTD")
+    named_expiries = list_expiries("ZYDUS LIFESCIENCES LTD")
+    assert named_expiries
+    assert named_expiries == list_expiries("ZYDUSLIFE")
     # A deliberately ambiguous name refuses rather than guessing.
     assert _canonical_underlying("TATA") is None
 

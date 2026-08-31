@@ -201,15 +201,14 @@ def _summarize_gex(greeks_table: pd.DataFrame) -> dict:
     sorted_tbl = greeks_table.sort_values("Strike")
     total_gex = float(sorted_tbl["netGEX"].sum())
 
-    cum = 0.0
     flip_strike = None
-    prev_cum = None
-    for _, row in sorted_tbl.iterrows():
-        cum += row["netGEX"]
-        if prev_cum is not None and (prev_cum < 0) != (cum < 0):
-            flip_strike = float(row["Strike"])
-            break
-        prev_cum = cum
+    cumulative_gex = sorted_tbl["netGEX"].cumsum()
+    sign_changes = cumulative_gex.lt(0).ne(cumulative_gex.shift().lt(0))
+    if not sign_changes.empty:
+        sign_changes.iloc[0] = False
+        crossing_rows = sorted_tbl.loc[sign_changes]
+        if not crossing_rows.empty:
+            flip_strike = float(crossing_rows.iloc[0]["Strike"])
 
     return {
         "total_gex": round(total_gex, 4),   # ₹ billions, same convention as netGEX

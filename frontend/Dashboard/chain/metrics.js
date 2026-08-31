@@ -63,27 +63,6 @@ function getVisibleRangeGreeks(d, filteredChain) {
 }
 
 // ── PCR (dashboard-redesign-proposal.md §4) ──
-// Full Chain PCR and Range PCR are deliberately kept as two separate
-// functions, not one computePCR(scope) — per §4's authoritative-source
-// table they're two distinct metrics that can legitimately disagree, not
-// two readings of the same number. Collapsing them into one function
-// with a scope switch would risk quietly re-merging what §1/§4 explicitly
-// want kept apart.
-
-// Full Chain PCR — authoritative source is the Decision Engine, backed
-// entirely by the backend's total_pcr (EngineResult -> DecisionResult ->
-// d.totalPCR). Traced against decision_engine.py/signal_builder.py: the
-// Decision Engine card's narrative vrd.pcr string and the plain d.totalPCR
-// number other cards (Conviction Gauge, Exec View) read are BOTH derived
-// from that same single backend value, just formatted two ways — not an
-// independent frontend computation, so there's nothing to centralize here
-// beyond this passthrough. Exists mainly so every consumer goes through
-// one named accessor instead of reading d.totalPCR directly, matching the
-// convention the GEX functions above set.
-function getFullChainPCR(d) {
-  return (d && d.totalPCR) || 0;
-}
-
 // Range OI totals + Range PCR — genuinely computed on the frontend,
 // independently of Full Chain PCR, from whatever chain array the caller
 // passes in (typically getFilteredChain(d)'s range-filtered output).

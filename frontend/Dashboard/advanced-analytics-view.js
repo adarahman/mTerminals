@@ -71,84 +71,7 @@ function _aaCardWrap(icon, title, bodyHtml, footnote, linkFn, linkLabel, subtitl
   </div>`;
 }
 
-// ── 1. GEX table ──
-// Strikes ranked by |Net GEX| — the strongest dealer-hedging pressure
-// points, rather than the full strike-ordered ledger (that stays behind
-// "Full Table →", which opens the existing Greeks/GEX modal).
-// IA redesign step 2: "Top |GEX| Strikes" scope tag distinguishes this
-// per-strike ranked view from the Greeks Alerts card's whole-chain
-// summed total and the Simulator's scenario-adjusted profile — see the
-// scope note atop buildGreeksAlertsHtml (chain-greeks.js).
-function _aaGexTableHtml(d) {
-  const greeks = (d.greeks || []).slice().sort((a, b) => Math.abs(b.netGEX || 0) - Math.abs(a.netGEX || 0)).slice(0, 6);
-  if (!greeks.length) return _aaCardWrap('\u03b3', 'GEX Table', `<div class="dd-empty">No GEX data yet.</div>`, null, null, null, 'Top |GEX| Strikes');
-  const rows = greeks.map((g, i) => {
-    const gex = g.netGEX || 0;
-    const clr = gex >= 0 ? 'var(--blue)' : 'var(--red)';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 2px;${i < greeks.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
-        <span style="font-family:var(--mono);font-weight:600;flex:0 0 64px;">${fmtI(g.strike)}</span>
-        <span style="flex:1;font-family:var(--mono);color:${clr};">${fmtN(gex, 3)}B</span>
-        <span style="font-size:11px;font-weight:600;color:${clr};">${gex >= 0 ? 'Long \u03b3' : 'Short \u03b3'}</span>
-      </div>`;
-  }).join('');
-  return _aaCardWrap('\u03b3', 'GEX Table', rows, 'Strikes ranked by |Net GEX| magnitude.', 'openGreeksModal()', 'Full Table →', 'Top |GEX| Strikes');
-}
-
-// ── 2. OI Velocity ──
-// Same oiVelocity[window].rows source the sidebar's Vel Window tabs and
-// OI Flow modal already read (see chain-renderer.js's velBlock lookup),
-// ranked by fastest ΔOI in the currently-selected window instead of
-// strike order.
-function _aaOiVelocityHtml(d) {
-  const velBlock = (d.oiVelocity || []).find(b => b.window === _velWin) || (d.oiVelocity || [])[0];
-  const rows = (velBlock && velBlock.rows) ? velBlock.rows : [];
-  if (!rows.length) return _aaCardWrap('\u26a1', 'OI Velocity', `<div class="dd-empty">No velocity data yet.</div>`);
-
-  const ranked = rows.map(r => ({
-    strike: r.strike, ceDOI: r.ceDOI || 0, peDOI: r.peDOI || 0,
-    mag: Math.max(Math.abs(r.ceDOI || 0), Math.abs(r.peDOI || 0))
-  })).sort((a, b) => b.mag - a.mag).slice(0, 6);
-
-  const body = ranked.map((r, i) => `
-    <div style="display:flex;align-items:center;gap:10px;padding:6px 2px;${i < ranked.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
-      <span style="font-family:var(--mono);font-weight:600;flex:0 0 64px;">${fmtI(r.strike)}</span>
-      <span style="flex:1;font-size:11px;color:var(--txt3);">CE <span style="font-family:var(--mono);color:${r.ceDOI >= 0 ? 'var(--green)' : 'var(--amber)'};">${r.ceDOI >= 0 ? '+' : '\u2212'}${fmtK(Math.abs(r.ceDOI))}</span></span>
-      <span style="flex:1;font-size:11px;color:var(--txt3);">PE <span style="font-family:var(--mono);color:${r.peDOI >= 0 ? 'var(--green)' : 'var(--amber)'};">${r.peDOI >= 0 ? '+' : '\u2212'}${fmtK(Math.abs(r.peDOI))}</span></span>
-    </div>`).join('');
-
-  return _aaCardWrap('\u26a1', `OI Velocity (${_velWin}m)`, body, 'Strikes ranked by fastest ΔOI in the current window — change the window from the Range/Vel rail.');
-}
-
-// ── 3. Per-strike Greeks ──
-// A narrow band around ATM (6 strikes) rather than the full chain — the
-// complete strike-by-strike Δ/Γ/Θ/Vega + Net GEX table (with tab
-// switching) stays behind "Full Table →", same modal as the GEX card
-// above since they're the same underlying dataset in this app.
-function _aaPerStrikeGreeksHtml(d) {
-  const atm = activeAtm(d);
-  const greeks = (d.greeks || []).slice()
-    .sort((a, b) => Math.abs(a.strike - atm) - Math.abs(b.strike - atm))
-    .slice(0, 6)
-    .sort((a, b) => a.strike - b.strike);
-  if (!greeks.length) return _aaCardWrap('\u0394', 'Per-Strike Greeks', `<div class="dd-empty">No Greeks data yet.</div>`);
-
-  let rows = `<table class="t"><thead><tr><th>Strike</th><th>CE \u0394</th><th>PE \u0394</th><th>\u0393</th><th>\u0398/day</th><th>Vega</th></tr></thead><tbody>`;
-  greeks.forEach(g => {
-    const isAtm = g.strike === atm;
-    rows += `<tr>
-      <td class="${isAtm ? 'atm-sc' : 'sc'}">${fmtI(g.strike)}${isAtm ? ' \u2605' : ''}</td>
-      <td>${fmtN(g.cDelta, 3)}</td>
-      <td>${fmtN(g.pDelta, 3)}</td>
-      <td>${fmtN(g.cGamma, 4)}</td>
-      <td>${fmtN(g.cTheta, 2)}</td>
-      <td>${fmtN(g.cVega, 2)}</td>
-    </tr>`;
-  });
-  rows += `</tbody></table>`;
-  return _aaCardWrap('\u0394', 'Per-Strike Greeks', rows, null, 'openGreeksModal()', 'Full Table →');
-}
-
-// ── 4. Capital Confirmation ──
+// ── Capital Confirmation ──
 // analytics/capital_futures_confirmation.py's compute_capital_confirmation()
 // output (spec item #3) — three-vote agreement check (capital flow /
 // market regime / price) with an elevated-volume upgrade from Weak to
@@ -184,7 +107,7 @@ function _aaCapitalConfirmationHtml(d) {
     'Agreement across capital flow, market regime, and price direction — elevated volume upgrades a 2/3 agreement to Confirmed.');
 }
 
-// ── 5. Futures-Options Divergence ──
+// ── Futures-Options Divergence ──
 // analytics/capital_futures_confirmation.py's detect_futures_options_
 // divergence() output (spec item #4).
 function _aaFuturesOptionsDivergenceHtml(d) {

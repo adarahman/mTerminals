@@ -59,6 +59,22 @@ function applyDelta(target, diff, keyField='strike'){
           const removedFields = Array.isArray(row._removed) ? row._removed : [];
           const patch = { ...row };
           delete patch._removed;
+          // Broker overlays occasionally emit an OI field as zero while
+          // that leg is absent from one incremental response. OI does not
+          // genuinely vanish and reappear between adjacent ticks, yet
+          // accepting that placeholder zero makes individual ledger rows,
+          // aggregate snapshot totals, PCR, and wall OI all flash to zero.
+          // Preserve a known positive value across delta patches only.
+          // A coherent `full` snapshot still replaces state wholesale and
+          // can therefore establish a legitimate zero when required.
+          for(const oiField of ['ceOI', 'peOI']){
+            const incoming = Number(patch[oiField]);
+            const previous = Number(existingRow[oiField]);
+            if(Object.prototype.hasOwnProperty.call(patch, oiField) &&
+               incoming === 0 && Number.isFinite(previous) && previous > 0){
+              delete patch[oiField];
+            }
+          }
           Object.assign(existingRow, patch);
           for(const field of removedFields) delete existingRow[field];
         } else {

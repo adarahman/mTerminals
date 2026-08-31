@@ -31,6 +31,8 @@ class DataService {
     this.wsManager = new WSManager(Config.ws.url);
     this.feedStatusTimer = null;
     this.lastStaleRecoveryAt = 0;
+    this.snapshotRecoveryTimer = null;
+    this.awaitingMarketSnapshot = true;
     this._setFeedStatus('CONNECTING');
     this.wsManager.on('open', () => {
       err('');
@@ -38,8 +40,11 @@ class DataService {
       // Socket open is not the same thing as a coherent market snapshot.
       // Stay RECOVERING until the first message actually arrives.
       this._setFeedStatus('RECOVERING');
+      this.awaitingMarketSnapshot = true;
+      this._armSnapshotRecovery();
     });
     this.wsManager.on('close', () => {
+      this._clearSnapshotRecovery();
       const dot=$i('ws-status'); if(dot) dot.style.background='var(--red)';
       this._setFeedStatus('DISCONNECTED', 'WebSocket closed');
     });
@@ -51,7 +56,11 @@ class DataService {
     // transport is active but must not keep a frozen market snapshot LIVE.
     this.wsManager.on('message', (raw) => {
       this._markTransportMessage();
-      if (this._isMarketSnapshotMessage(raw)) this._markFeedMessage();
+      if (this._isMarketSnapshotMessage(raw)) {
+        this.awaitingMarketSnapshot = false;
+        this._clearSnapshotRecovery();
+        this._markFeedMessage();
+      }
       this.store.ingest(raw);
     });
     this.feedStatusTimer = setInterval(() => this._checkFeedFreshness(), 1000);
@@ -64,6 +73,32 @@ class DataService {
     // force a full rebuild on a scrip switch instead of patching in place —
     // see the notYetBuilt/symbolChanged check in scheduleRender().
     this.lastRenderedSymbol = null;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const last = (AppState.feedState && AppState.feedState.lastMessageAt) || 0;
+      const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 30000;
+      const needsSnapshot = this.awaitingMarketSnapshot || Date.now() - last > staleAfter;
+      this.wsManager.ensureConnected(needsSnapshot);
+      if (!needsSnapshot && AppState.wsState) this.scheduleRender();
+    });
+    window.addEventListener('online', () => this.wsManager.ensureConnected(true));
+  }
+
+  _clearSnapshotRecovery(){
+    if (this.snapshotRecoveryTimer) {
+      clearTimeout(this.snapshotRecoveryTimer);
+      this.snapshotRecoveryTimer = null;
+    }
+  }
+
+  _armSnapshotRecovery(){
+    this._clearSnapshotRecovery();
+    this.snapshotRecoveryTimer = setTimeout(() => {
+      this.snapshotRecoveryTimer = null;
+      if (!this.awaitingMarketSnapshot) return;
+      this._setFeedStatus('RECOVERING', 'Connected without a market snapshot; resyncing');
+      this.wsManager.connect(undefined, true);
+    }, 15000);
   }
 
   _setFeedStatus(status, reason){
@@ -359,7 +394,7 @@ class DataService {
       if (window.renderReconciliationAlerts) renderReconciliationAlerts(AppState.wsState);
       return;
     }
-    this.lastRenderedSymbol = AppState.wsState.symbol || _lastRenderedSymbol;
+          this.lastRenderedSymbol = AppState.wsState.symbol || this.lastRenderedSymbol;
     _data = AppState.wsState;
     if (window._afterRenderStratPayoff) _afterRenderStratPayoff();
     if (window._rerenderChainPanels) app.chain._rerenderChainPanels();

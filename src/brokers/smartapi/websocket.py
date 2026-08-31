@@ -164,7 +164,16 @@ class SmartTickStream:
             self._desired.setdefault(exchange_type, set()).update(tokens)
 
         if self._connected.is_set():
-            self._do_subscribe(exchange_type, tokens, correlation_id)
+            try:
+                self._do_subscribe(exchange_type, tokens, correlation_id)
+            except Exception as exc:  # noqa: BLE001 - reconnect will replay state
+                # The SDK can report connected immediately before the socket
+                # breaks. Desired state is already recorded above, so leave it
+                # queued for _handle_open() rather than failing a feed switch.
+                self._connected.clear()
+                logger.warning(
+                    "[smartapi_ws] Subscribe deferred until reconnect: %s", exc
+                )
         # else: _handle_open() will pick this up from self._desired once
         # the (re)connect completes — no separate pending queue needed.
 
@@ -183,7 +192,13 @@ class SmartTickStream:
 
         if self._connected.is_set() and self._ws:
             token_list = [{"exchangeType": exchange_type, "tokens": tokens}]
-            self._ws.unsubscribe(correlation_id, self.mode, token_list)
+            try:
+                self._ws.unsubscribe(correlation_id, self.mode, token_list)
+            except Exception as exc:  # noqa: BLE001 - desired state is authoritative
+                self._connected.clear()
+                logger.warning(
+                    "[smartapi_ws] Unsubscribe deferred until reconnect: %s", exc
+                )
 
     def run_forever(self):
         """Blocks the current thread for a SINGLE connection lifetime — if

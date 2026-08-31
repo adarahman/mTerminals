@@ -41,6 +41,8 @@ _PROVIDER_HEALTH_CACHE: dict[str, tuple[float, dict]] = {}
 # non-active broker. Keeps the dropdown showing live health for every
 # configured broker without firing a login/TOTP storm on every render.
 _PROVIDER_HEALTH_TTL = 180.0
+_ACTIVE_PROVIDER_HEALTH_TTL = 30.0
+_UNAVAILABLE_PROVIDER_HEALTH_TTL = 900.0
 
 _STATUS_MAP = {
     "available": "AVAILABLE",
@@ -61,6 +63,19 @@ def _health_from_connection(name: str, connection) -> dict:
         "error": connection.error,
         "capabilities": PROVIDER_CAPABILITIES.get(name, {}),
     }
+
+
+def _health_cache_is_fresh(cached, now: float, *, active: bool) -> bool:
+    if cached is None:
+        return False
+    checked_at, entry = cached
+    if not entry.get("ready"):
+        ttl = _UNAVAILABLE_PROVIDER_HEALTH_TTL
+    elif active:
+        ttl = _ACTIVE_PROVIDER_HEALTH_TTL
+    else:
+        ttl = _PROVIDER_HEALTH_TTL
+    return now - checked_at < ttl
 
 
 def _provider_classes():
@@ -272,17 +287,18 @@ def provider_status() -> list[dict]:
             )
             continue
 
-        if key == _active_provider_name:
-            # The active provider is genuinely probed every refresh.
+        cached = _PROVIDER_HEALTH_CACHE.get(key)
+        active = key == _active_provider_name
+        if _health_cache_is_fresh(cached, now, active=active):
+            entry = dict(cached[1])
+        elif active:
+            # Keep active status current without turning every UI refresh
+            # into a broker API call.
             connection = check_connection(key)
             entry = _health_from_connection(key, connection)
             _PROVIDER_HEALTH_CACHE[key] = (now, entry)
         else:
-            cached = _PROVIDER_HEALTH_CACHE.get(key)
-            if cached is not None and (now - cached[0]) < _PROVIDER_HEALTH_TTL:
-                # Trust the last real probe within the TTL window.
-                entry = dict(cached[1])
-            elif provider_has_credentials(key):
+            if provider_has_credentials(key):
                 # Configured broker: probe for real status, but throttled by the
                 # TTL above so we don't log in / fire TOTP on every render.
                 try:
@@ -315,7 +331,7 @@ def provider_status() -> list[dict]:
                 }
 
         entry = dict(entry)
-        entry["active"] = key == _active_provider_name
+        entry["active"] = active
         out.append(entry)
 
     return out

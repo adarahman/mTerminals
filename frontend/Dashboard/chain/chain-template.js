@@ -574,21 +574,38 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         }).join('')
       : `<div class="decision-flow-line"><span class="decision-flow-dot">·</span><span>${explainVal(vrd.pcr) || explainVal(vrd.vix) || 'No strong confirming signal yet.'}</span></div>`;
 
-    // CE Wall / PE Wall now rendered in the same 🏛️-tile style OI Flow
-    // Snapshot used (build-rows with strike + OI delta), not the old flat
-    // single-figure verdict-stat-line — same underlying computation
-    // (OiFlowView.findOiBiggestBuild, mode 'oi', on the same filtered
-    // chain _rerenderChainPanels/getFilteredChain already uses elsewhere),
-    // just relabeled CE Wall/PE Wall here instead of Biggest CE OI/Biggest
-    // PE OI. Both the tile's "Biggest Build" header text and its 🏛️ icon
-    // were dropped — CE Wall/PE Wall rows read fine on their own. The OI
-    // Flow Snapshot card's own copy of this tile was removed as a
-    // duplicate once this one shipped — see buildOiFlowSummaryHtml in
-    // oi-flow-view.js.
+    // Use the wall strikes computed from the coherent backend snapshot.
+    // Recomputing them here from the filtered, incrementally patched chain
+    // made a partial broker tick briefly become the largest OI row; the
+    // next complete snapshot then restored the real wall, causing a visible
+    // one-frame jump. The chain is used only to obtain the OI displayed next
+    // to the authoritative wall strike.
     const wallChain = (typeof getFilteredChain === 'function') ? getFilteredChain(d) : (d.chain || []);
-    const wallBuild = (typeof app !== 'undefined' && app.oiFlow && typeof app.oiFlow.findOiBiggestBuild === 'function')
-      ? app.oiFlow.findOiBiggestBuild(wallChain, {}, 'oi')
-      : { ceStrike: null, ceVal: 0, peStrike: null, peVal: 0 };
+    const wallRow = strike => wallChain.find(row => Number(row.strike) === Number(strike));
+    const ceWallStrike = Number(d.ceWall) || null;
+    const peWallStrike = Number(d.peWall) || null;
+    const ceWallRow = ceWallStrike == null ? null : wallRow(ceWallStrike);
+    const peWallRow = peWallStrike == null ? null : wallRow(peWallStrike);
+    // A keyed delta can briefly leave the authoritative wall outside the
+    // currently filtered rows. Missing is not zero OI: keep the last valid
+    // value for that same side/strike until a positive replacement arrives.
+    // Keying by strike prevents an old wall's OI leaking into a new wall.
+    this._wallOiCache = this._wallOiCache || { ce: new Map(), pe: new Map() };
+    const stableWallOi = (side, strike, row, field) => {
+      if(strike == null) return null;
+      const current = row ? Number(row[field]) : NaN;
+      if(Number.isFinite(current) && current > 0){
+        this._wallOiCache[side].set(strike, current);
+        return current;
+      }
+      return this._wallOiCache[side].get(strike) ?? null;
+    };
+    const wallBuild = {
+      ceStrike: ceWallStrike,
+      ceVal: stableWallOi('ce', ceWallStrike, ceWallRow, 'ceOI'),
+      peStrike: peWallStrike,
+      peVal: stableWallOi('pe', peWallStrike, peWallRow, 'peOI'),
+    };
 
     return `
 <!-- Single root wrapper is required here: chain-renderer.js's live-tick
@@ -650,12 +667,12 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           ${wallBuild.ceStrike!==null ? `
           <div class="oic-build-row">
             <span>CE Wall</span>
-            <span><button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${wallBuild.ceStrike})">${fmtI(wallBuild.ceStrike)}</button><span class="delta up">▲${fmtK(wallBuild.ceVal)}</span></span>
+            <span><button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${wallBuild.ceStrike})">${fmtI(wallBuild.ceStrike)}</button><span class="delta up">${wallBuild.ceVal == null ? '—' : `▲${fmtK(wallBuild.ceVal)}`}</span></span>
           </div>` : ''}
           ${wallBuild.peStrike!==null ? `
           <div class="oic-build-row">
             <span>PE Wall</span>
-            <span><button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${wallBuild.peStrike})">${fmtI(wallBuild.peStrike)}</button><span class="delta up">▲${fmtK(wallBuild.peVal)}</span></span>
+            <span><button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${wallBuild.peStrike})">${fmtI(wallBuild.peStrike)}</button><span class="delta up">${wallBuild.peVal == null ? '—' : `▲${fmtK(wallBuild.peVal)}`}</span></span>
           </div>` : ''}
           ${wallBuild.ceStrike===null && wallBuild.peStrike===null ? '<div class="oic-empty">—</div>' : ''}
         </div>

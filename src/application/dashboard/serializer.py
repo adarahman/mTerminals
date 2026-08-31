@@ -384,6 +384,8 @@ def export_dashboard_json(
         "capitalPCR":            _r(capital_summary.get("capital_pcr", 0.0), 2),
         "netPremiumLocked":      _r(capital_summary.get("net_premium_locked", 0.0), 2),
         "netCapitalFlow":        _r(capital_summary.get("net_capital_flow", 0.0), 2),
+        "totalCeCapitalFlow":    _r(capital_summary.get("total_ce_capital_flow", 0.0), 2),
+        "totalPeCapitalFlow":    _r(capital_summary.get("total_pe_capital_flow", 0.0), 2),
         "netGammaExposureCapital": _nullable_r(capital_summary.get("net_gamma_exposure"), 2),
         "netDeltaExposureCapital": _nullable_r(capital_summary.get("net_delta_exposure"), 2),
         "totalNotionalExposureCapital": _r(

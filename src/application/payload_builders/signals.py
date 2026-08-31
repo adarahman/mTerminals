@@ -3,12 +3,7 @@ from __future__ import annotations
 
 import math
 
-
-def _safe_string(value, default="—") -> str:
-    if value is None:
-        return default
-    normalized = str(value).strip()
-    return normalized if normalized else default
+from application.payload_builders.common import safe_string
 
 
 def _number(value, decimals=2) -> float:
@@ -31,10 +26,10 @@ def _bias_class(value: str) -> str:
 
 
 def build_signals(context: dict, engine_result=None) -> list[dict]:
-    futures = _safe_string(context.get("fut_signal"))
-    vix_regime = _safe_string(context.get("vix_regime"))
-    trap = _safe_string(context.get("trap_warn"))
-    pcr_sentiment = _safe_string(context.get("pcr_sentiment"))
+    futures = safe_string(context.get("fut_signal"))
+    vix_regime = safe_string(context.get("vix_regime"))
+    trap = safe_string(context.get("trap_warn"))
+    pcr_sentiment = safe_string(context.get("pcr_sentiment"))
     spot_change = _number(context.get("spot_chg_pct", 0.0))
 
     signals = [
@@ -94,9 +89,9 @@ def build_signals(context: dict, engine_result=None) -> list[dict]:
                         continue
                     signals.append(
                         {
-                            "label": _safe_string(signal.get("label")),
-                            "value": _safe_string(signal.get("value")),
-                            "cls": _safe_string(
+                            "label": safe_string(signal.get("label")),
+                            "value": safe_string(signal.get("value")),
+                            "cls": safe_string(
                                 signal.get("cls", "neutral")
                             ),
                         }

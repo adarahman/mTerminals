@@ -67,6 +67,17 @@ def test_subscribe_while_connected_calls_do_subscribe_immediately(stream):
     )
 
 
+def test_subscribe_send_failure_is_queued_for_reconnect(stream):
+    stream.connect()
+    stream._connected.set()
+    stream._ws.subscribe.side_effect = BrokenPipeError("socket closed")
+
+    stream.subscribe("NFO", ["333"])
+
+    assert stream._desired == {2: {"333"}}
+    assert not stream._connected.is_set()
+
+
 def test_handle_open_replays_desired_subscriptions(stream):
     stream.connect()
     stream.subscribe("NFO", ["111"])  # stored only, not yet connected
@@ -84,6 +95,18 @@ def test_unsubscribe_removes_token_from_desired_state(stream):
     stream.subscribe("NFO", ["111", "222"])
     stream.unsubscribe("NFO", ["111"])
     assert stream._desired == {2: {"222"}}
+
+
+def test_unsubscribe_send_failure_keeps_updated_desired_state(stream):
+    stream.connect()
+    stream.subscribe("NFO", ["111", "222"])
+    stream._connected.set()
+    stream._ws.unsubscribe.side_effect = BrokenPipeError("socket closed")
+
+    stream.unsubscribe("NFO", ["111"])
+
+    assert stream._desired == {2: {"222"}}
+    assert not stream._connected.is_set()
 
 
 # ── error/close callback gating around intentional close ────────────────

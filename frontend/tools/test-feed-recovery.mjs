@@ -11,12 +11,17 @@ function loadWsManager() {
   const timers = new Map();
   let nextTimer = 1;
   class FakeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
     constructor(url) {
       this.url = url;
       this.closed = false;
+      this.readyState = FakeWebSocket.CONNECTING;
       sockets.push(this);
     }
-    close() { this.closed = true; }
+    close() { this.closed = true; this.readyState = FakeWebSocket.CLOSED; }
   }
   const context = vm.createContext({
     WebSocket: FakeWebSocket,
@@ -39,6 +44,7 @@ function loadWsManager() {
 
   manager.connect();
   assert.equal(sockets.length, 1, 'initial socket must be created');
+  sockets[0].readyState = 1;
   sockets[0].onopen();
   assert.deepEqual(events, ['open']);
 
@@ -51,6 +57,7 @@ function loadWsManager() {
   assert.equal(sockets.length, 2, 'reconnect timer must create a replacement socket');
   assert.match(sockets[1].url, /[?&]reconnect=1$/, 'automatic reconnect must identify itself to metrics');
 
+  sockets[1].readyState = 1;
   sockets[1].onopen();
   sockets[1].onmessage({ data: JSON.stringify({ type: 'full', payload: {} }) });
   assert.deepEqual(events, ['open', 'close', 'open', 'full']);
@@ -58,7 +65,8 @@ function loadWsManager() {
   sockets[1].onclose();
   assert.equal(timers.size, 1);
   manager.connect('ws://example.test/ws?symbol=BANKNIFTY');
-  assert.equal(timers.size, 0, 'explicit connect must cancel an older reconnect timer');
+  assert.equal(manager.reconnectTimer, null, 'explicit connect must cancel an older reconnect timer');
+  assert.equal(timers.size, 1, 'replacement socket must retain only its connect watchdog');
   assert.equal(sockets.length, 3);
 }
 
@@ -70,6 +78,7 @@ function loadDataService() {
     on(name, fn) { (this.listeners[name] ||= []).push(fn); return this; }
     emit(name, value) { for (const fn of this.listeners[name] || []) fn(value); }
     connect(url, reconnect) { this.connectCalls.push({ url, reconnect }); }
+    ensureConnected(force) { this.connectCalls.push({ ensure: force }); }
   }
   class FakeMarketStore {
     constructor() { this.listeners = {}; }
@@ -86,9 +95,12 @@ function loadDataService() {
     AppState: { feedState: null },
     WSManager: FakeWSManager,
     MarketStore: FakeMarketStore,
-    window: { eventBus },
+    window: { eventBus, addEventListener() {} },
+    document: { addEventListener() {}, visibilityState: 'visible' },
     setInterval() { return 1; },
     clearInterval() {},
+    setTimeout() { return 2; },
+    clearTimeout() {},
     err() {},
     $i() { return null; },
   });

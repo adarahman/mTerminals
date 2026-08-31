@@ -27,10 +27,12 @@ class MarketHistoryApi:
         state: Callable[[], dict[str, Any]],
         get_candle_data: Callable[..., Any],
         get_index_candles: Callable[..., Any],
+        public_history: Callable[..., Any] | None = None,
     ) -> None:
         self._state = state
         self._get_candle_data = get_candle_data
         self._get_index_candles = get_index_candles
+        self._public_history = public_history
         self._cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
         self._inflight: dict[tuple[str, str], asyncio.Future] = {}
         self._failures: dict[tuple[str, str], float] = {}
@@ -113,8 +115,11 @@ class MarketHistoryApi:
         symbol = (request.query.get("symbol") or state["symbol"]).strip().upper()
         instrument = (request.query.get("instrument") or "EQ").strip().upper()
         expiry = (request.query.get("expiry") or "").strip().upper()
-        if not state["broker_services_enabled"]:
-            from brokers.public_history import fetch_public_history
+        if instrument in {"EQ", "INDEX"} or not state["broker_services_enabled"]:
+            if self._public_history is None:
+                from brokers.public_history import fetch_public_history
+            else:
+                fetch_public_history = self._public_history
             interval = {
                 "ONE_MINUTE": "1m", "FIVE_MINUTE": "5m",
                 "FIFTEEN_MINUTE": "15m", "ONE_HOUR": "60m", "ONE_DAY": "1d",
@@ -151,4 +156,3 @@ async def no_cache_middleware(request, handler):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
-

@@ -20,10 +20,6 @@ function openOptionChainAtStrike(strike) {
   return false;
 }
 
-function openOptionChain() {
-  return openOptionChainAtStrike(null);
-}
-
 function toggleOptionChainSnapshot(button) {
   if (typeof openOptionChainModal === 'function') openOptionChainModal(button);
   return false;

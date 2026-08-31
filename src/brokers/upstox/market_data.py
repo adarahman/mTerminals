@@ -15,6 +15,14 @@ def _safe_float(value):
         return None
 
 
+def _upstox_instrument_key(value) -> str | None:
+    """Return an opaque Upstox key without accepting another broker's token."""
+    normalized = str(value or "")
+    if "|" in normalized and normalized.startswith(("NSE_", "BSE_", "MCX_")):
+        return normalized
+    return None
+
+
 class UpstoxMarketData:
     """Adapter over brokers.upstox.client, implementing the same
     MarketData protocol SmartApiMarketData does.
@@ -141,7 +149,10 @@ class UpstoxMarketData:
         resolved = []
 
         for tradingsymbol, original_token in symbol_token_pairs:
-            instrument_key = index_instrument_key(tradingsymbol)
+            instrument_key = (
+                _upstox_instrument_key(original_token)
+                or index_instrument_key(tradingsymbol)
+            )
 
             if instrument_key:
                 resolved.append(
@@ -199,7 +210,10 @@ class UpstoxMarketData:
         resolved = []
 
         for tradingsymbol, original_token in symbol_token_pairs:
-            instrument_key = index_instrument_key(tradingsymbol)
+            instrument_key = (
+                _upstox_instrument_key(original_token)
+                or index_instrument_key(tradingsymbol)
+            )
 
             if instrument_key:
                 resolved.append(

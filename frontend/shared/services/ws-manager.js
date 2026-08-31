@@ -27,6 +27,7 @@ class WSManager {
     this.url = url;
     this.ws = null;
     this.reconnectTimer = null;
+    this.connectTimer = null;
     this.reconnectDelayMs = (typeof Config !== 'undefined' && Config.ws && Config.ws.reconnectDelayMs) || 3000;
     this.listeners = { open: [], close: [], message: [] };
   }
@@ -48,6 +49,10 @@ class WSManager {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
     }
     // A symbol switch (switchActiveIndex -> connectWebSocket(newUrl)) calls
     // this while a connection is already open. Without closing it first, the
@@ -85,13 +90,28 @@ class WSManager {
       return;
     }
     this.ws = socket;
+    // Some browser/network failures leave a socket stuck in CONNECTING
+    // without a useful close event. Recover automatically instead of
+    // requiring a page refresh.
+    this.connectTimer = setTimeout(() => {
+      if (this.ws !== socket || socket.readyState !== WebSocket.CONNECTING) return;
+      try { socket.close(); } catch(e){}
+      if (this.ws === socket) this.reconnect();
+    }, 10000);
 
     // Belt-and-suspenders: even with the handlers above nulled, guard by
     // identity too. If `socket` (captured in this closure) is no longer
     // this.ws by the time a handler fires — e.g. connect() ran again before
     // this particular handler got cleared — the event is silently dropped
     // instead of being emitted.
-    socket.onopen = () => { if (this.ws === socket) this.emit('open'); };
+    socket.onopen = () => {
+      if (this.ws !== socket) return;
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
+      this.emit('open');
+    };
 
     socket.onmessage = (event) => {
       if (this.ws !== socket) return;
@@ -104,6 +124,10 @@ class WSManager {
 
     socket.onclose = () => {
       if (this.ws !== socket) return;
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       this.emit('close');
       this.reconnect();
     };
@@ -116,7 +140,18 @@ class WSManager {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
     if (this.ws) { this.ws.onclose = null; try { this.ws.close(); } catch(e){} this.ws = null; }
+  }
+
+  ensureConnected(forceResync = false) {
+    const state = this.ws ? this.ws.readyState : WebSocket.CLOSED;
+    if (forceResync || state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
+      this.connect(undefined, true);
+    }
   }
 
   reconnect() {
