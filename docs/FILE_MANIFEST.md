@@ -3,7 +3,7 @@
 > **Baseline:** post-v1.6.0 documentation maintenance
 > **Status:** CI-enforced
 
-Total tracked documentation files: **65**.
+Total tracked documentation files: **66**.
 
 Transient `.DS_Store` files and generated build output are excluded. Byte sizes
 are deliberately not recorded because they turn ordinary edits into unrelated

@@ -2,8 +2,8 @@
 
 
 > **Product:** mTerminals
-> **Architecture baseline:** mTerminals v1.6.0
-> **Status:** Implementation-aligned and CI-enforced
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
+> **Status:** Current navigation and authority map; contracts are CI-enforced
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -50,9 +50,10 @@ GitHub and many Markdown editors.
 
 ## Audits
 
-`07_Audits/` preserves the original 2026-08-07 PDS-01 audit and the current
-v1.2 closure audit. The historical file is explicitly superseded; the current
-audit is the release baseline.
+`07_Audits/` preserves the 2026-08-07 PDS-01 audit and its v1.2 closure audit.
+Both are dated release evidence rather than a description of every later
+repository change. The historical v1.1 file is explicitly superseded; use the
+active architecture and engineering documents for the current repository.
 
 ## Release and operations
 
@@ -73,6 +74,8 @@ When documents conflict, precedence is:
 
 ## Preserved existing project documentation
 
-- `Existing_Project_Docs/CHANGELOG.md` — original mTerminals project changelog.
-- `Existing_Project_Docs/PROJECT-ARCHITECTURE.md` — original mTerminals project architecture document.
+- `Existing_Project_Docs/CHANGELOG.md` — original mTerminals project changelog;
+  historical paths such as `backend/` and `ws_server_live.py` are intentional.
+- `Existing_Project_Docs/PROJECT-ARCHITECTURE.md` — original project architecture
+  snapshot, not valid guidance for the current `src/` layout.
 - `ARCHITECTURE_CHANGELOG.md` — changelog for this new professional architecture package.

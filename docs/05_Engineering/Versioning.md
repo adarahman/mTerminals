@@ -2,7 +2,7 @@
 
 
 > **Product:** mTerminals
-> **Architecture baseline:** 2026-08-08 implementation
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
 > **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
@@ -45,6 +45,11 @@ Current release line:
 
 The changelog may contain later unreleased conformance work. Unreleased entries
 do not retroactively change a published tag's contents.
+
+The root `VERSION` file and release documentation identify the product release.
+The `version` in `src/pyproject.toml` is Python distribution metadata and is not
+currently synchronized automatically. Until that is unified, documentation
+SHALL not use the package metadata value as the product release number.
 
 Annotated release tags SHALL point to a commit that passed the repository's
 three CI jobs and the applicable manual smoke checklist. A tag SHALL not be

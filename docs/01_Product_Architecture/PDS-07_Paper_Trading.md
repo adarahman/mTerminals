@@ -2,8 +2,8 @@
 
 
 > **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
+> **Status:** Implemented contract; requirements remain authoritative
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -15,9 +15,11 @@ strategy evaluation without implying that simulated fills equal real fills.
 ## Current implementation
 
 Current code includes:
-- `backend/paper_trading.py`;
-- Dashboard paper-trading UI modules;
-- order-entry, portfolio-tracker and shared paper-trading utilities.
+- `src/execution/paper_trading.py` for the simulation engine;
+- `src/server/paper_portfolio.py` for server-side portfolio transport;
+- `frontend/Dashboard/order-entry.js`;
+- `frontend/Dashboard/portfolio-tracker.js`;
+- `frontend/Dashboard/paper-trading-shared.js`.
 
 ## Required concepts
 

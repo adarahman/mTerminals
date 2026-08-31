@@ -31,7 +31,7 @@ const requiredRoot = [
 ];
 
 const checks = [
-  ['recursive documentation total matches manifest', allFiles.length === 65 && manifest.includes('files: **65**')],
+  ['recursive documentation total matches manifest', allFiles.length === 66 && manifest.includes('files: **66**')],
   ['every package count matches', Object.entries(packageCounts).every(([dir, count]) => filesUnder(path.join(docsRoot, dir)).length === count)],
   ['all root documentation files are present', requiredRoot.every((name) => fs.existsSync(path.join(docsRoot, name)) && manifest.includes(`\`${name}\``))],
   ['transient metadata is excluded', !allFiles.some((file) => path.basename(file) === '.DS_Store') && manifest.includes('`.DS_Store`')],

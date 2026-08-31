@@ -2,7 +2,7 @@
 
 
 > **Product:** mTerminals
-> **Architecture baseline:** 2026-08-08 implementation
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
 > **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
@@ -33,8 +33,9 @@ using esbuild/PostCSS dependencies.
 
 ## Backend packaging
 
-Current `pyproject.toml` intentionally packages multiple top-level packages and
-modules. Do not force a `src/` conversion without a concrete benefit.
+`src/pyproject.toml` packages multiple top-level packages and modules from the
+repository's existing `src/` application root. Do not introduce another nested
+source-layout conversion without a concrete benefit.
 
 ## Operational health contract
 

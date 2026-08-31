@@ -30,5 +30,5 @@ must disclose visible-range versus whole-chain scope.
 Stage-2 values require verified IV and Greeks. If any included strike is
 unverified, the chain total is `null`, not a partial total or manufactured zero.
 
-**Owner:** `backend/oi/capital_metrics.py`. **Approved consumers:** exporter,
+**Owner:** `src/oi/capital_metrics.py`. **Approved consumers:** exporter,
 Executive view, Capital Flow, strike detail and Smart Money interpretation.

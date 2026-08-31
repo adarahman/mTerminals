@@ -4,10 +4,10 @@ import process from 'node:process';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
-const exporter = read('src/application/dashboard_serializer.py');
+const exporter = read('src/application/dashboard/serializer.py');
 const capital = read('src/oi/capital_metrics.py');
 const decision = read('src/core/domain.py');
-const transport = read('src/application/market_service.py');
+const transport = read('src/application/market_cycle.py');
 const docs = fs.readdirSync(path.join(root, 'docs/04_Data_Model'))
   .filter((name) => name.endsWith('.md'))
   .map((name) => read(`docs/04_Data_Model/${name}`));

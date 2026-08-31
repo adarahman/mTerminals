@@ -14,7 +14,7 @@ const renderer = [
 ].join('\n');
 const store = read('shared/stores/market-store.js');
 const service = read('shared/services/data-service.js');
-const server = read('../src/application/market_service.py');
+const server = read('../src/application/market_cycle.py');
 const modal = read('Dashboard/modal-manager.js');
 const chainView = read('Dashboard/chain/chain-view.js');
 const storeContext = vm.createContext({ window: {} });

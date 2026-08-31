@@ -2,7 +2,7 @@
 
 
 > **Product:** mTerminals
-> **Architecture baseline:** 2026-08-08 implementation
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
 > **Status:** Implemented; requirements CI-enforced where automatable
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
@@ -29,6 +29,8 @@ src/
 
 The `src/` migration is complete. Runtime commands set `PYTHONPATH=src`, and
 `src/main.py` delegates to the composition root in `src/server/app.py`.
+References to `backend/` or root-level `ws_server_live.py` in
+`docs/Existing_Project_Docs/` are preserved history, not current paths.
 
 ## Current frontend
 

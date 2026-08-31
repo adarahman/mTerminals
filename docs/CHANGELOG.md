@@ -1,6 +1,17 @@
 # Architecture Changelog
 
-## Unreleased — documentation manifest maintenance
+## Unreleased — current documentation alignment
+
+- Reviewed the active documentation entry points against the post-v1.6.0
+  repository on 2026-08-31.
+- Distinguished dated audits and preserved project snapshots from current
+  implementation guidance.
+- Replaced active `backend/` and `ws_server_live.py` guidance with the current
+  `src/` entry point, composition root, paper-trading and capital-metric paths.
+- Clarified the difference between the product release in `VERSION` and the
+  independently maintained Python distribution metadata.
+
+### Earlier unreleased manifest maintenance
 
 - Replaced the stale byte-size inventory with a package-level documentation
   manifest aligned to the post-v1.6.0 repository.

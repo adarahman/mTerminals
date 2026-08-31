@@ -2,11 +2,15 @@
 
 | Field | Value |
 |---|---|
-| **Audit baseline** | repository `main` after v1.5.0 conformance work |
+| **Audit baseline** | repository `main` after v1.5.0 conformance work; dated release evidence |
 | **Specification** | `docs/01_Product_Architecture/PDS-01_Dashboard.md` v1.3 |
 | **Audit date** | 2026-08-08 |
 | **Scope** | Dashboard, dedicated Option Chain, shared state/rendering, responsive and accessibility contracts |
-| **Result** | **Compliant — automated gates green; runtime smoke remains a release operation** |
+| **Result** | **Compliant for the audited baseline — automated gates were green; runtime smoke remains a release operation** |
+
+> This is an immutable 2026-08-08 audit record, not the current repository
+> overview. Later implementation guidance is maintained in the active system
+> and engineering documents linked from `docs/00_MASTER_INDEX.md`.
 
 ## Executive result
 

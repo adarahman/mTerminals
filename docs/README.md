@@ -2,8 +2,8 @@
 
 
 > **Product:** mTerminals
-> **Architecture baseline:** mTerminals v1.6.0
-> **Status:** Implementation-aligned and CI-enforced
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
+> **Status:** Active documentation entry point; contracts are CI-enforced
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -39,9 +39,11 @@ The package is aligned to the observed project structure:
 - Build: `frontend/build.mjs` + `frontend/gen_html.mjs`.
 - Process entry point: `python -m main`; composition root: `server/app.py`.
 
-The v1.6.0 package is implementation-aligned. Any remaining target language is
-an explicitly identified optimization or migration, not an unqualified claim
-about current behavior.
+The active package describes the post-v1.6.0 repository as reviewed on
+2026-08-31. Dated release notes and audits describe their named baselines; they
+must not be treated as a statement that no implementation changes occurred
+after that date. Any remaining target language is an explicitly identified
+optimization or migration, not an unqualified claim about current behavior.
 
 ## Completion and enforcement
 
@@ -56,7 +58,9 @@ Release notes: `RELEASE_NOTES_v1.6.0.md`.
 
 ## Existing project documents
 
-The following historical files are preserved from the original project snapshot:
+The following historical files are preserved from the original project
+snapshot. Their `backend/` paths and `ws_server_live.py` references are not
+current operational instructions:
 
 - `Existing_Project_Docs/CHANGELOG.md`
 - `Existing_Project_Docs/PROJECT-ARCHITECTURE.md`

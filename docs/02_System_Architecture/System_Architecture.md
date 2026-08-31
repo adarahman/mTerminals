@@ -2,8 +2,8 @@
 
 
 > **Product:** mTerminals  
-> **Architecture baseline:** 2026-08-07 project snapshot  
-> **Status:** Authoritative design target unless marked otherwise  
+> **Architecture baseline:** post-v1.6.0 repository, reviewed 2026-08-31
+> **Status:** Current implemented architecture plus explicitly marked targets
 > **Rule language:** SHALL = required; SHOULD = recommended; MAY = optional.
 
 
@@ -141,7 +141,7 @@ complexity/performance needs, not fashion.
 5. A reconnect cannot silently mix incompatible snapshot/delta versions.
 6. A single failed analytical module degrades locally where possible.
 
-## 8. Implementation status (v1.5 line)
+## 8. Current implementation status
 
 - Layers A–G have explicit package/component owners.
 - Full snapshots establish a versioned client baseline; incompatible deltas
@@ -152,3 +152,7 @@ complexity/performance needs, not fashion.
 - High-frequency top-bar/ticker updates patch stable DOM nodes in place;
   structural rebuilds are reserved for structural changes.
 - CI enforces frontend architecture contracts and backend dependency direction.
+
+The process entry point is `src/main.py`; `src/server/app.py` is the composition
+root. Older references to a root `ws_server_live.py` or a `backend/` source tree
+belong only to preserved historical documents.
