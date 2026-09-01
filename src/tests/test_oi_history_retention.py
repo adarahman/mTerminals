@@ -67,3 +67,62 @@ def test_velocity_never_compares_different_brokers(tmp_path, monkeypatch):
         log_path=str(log_path), provider="KOTAK",
     )
     assert result.empty
+
+
+def test_velocity_bridges_provider_when_boundary_oi_is_identical(tmp_path, monkeypatch):
+    log_path = tmp_path / "velocity.parquet"
+    monkeypatch.setattr(oi_analysis, "_HISTORY_MEM", DirtyFrameStore())
+    now = pd.Timestamp.now()
+    old = _snapshot(now - timedelta(minutes=5))
+    old["Provider"] = "SMARTAPI"
+    boundary_old = _snapshot(now - timedelta(minutes=1))
+    boundary_old["Provider"] = "SMARTAPI"
+    boundary_new = _snapshot(now - timedelta(seconds=59))
+    boundary_new["Provider"] = "UPSTOX"
+    oi_analysis.append_json_history(
+        pd.concat([old, boundary_old, boundary_new], ignore_index=True),
+        log_path=str(log_path), flush_interval_seconds=3600,
+    )
+
+    current = pd.DataFrame([{
+        "StrikePrice": 24500, "Expiry": "2026-08-13",
+        "CE_OI": 125, "PE_OI": 150, "CE_LTP": 9, "PE_LTP": 13,
+    }])
+    result = oi_analysis.get_oi_velocity(
+        current, "NIFTY", "2026-08-13", windows=(5,), lot_size=1,
+        log_path=str(log_path), provider="UPSTOX",
+    )
+
+    assert len(result) == 1
+    assert result.iloc[0]["ceDOI"] > 0
+    assert result.iloc[0]["peDOI"] > 0
+
+
+def test_velocity_resets_when_provider_boundary_oi_differs(tmp_path, monkeypatch):
+    log_path = tmp_path / "velocity.parquet"
+    monkeypatch.setattr(oi_analysis, "_HISTORY_MEM", DirtyFrameStore())
+    now = pd.Timestamp.now()
+    old = _snapshot(now - timedelta(minutes=5))
+    old["Provider"] = "SMARTAPI"
+    boundary_old = _snapshot(now - timedelta(minutes=1))
+    boundary_old["Provider"] = "SMARTAPI"
+    boundary_new = _snapshot(now - timedelta(seconds=59))
+    boundary_new["Provider"] = "UPSTOX"
+    # Simulate a contracts-vs-underlying-quantity unit mismatch.
+    boundary_new["CE_OI"] = 5000
+    boundary_new["PE_OI"] = 6000
+    oi_analysis.append_json_history(
+        pd.concat([old, boundary_old, boundary_new], ignore_index=True),
+        log_path=str(log_path), flush_interval_seconds=3600,
+    )
+
+    current = pd.DataFrame([{
+        "StrikePrice": 24500, "Expiry": "2026-08-13",
+        "CE_OI": 125, "PE_OI": 150, "CE_LTP": 9, "PE_LTP": 13,
+    }])
+    result = oi_analysis.get_oi_velocity(
+        current, "NIFTY", "2026-08-13", windows=(5,), lot_size=1,
+        log_path=str(log_path), provider="UPSTOX",
+    )
+
+    assert result.empty

@@ -459,6 +459,95 @@ def flush_history_to_disk(log_path=JSON_HISTORY_LOG_PATH):
 # ---------------------------------------------------------------
 # OI Velocity (replaces oi_velocity.py — scrapped)
 # ---------------------------------------------------------------
+def _oi_snapshots_match(left, right):
+    """Return True when two provider-boundary snapshots form one OI series.
+
+    A provider label can change before the normalized option-chain values do.
+    In that case resetting every velocity window throws away valid history.
+    Boundaries are often several seconds apart, so exact equality is too
+    brittle: legitimate trades change a handful of strikes in between. The
+    checks below admit small market movement while rejecting coverage gaps,
+    unit changes, and materially different chains.
+    """
+    required = {"StrikePrice", "CE_OI", "PE_OI"}
+    if left.empty or right.empty:
+        return False
+    if not required.issubset(left.columns) or not required.issubset(right.columns):
+        return False
+
+    columns = ["StrikePrice", "CE_OI", "PE_OI"]
+    left_oi = (left[columns].drop_duplicates("StrikePrice")
+               .set_index("StrikePrice").sort_index())
+    right_oi = (right[columns].drop_duplicates("StrikePrice")
+                .set_index("StrikePrice").sort_index())
+    common = left_oi.index.intersection(right_oi.index)
+    coverage = len(common) / max(len(left_oi), len(right_oi))
+    if coverage < 0.90:
+        return False
+
+    left_oi = left_oi.loc[common, ["CE_OI", "PE_OI"]].apply(pd.to_numeric, errors="coerce")
+    right_oi = right_oi.loc[common, ["CE_OI", "PE_OI"]].apply(pd.to_numeric, errors="coerce")
+    if not (left_oi.notna().all().all() and right_oi.notna().all().all()):
+        return False
+
+    for column in ("CE_OI", "PE_OI"):
+        older = left_oi[column].abs()
+        newer = right_oi[column].abs()
+        scale = pd.concat([older, newer], axis=1).max(axis=1).clip(lower=1)
+        relative_change = (newer - older).abs() / scale
+        # Most strikes must remain close, and the whole chain must retain the
+        # same scale. A contracts-vs-quantity mismatch fails both checks.
+        if relative_change.quantile(0.90) > 0.10:
+            return False
+        older_total = older.sum()
+        newer_total = newer.sum()
+        if older_total <= 0 or newer_total <= 0:
+            return False
+        if abs(newer_total - older_total) / max(older_total, newer_total) > 0.10:
+            return False
+    return True
+
+
+def _continuous_provider_history(hist, provider):
+    """Keep history connected to the active provider by proven OI continuity."""
+    if not provider:
+        return hist
+    if "Provider" not in hist.columns or "snapshot_time" not in hist.columns:
+        return hist.iloc[0:0]
+
+    snapshots = (
+        hist[["snapshot_time", "Provider"]]
+        .drop_duplicates("snapshot_time")
+        .sort_values("snapshot_time")
+        .reset_index(drop=True)
+    )
+    if snapshots.empty or snapshots.iloc[-1]["Provider"] != provider:
+        return hist.iloc[0:0]
+
+    # Walk backward through provider runs. A boundary is admitted only when
+    # its two adjacent snapshots contain the exact same normalized OI chain.
+    earliest_admitted = snapshots.iloc[-1]["snapshot_time"]
+    idx = len(snapshots) - 1
+    while idx > 0:
+        current_provider = snapshots.iloc[idx]["Provider"]
+        run_start = idx
+        while run_start > 0 and snapshots.iloc[run_start - 1]["Provider"] == current_provider:
+            run_start -= 1
+        earliest_admitted = snapshots.iloc[run_start]["snapshot_time"]
+        if run_start == 0:
+            break
+
+        older_time = snapshots.iloc[run_start - 1]["snapshot_time"]
+        newer_time = snapshots.iloc[run_start]["snapshot_time"]
+        older = hist[hist["snapshot_time"] == older_time]
+        newer = hist[hist["snapshot_time"] == newer_time]
+        if not _oi_snapshots_match(older, newer):
+            break
+        idx = run_start - 1
+
+    return hist[hist["snapshot_time"] >= earliest_admitted]
+
+
 # The old get_oi_velocity() lived in oi_velocity.py and took a
 # `df_full_history` argument that, in practice, only ever carried a
 # single tick's snapshot (option_chain_json.py built it fresh every poll
@@ -498,11 +587,10 @@ def get_oi_velocity(current_df, symbol, expiry, windows=(5, 15, 30), lot_size=1,
 
     hist = hist[(hist["Symbol"] == symbol) & (hist["Expiry"] == expiry)]
     if provider:
-        # Never turn differences between broker snapshots into fake OI
-        # velocity. Legacy rows without provenance are intentionally ignored.
-        if "Provider" not in hist.columns:
-            return pd.DataFrame()
-        hist = hist[hist["Provider"] == provider]
+        # Bridge a provider transition only when adjacent snapshots prove
+        # that the normalized OI series is continuous. Otherwise retain the
+        # old safety property and begin a fresh velocity window.
+        hist = _continuous_provider_history(hist, provider)
     if hist.empty or "snapshot_time" not in hist.columns:
         return pd.DataFrame()
 

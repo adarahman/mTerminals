@@ -223,7 +223,10 @@ function getFilteredChain(d){
 }
 
 function velMiniCell(v,maxAbs,clr){
-  v=v||0;
+  if(v==null || !Number.isFinite(Number(v))){
+    return '<div class="vel-mini-wrap"><span class="vel-mini-val" style="color:var(--text-tertiary);">—</span></div>';
+  }
+  v=Number(v);
   const pct=maxAbs>0?Math.max(Math.min(Math.abs(v)/maxAbs*24,24),2):2;
   return `<div class="vel-mini-wrap"><div class="vel-mini-bar" style="width:${pct.toFixed(0)}px;background:${clr};"></div><span class="vel-mini-val" style="color:${clr};">${v>=0?'+':''}${fmtK(v)}</span></div>`;
 }

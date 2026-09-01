@@ -166,8 +166,8 @@ ChainView.prototype._rerenderChainPanels = function() {
       const g=greeks.find(x=>x.strike===r.strike)||{};
       const sk=r.strike;
       const vr=velByStrike[sk]||{};
-      const ceVelDOI=vr.ceDOI!=null?vr.ceDOI:0;
-      const peVelDOI=vr.peDOI!=null?vr.peDOI:0;
+      const ceVelDOI=vr.ceDOI!=null?vr.ceDOI:null;
+      const peVelDOI=vr.peDOI!=null?vr.peDOI:null;
       const cs=combinedSignal(r.ceSignal,r.peSignal);
       const annot=oiAnnot[String(sk)]||{};
       const rowTitle=annot.ce||annot.pe?`CE: ${annot.ce||'—'} | PE: ${annot.pe||'—'}`:'Click to show/hide Greeks';
