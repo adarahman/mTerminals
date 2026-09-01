@@ -246,7 +246,6 @@ def build_strategies(ctx_dict, engine_result=None, chain_rows=None):
         atm      = _to_int(ctx_dict.get("atm", 0))
         ce_prem  = _r(ctx_dict.get("ce_premium", 0.0))
         pe_prem  = _r(ctx_dict.get("pe_premium", 0.0))
-        straddle = round(ce_prem + pe_prem, 0)
         step     = 100
         lot_size_ctx = _to_int(ctx_dict.get("lot_size", 75))
 

@@ -100,7 +100,7 @@ class SmartTickStream:
         self._ws.on_error = self._handle_error
         self._ws.on_close = self._handle_close
 
-    def _handle_open(self, wsapp):
+    def _handle_open(self, _wsapp):
         logger.info("[smartapi_ws] Connected")
         self._connected.set()
         with self._desired_lock:
@@ -128,7 +128,7 @@ class SmartTickStream:
                 tick[field] = tick[field] / 100.0
         return tick
 
-    def _handle_data(self, wsapp, message):
+    def _handle_data(self, _wsapp, message):
         message = self._normalize_tick(message)
         if self._on_tick_cb:
             try:
@@ -136,7 +136,7 @@ class SmartTickStream:
             except Exception as e:
                 logger.error(f"[smartapi_ws] on_tick callback error: {e}")
 
-    def _handle_error(self, wsapp, error):
+    def _handle_error(self, _wsapp, error):
         if self._closing:
             return  # expected noise from the library's internal reconnect
                     # logic firing after we intentionally closed the socket
@@ -144,7 +144,7 @@ class SmartTickStream:
         if self._on_error_cb:
             self._on_error_cb(error)
 
-    def _handle_close(self, wsapp):
+    def _handle_close(self, _wsapp):
         logger.warning("[smartapi_ws] Connection closed")
         self._connected.clear()
         if self._closing:

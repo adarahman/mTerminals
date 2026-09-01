@@ -8,7 +8,7 @@ const flow = read('Dashboard/oi-flow-view.js');
 const chainTemplate = read('Dashboard/chain/chain-template.js');
 const strike = read('Dashboard/strike-detail-report-view.js');
 const exec = read('Dashboard/exec-view.js');
-const backend = read('../src/application/dashboard_serializer.py');
+const backend = read('../src/application/dashboard/serializer.py');
 const capital = read('../src/oi/capital_metrics.py');
 const panelsCss = read('styles/panels.css');
 

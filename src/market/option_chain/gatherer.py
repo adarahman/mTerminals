@@ -191,7 +191,3 @@ class ConcurrentMarketDataGatherer:
         finally:
             if own_executor:
                 executor.shutdown(wait=False, cancel_futures=True)
-
-    @staticmethod
-    def _submit_optional(executor, operation):
-        return executor.submit(operation) if operation is not None else None

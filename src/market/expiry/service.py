@@ -243,7 +243,6 @@ class ExpiryManager:
         # ── MONTHLY: last expiry of the nearest calendar month beyond current ──
         #    If current IS a monthly expiry → look one month further forward
         monthly: Optional[ExpirySlot] = None
-        target_month_start = cur_d + timedelta(days=1)
 
         # Gather all monthly-flagged dates strictly after current
         future_monthlies = [

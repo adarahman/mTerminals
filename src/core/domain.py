@@ -18,8 +18,6 @@ from .enums import (
     OrderSide,
     OrderType,
     OrderStatus,
-    SignalType,
-    DecisionStatus,
 )
 
 # ============================================================
@@ -69,24 +67,6 @@ class Quote:
     open_interest: int = 0
 
 
-@dataclass
-class Candle:
-    """
-    OHLC market data.
-    """
-
-    instrument: Instrument
-
-    timestamp: datetime
-
-    open: Decimal
-    high: Decimal
-    low: Decimal
-    close: Decimal
-
-    volume: int = 0
-
-
 # Option-chain models live in their bounded context. These re-exports keep
 # historical ``core.domain`` imports working during the migration.
 from .market.option_chain.models import OptionChain, OptionContract
@@ -129,37 +109,6 @@ class Position:
     unrealized_pnl: Decimal = Decimal("0")
     realized_pnl: Decimal = Decimal("0")
     last_price: Optional[Decimal] = None
-
-
-# ============================================================
-# DECISION DOMAIN
-# ============================================================
-
-@dataclass
-class Signal:
-    instrument: Instrument
-    signal_type: SignalType
-    confidence: float
-    reason: str
-
-
-@dataclass
-class TradingDecision:
-    signal: Signal
-    status: DecisionStatus
-    score: float
-    explanation: str
-
-
-# ============================================================
-# RISK DOMAIN
-# ============================================================
-
-@dataclass
-class RiskDecision:
-    allowed: bool
-    reason: str
-    max_quantity: int = 0
 
 
 # ============================================================

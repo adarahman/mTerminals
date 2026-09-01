@@ -402,65 +402,12 @@ def score_walls(ce_wall, pe_wall, spot, atm, step,
 
 def score_smart_money(smart_money_top, spot: float, atm: float,
                        step: int, out: DecisionResult) -> float:
-    """
-    Read er.smart_money_top (top-4 CE vol/OI strikes computed in engine.py).
-
-    Logic:
-    • If the highest vol/OI strike is a CE strike ABOVE spot → smart money
-      is aggressively selling calls → BEARISH confirmation.
-    • If it is a PE strike BELOW spot → smart money is selling puts →
-      BULLISH confirmation.
-    • CE score and PE score both contribute; net = pe_score – ce_score.
-
-    Score range [-1, +1]. Returns 0.0 when smart_money_top is None/empty.
-    """
+    """Keep turnover/OI ranking descriptive, never directional."""
+    del smart_money_top, spot, atm, step, out
     # Turnover and OI do not reveal whether initiators bought or wrote the
     # option. Until aggressor-side/order-flow data is available this metric
     # must remain descriptive and must not contribute directional score.
     return 0.0
-    if smart_money_top is None:
-        return 0.0
-    try:
-        if hasattr(smart_money_top, 'empty') and smart_money_top.empty:
-            return 0.0
-    except Exception:
-        return 0.0
-
-    ce_conviction = 0.0   # bearish contribution
-    pe_conviction = 0.0   # bullish contribution
-    signals_fired = False
-
-    try:
-        for _, row in smart_money_top.iterrows():
-            strike    = float(row.get("StrikePrice", 0) or 0)
-            ce_score  = float(row.get("CE_Score", 0) or 0)
-            pe_score  = float(row.get("PE_Score", 0) or 0)
-
-            # Only count strikes on the correct side of spot
-            ce_relevant = ce_score > 1.0 and strike >= atm   # OTM call side
-            pe_relevant = pe_score > 1.0 and strike <= atm   # OTM put side
-
-            if ce_relevant:
-                ce_conviction += min(ce_score / 20.0, 0.5)  # normalise; cap 0.5
-            if pe_relevant:
-                pe_conviction += min(pe_score / 20.0, 0.5)
-
-            if (ce_relevant or pe_relevant) and not signals_fired:
-                side  = "CE" if ce_relevant else "PE"
-                ratio = ce_score if ce_relevant else pe_score
-                sev   = "warn" if ce_relevant else "ok"
-                out.active_signals.append(ActiveSignal(
-                    f"Smart money: {side} vol/OI {ratio:.1f}× at ₹{strike:,.0f} "
-                    f"— {'bearish call writing' if ce_relevant else 'bullish put writing'} conviction",
-                    sev, 22, f"smart-money:{side.lower()}:{int(strike)}"))
-                signals_fired = True
-
-    except Exception:
-        return 0.0
-
-    # Net: positive → more PE conviction (bullish), negative → more CE (bearish)
-    net = pe_conviction - ce_conviction
-    return max(-1.0, min(1.0, net))
 
 
 # ── Verdicts ──────────────────────────────────────────────────────────────

@@ -202,35 +202,6 @@ class OiFlowView {
   ctx.fillStyle=ce;ctx.fillRect(L,T-14,9,9);ctx.fillStyle=txt;ctx.textAlign='left';ctx.fillText('CE',L+13,T-6);ctx.fillStyle=pe;ctx.fillRect(L+42,T-14,9,9);ctx.fillStyle=txt;ctx.fillText('PE',L+55,T-6);
 }
 
-  // Dashboard-native OI Flow summary. The retired standalone Butterfly
-  // page used this same canonical option-chain state, so this card is now
-  // the single presentation of the flow metrics.
-  // Same find-the-biggest-strike logic buildOiTopMoversStrip() uses (kept
-  // intact above, still the source for the OI Dashboard's Butterfly tab),
-  // just returning the raw {strike,val} pair instead of a pre-joined
-  // inline-HTML strip — buildOiFlowSummaryHtml() below renders each side
-  // as its own stacked row (matching the redesign mockup) rather than a
-  // single "CE | PE" line, so it needs the numbers, not pre-built markup.
-  findOiBiggestBuild(chain, velByStrike, mode){
-  let ceStrike=null, ceVal=0, peStrike=null, peVal=0;
-  chain.forEach(r=>{
-    let ceV, peV;
-    if(mode==='vel'){
-      const vr=velByStrike[r.strike]||{};
-      ceV=vr.ceDOI||0; peV=vr.peDOI||0;
-    }else if(mode==='oi'){
-      ceV=r.ceOI||0; peV=r.peOI||0;
-    }else{
-      ceV=r.ceChgOI||0; peV=r.peChgOI||0;
-    }
-    if(ceStrike===null||ceV>ceVal){ceVal=ceV;ceStrike=r.strike;}
-    if(peStrike===null||peV>peVal){peVal=peV;peStrike=r.strike;}
-  });
-  const lbl=mode==='oi'?'Biggest CE OI':mode==='vel'?`Biggest CE Vel (${_velWin}m)`:'Biggest CE build';
-  const lblPe=mode==='oi'?'Biggest PE OI':mode==='vel'?`Biggest PE Vel (${_velWin}m)`:'Biggest PE build';
-  return { ceStrike, ceVal, peStrike, peVal, lbl, lblPe };
-}
-
   buildOiFlowSummaryHtml(chain, atm, velByStrike, oiVelocity, dashboardData){
   if(!chain || !chain.length){
     return `
@@ -328,7 +299,7 @@ class OiFlowView {
   // removed in favor of the Block Detection readout below.
   //
   // NOTE: the "🏛️ Biggest Build" tile that used to sit here (Biggest CE
-  // OI / Biggest PE OI, via findOiBiggestBuild) was removed — it's now
+  // OI / Biggest PE OI) was removed — it's now
   // shown in the Decision Engine verdict box as "CE Wall"/"PE Wall" (same
   // computation, same style, just relabeled to match the wall terminology
   // used everywhere else on that card), so keeping a second copy here was

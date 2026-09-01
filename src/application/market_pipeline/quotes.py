@@ -20,8 +20,6 @@ import time
 from application.index_quote_cache import (
     IndexQuoteCache,
     TICKER_SYMBOLS as _TICKER_SYMBOLS,
-    NSE_TICKER_SYMBOLS as _NSE_TICKER_SYMBOLS,
-    BSE_TICKER_SYMBOLS as _BSE_TICKER_SYMBOLS,
     VIX_CACHE_KEY as _VIX_TRADINGSYMBOL,
     VIX_TOKEN as _VIX_TOKEN,
 )
