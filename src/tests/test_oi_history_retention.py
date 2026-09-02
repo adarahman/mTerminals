@@ -98,6 +98,37 @@ def test_velocity_bridges_provider_when_boundary_oi_is_identical(tmp_path, monke
     assert result.iloc[0]["peDOI"] > 0
 
 
+def test_provider_boundary_allows_small_market_movement():
+    older_rows = []
+    newer_rows = []
+    for offset in range(10):
+        strike = 24000 + offset * 50
+        older_rows.append({"StrikePrice": strike, "CE_OI": 1000 + offset * 100,
+                           "PE_OI": 1200 + offset * 100})
+        newer_rows.append({"StrikePrice": strike, "CE_OI": 1005 + offset * 100,
+                           "PE_OI": 1195 + offset * 100})
+
+    assert oi_analysis._oi_snapshots_match(
+        pd.DataFrame(older_rows), pd.DataFrame(newer_rows)
+    )
+
+
+def test_provider_boundary_allows_a_wider_strike_range():
+    narrower = pd.DataFrame([
+        {"StrikePrice": 24500, "CE_OI": 1000, "PE_OI": 1200},
+        {"StrikePrice": 24550, "CE_OI": 900, "PE_OI": 1300},
+    ])
+    wider = pd.concat([
+        narrower,
+        pd.DataFrame([
+            {"StrikePrice": 24450, "CE_OI": 500, "PE_OI": 700},
+            {"StrikePrice": 24600, "CE_OI": 600, "PE_OI": 800},
+        ]),
+    ], ignore_index=True)
+
+    assert oi_analysis._oi_snapshots_match(narrower, wider)
+
+
 def test_velocity_resets_when_provider_boundary_oi_differs(tmp_path, monkeypatch):
     log_path = tmp_path / "velocity.parquet"
     monkeypatch.setattr(oi_analysis, "_HISTORY_MEM", DirtyFrameStore())

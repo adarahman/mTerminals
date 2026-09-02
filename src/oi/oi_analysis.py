@@ -481,7 +481,11 @@ def _oi_snapshots_match(left, right):
     right_oi = (right[columns].drop_duplicates("StrikePrice")
                 .set_index("StrikePrice").sort_index())
     common = left_oi.index.intersection(right_oi.index)
-    coverage = len(common) / max(len(left_oi), len(right_oi))
+    # Providers may expose different strike ranges (for example 31 broker
+    # strikes versus 83 NSE strikes). Continuity only requires that nearly
+    # all of the narrower chain is present in the wider one; the shared OI
+    # values and aggregate scale are validated below.
+    coverage = len(common) / min(len(left_oi), len(right_oi))
     if coverage < 0.90:
         return False
 
