@@ -85,9 +85,7 @@ window.switchDashboardWorkspace = (...args) => app.ui.switchDashboardWorkspace(.
 window.secJump = (...args) => app.ui.secJump(...args);
 window.connectWebSocket = (...args) => app.data.connectWebSocket(...args);
 window.beginSymbolSwitch = (...args) => app.data.beginSymbolSwitch(...args);
-window.setDashboardStreaming = (...args) => app.data.setDashboardStreaming(...args);
 window.setBrokerFeed = (...args) => app.data.setBrokerFeed(...args);
-window.toggleDashboardStreaming = () => app.data.setDashboardStreaming(app.data.dashboardPaused);
 window.toggleBrokerFeed = () => {
   const button = document.getElementById('broker-feed-toggle');
   const running = !button || button.dataset.running !== 'false';

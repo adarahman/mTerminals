@@ -34,7 +34,6 @@ class DataService {
     this.snapshotRecoveryTimer = null;
     this.awaitingMarketSnapshot = true;
     this.pendingSymbol = null;
-    this.dashboardPaused = false;
     this._setFeedStatus('CONNECTING');
     this.wsManager.on('open', () => {
       err('');
@@ -88,7 +87,6 @@ class DataService {
     // see the notYetBuilt/symbolChanged check in scheduleRender().
     this.lastRenderedSymbol = null;
     document.addEventListener('visibilitychange', () => {
-      if (this.dashboardPaused) return;
       if (document.visibilityState !== 'visible') return;
       const last = (AppState.feedState && AppState.feedState.lastMessageAt) || 0;
       const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 30000;
@@ -97,7 +95,7 @@ class DataService {
       if (!needsSnapshot && AppState.wsState) this.scheduleRender();
     });
     window.addEventListener('online', () => {
-      if (!this.dashboardPaused) this.wsManager.ensureConnected(true);
+      this.wsManager.ensureConnected(true);
     });
   }
 
@@ -215,7 +213,6 @@ class DataService {
   }
 
   _checkFeedFreshness(){
-    if (this.dashboardPaused) return;
     const fs = AppState.feedState || {};
     if (!fs.lastMessageAt) return;
     if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING') return;
@@ -280,22 +277,9 @@ class DataService {
   }
 
   connectWebSocket(url){
-    this.dashboardPaused = false;
     this._setFeedStatus('CONNECTING');
     this.wsManager.connect(url);
     this._renderStreamingControls();
-  }
-
-  setDashboardStreaming(enabled){
-    this.dashboardPaused = !enabled;
-    if (enabled) {
-      this.connectWebSocket();
-    } else {
-      this._clearSnapshotRecovery();
-      this.wsManager.disconnect();
-      this._setFeedStatus('PAUSED', 'Dashboard updates paused locally');
-      this._renderStreamingControls();
-    }
   }
 
   setBrokerFeed(enabled){
@@ -305,14 +289,6 @@ class DataService {
   }
 
   _renderStreamingControls(feedControl){
-    const dashboardButton = $i('dashboard-stream-toggle');
-    if (dashboardButton) {
-      dashboardButton.dataset.paused = this.dashboardPaused ? 'true' : 'false';
-      dashboardButton.innerHTML = this.dashboardPaused
-        ? '<span>▶</span>Resume UI' : '<span>⏸</span>Pause UI';
-      dashboardButton.title = this.dashboardPaused
-        ? 'Resume updates in this dashboard' : 'Pause updates in this dashboard only';
-    }
     if (!feedControl) return;
     const feedButton = $i('broker-feed-toggle');
     if (!feedButton) return;
