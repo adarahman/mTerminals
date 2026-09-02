@@ -83,6 +83,7 @@ def build_market_runtime(
         index_quotes=runtime_state.INDEX_QUOTES,
         poll_seconds=runtime_state.INDEX_QUOTE_SECONDS,
         report=report,
+        paused=lambda: runtime_state.MARKET_CYCLE_PAUSED,
     )
     funds = FundsPoller(
         get_funds=get_funds,
@@ -189,6 +190,7 @@ def build_market_runtime(
         check_pending_orders=paper_engine.check_pending_orders,
         broadcast_portfolio=paper_portfolio.broadcast,
         pace=pacer.wait,
+        wait_until_running=runtime_state.MARKET_CYCLE_RESUME_EVENT.wait,
     )
     runtime_state.CANONICAL_PAYLOAD_PUBLISHER = publisher
     runtime_state.MARKET_TICK_PACER = pacer

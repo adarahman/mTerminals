@@ -222,6 +222,9 @@ window.onSymbolPicked = onSymbolPicked;
 // Inside dashboard.js, within the DataService or global scope:
 function switchActiveIndex(sym) {
   if (!sym) return;
+  // Mask the previous symbol's price immediately and make DataService wait
+  // for a matching full baseline before rendering the replacement market.
+  if (typeof window.beginSymbolSwitch === 'function') window.beginSymbolSwitch(sym);
   // Rebuild the WS URL preserving any existing query params (dataSource,
   // futuresExpiry, ...) so a symbol switch doesn't silently drop them —
   // same pattern as setFuturesExpiry()/applyExpirySelection().

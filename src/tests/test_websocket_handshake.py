@@ -29,6 +29,7 @@ def _sender(payload=lambda: {"symbol": "NIFTY"}):
         baseline_version=lambda: 7,
         index_quotes=lambda: {"NIFTY": {"ltp": 25000}},
         pipeline_status=lambda: {"status": "LIVE"},
+        feed_control=lambda: {"enabled": True, "provider": "SMARTAPI"},
         funds=lambda: {"available": 1000},
         algo_status=lambda: {"enabled": False},
         reconciliation_alert=lambda: {"reason": "mismatch"},
@@ -44,6 +45,7 @@ def test_sends_complete_handshake_in_stable_order():
         "full",
         "indexQuotes",
         "pipelineStatus",
+        "feedControl",
         "funds",
         "algoStatus",
         "reconciliationAlert",
@@ -62,6 +64,7 @@ def test_does_not_send_stale_or_absent_optional_snapshots():
         baseline_version=lambda: 1,
         index_quotes=lambda: {},
         pipeline_status=lambda: {"status": "STARTING"},
+        feed_control=lambda: {"enabled": False, "provider": "SMARTAPI"},
         funds=lambda: None,
         algo_status=lambda: {},
         reconciliation_alert=lambda: None,
@@ -72,6 +75,7 @@ def test_does_not_send_stale_or_absent_optional_snapshots():
 
     assert [message["type"] for message in websocket.messages] == [
         "pipelineStatus",
+        "feedControl",
         "algoStatus",
         "portfolio",
         "orders",

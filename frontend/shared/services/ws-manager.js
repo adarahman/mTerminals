@@ -144,7 +144,20 @@ class WSManager {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
     }
-    if (this.ws) { this.ws.onclose = null; try { this.ws.close(); } catch(e){} this.ws = null; }
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.onmessage = null;
+      this.ws.onopen = null;
+      this.ws.onerror = null;
+      try { this.ws.close(); } catch(e){}
+      this.ws = null;
+    }
+  }
+
+  send(message) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(message));
+    return true;
   }
 
   ensureConnected(forceResync = false) {

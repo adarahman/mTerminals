@@ -143,6 +143,7 @@ class MarketEngineCycle:
         check_pending_orders,
         broadcast_portfolio,
         pace,
+        wait_until_running=None,
     ):
         self._reset_daily_sessions = reset_daily_sessions
         self._trigger_eod = trigger_eod
@@ -158,6 +159,7 @@ class MarketEngineCycle:
         self._check_pending_orders = check_pending_orders
         self._broadcast_portfolio = broadcast_portfolio
         self._pace = pace
+        self._wait_until_running = wait_until_running
 
     async def run_once(self) -> None:
         tick_started_at = time.monotonic()
@@ -210,6 +212,8 @@ class MarketEngineCycle:
         warm_fno_symbols()
         warm_data_sources()
         while True:
+            if self._wait_until_running is not None:
+                await self._wait_until_running()
             await self.run_once()
 
 

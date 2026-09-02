@@ -128,6 +128,16 @@ def build_runtime_stack(
         build_current_prices=paper_price_book.build,
         start_funds_polling=market.funds.start,
         stop_funds_polling=market.funds.stop,
+        control_feed=lambda enabled: _control_broker_feed(
+            enabled, runtime_state=runtime_state, feed_manager=feed_manager
+        ),
+        broadcast_control=core_runtime.broadcast,
+        feed_control_status=lambda: {
+            "enabled": not runtime_state.MARKET_CYCLE_PAUSED,
+            "accepted": True,
+            "provider": runtime_state.LIVE_FEED_PROVIDER,
+            "reason": "",
+        },
         switch_symbol=core_runtime.symbol_switcher.switch,
         switch_data_source=core_runtime.data_source_switcher.switch,
         build_algo_status=live.supervisor.build_status,
@@ -165,3 +175,28 @@ def build_runtime_stack(
         portfolio_broadcaster=core_runtime.paper_portfolio.broadcast_from_feed,
     )
     return RuntimeStack(live, market, dashboard, application)
+
+
+def _control_broker_feed(enabled: bool, *, runtime_state: Any, feed_manager: Any) -> dict:
+    """Pause/resume the complete market cycle while keeping the server alive."""
+    provider = runtime_state.LIVE_FEED_PROVIDER
+    if enabled:
+        runtime_state.BROKER_FEED_PAUSED = False
+        runtime_state.MARKET_CYCLE_PAUSED = False
+        runtime_state.MARKET_CYCLE_RESUME_EVENT.set()
+        if feed_manager._feed_allowed(provider):
+            feed_manager._start_live_feed(provider, runtime_state.MAIN_LOOP)
+    else:
+        runtime_state.BROKER_FEED_PAUSED = True
+        runtime_state.MARKET_CYCLE_PAUSED = True
+        runtime_state.MARKET_CYCLE_RESUME_EVENT.clear()
+        # Wake a cycle currently inside its pacer so it reaches the pause
+        # gate immediately instead of printing until the poll timeout.
+        runtime_state.SYMBOL_SWITCH_EVENT.set()
+        feed_manager._stop_active_broker_feed(provider)
+    return {
+        "enabled": bool(enabled),
+        "accepted": True,
+        "provider": provider,
+        "reason": "",
+    }

@@ -19,6 +19,7 @@ class WebSocketHandshakeSender:
         baseline_version: Callable[[], Any],
         index_quotes: Callable[[], Any],
         pipeline_status: Callable[[], dict],
+        feed_control: Callable[[], dict],
         funds: Callable[[], Any],
         algo_status: Callable[[], dict],
         reconciliation_alert: Callable[[], Any],
@@ -30,6 +31,7 @@ class WebSocketHandshakeSender:
         self._baseline_version = baseline_version
         self._index_quotes = index_quotes
         self._pipeline_status = pipeline_status
+        self._feed_control = feed_control
         self._funds = funds
         self._algo_status = algo_status
         self._reconciliation_alert = reconciliation_alert
@@ -89,6 +91,9 @@ class WebSocketHandshakeSender:
             "pipelineStatus",
             self._pipeline_status(),
         ):
+            return
+
+        if not await self._send(websocket, "feedControl", self._feed_control()):
             return
 
         funds = self._funds()

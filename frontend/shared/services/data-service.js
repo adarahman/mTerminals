@@ -33,6 +33,8 @@ class DataService {
     this.lastStaleRecoveryAt = 0;
     this.snapshotRecoveryTimer = null;
     this.awaitingMarketSnapshot = true;
+    this.pendingSymbol = null;
+    this.dashboardPaused = false;
     this._setFeedStatus('CONNECTING');
     this.wsManager.on('open', () => {
       err('');
@@ -56,6 +58,18 @@ class DataService {
     // transport is active but must not keep a frozen market snapshot LIVE.
     this.wsManager.on('message', (raw) => {
       this._markTransportMessage();
+      if (this.pendingSymbol && this._isMarketSnapshotMessage(raw)) {
+        // A closing socket can have one buffered payload, and a newly opened
+        // socket must establish a full baseline before any deltas are safe.
+        // During a symbol handoff, accept only a full snapshot explicitly
+        // belonging to the requested symbol.
+        const isFull = !raw || !raw.type || raw.type === 'full';
+        const payload = raw && raw.type === 'full' ? raw.payload : raw;
+        const incomingSymbol = payload && payload.symbol
+          ? String(payload.symbol).toUpperCase() : '';
+        if (!isFull || incomingSymbol !== this.pendingSymbol) return;
+        this.pendingSymbol = null;
+      }
       if (this._isMarketSnapshotMessage(raw)) {
         this.awaitingMarketSnapshot = false;
         this._clearSnapshotRecovery();
@@ -74,6 +88,7 @@ class DataService {
     // see the notYetBuilt/symbolChanged check in scheduleRender().
     this.lastRenderedSymbol = null;
     document.addEventListener('visibilitychange', () => {
+      if (this.dashboardPaused) return;
       if (document.visibilityState !== 'visible') return;
       const last = (AppState.feedState && AppState.feedState.lastMessageAt) || 0;
       const staleAfter = (Config.ws && Config.ws.staleAfterMs) || 30000;
@@ -81,7 +96,9 @@ class DataService {
       this.wsManager.ensureConnected(needsSnapshot);
       if (!needsSnapshot && AppState.wsState) this.scheduleRender();
     });
-    window.addEventListener('online', () => this.wsManager.ensureConnected(true));
+    window.addEventListener('online', () => {
+      if (!this.dashboardPaused) this.wsManager.ensureConnected(true);
+    });
   }
 
   _clearSnapshotRecovery(){
@@ -198,6 +215,7 @@ class DataService {
   }
 
   _checkFeedFreshness(){
+    if (this.dashboardPaused) return;
     const fs = AppState.feedState || {};
     if (!fs.lastMessageAt) return;
     if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING') return;
@@ -262,8 +280,64 @@ class DataService {
   }
 
   connectWebSocket(url){
+    this.dashboardPaused = false;
     this._setFeedStatus('CONNECTING');
     this.wsManager.connect(url);
+    this._renderStreamingControls();
+  }
+
+  setDashboardStreaming(enabled){
+    this.dashboardPaused = !enabled;
+    if (enabled) {
+      this.connectWebSocket();
+    } else {
+      this._clearSnapshotRecovery();
+      this.wsManager.disconnect();
+      this._setFeedStatus('PAUSED', 'Dashboard updates paused locally');
+      this._renderStreamingControls();
+    }
+  }
+
+  setBrokerFeed(enabled){
+    const sent = this.wsManager.send({type:'control_feed', payload:{enabled:!!enabled}});
+    if (!sent) err('Connect the dashboard before controlling the broker feed.');
+    return sent;
+  }
+
+  _renderStreamingControls(feedControl){
+    const dashboardButton = $i('dashboard-stream-toggle');
+    if (dashboardButton) {
+      dashboardButton.dataset.paused = this.dashboardPaused ? 'true' : 'false';
+      dashboardButton.innerHTML = this.dashboardPaused
+        ? '<span>▶</span>Resume UI' : '<span>⏸</span>Pause UI';
+      dashboardButton.title = this.dashboardPaused
+        ? 'Resume updates in this dashboard' : 'Pause updates in this dashboard only';
+    }
+    if (!feedControl) return;
+    const feedButton = $i('broker-feed-toggle');
+    if (!feedButton) return;
+    const enabled = !!feedControl.enabled;
+    feedButton.dataset.running = enabled ? 'true' : 'false';
+    feedButton.innerHTML = enabled
+      ? '<span>■</span>Stop Stream' : '<span>▶</span>Start Stream';
+    feedButton.title = feedControl.reason || `${enabled ? 'Stop' : 'Start'} the complete market-data cycle`;
+  }
+
+  beginSymbolSwitch(symbol){
+    this.pendingSymbol = String(symbol || '').trim().toUpperCase() || null;
+    this.awaitingMarketSnapshot = true;
+    this._setFeedStatus('RECOVERING', this.pendingSymbol
+      ? `Loading ${this.pendingSymbol}` : 'Loading symbol');
+
+    // Never present the previous instrument's spot/change as if it belongs
+    // to the newly selected symbol while the replacement snapshot is in
+    // flight. The normal full render restores these nodes.
+    ['topbar-spot', 'spot-chg-pts', 'spot-chg-pct'].forEach((id) => {
+      const node = $i(id);
+      if (!node) return;
+      node.textContent = '—';
+      node.classList.remove('tick-flash-up', 'tick-flash-down', 'chg-pos', 'chg-neg');
+    });
   }
 
   // Called with the already-merged state (MarketStore.ingest ran before
@@ -283,6 +357,12 @@ class DataService {
   }
   if(messageType === 'pipelineStatus'){
     this._applyPipelineStatus(AppState.wsState.pipelineStatus);
+    return;
+  }
+  if(messageType === 'feedControl'){
+    this._renderStreamingControls(AppState.wsState.feedControl);
+    const result = AppState.wsState.feedControl || {};
+    if(result.reason) err(result.reason); else err('');
     return;
   }
   if(messageType === 'algoStatus'){

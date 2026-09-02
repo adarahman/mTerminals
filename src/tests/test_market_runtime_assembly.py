@@ -59,6 +59,8 @@ def test_market_runtime_installs_engine_transport_and_background_services():
         MIN_TICK_RECOMPUTE_SECONDS=3,
         SYMBOL_SWITCH_EVENT=asyncio.Event(),
         TICK_ACTIVITY_EVENT=asyncio.Event(),
+        MARKET_CYCLE_PAUSED=False,
+        MARKET_CYCLE_RESUME_EVENT=asyncio.Event(),
         CONNECTED=set(),
         METRICS=_Metrics(),
         store_canonical_payload=lambda *_args: None,

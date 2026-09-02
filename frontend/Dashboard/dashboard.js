@@ -84,6 +84,16 @@ window.toggleNavigationRail = (...args) => app.ui.toggleNavigationRail(...args);
 window.switchDashboardWorkspace = (...args) => app.ui.switchDashboardWorkspace(...args);
 window.secJump = (...args) => app.ui.secJump(...args);
 window.connectWebSocket = (...args) => app.data.connectWebSocket(...args);
+window.beginSymbolSwitch = (...args) => app.data.beginSymbolSwitch(...args);
+window.setDashboardStreaming = (...args) => app.data.setDashboardStreaming(...args);
+window.setBrokerFeed = (...args) => app.data.setBrokerFeed(...args);
+window.toggleDashboardStreaming = () => app.data.setDashboardStreaming(app.data.dashboardPaused);
+window.toggleBrokerFeed = () => {
+  const button = document.getElementById('broker-feed-toggle');
+  const running = !button || button.dataset.running !== 'false';
+  if (running && !confirm('Stop all market ticks, polling, analytics, and dashboard broadcasts for every open dashboard? The server will remain available for restart.')) return;
+  app.data.setBrokerFeed(!running);
+};
 window.updateDashboard = (...args) => app.data.updateDashboard(...args);
 window.scheduleRender = (...args) => app.data.scheduleRender(...args);
 window.triggerFile = (...args) => app.data.triggerFile(...args);

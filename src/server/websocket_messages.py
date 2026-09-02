@@ -19,6 +19,8 @@ class WebSocketMessageRouter:
         last_payload: Callable[[], Any],
         start_funds_polling: Callable[[], Any],
         stop_funds_polling: Callable[[], Any],
+        control_feed: Callable[[bool], Mapping[str, Any]],
+        broadcast_control: Callable[[dict], Awaitable[Any]],
     ):
         self._place_order = place_order
         self._cancel_order = cancel_order
@@ -27,6 +29,8 @@ class WebSocketMessageRouter:
         self._last_payload = last_payload
         self._start_funds_polling = start_funds_polling
         self._stop_funds_polling = stop_funds_polling
+        self._control_feed = control_feed
+        self._broadcast_control = broadcast_control
 
     async def dispatch(self, data: Mapping[str, Any] | Any) -> None:
         if not isinstance(data, Mapping):
@@ -63,3 +67,8 @@ class WebSocketMessageRouter:
                 self._start_funds_polling()
             else:
                 self._stop_funds_polling()
+            return
+
+        if message_type == "control_feed":
+            result = self._control_feed(bool(payload.get("enabled")))
+            await self._broadcast_control({"type": "feedControl", "payload": result})

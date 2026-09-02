@@ -3,6 +3,50 @@ from types import SimpleNamespace
 from server import runtime_stack
 
 
+class _ResumeEvent:
+    def __init__(self):
+        self.is_set = True
+
+    def set(self):
+        self.is_set = True
+
+    def clear(self):
+        self.is_set = False
+
+
+def test_shared_stream_control_pauses_and_resumes_complete_market_cycle():
+    calls = []
+    state = SimpleNamespace(
+        LIVE_FEED_PROVIDER="SMARTAPI",
+        MAIN_LOOP=object(),
+        BROKER_FEED_PAUSED=False,
+        MARKET_CYCLE_PAUSED=False,
+        MARKET_CYCLE_RESUME_EVENT=_ResumeEvent(),
+        SYMBOL_SWITCH_EVENT=_ResumeEvent(),
+    )
+    manager = SimpleNamespace(
+        _feed_allowed=lambda _provider: True,
+        _start_live_feed=lambda provider, _loop: calls.append(("start", provider)),
+        _stop_active_broker_feed=lambda provider: calls.append(("stop", provider)),
+    )
+
+    stopped = runtime_stack._control_broker_feed(
+        False, runtime_state=state, feed_manager=manager
+    )
+    assert stopped["enabled"] is False
+    assert state.MARKET_CYCLE_PAUSED is True
+    assert state.MARKET_CYCLE_RESUME_EVENT.is_set is False
+    assert calls == [("stop", "SMARTAPI")]
+
+    started = runtime_stack._control_broker_feed(
+        True, runtime_state=state, feed_manager=manager
+    )
+    assert started["enabled"] is True
+    assert state.MARKET_CYCLE_PAUSED is False
+    assert state.MARKET_CYCLE_RESUME_EVENT.is_set is True
+    assert calls[-1] == ("start", "SMARTAPI")
+
+
 def test_runtime_stack_composes_services_and_installs_dashboard(monkeypatch):
     calls = []
     supervisor = SimpleNamespace(

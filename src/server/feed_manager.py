@@ -31,7 +31,7 @@ def _feed_allowed(feed_provider: str) -> bool:
     WebSocket feed in this codebase). Every *_sync_and_broadcast() gates on
     this BEFORE touching runtime_state.LAST_PAYLOAD/runtime_state.LAST_SENT, so a feed left running
     after a switch can't contaminate the new provider's baseline."""
-    return feed_lifecycle.is_allowed(
+    return not runtime_state.BROKER_FEED_PAUSED and feed_lifecycle.is_allowed(
         feed_provider,
         runtime_state.MARKET_SELECTION.data_source,
         _provider_supports_websocket,
@@ -190,6 +190,8 @@ def _restart_live_feed(provider: str, symbol: str, expiry=None) -> bool:
     Socket lifecycle remains provider-native; every orchestration call site
     uses this broker-neutral dispatch rather than duplicating a provider
     branch."""
+    if runtime_state.BROKER_FEED_PAUSED:
+        return False
     return feed_lifecycle.restart(
         provider, symbol, expiry, {k: m.restart for k, m in runtime_state.FEEDS.items()}
     )
@@ -197,6 +199,8 @@ def _restart_live_feed(provider: str, symbol: str, expiry=None) -> bool:
 
 def _start_live_feed(provider: str, loop) -> bool:
     """Offload the configured provider's blocking feed startup."""
+    if runtime_state.BROKER_FEED_PAUSED:
+        return False
     return feed_lifecycle.start(
         provider,
         loop,

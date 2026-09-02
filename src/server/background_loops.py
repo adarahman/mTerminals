@@ -38,6 +38,7 @@ class IndexQuoteLoop:
         index_quotes: dict,  # mutated in place — this IS ws_server_live's INDEX_QUOTES
         poll_seconds: float,
         report: Callable[[str], None] = print,
+        paused: Callable[[], bool] = lambda: False,
     ) -> None:
         self._enabled = enabled
         self._symbols = symbols
@@ -47,6 +48,7 @@ class IndexQuoteLoop:
         self._index_quotes = index_quotes
         self._poll_seconds = poll_seconds
         self._report = report
+        self._paused = paused
 
     async def run(self) -> None:
         if not self._enabled:
@@ -57,6 +59,8 @@ class IndexQuoteLoop:
 
     async def tick(self) -> None:
         """One polling cycle. Public/awaitable directly for tests."""
+        if self._paused():
+            return
         active = self._active_symbol()
         others = [s for s in self._symbols if s != active]
         updates: dict = {}

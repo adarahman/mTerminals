@@ -142,9 +142,20 @@ function loadDataService() {
   service.wsManager.emit('message', { type: 'delta', payload: {} });
   assert.equal(AppState.feedState.status, 'LIVE', 'fresh message must recover from STALE');
   assert.equal(AppState.feedState.reason, '');
+
+  service.beginSymbolSwitch('BANKNIFTY');
+  service.store.lastIngested = null;
+  service.wsManager.emit('message', { type: 'delta', payload: { spot: 50000 } });
+  assert.equal(service.store.lastIngested, null, 'a new symbol must not inherit a delta from the old baseline');
+  service.wsManager.emit('message', { type: 'full', payload: { symbol: 'NIFTY', spot: 24000 } });
+  assert.equal(service.store.lastIngested, null, 'a stale full snapshot for the old symbol must be ignored');
+  const bankSnapshot = { type: 'full', payload: { symbol: 'BANKNIFTY', spot: 50000 } };
+  service.wsManager.emit('message', bankSnapshot);
+  assert.equal(service.store.lastIngested, bankSnapshot, 'the requested symbol full snapshot must establish the new baseline');
+  assert.equal(service.pendingSymbol, null);
   assert.deepEqual(statuses, [
     'CONNECTING', 'RECOVERING', 'DISCONNECTED', 'RECOVERING',
-    'LIVE', 'STALE', 'RECOVERING', 'LIVE',
+    'LIVE', 'STALE', 'RECOVERING', 'LIVE', 'RECOVERING', 'LIVE',
   ], 'shared consumers must receive both recovery transitions');
 }
 
@@ -154,4 +165,5 @@ console.log('PASS  Open socket remains RECOVERING until data arrives');
 console.log('PASS  Feed transitions LIVE → STALE → LIVE deterministically');
 console.log('PASS  Auxiliary traffic cannot refresh market freshness');
 console.log('PASS  A stale half-open socket is replaced with a reconnect baseline');
-console.log('\n6/6 feed recovery checks passed.');
+console.log('PASS  Symbol handoff rejects stale prices until the matching baseline');
+console.log('\n7/7 feed recovery checks passed.');

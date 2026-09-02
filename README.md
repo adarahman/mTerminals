@@ -35,6 +35,20 @@ Run the backend from the repository root:
 .venv/bin/python -m main
 ```
 
+Or keep only the lightweight launcher running and start/stop the analytics
+backend from its minimal GUI:
+
+```bash
+.venv/bin/python scripts/control_server.py
+```
+
+Open `http://127.0.0.1:5400`, choose the symbol, optional expiry, and market-data
+broker, then enter any required broker credentials and use **Start Backend**.
+The launcher masks credentials and saves supplied values to `.env`; blank fields
+preserve values already stored there. The full dashboard remains on port `5500`;
+stopping it does not close the launcher page. The launcher opens this address
+automatically; pass `--no-browser` when automatic browser opening is not wanted.
+
 The application is served from `http://127.0.0.1:5500`; operational endpoints
 are `/health` and `/metrics`. Broker credentials are required for SmartAPI mode.
 Never commit `.env` or live credentials.

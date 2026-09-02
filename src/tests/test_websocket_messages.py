@@ -22,7 +22,13 @@ def _router(calls):
         last_payload=lambda: "latest",
         start_funds_polling=lambda: calls.append(("funds", "start")),
         stop_funds_polling=lambda: calls.append(("funds", "stop")),
+        control_feed=lambda enabled: calls.append(("feed", enabled)) or {"enabled": enabled},
+        broadcast_control=lambda message: _record_async(calls, ("control", message)),
     )
+
+
+async def _record_async(calls, value):
+    calls.append(value)
 
 
 def test_routes_order_and_cancel_messages():
@@ -49,3 +55,15 @@ def test_routes_live_mode_and_ignores_unknown_messages():
     _run(router.dispatch(["invalid-shape"]))
 
     assert calls == [("funds", "start"), ("funds", "stop")]
+
+
+def test_routes_shared_feed_control_and_broadcasts_result():
+    calls = []
+    router = _router(calls)
+
+    _run(router.dispatch({"type": "control_feed", "payload": {"enabled": False}}))
+
+    assert calls == [
+        ("feed", False),
+        ("control", {"type": "feedControl", "payload": {"enabled": False}}),
+    ]

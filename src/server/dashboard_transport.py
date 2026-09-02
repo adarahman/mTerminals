@@ -73,6 +73,9 @@ def build_dashboard_transport(
     build_current_prices: Callable[[Any], dict],
     start_funds_polling: Callable[[], Any],
     stop_funds_polling: Callable[[], Any],
+    control_feed: Callable[[bool], dict],
+    broadcast_control: Callable[[dict], Awaitable[Any]],
+    feed_control_status: Callable[[], dict],
     switch_symbol: Callable[..., Any],
     switch_data_source: Callable[..., Awaitable[Any]],
     build_algo_status: Callable[[], dict],
@@ -86,6 +89,7 @@ def build_dashboard_transport(
         baseline_version=lambda: runtime_state.BASELINE_ID,
         index_quotes=lambda: runtime_state.INDEX_QUOTES,
         pipeline_status=lambda: runtime_state.PIPELINE_STATUS,
+        feed_control=feed_control_status,
         funds=lambda: runtime_state.LAST_FUNDS,
         algo_status=lambda: (
             runtime_state.LAST_ALGO_STATUS
@@ -103,6 +107,8 @@ def build_dashboard_transport(
         last_payload=lambda: runtime_state.LAST_PAYLOAD,
         start_funds_polling=start_funds_polling,
         stop_funds_polling=stop_funds_polling,
+        control_feed=control_feed,
+        broadcast_control=broadcast_control,
     )
     query_controller = WebSocketQueryController(
         current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
