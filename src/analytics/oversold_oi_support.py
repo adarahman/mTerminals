@@ -91,3 +91,26 @@ def evaluate_oversold_oi_support(*, rsi: float | None, spot: float, pe_wall: flo
 def reset_spot_rsi_history() -> None:
     """Test/session reset hook."""
     _minute_closes.clear()
+
+
+def recent_momentum_pct(symbol: str, lookback_minutes: int = 5) -> float | None:
+    """% change in spot over the last `lookback_minutes` one-minute closes
+    already retained for RSI (see update_spot_rsi) — reused rather than
+    tracking a second rolling spot series. This is deliberately a NEAR-TERM
+    read (default 5 min), unlike EngineResult.spot_chg_pct which is the
+    whole session's change from the day's open and is therefore close to
+    zero (and so barely a guard at all) for most of the trading day.
+
+    Returns None until at least lookback_minutes+1 closes exist for this
+    symbol — same "wait for enough history, don't compute over a noisy
+    partial window" posture as update_spot_rsi.
+    """
+    series = _minute_closes.get(symbol)
+    if not series or len(series) < lookback_minutes + 1:
+        return None
+    closes = list(series)[-(lookback_minutes + 1):]
+    start_price = closes[0][1]
+    end_price = closes[-1][1]
+    if start_price <= 0:
+        return None
+    return round((end_price - start_price) / start_price * 100, 4)

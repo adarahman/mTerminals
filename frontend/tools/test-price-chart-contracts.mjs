@@ -20,6 +20,8 @@ assert.match(dataService, /window\.priceChart\.addTick/,
   'the dashboard feed must keep the native chart buffer current');
 assert.match(chart, /this\._zoomStart[\s\S]*this\._zoomEnd/,
   'zoom/pan state must be stored independently of live ticks');
+assert.match(chart, /addTick\(price, t, vwap\)\{[\s\S]*?this\.chartData\.addTick\(price, t, vwap\);[\s\S]*?this\._scheduleRender\(\);/,
+  'a live tick must schedule a repaint on its own — the canvas must not depend on cursor movement to show new candles');
 assert.match(history, /catch \(e\)[\s\S]*Logger\.warn\('historyLoader'/,
   'history failures must be contained without breaking live quote handling');
 assert.match(build, /Dashboard\/DashboardPro\.html[\s\S]*PriceChart\/price-chart-engine\.js/,
@@ -29,4 +31,4 @@ assert.doesNotMatch(build, /html: "PriceChart\/price-chart\.html"/,
 assert.doesNotMatch(generator, /src: "PriceChart\/price-chart\.html"/,
   'HTML generation must keep DashboardPro as the only page');
 
-console.log('Price chart contracts: 9/9 passed');
+console.log('Price chart contracts: 10/10 passed');

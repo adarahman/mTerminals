@@ -111,6 +111,11 @@ class SimTrade:
     lot_size: int
     entry_time: str
     entry_price: float
+    # Decision-engine read AT ENTRY (not re-derived) — lets summary_by_
+    # confidence_bucket() answer "does confidence actually predict P&L",
+    # which the plain aggregate win_rate above cannot.
+    confidence: Optional[int] = None
+    bias_strength: Optional[str] = None
     exit_time: Optional[str] = None
     exit_price: Optional[float] = None
     exit_reason: Optional[str] = None
@@ -159,6 +164,50 @@ class BacktestResult:
             "max_drawdown": round(max_dd, 2),
             "unpriced_signals": self.unpriced_signals,
         }
+
+    def summary_by_confidence_bucket(
+            self, edges: tuple = (40, 55, 70, 85, 101)) -> list[dict]:
+        """Win rate / avg P&L broken out by the confidence value read AT
+        ENTRY, so a bucket with a low win rate flags that
+        compute_confidence()'s agreement-of-inputs score isn't tracking
+        actual forward price behavior at that level — the plain aggregate
+        summary() above cannot show this since it collapses every trade,
+        low- and high-confidence alike, into one win rate.
+
+        `edges` are bucket upper bounds, e.g. (40, 55, 70, 85, 101) makes
+        buckets [40,55) [55,70) [70,85) [85,101). Trades with no recorded
+        confidence (older snapshots predating this field) are skipped and
+        counted separately so they don't silently distort a bucket.
+        """
+        closed = [t for t in self.closed_trades if t.confidence is not None]
+        skipped_no_confidence = len(self.closed_trades) - len(closed)
+        buckets = []
+        lo = edges[0]
+        for hi in edges[1:]:
+            in_bucket = [t for t in closed if lo <= t.confidence < hi]
+            if in_bucket:
+                pnls = [t.pnl for t in in_bucket]
+                wins = sum(1 for p in pnls if p > 0)
+                buckets.append({
+                    "range": f"{lo}-{hi - 1}",
+                    "num_trades": len(in_bucket),
+                    "win_rate": round(wins / len(in_bucket), 3),
+                    "avg_pnl": round(sum(pnls) / len(in_bucket), 2),
+                    "total_pnl": round(sum(pnls), 2),
+                })
+            else:
+                buckets.append({
+                    "range": f"{lo}-{hi - 1}", "num_trades": 0,
+                    "win_rate": None, "avg_pnl": None, "total_pnl": 0.0,
+                })
+            lo = hi
+        if skipped_no_confidence:
+            buckets.append({
+                "range": "no_confidence_recorded",
+                "num_trades": skipped_no_confidence,
+                "win_rate": None, "avg_pnl": None, "total_pnl": 0.0,
+            })
+        return buckets
 
     def metadata(self) -> dict:
         return {
@@ -329,11 +378,15 @@ async def run_backtest(
             strike=strike, qty_lots=lots,
             lot_size=int(_submit.current_lot_size or 1),
             entry_time=str(fill_time), entry_price=fill_price,
+            confidence=_submit.current_confidence,
+            bias_strength=_submit.current_bias_strength,
         )
         result.trades.append(open_position)
 
     _submit.current_ts = None
     _submit.current_lot_size = None
+    _submit.current_confidence = None
+    _submit.current_bias_strength = None
 
     # AutoExecutor's cooldown/daily-cap gates read _now_fn()/_today_fn()
     # (see decision/auto_executor.py) — bound to the CURRENT loop tick's
@@ -436,6 +489,11 @@ async def run_backtest(
         if open_position is None and not exited_this_tick and _in_market_hours(ts):
             _submit.current_ts = ts
             _submit.current_lot_size = row.get("lot_size")
+            # Captured here (the tick that decided to enter), not re-derived
+            # at settle time, so a bucket reflects what the engine believed
+            # AT ENTRY even if later ticks' confidence drifted.
+            _submit.current_confidence = decision.get("confidence")
+            _submit.current_bias_strength = decision.get("biasStrength")
             await executor.maybe_execute(decision, symbol, expiry)
 
     if open_position is not None:
@@ -454,6 +512,11 @@ if __name__ == "__main__":
     sym = sys.argv[1] if len(sys.argv) > 1 else "NIFTY"
     res = run_backtest_sync(sym, use_account_guard=True)
     print(f"[backtest] {sym}: {res.summary()}")
+    print(f"[backtest] {sym} by confidence bucket:")
+    for b in res.summary_by_confidence_bucket():
+        print(f"  {b['range']:>22}: n={b['num_trades']:<4} "
+              f"win_rate={b['win_rate']} avg_pnl={b['avg_pnl']} total_pnl={b['total_pnl']}")
     for t in res.trades:
         print(f"  {t.entry_time} {t.side} {t.instrument_type} {t.strike} @ {t.entry_price} "
-              f"-> {t.exit_time} @ {t.exit_price} pnl={t.pnl} ({t.exit_reason})")
+              f"-> {t.exit_time} @ {t.exit_price} pnl={t.pnl} ({t.exit_reason}) "
+              f"conf={t.confidence} strength={t.bias_strength}")

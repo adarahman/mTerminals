@@ -86,6 +86,53 @@ def test_entry_and_opposite_signal_exit_computes_correct_pnl(tmp_path):
     assert trade.pnl == 2250.0
 
 
+def test_summary_by_confidence_bucket_captures_confidence_at_entry(tmp_path):
+    db_path = str(tmp_path / "snapshots.db")
+    ltp_path = str(tmp_path / "ltp.parquet")
+
+    rows = [
+        # Trade 1: enters at 45 confidence (low bucket), wins.
+        ("2026-08-01T09:20:00", "07AUG2026",
+         _decision(action_type="BUY_CE", strike=20000, confidence=45)),
+        ("2026-08-01T09:30:00", "07AUG2026",
+         _decision(action_type="SELL_CE", strike=20000, confidence=50)),
+        # Trade 2: enters at 80 confidence (high bucket), also wins —
+        # separate strike so the two trades don't collide.
+        ("2026-08-01T09:40:00", "07AUG2026",
+         _decision(action_type="BUY_PE", strike=20100, confidence=80)),
+        ("2026-08-01T09:50:00", "07AUG2026",
+         _decision(action_type="SELL_PE", strike=20100, confidence=75)),
+    ]
+    _seed_snapshots(db_path, "NIFTY", rows)
+    # Two strikes' worth of ticks in one parquet — _seed_ltp writes a single
+    # strike per call and would overwrite the file, so build it directly.
+    pd.DataFrame([
+        {"snapshot_time": "2026-08-01T09:20:00", "Symbol": "NIFTY", "Expiry": "07AUG2026",
+         "StrikePrice": 20000, "CE_LTP": 100.0, "PE_LTP": 80.0},
+        {"snapshot_time": "2026-08-01T09:30:00", "Symbol": "NIFTY", "Expiry": "07AUG2026",
+         "StrikePrice": 20000, "CE_LTP": 130.0, "PE_LTP": 60.0},
+        {"snapshot_time": "2026-08-01T09:40:00", "Symbol": "NIFTY", "Expiry": "07AUG2026",
+         "StrikePrice": 20100, "CE_LTP": 90.0, "PE_LTP": 50.0},
+        {"snapshot_time": "2026-08-01T09:50:00", "Symbol": "NIFTY", "Expiry": "07AUG2026",
+         "StrikePrice": 20100, "CE_LTP": 70.0, "PE_LTP": 65.0},
+    ]).to_parquet(ltp_path, index=False)
+
+    result = run_backtest_sync("NIFTY", db_path=db_path, ltp_log_path=ltp_path)
+    assert len(result.closed_trades) == 2
+    assert {t.confidence for t in result.closed_trades} == {45, 80}
+
+    buckets = result.summary_by_confidence_bucket()
+    by_range = {b["range"]: b for b in buckets}
+    assert by_range["40-54"]["num_trades"] == 1
+    assert by_range["40-54"]["win_rate"] == 1.0
+    assert by_range["70-84"]["num_trades"] == 1
+    assert by_range["70-84"]["win_rate"] == 1.0
+    # Buckets with no trades still report, just empty — makes gaps visible
+    # instead of silently omitting them from the printed breakdown.
+    assert by_range["55-69"]["num_trades"] == 0
+    assert by_range["55-69"]["win_rate"] is None
+
+
 def test_day_boundary_forces_square_off(tmp_path):
     db_path = str(tmp_path / "snapshots.db")
     ltp_path = str(tmp_path / "ltp.parquet")

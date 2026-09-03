@@ -1,5 +1,7 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from analytics.oversold_oi_support import reset_spot_rsi_history, update_spot_rsi
 from decision.confidence import compute_confidence
 from decision.decision_engine import DecisionEngine
 from decision.types import ActiveSignal, DecisionResult
@@ -95,6 +97,46 @@ def test_falling_session_cannot_emit_moderate_bullish_trade():
     ).to_dict()
     assert result["biasStrength"] == "WEAK"
     assert result["actionType"] == "WAIT"
+
+
+def test_near_term_countertrend_move_clamps_bullish_call_even_mid_session():
+    # spot_chg_pct=0 here (whole-session move silent, e.g. mid-day chop
+    # relative to the open) — the ONLY thing available to catch this
+    # countertrend case is the near-term rolling-closes read.
+    reset_spot_rsi_history()
+    symbol = "NIFTY_TEST_MOMENTUM_DOWN"
+    start = datetime(2026, 8, 8, 9, 15, tzinfo=timezone.utc)
+    for i, price in enumerate([24100, 24080, 24060, 24040, 24020, 23980]):
+        update_spot_rsi(symbol, price, (start + timedelta(minutes=i)).isoformat())
+
+    result = DecisionEngine().evaluate(
+        _engine_result(symbol=symbol, spot_chg_pct=0.0,
+                        total_pcr=1.5, bias="Strong Bullish",
+                        fut_signal="Long Buildup", basis=50), {}
+    ).to_dict()
+
+    assert result["_debug"]["spot_move_session_pct"] == 0.0
+    assert result["_debug"]["near_term_countertrend_clamp"] is True
+    assert result["biasStrength"] == "WEAK"
+    assert result["actionType"] == "WAIT"
+
+
+def test_near_term_move_with_the_call_is_not_clamped():
+    # Same magnitude of near-term move, but in the SAME direction as the
+    # composite — must not be treated as countertrend evidence.
+    reset_spot_rsi_history()
+    symbol = "NIFTY_TEST_MOMENTUM_UP"
+    start = datetime(2026, 8, 8, 9, 15, tzinfo=timezone.utc)
+    for i, price in enumerate([23980, 24020, 24040, 24060, 24080, 24100]):
+        update_spot_rsi(symbol, price, (start + timedelta(minutes=i)).isoformat())
+
+    result = DecisionEngine().evaluate(
+        _engine_result(symbol=symbol, spot_chg_pct=0.0,
+                        total_pcr=1.5, bias="Strong Bullish",
+                        fut_signal="Long Buildup", basis=50), {}
+    ).to_dict()
+
+    assert result["_debug"]["near_term_countertrend_clamp"] is False
 
 
 def test_evidence_coverage_reduces_confidence():

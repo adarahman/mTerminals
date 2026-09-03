@@ -45,6 +45,16 @@ class T:
     # but should not be presented as execute-ready.
     CONFIDENCE_EXECUTE_MIN = 40
 
+    # Near-term countertrend guard: if spot has moved this many % against
+    # the composite's direction over the last MOMENTUM_LOOKBACK_MIN
+    # minutes, treat that as real momentum evidence and clamp the
+    # composite toward neutral rather than firing a call against the
+    # market's immediate direction. Deliberately smaller/faster than the
+    # whole-session spot_chg_pct guard below — that one stays near zero
+    # for most of the day and misses exactly this case.
+    MOMENTUM_COUNTERTREND_PCT = 0.15
+    MOMENTUM_LOOKBACK_MIN = 5
+
     # IV crush: a fast VIX drop from its recent peak while positions are
     # still open (buildup, not unwinding) — the classic post-event trap
     # where Vega losses eat a correctly-directioned Delta gain.

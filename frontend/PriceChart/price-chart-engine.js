@@ -160,6 +160,21 @@ class PriceChartEngine {
 
   addTick(price, t, vwap){
     this.chartData.addTick(price, t, vwap);
+    // A live WS tick is not one of the discrete UI events (resize, zoom,
+    // toolbar change, hover) the render() call sites elsewhere in this
+    // file already trigger on — without this, the canvas only repainted
+    // when the user happened to move the mouse over it, so a candle
+    // could sit stale indefinitely while the cursor was still. Throttled
+    // via the same one-render-per-frame guard as the hover handler below
+    // so a burst of ticks doesn't queue a redraw backlog.
+    this._scheduleRender();
+  }
+
+  // Shared by addTick() and the hover handlers below — coalesces any
+  // number of calls within one animation frame into a single render().
+  _scheduleRender(){
+    if(this._renderRaf) return;
+    this._renderRaf = requestAnimationFrame(() => { this._renderRaf = null; this.render(); });
   }
 
   async hydrateRange(range, force){
@@ -516,15 +531,13 @@ class PriceChartEngine {
         // Only trigger render if position actually changed
         if(!this._hover || this._hover.x !== x || this._hover.y !== y){
           this._hover = { x, y };
-          if(this._hoverRaf) return;
-          this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
+          this._scheduleRender();
         }
       };
       canvas.onmouseleave = () => {
         if(!this._hover) return; // Already cleared
         this._hover = null;
-        if(this._hoverRaf) return;
-        this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = null; this.render(); });
+        this._scheduleRender();
       };
     }
 
@@ -820,7 +833,11 @@ class PriceChartEngine {
     const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(320, canvas.parentElement.clientHeight);
     const ctx = sizeCanvasIfChanged(canvas, W0, H0);
     const W = W0, H = H0;
-    const PAD = { l: 54, r: 12, t: 12, b: 22 };
+    // Kept identical to chart-renderer.js's own PAD (see its comment) —
+    // this copy drives hoverIdx/xScale for hit-testing, so it must match
+    // the actual plotted layout or the crosshair/OHLC readout will
+    // silently point at the wrong candle.
+    const PAD = { l: 12, r: 54, t: 12, b: 22 };
     const PW = W - PAD.l - PAD.r, PH = H - PAD.t - PAD.b;
 
     ctx.clearRect(0,0,W,H);

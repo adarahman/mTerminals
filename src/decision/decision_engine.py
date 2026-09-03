@@ -42,6 +42,7 @@ from decision.confidence import derive_bias, compute_confidence
 from decision.strategy_selection import derive_action, suggest_strategy
 from analytics.oversold_oi_support import (
     evaluate_oversold_oi_support,
+    recent_momentum_pct,
     update_spot_rsi,
 )
 
@@ -207,13 +208,29 @@ class DecisionEngine:
         out.verdicts["oversoldOiSupport"] = oversold_support
 
         # A moderate/strong call against an established session move needs
-        # explicit momentum evidence, which this engine does not yet carry.
-        # Fail closed to neutral instead of recommending a countertrend trade.
+        # explicit momentum evidence. Two complementary guards:
+        #  (a) whole-session move from the day's open (spot_chg_pct) — a
+        #      coarse "don't fight a trending day" check, but near-zero
+        #      (and so barely a guard) for most of the session;
+        #  (b) near-term (last MOMENTUM_LOOKBACK_MIN-minute) move, read
+        #      from the same rolling closes update_spot_rsi already
+        #      maintains — catches "price just moved against this call in
+        #      the last few minutes" even mid-session when (a) is silent.
+        # Either firing is enough to fail closed to neutral rather than
+        # recommend a countertrend trade.
         spot_move = float(getattr(er, "spot_chg_pct", 0.0) or 0.0)
-        if spot_move <= -0.25 and composite > 0.15:
-            composite = 0.149
-        elif spot_move >= 0.25 and composite < -0.15:
-            composite = -0.149
+        near_term_move = recent_momentum_pct(symbol, T.MOMENTUM_LOOKBACK_MIN)
+        session_countertrend = (
+            (spot_move <= -0.25 and composite > 0.15) or
+            (spot_move >= 0.25 and composite < -0.15)
+        )
+        near_term_countertrend = (
+            near_term_move is not None and
+            ((near_term_move <= -T.MOMENTUM_COUNTERTREND_PCT and composite > 0.15) or
+             (near_term_move >= T.MOMENTUM_COUNTERTREND_PCT and composite < -0.15))
+        )
+        if session_countertrend or near_term_countertrend:
+            composite = 0.149 if composite > 0 else -0.149
 
         out._debug = {
             "pcr_score":  round(pcr_score,  3),
@@ -229,6 +246,10 @@ class DecisionEngine:
             "vix_tag":    vix_tag,
             "evidence_coverage": out.evidence_coverage,
             "missing_inputs": out.missing_inputs,
+            "spot_move_session_pct": round(spot_move, 3),
+            "spot_move_near_term_pct": near_term_move,
+            "session_countertrend_clamp": session_countertrend,
+            "near_term_countertrend_clamp": near_term_countertrend,
         }
 
         # ── Top-line derivation ───────────────────────────────────────────────

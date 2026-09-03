@@ -69,7 +69,11 @@ class ChartRenderer {
     const H0 = Math.max(160, canvas.parentElement.clientHeight);
     const ctx = sizeCanvasIfChanged(canvas, W0, H0);
     const W = W0, H = H0;
-    const PAD = { l: 54, r: 12, t: 12, b: 22 };
+    // Price axis sits on the RIGHT: the chart advances left→right, so new
+    // candles form at the right edge — keeping the price scale there means
+    // the newest data lines up directly against the axis you're reading it
+    // off, instead of the eye jumping all the way back to the left margin.
+    const PAD = { l: 12, r: 54, t: 12, b: 22 };
     const PW = W - PAD.l - PAD.r, PH = H - PAD.t - PAD.b;
 
     ctx.clearRect(0, 0, W, H);
@@ -166,8 +170,10 @@ class ChartRenderer {
       const val = y1 - (g / 4) * (y1 - y0);
       ctx.fillStyle = C.axisLbl;
       ctx.font = '10px Inter,sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(fmtI(val), PAD.l - 6, gy + 3);
+      // Right-anchored, drawn just past the plot area's right edge — see
+      // the PAD comment in render() for why the axis lives here.
+      ctx.textAlign = 'left';
+      ctx.fillText(fmtI(val), W - PAD.r + 6, gy + 3);
     }
   }
 
