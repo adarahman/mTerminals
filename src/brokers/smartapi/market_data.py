@@ -88,14 +88,13 @@ class SmartApiMarketData:
             "High": _safe_float(quote.get("high")),
             "Low": _safe_float(quote.get("low")),
             "PrevClose": previous_close,
-            "Volume": quote.get("volume"),
+            "Volume": _safe_float(quote.get("tradeVolume")),
             "Turnover": None,
-            "OI": quote.get("oi"),
+            "OI": _safe_float(quote.get("opnInterest")),
             "Spot": spot,
             "Basis": round(ltp - spot, 2) if spot and ltp else None,
             "FutSource": "SMARTAPI",
         }
-
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.smartapi.client import get_fno_underlyings
 

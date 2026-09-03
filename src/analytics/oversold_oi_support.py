@@ -34,8 +34,7 @@ def update_spot_rsi(symbol: str, spot: float, timestamp: str) -> float | None:
         series[-1] = (bucket, spot)
     else:
         series.append((bucket, spot))
-    if len(series) < RSI_PERIOD + 1:
-        return None
+    RSI_PERIOD = 14
     closes = [value for _, value in list(series)[-(RSI_PERIOD + 1):]]
     changes = [right - left for left, right in zip(closes, closes[1:])]
     gains = sum(max(change, 0.0) for change in changes) / RSI_PERIOD
