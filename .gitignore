@@ -60,3 +60,5 @@ runtime/shoonya_api/**/.DS_Store
 
 # Shoonya instrument-master downloads (refreshed manually from api.shoonya.com)
 /*_symbols.txt
+# Runtime live-trading emergency kill switch
+LIVE_TRADING_KILL
