@@ -34,6 +34,14 @@ function buildRangeTabsHtml(options, defaultValue) {
   }).join('');
 }
 
+function buildRangeSelectOptionsHtml(selectedValue, options) {
+  options = options || RANGE_TAB_OPTIONS;
+  selectedValue = Number(selectedValue != null ? selectedValue : RANGE_TAB_DEFAULT);
+  return options.map(function (opt) {
+    return '<option value="' + opt.value + '"' + (opt.value === selectedValue ? ' selected' : '') + '>' + opt.label + '</option>';
+  }).join('');
+}
+
 // Fills every placeholder present at call time. Safe to call again later
 // (e.g. after a modal's markup is rebuilt) — it just overwrites innerHTML,
 // it doesn't care whether this is the first pass or a re-render.

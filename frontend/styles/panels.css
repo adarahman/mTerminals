@@ -31,6 +31,7 @@
 
 .exec-card.c-amber::before{background:var(--warn);}
 
+.exec-card.c-blue{background:var(--bg-0);}
 .exec-card.c-blue::before{background:var(--info);}
 
 .exec-card.c-red::before{background:var(--neg);}
@@ -283,8 +284,8 @@
   background:var(--section-accent, var(--border));
 }
 
-.section-card.sc-blue{    --section-accent:var(--info); }
-.section-card.sc-violet{  --section-accent:var(--sc-violet); }
+.section-card.sc-blue{    --section-accent:var(--info); background:var(--bg-0); }
+.section-card.sc-violet{  --section-accent:var(--sc-violet); background:var(--bg-0); }
 .section-card.sc-green{   --section-accent:var(--pos); }
 .section-card.sc-amber{   --section-accent:var(--warn); }
 .section-card.sc-red{     --section-accent:var(--neg); }
@@ -884,11 +885,29 @@ details.card summary .card-head{margin:0;}
   padding: var(--space-1) var(--space-4);letter-spacing:.03em;white-space:nowrap;
 }
 
+.oi-snap-toolbar{gap:12px;}
+.oi-snap-header-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.oi-snap-range{display:flex;align-items:center;gap:7px;padding:4px 5px 4px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-2);}
+.oi-snap-range>span{font-size:var(--fs-2xs);font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;}
+.oi-snap-range select{appearance:none;min-width:76px;padding:5px 25px 5px 8px;border:1px solid var(--border-2);border-radius:5px;background-color:var(--bg-1);background-image:linear-gradient(45deg,transparent 50%,var(--text-tertiary) 50%),linear-gradient(135deg,var(--text-tertiary) 50%,transparent 50%);background-position:calc(100% - 12px) 50%,calc(100% - 8px) 50%;background-size:4px 4px,4px 4px;background-repeat:no-repeat;color:var(--text-primary);font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:800;cursor:pointer;}
+.oi-snap-range select:hover,.oi-snap-range select:focus-visible{border-color:var(--section-accent,var(--info));outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--section-accent,var(--info)) 18%,transparent);}
+.oi-snap-open-link{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid color-mix(in srgb,var(--section-accent,var(--info)) 42%,var(--border));border-radius:var(--radius-sm);background:color-mix(in srgb,var(--section-accent,var(--info)) 9%,var(--bg-2));color:var(--section-accent,var(--info));font:inherit;font-size:var(--fs-xs);font-weight:800;white-space:nowrap;cursor:pointer;}
+.oi-snap-open-link span{transition:transform .18s ease;}.oi-snap-open-link:hover,.oi-snap-open-link:focus-visible{border-color:var(--section-accent,var(--info));outline:none;background:color-mix(in srgb,var(--section-accent,var(--info)) 16%,var(--bg-2));}.oi-snap-open-link:hover span,.oi-snap-open-link:focus-visible span{transform:translateX(2px);}
+
 /* .oi-snap-fullchain (the old standalone "Full Chain →" pill button) is
    removed — the card header itself is now the click target (see
    components.css's NAVIGABLE CARD HEADERS block, .nav-card-header). */
 
 .oi-snap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;}
+.oi-snap-overview{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:10px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:linear-gradient(110deg,color-mix(in srgb,var(--warn) 8%,var(--bg-2)),var(--bg-2) 48%);}
+.oi-snap-overview-main{display:flex;align-items:center;gap:9px;min-width:0;}
+.oi-snap-overview-label{font-size:var(--fs-xs);font-weight:700;color:var(--text-tertiary);white-space:nowrap;}
+.oi-snap-overview-main>strong{font-family:var(--font-mono);font-size:var(--fs-xl);line-height:1;color:var(--warn);}
+.oi-snap-positioning{padding:4px 8px;border-radius:999px;font-size:var(--fs-2xs);font-weight:800;letter-spacing:.03em;white-space:nowrap;}
+.oi-snap-positioning.bull{color:var(--pe);background:var(--pe-dim);}.oi-snap-positioning.bear{color:var(--ce);background:var(--ce-dim);}.oi-snap-positioning.neutral{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent);}
+.oi-snap-overview-detail{display:flex;align-items:center;}
+.oi-snap-overview-detail>span{display:flex;flex-direction:column;gap:2px;align-items:flex-end;padding-left:12px;border-left:1px solid var(--border-2);min-width:0;}
+.oi-snap-overview-detail small{font-size:var(--fs-2xs);color:var(--text-tertiary);white-space:nowrap;}.oi-snap-overview-detail strong{font-family:var(--font-mono);font-size:var(--fs-sm);white-space:nowrap;}
 .oc-native-chain[hidden]{display:none;}
 .oc-native-chain{
   margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--border);
@@ -911,9 +930,20 @@ details.card summary .card-head{margin:0;}
   background:#12151c;
   box-shadow:0 20px 50px -20px rgba(0,0,0,.6);
 }
-.option-chain-modal-body{flex:1 1 auto;min-height:0;padding:12px 14px;overflow:hidden;display:flex;}
+.option-chain-focus-grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,3fr) minmax(260px,1fr);overflow:hidden;}
+.option-chain-focus-grid.dense-all{grid-template-columns:1fr;}
+.option-chain-focus-grid.dense-all .option-chain-context{display:none;}
+.option-chain-modal-body{min-width:0;min-height:0;padding:12px 14px;overflow:hidden;display:flex;}
+.option-chain-context{min-width:0;overflow-y:auto;padding:14px;border-left:1px solid var(--border);background:var(--bg-1);}
 .option-chain-modal-body .oc-native-chain{display:flex;flex:1 1 auto;min-height:0;max-width:100%;margin:0;padding:0;border:0;flex-direction:column;}
 .option-chain-modal-body .oc-native-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}
+@media(max-width:1100px){
+  .option-chain-focus-grid{grid-template-columns:1fr;overflow-y:auto;}
+  .option-chain-modal-body{min-height:62vh;overflow:visible;}
+  .option-chain-context{border-left:0;border-top:1px solid var(--border);overflow:visible;}
+  .option-chain-context .focus-context-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:640px){.option-chain-context .focus-context-grid{grid-template-columns:1fr;}}
 
 /* IV Surface keeps its summary visible while only the strike plot scrolls.
    Previously #iv-surface-content had its intrinsic full-row height, so the
@@ -952,7 +982,7 @@ details.card summary .card-head{margin:0;}
   padding: var(--space-4);display:flex;flex-direction:column;gap:10px;min-width:0;
 }
 .oi-snap-card.pos{background:var(--pos-dim);border-color:rgba(32,201,151,.25);}
-.oi-snap-card.info{background:var(--info-dim);border-color:rgba(116,192,252,.25);}
+.oi-snap-card.info{background:var(--bg-0);border-color:color-mix(in srgb,var(--info) 42%,var(--border));}
 
 .oi-snap-card-top{display:flex;align-items:center;gap: var(--space-3);min-width:0;}
 .oi-snap-head-net,.oi-snap-head-pcr{display:flex;flex-direction:column;gap:2px;min-width:0;white-space:nowrap;}
@@ -970,7 +1000,7 @@ details.card summary .card-head{margin:0;}
   display:flex;align-items:center;justify-content:center;
 }
 .oi-snap-icon.pos{background:rgba(32,201,151,.16);}
-.oi-snap-icon.info{background:rgba(116,192,252,.16);}
+.oi-snap-icon.info{background:var(--bg-0);border:1px solid color-mix(in srgb,var(--info) 45%,var(--border));}
 
 .oi-snap-title{
   font-family:var(--font-display);font-weight:700;font-size:var(--fs-sm);
@@ -981,8 +1011,14 @@ details.card summary .card-head{margin:0;}
 .oi-snap-sides span{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0;padding:5px 6px;border-radius:var(--radius-sm);}
 .oi-snap-sides span+span{padding-left:8px;border-left:1px solid var(--border-2);}
 .oi-snap-sides small{font-size:var(--fs-xs);font-weight:700;letter-spacing:.04em;white-space:nowrap;}
-.oi-snap-sides strong{font-family:var(--font-mono);font-size:var(--fs-sm);font-variant-numeric:tabular-nums;white-space:nowrap;}
-.oi-snap-sides .ce{color:var(--ce);background:var(--ce-dim);}.oi-snap-sides .pe{color:var(--pe);background:var(--pe-dim);}
+.oi-snap-sides strong{font-family:var(--font-mono);font-size:.9375rem;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.oi-snap-sides .ce{color:var(--ce);background:color-mix(in srgb,var(--ce) 12%,var(--bg-1));border:1px solid color-mix(in srgb,var(--ce) 25%,var(--border));}.oi-snap-sides .pe{color:var(--pe);background:color-mix(in srgb,var(--pe) 12%,var(--bg-1));border:1px solid color-mix(in srgb,var(--pe) 25%,var(--border));}
+
+.oi-snap-balance{display:flex;flex-direction:column;gap:5px;}
+.oi-snap-balance-labels{display:flex;justify-content:space-between;gap:8px;font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:700;}
+.oi-snap-balance-labels .ce{color:var(--ce);}.oi-snap-balance-labels .pe{color:var(--pe);}
+.oi-snap-balance-track{display:flex;width:100%;height:6px;overflow:hidden;border-radius:999px;background:var(--bg-1);}
+.oi-snap-balance-track i{display:block;height:100%;}.oi-snap-balance-track i.ce{background:var(--ce);}.oi-snap-balance-track i.pe{background:var(--pe);}
 
 .oi-snap-inline-metrics{margin-top:auto;padding-top:9px;border-top:1px solid var(--border-2);}
 .oi-snap-inline-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:7px;}
@@ -1016,6 +1052,10 @@ details.card summary .card-head{margin:0;}
 .oi-flow-divider{width:1px;align-self:stretch;background:var(--border);margin:0 14px;}
 @media (max-width:640px){
   .oi-snap-grid{grid-template-columns:1fr;}
+  .oi-snap-overview{align-items:flex-start;flex-direction:column;}
+  .oi-snap-toolbar{align-items:flex-start;flex-direction:column;}
+  .oi-snap-header-actions{width:100%;margin-left:0;justify-content:space-between;}
+  .oi-snap-overview-detail>span{padding-left:0;border-left:0;align-items:flex-start;}
   .oi-flow-body{flex-direction:column;gap: var(--space-5);}
   .oi-flow-divider{display:none;}
 }
@@ -1485,7 +1525,7 @@ button.oic-head.nav-card-header{
   border-radius:9px;
   display:flex;align-items:center;justify-content:center;
   font-size:var(--fs-lg);
-  background:rgba(116,192,252,0.14);color:var(--info);
+  background:var(--bg-0);color:var(--info);border:1px solid color-mix(in srgb,var(--info) 42%,var(--border));
 }
 .oic-icon.icon-amber{background:var(--warn-dim);color:var(--warn);}
 
@@ -1508,13 +1548,13 @@ button.oic-head.nav-card-header{
   padding:8px 14px;
   border-radius:var(--radius-pill);
   border:1px solid var(--info-dim);
-  background:rgba(116,192,252,0.06);
+  background:var(--bg-0);
   color:var(--info);
   font-size:var(--fs-sm);font-weight:600;
   white-space:nowrap;cursor:pointer;
   transition:background .12s,border-color .12s;
 }
-.oic-action:hover{background:rgba(116,192,252,0.16);border-color:var(--info);}
+.oic-action:hover{background:var(--bg-0);border-color:var(--info);color:#fff;}
 
 /* Strike Detail Report button lives inline in .oic-head now, right of
    the title (see exec-view.js's buildInstitutionalActivitySummaryCard) —
@@ -1540,7 +1580,7 @@ button.oic-head.nav-card-header{
 .oic-tile-icon{
   width:26px;height:26px;flex-shrink:0;border-radius:7px;
   display:flex;align-items:center;justify-content:center;
-  font-size:var(--fs-sm);background:rgba(139,92,246,0.16);color:var(--oic-purple);
+  font-size:var(--fs-sm);background:var(--bg-0);color:#B197FC;border:1px solid rgba(177,151,252,.4);
 }
 
 .oic-tile-label{

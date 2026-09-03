@@ -19,7 +19,7 @@
   --pos:      #20C997;  --pos-dim:  rgba(32,201,151,0.14);  --pos-strong: #12B886;
   --neg:      #FF6B6B;  --neg-dim:  rgba(255,107,107,0.14); --neg-strong: #FA5252;
   --warn:     #FFD43B;  --warn-dim: rgba(255,212,59,0.14);
-  --info:     #74C0FC;  --info-dim: rgba(116,192,252,0.14); --info-strong: #339AF0;
+  --info:     #8ACEFF;  --info-dim: rgba(5,9,16,0.94); --info-strong: #4DABF7;
   --disabled: #5C6370;  --disabled-dim: rgba(92,99,112,0.14);
 
   /* Alternate accent palette used by option-chain.css's "ledger" design
@@ -40,8 +40,8 @@
      These remain identity colors only; use --pos/--neg for price direction. */
   /* Saturated CE blue on a near-black surface so it reads as a distinct
      option side rather than fading into a second blue background. */
-  --ce:        #3B82F6;  --ce-dim:   rgba(5,10,22,0.86);
-  --pe:        #C084FC;  --pe-dim:   rgba(192,132,252,0.16);
+  --ce:        #60A5FA;  --ce-dim:   rgba(5,9,16,0.94);
+  --pe:        #D8B4FE;  --pe-dim:   rgba(9,6,15,0.94);
 
   /* ── Radius scale ── */
   --radius:    8px;   /* default/base radius — most common value, predates the sm/md/lg scale below */

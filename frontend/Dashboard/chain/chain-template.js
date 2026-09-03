@@ -822,11 +822,13 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   if(!chain.length){
     return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
-      aria-expanded="${tableOpen}" aria-controls="option-chain-table">
+    <div class="section-header oi-snap-toolbar">
       <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">${tableOpen?'▾':'↗'}</span>
-    </button>
+      <div class="oi-snap-header-actions">
+        <label class="oi-snap-range"><span>Range</span><select data-chain-range-select onchange="switchChainRange(Number(this.value),this)" aria-label="Option chain strike range">${typeof buildRangeSelectOptionsHtml === 'function' ? buildRangeSelectOptionsHtml(_chainRange) : ''}</select></label>
+        <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table">Option Chain <span aria-hidden="true">↗</span></button>
+      </div>
+    </div>
     <div class="dd-empty">Awaiting chain data…</div>
   </div>`;
   }
@@ -858,9 +860,15 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const totalPeVol = chain.reduce((sum,r)=>sum+(r.peVol||0),0);
   const ceVolOi = totalCeVol/(totalCe||1);
   const peVolOi = totalPeVol/(totalPe||1);
+  const oiTotal = totalCe + totalPe;
+  const ceOiPct = oiTotal > 0 ? (totalCe / oiTotal) * 100 : 50;
+  const peOiPct = 100 - ceOiPct;
+  const chgMagnitude = Math.abs(totalCeChg) + Math.abs(totalPeChg);
+  const ceChgPct = chgMagnitude > 0 ? (Math.abs(totalCeChg) / chgMagnitude) * 100 : 50;
+  const peChgPct = 100 - ceChgPct;
+  const positioningLabel = pcr > 1.05 ? 'Put-heavy' : pcr < 0.95 ? 'Call-heavy' : 'Balanced';
+  const positioningClass = pcr > 1.05 ? 'bull' : pcr < 0.95 ? 'bear' : 'neutral';
 
-  const rngLabel = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'ALL STRIKES':'±'+rng+' STRIKES'; })();
-  const rngTag = (() => { const rng = typeof _chainRange !== 'undefined' ? _chainRange : 10; return rng===9999?'All':'±'+rng; })();
   const visibleStrikes = new Set(chain.map(r => Number(r.strike)));
   const netOiVelocityFor = (windowMin) => {
     const block = (d.oiVelocity || []).find(b => Number(b.window) === windowMin);
@@ -881,17 +889,29 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   return `
   <div class="section-card sc-green" id="chain-summary-card">
-    <button type="button" class="section-header nav-card-header" onclick="openOptionChainModal(this)"
-      aria-expanded="${tableOpen}" aria-controls="option-chain-table">
+    <div class="section-header oi-snap-toolbar">
       <span class="oi-snap-heading nav-card-header-label">
         <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--ce)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pe)"/></svg>
         Option Chain Snapshot
       </span>
-      <span class="oi-snap-badge">${rngLabel}</span>
-      <span class="nav-card-header-arrow" aria-hidden="true">${tableOpen?'▾':'↗'}</span>
-    </button>
+      <div class="oi-snap-header-actions">
+        <label class="oi-snap-range"><span>Range</span><select data-chain-range-select onchange="switchChainRange(Number(this.value),this)" aria-label="Option chain strike range">${typeof buildRangeSelectOptionsHtml === 'function' ? buildRangeSelectOptionsHtml(_chainRange) : ''}</select></label>
+        <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table">Option Chain <span aria-hidden="true">↗</span></button>
+      </div>
+    </div>
 
     <div class="oi-snap-content">
+
+    <div class="oi-snap-overview" aria-label="Visible option-chain positioning summary">
+      <div class="oi-snap-overview-main">
+        <span class="oi-snap-overview-label">Range PCR</span>
+        <strong>${fmtN(pcr,2)}</strong>
+        <span class="oi-snap-positioning ${positioningClass}">${positioningLabel}</span>
+      </div>
+      <div class="oi-snap-overview-detail">
+        <span><small>PCR change</small><strong>${signedPcrDelta(pcrShift)}</strong></span>
+      </div>
+    </div>
 
     <div class="oi-snap-grid">
 
@@ -902,11 +922,14 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           </div>
           <div class="oi-snap-title">OI Summary</div>
           <span class="oi-snap-head-net"><small>Net OI · PE−CE</small><strong style="color:${signColor(netOi)}">${signedFmt(netOi)}</strong></span>
-          <span class="oi-snap-head-pcr"><small>Range PCR · ${rngTag}</small><strong>${fmtN(pcr,2)}</strong></span>
         </div>
         <div class="oi-snap-sides" aria-label="Call and put open interest totals">
           <span class="ce"><small>CE OI</small><strong>${fmtCrLK(totalCe)}</strong></span>
           <span class="pe"><small>PE OI</small><strong>${fmtCrLK(totalPe)}</strong></span>
+        </div>
+        <div class="oi-snap-balance" aria-label="CE ${fmtN(ceOiPct,0)} percent, PE ${fmtN(peOiPct,0)} percent">
+          <div class="oi-snap-balance-labels"><span class="ce">CE ${fmtN(ceOiPct,0)}%</span><span class="pe">PE ${fmtN(peOiPct,0)}%</span></div>
+          <div class="oi-snap-balance-track"><i class="ce" style="width:${ceOiPct}%"></i><i class="pe" style="width:${peOiPct}%"></i></div>
         </div>
         <div class="oi-snap-inline-metrics" aria-label="Volume to open interest ratios">
           <div class="oi-snap-inline-heading"><strong>Vol/OI</strong><small>Visible range</small></div>
@@ -927,11 +950,14 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
           </button>
           <span class="oi-snap-head-net"><small>Net ΔOI · PE−CE</small><strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong></span>
-          <span class="oi-snap-head-pcr"><small>Range PCR Δ</small><strong>${signedPcrDelta(pcrShift)}</strong></span>
         </div>
         <div class="oi-snap-sides" aria-label="Call and put change in open interest totals">
           <span class="ce"><small>CE ΔOI</small><strong>${signedFmt(totalCeChg)}</strong></span>
           <span class="pe"><small>PE ΔOI</small><strong>${signedFmt(totalPeChg)}</strong></span>
+        </div>
+        <div class="oi-snap-balance" aria-label="Absolute change split: CE ${fmtN(ceChgPct,0)} percent, PE ${fmtN(peChgPct,0)} percent">
+          <div class="oi-snap-balance-labels"><span class="ce">CE share ${fmtN(ceChgPct,0)}%</span><span class="pe">PE share ${fmtN(peChgPct,0)}%</span></div>
+          <div class="oi-snap-balance-track"><i class="ce" style="width:${ceChgPct}%"></i><i class="pe" style="width:${peChgPct}%"></i></div>
         </div>
         <div class="oi-snap-inline-metrics" aria-label="Net OI flow and velocity">
           <div class="oi-snap-inline-heading"><strong>OI Flow / Velocity</strong><small>PE−CE ΔOI</small></div>
@@ -947,17 +973,17 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
       <div class="oc-native-scroll">
         <table class="oc-ledger-table" data-view="${ledgerView}" aria-label="Option Chain ledger by strike">
           <colgroup>
-            <col class="c-ltp"><col class="c-ltp"><col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-sig">
+            <col class="c-sig"><col class="c-ltp"><col class="c-ltp"><col class="c-strike"><col class="c-oi"><col class="c-chg">
             <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-delta"><col class="c-gamma"><col class="c-theta"><col class="c-vega"><col class="c-foot"><col class="c-struct">
           </colgroup>
           <thead>
             <tr>
+              <th class="oc-metric positioning">Signal <small>composite</small></th>
               <th class="ce">CE LTP <small>change</small></th>
               <th class="pe">PE LTP <small>change</small></th>
               <th class="strike">Strike <small>PCR</small></th>
               <th class="oc-metric positioning">Open Int <small>PE / CE</small></th>
               <th class="oc-metric positioning">Chg OI <small>PE / CE</small></th>
-              <th class="oc-metric positioning">Signal <small>composite</small></th>
               <th class="oc-metric activity">IV <small>PE / CE</small></th>
               <th class="oc-metric activity">Volume <small>PE / CE</small></th>
               <th class="oc-metric activity">Premium ₹ <small>PE / CE</small></th>
@@ -971,12 +997,12 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           </thead>
           <tbody>
             ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; const oiWinner=(Number(r.peOI)||0)===(Number(r.ceOI)||0)?'':((Number(r.peOI)||0)>(Number(r.ceOI)||0)?'pe':'ce'); const chgWinner=Math.abs(Number(r.peChgOI)||0)===Math.abs(Number(r.ceChgOI)||0)?'':(Math.abs(Number(r.peChgOI)||0)>Math.abs(Number(r.ceChgOI)||0)?'pe':'ce'); return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
+              <td class="oc-metric positioning signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
               <td class="ltp ce"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button></td>
               <td class="ltp pe"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button></td>
               <td class="strike"><button type="button" onclick="event.stopPropagation();openOptionChainAtStrike(${Number(r.strike)})" aria-label="Open Strike Detail for ${fmtI(r.strike)}"><strong>${fmtI(r.strike)}</strong><small>PCR ${r.ceOI?fmtN((r.peOI||0)/r.ceOI,2):'—'}</small></button></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${oiWinner==='pe'?'dominant':''}">${fmtCrLK(r.peOI)}</span><span class="side-value ce ${oiWinner==='ce'?'dominant':''}">${fmtCrLK(r.ceOI)}</span></div></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${chgWinner==='pe'?'dominant':''}">${signedFmt(r.peChgOI)}</span><span class="side-value ce ${chgWinner==='ce'?'dominant':''}">${signedFmt(r.ceChgOI)}</span></div></td>
-              <td class="oc-metric positioning signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>

@@ -42,3 +42,21 @@ def test_verified_greeks_keep_real_zero_distinct_from_unavailable():
     summary = compute_chain_metrics(result)
     assert summary["net_delta_exposure"] == 0.0
     assert summary["net_gamma_exposure"] == 0.0
+
+
+def test_capital_walls_respect_spot_side_instead_of_selecting_itm_premium():
+    rows = []
+    for strike, ce_ltp, pe_ltp in [
+        (100.0, 30.0, 1.0),
+        (110.0, 12.0, 8.0),
+        (120.0, 2.0, 25.0),
+    ]:
+        row = _master().iloc[0].to_dict()
+        row.update(strike=strike, ce_ltp=ce_ltp, pe_ltp=pe_ltp)
+        rows.append(row)
+
+    result = compute_capital_metrics(pd.DataFrame(rows), spot=115.0, lot_size=50)
+    summary = compute_chain_metrics(result, spot=115.0)
+
+    assert summary["ce_capital_wall_strike"] == 120.0
+    assert summary["pe_capital_wall_strike"] == 110.0

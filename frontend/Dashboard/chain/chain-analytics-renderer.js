@@ -361,6 +361,7 @@ ChainView.prototype._rerenderChainPanels = function() {
     // momentum, leave every physical row and its contents untouched; once
     // the gesture settles, patch values inside the already-mounted rows.
     // This preserves scrolling without freezing market ticks until close.
+    copyInner('.oi-snap-overview');
     copyInner('.oi-snap-grid');
     _bindChainLedgerScrollGuard(expandedChain);
     if(Date.now() >= _chainLedgerScrollState.activeUntil){
@@ -378,7 +379,14 @@ ChainView.prototype._rerenderChainPanels = function() {
     bindGuard: true,
     shouldSkip: (card) => {
       _bindChainLedgerScrollGuard(card);
-      return Date.now() < _chainLedgerScrollState.activeUntil;
+      // A native select is dismissed when its DOM node is replaced. Live
+      // ticks can arrive several times while the range menu is open, so
+      // keep the current card mounted until the user finishes selecting.
+      // The next tick after blur applies any values that changed meanwhile.
+      const rangeSelectOpen = document.activeElement
+        && document.activeElement.matches('[data-chain-range-select]')
+        && card.contains(document.activeElement);
+      return rangeSelectOpen || Date.now() < _chainLedgerScrollState.activeUntil;
     },
     preserveState: (card) => {
       const scroll = _bindChainLedgerScrollGuard(card);

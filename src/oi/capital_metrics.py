@@ -173,7 +173,7 @@ def compute_capital_metrics(master: pd.DataFrame, spot: float, lot_size: int) ->
     return out
 
 
-def compute_chain_metrics(capital_df: pd.DataFrame) -> dict:
+def compute_chain_metrics(capital_df: pd.DataFrame, spot: float | None = None) -> dict:
     """
     Chain-wide rollup of compute_capital_metrics()'s per-strike columns —
     the "Executive Card" numbers (a single net figure) rather than a
@@ -206,19 +206,28 @@ def compute_chain_metrics(capital_df: pd.DataFrame) -> dict:
     total_pe_gamma_exp = complete_stage2_sum("pe_gamma_exposure")
     net_delta_exp = complete_stage2_sum("net_delta_exposure")
 
-    # Capital-weighted "wall" — the strike holding the most premium, as
+    # Capital-weighted "wall" — the eligible strike holding the most
+    # premium, as
     # opposed to ce_wall/pe_wall elsewhere (engine.py), which is the
     # highest-raw-OI strike. These can point at different strikes: a
     # strike with huge OI in cheap far-OTM premium can lose the capital
     # wall to a smaller-OI, expensive near-ATM strike — exactly the
     # "raw OI misleads" case this whole capital-metrics layer exists for.
+    # A CE wall is resistance, so it must not be below spot; a PE wall is
+    # support, so it must not be above spot.  Without this moneyness filter,
+    # intrinsic value makes ITM calls below spot and ITM puts above spot look
+    # artificially dominant and produces an inverted pair of "walls".
+    valid_spot = spot is not None and pd.notna(spot) and float(spot) > 0
+    ce_candidates = capital_df[capital_df["strike"] >= float(spot)] if valid_spot else capital_df
+    pe_candidates = capital_df[capital_df["strike"] <= float(spot)] if valid_spot else capital_df
+
     ce_capital_wall_strike = (
-        float(capital_df.loc[capital_df["ce_premium_locked"].idxmax(), "strike"])
-        if capital_df["ce_premium_locked"].notna().any() else None
+        float(ce_candidates.loc[ce_candidates["ce_premium_locked"].idxmax(), "strike"])
+        if ce_candidates["ce_premium_locked"].notna().any() else None
     )
     pe_capital_wall_strike = (
-        float(capital_df.loc[capital_df["pe_premium_locked"].idxmax(), "strike"])
-        if capital_df["pe_premium_locked"].notna().any() else None
+        float(pe_candidates.loc[pe_candidates["pe_premium_locked"].idxmax(), "strike"])
+        if pe_candidates["pe_premium_locked"].notna().any() else None
     )
 
     return {

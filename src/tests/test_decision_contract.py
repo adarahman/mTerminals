@@ -31,7 +31,9 @@ def test_decision_contract_has_provenance_and_visible_evidence():
     assert result["evidenceCoverage"] == 85
     assert result["degraded"] is False
     assert result["missingInputs"] == ["oi_velocity"]
-    assert len(result["contributors"]) == 5
+    assert len(result["contributors"]) == 6
+    assert result["contributors"][-1]["key"] == "oversold_oi_support"
+    assert result["contributors"][-1]["state"] == "unavailable"
     assert result["tradeGrade"] == "A"
     assert result["importantLevels"]["atm"] == 24000
 

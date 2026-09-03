@@ -40,6 +40,10 @@ from decision.signal_builder import (
 )
 from decision.confidence import derive_bias, compute_confidence
 from decision.strategy_selection import derive_action, suggest_strategy
+from analytics.oversold_oi_support import (
+    evaluate_oversold_oi_support,
+    update_spot_rsi,
+)
 
 
 # ── Main engine ───────────────────────────────────────────────────────────────
@@ -85,6 +89,16 @@ class DecisionEngine:
         # Smart money top strikes (DataFrame | None)
         smart_money_top = getattr(er, "smart_money_top", None)
         futures_oi = float(getattr(er, "fut_oi", 0.0) or 0.0)
+        symbol = str(getattr(er, "symbol", "") or "")
+        spot_rsi = update_spot_rsi(symbol, spot, out.decision_timestamp)
+        oversold_support = evaluate_oversold_oi_support(
+            rsi=spot_rsi,
+            spot=spot,
+            pe_wall=pe_wall,
+            master=getattr(er, "master", None),
+            fut_signal=fut_signal,
+            strike_step=strike_step,
+        )
 
         # ── Sub-scores  (all in [-1, +1]; positive = bullish) ─────────────────
         pcr_score  = score_pcr(total_pcr)
@@ -142,6 +156,19 @@ class DecisionEngine:
             "score": round(score_map[key], 3) if availability[key] else None,
             "weightedContribution": round(score_map[key] * weight, 3) if availability[key] else None,
         } for key, weight in weights.items()]
+        out.contributors.append({
+            "key": "oversold_oi_support",
+            "label": "Oversold + OI Support",
+            "available": oversold_support["state"] != "unavailable",
+            "weight": 8,
+            "score": oversold_support["score"] if oversold_support["state"] != "unavailable" else None,
+            "weightedContribution": round(oversold_support["score"] * 0.08, 3)
+            if oversold_support["state"] != "unavailable" else None,
+            "state": oversold_support["state"],
+            "detail": oversold_support.get("detail", ""),
+            "rsi": oversold_support.get("rsi"),
+            "evidence": oversold_support.get("evidence", []),
+        })
 
         directional_scores = [score_map[key] for key in weights if availability[key]]
         pos = sum(1 for s in directional_scores if s > 0.15)
@@ -164,7 +191,20 @@ class DecisionEngine:
             sum(score_map[key] * weight for key, weight in weights.items()
                 if availability[key])
         )
+        composite += oversold_support["score"] * 0.08
         composite = max(-1.0, min(1.0, composite))
+
+        if oversold_support["state"] == "confirmed":
+            out.active_signals.append(ActiveSignal(
+                f"Oversold + OI Support confirmed · RSI {spot_rsi:.1f} · "
+                + " · ".join(oversold_support["evidence"]),
+                "ok", 11, "confirmation:oversold-oi-support"))
+        elif oversold_support["state"] in {"unconfirmed", "invalidated"} and spot_rsi is not None and spot_rsi <= 30:
+            out.active_signals.append(ActiveSignal(
+                f"Oversold signal {oversold_support['state']} · RSI {spot_rsi:.1f} · "
+                f"{oversold_support['detail']}",
+                "warn", 11, "confirmation:oversold-oi-support"))
+        out.verdicts["oversoldOiSupport"] = oversold_support
 
         # A moderate/strong call against an established session move needs
         # explicit momentum evidence, which this engine does not yet carry.
@@ -182,6 +222,7 @@ class DecisionEngine:
             "mp_score":   round(mp_score,   3),
             "oi_score":   round(oi_score,   3),
             "sm_score":   round(sm_score,   3),
+            "oversold_oi_support": oversold_support,
             "vol_oi_available": bool(vol_oi_ratios),
             "composite":  round(composite,  3),
             "conflict":   conflict,

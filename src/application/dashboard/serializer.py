@@ -233,7 +233,7 @@ def export_dashboard_json(
     # (empty) object instead of a missing key.
     capital_df_for_rollup = ctx_dict.get("capital_metrics")
     capital_summary = (
-        compute_chain_metrics(capital_df_for_rollup)
+        compute_chain_metrics(capital_df_for_rollup, spot=spot)
         if capital_df_for_rollup is not None and not capital_df_for_rollup.empty
         else {}
     )

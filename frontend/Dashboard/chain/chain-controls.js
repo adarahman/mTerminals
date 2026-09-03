@@ -36,4 +36,7 @@ function setOptionChainLedgerView(view, button) {
     control.setAttribute('aria-pressed', String(selected));
   });
   if (typeof app !== 'undefined' && app.chain) app.chain.chainLedgerView = view;
+  if (typeof app !== 'undefined' && app.modal && typeof app.modal.renderOptionChainContext === 'function' && typeof _data !== 'undefined') {
+    app.modal.renderOptionChainContext(_data);
+  }
 }

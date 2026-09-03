@@ -122,6 +122,17 @@ class ChainView {
       b.classList.toggle('active-range', b.textContent.trim() === (range === 9999 ? 'All' : '±' + range));
     });
   });
+  document.querySelectorAll('[data-chain-range-select]').forEach(select => {
+    select.value = String(range);
+  });
+
+  // onchange fires while the native select still owns focus. The live-tick
+  // renderer deliberately preserves a focused range select to prevent its
+  // menu flickering closed; release focus here so this user-initiated range
+  // change is allowed to rebuild the figures immediately.
+  if(el && el.matches && el.matches('[data-chain-range-select]') && typeof el.blur === 'function'){
+    el.blur();
+  }
 
   // ── KEEP THE DENSE CHAIN TABLE (#tbody/#rightPanel) IN SYNC ──
   // It used to have its own ±3/±7/±13/ALL filter bar; that's gone, so it
@@ -137,6 +148,9 @@ class ChainView {
   }
 
   if(_data) _rerenderChainPanels();
+  if(typeof app !== 'undefined' && app.modal && typeof app.modal.renderOptionChainContext === 'function'){
+    app.modal.renderOptionChainContext(_data);
+  }
 
   // The ledger is physically mounted inside its modal while open, so the
   // dashboard card refresh above intentionally leaves that scroll subtree

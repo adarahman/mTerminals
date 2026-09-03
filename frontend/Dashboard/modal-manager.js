@@ -187,6 +187,52 @@ class ModalManager {
   }
   if(_data.dte != null) parts.push(`${_data.dte}D`);
   context.textContent = parts.join(' · ');
+  this.renderOptionChainContext(_data);
+}
+
+  renderOptionChainContext(d){
+  const host=document.getElementById('option-chain-context-grid');
+  const layout=document.getElementById('option-chain-focus-grid');
+  if(!host||!layout||!d)return;
+  const allColumns=typeof app!=='undefined' && app.chain && app.chain.chainLedgerView==='all';
+  layout.classList.toggle('dense-all',allColumns);
+  const dec=d.decision||{};
+  const esc=v=>String(v==null?'—':v).replace(/[&<>"']/g,c=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+  const num=(v,digits=2)=>Number.isFinite(Number(v))
+    ? Number(v).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
+  const bias=String(dec.bias||'WAIT').toUpperCase();
+  const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';
+  host.innerHTML=`
+    <section class="focus-context-card focus-context-primary">
+      <span class="focus-context-label">Underlying</span>
+      <strong>${esc(d.symbol)} <em>SPOT</em></strong>
+      <div class="focus-context-price">₹${num(d.spot,2)}</div>
+      <small>${esc(d.expiry)} · ${num(d.dte,0)}d · ${Number(_chainRange)===9999?'All strikes':'ATM ±'+Number(_chainRange)}</small>
+    </section>
+    <section class="focus-context-card">
+      <span class="focus-context-label">Positioning</span>
+      <div class="focus-context-row"><span>OI PCR</span><b>${num(d.totalPCR,2)}</b></div>
+      <div class="focus-context-row"><span>ΔOI PCR</span><b>${num(d.oiChgPCR,2)}</b></div>
+      <div class="focus-context-row"><span>Max pain</span><b>₹${num(d.maxPain,0)}</b></div>
+    </section>
+    <section class="focus-context-card">
+      <span class="focus-context-label">Key walls</span>
+      <div class="focus-context-row"><span>CE resistance</span><b class="negative">₹${num(d.ceWall,0)}</b></div>
+      <div class="focus-context-row"><span>PE support</span><b class="positive">₹${num(d.peWall,0)}</b></div>
+    </section>
+    <section class="focus-context-card">
+      <span class="focus-context-label">Volatility</span>
+      <div class="focus-context-row"><span>ATM IV</span><b>${num(d.atmIV,2)}%</b></div>
+      <div class="focus-context-row"><span>IV Rank</span><b>${num(d.ivRank,0)}</b></div>
+      <div class="focus-context-row"><span>India VIX</span><b>${num(d.indiaVix,2)}</b></div>
+    </section>
+    <section class="focus-context-card focus-context-decision ${tone}">
+      <span class="focus-context-label">Decision engine</span>
+      <strong>${esc(dec.bias||'WAIT')} · ${num(dec.confidence,0)}%</strong>
+      <small>${esc(dec.action||dec.suggestedStrategy||'Awaiting confirmation')}</small>
+    </section>`;
 }
 
   closeOptionChainModal(){
