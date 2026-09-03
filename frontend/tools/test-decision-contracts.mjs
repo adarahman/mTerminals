@@ -8,6 +8,8 @@ const strategyView = fs.readFileSync(new URL('../Dashboard/strategy-view.js', im
 assert.match(source, /Evidence Confidence/, 'confidence must be labelled as evidence confidence');
 assert.match(source, /dec\.evidenceCoverage/, 'decision view must consume backend evidence coverage');
 assert.match(source, /dec\.contributors/, 'decision view must expose backend contributors');
+assert.match(source, /\['futures', 'Futures positioning', 20\]/,
+  'decision detail must retain a visible futures-positioning row when evidence is missing');
 assert.match(source, /dec\.degraded/, 'decision view must expose degraded state');
 assert.match(source, /dec\.missingInputs/, 'decision view must expose missing inputs');
 assert.doesNotMatch(source, /confidence\s*=\s*.*(?:pcr|oi_score|composite)/i,
@@ -27,4 +29,4 @@ assert.match(dashboardRenderer, /d\.decision\.suggestedStrategy/,
 assert.match(strategyView, /this\.selectionTouched = true/,
   'manual strategy selection must remain under user control');
 
-console.log('Decision contracts: 13/13 passed');
+console.log('Decision contracts: 14/14 passed');

@@ -451,6 +451,24 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const act  = dec.action || '—';
     const conflict = dec.conflictFlag || false;
     const contributors = Array.isArray(dec.contributors) ? dec.contributors : [];
+    // Required evidence must remain visible even when a degraded/legacy
+    // decision payload omits contributor records. Otherwise the most useful
+    // diagnostic (for example, missing futures OI) disappears from the very
+    // panel intended to explain incomplete evidence.
+    const requiredEvidence = [
+      ['pcr', 'PCR positioning', 30],
+      ['engine_bias', 'Combined market bias', 30],
+      ['futures', 'Futures positioning', 20],
+      ['max_pain', 'Max-pain gravity', 5],
+      ['oi_velocity', 'OI velocity', 15],
+    ];
+    const visibleContributors = [...contributors];
+    const contributorKeys = new Set(visibleContributors.map(c => c && c.key));
+    requiredEvidence.forEach(([key, label, weight]) => {
+      if (!contributorKeys.has(key)) {
+        visibleContributors.push({ key, label, weight, available: false });
+      }
+    });
     const evidenceCoverage = Number.isFinite(Number(dec.evidenceCoverage)) ? Number(dec.evidenceCoverage) : 0;
     const decisionDegraded = dec.degraded === true;
     const decisionMissing = Array.isArray(dec.missingInputs) ? dec.missingInputs : [];
@@ -555,7 +573,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     // below remains the single owner of live alerts and confirmations.
     // Ranking by absolute weighted contribution surfaces the evidence that
     // moved the composite score most, irrespective of bullish/bearish sign.
-    const heroContributors = contributors
+    const heroContributors = visibleContributors
       .filter(c => c.available !== false && Number.isFinite(Number(c.weightedContribution)))
       .sort((a,b) => Math.abs(Number(b.weightedContribution)) - Math.abs(Number(a.weightedContribution)))
       .slice(0,3);
@@ -699,7 +717,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       <div class="dd-col" style="margin-bottom:10px;">
         <div class="dd-col-title">Decision Evidence · ${evidenceCoverage}% coverage</div>
         <div class="dd-sig-list">
-          ${contributors.length ? contributors.map(c => {
+          ${visibleContributors.map(c => {
             const available = c.available !== false;
             const contribution = available && c.weightedContribution != null
               ? `${Number(c.weightedContribution) >= 0 ? '+' : ''}${Number(c.weightedContribution).toFixed(3)}`
@@ -708,7 +726,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
               <span style="color:${available?'var(--text-primary)':'var(--neg)'};font-weight:700;min-width:170px;">${escapeHtml(c.label || c.key || 'Signal')}</span>
               <span style="color:var(--text-tertiary);">${available ? `${c.weight || 0}% weight · ${contribution}` : 'Missing — excluded from score'}</span>
             </div>`;
-          }).join('') : '<div class="dd-empty">Contributor evidence unavailable.</div>'}
+          }).join('')}
           ${dec.decisionTimestamp ? `<div class="dd-sig"><span style="color:var(--text-tertiary);">State ${dec.stateVersion || '—'} · ${dec.decisionTimestamp}</span></div>` : ''}
         </div>
       </div>
