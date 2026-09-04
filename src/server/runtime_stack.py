@@ -117,6 +117,13 @@ def build_runtime_stack(
         paper_engine=paper_engine,
         paper_portfolio=core_runtime.paper_portfolio,
     )
+    # Read-only Trade state for the authenticated mobile bridge.
+    # Deliberately does NOT expose place_order/cancel_order/control callables.
+    core_runtime.bridge.configure_trade_sources(
+        paper_snapshot=core_runtime.paper_portfolio.handshake_snapshot,
+        trading_status=live.supervisor.build_status,
+    )
+
     dashboard = build_dashboard_transport(
         runtime_state=runtime_state,
         encode=encode,
