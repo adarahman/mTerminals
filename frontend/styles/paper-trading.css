@@ -268,3 +268,19 @@
   #pt-portfolio-panel .pt-portfolio-summary-grid{grid-template-columns:1fr;}
   #pt-portfolio-panel .pt-summary-key,#pt-portfolio-panel .pt-summary-fund{grid-column:auto;}
 }
+
+
+/* Trade panel stacking
+   Order Entry is launched from the Portfolio panel and therefore must
+   explicitly sit above Portfolio while both are open. */
+#pt-portfolio-panel.trade-panel-background{
+  z-index:10020 !important;
+}
+
+#pt-order-panel.trade-panel-foreground{
+  z-index:10040 !important;
+}
+
+#pt-order-panel.open{
+  isolation:isolate;
+}

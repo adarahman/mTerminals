@@ -211,15 +211,24 @@ ChainView.prototype.renderDashboard = function(d) {
   // below it is grouped into one workspace at a time so analysis no longer
   // becomes one very long stack of equally-weighted cards.
   const activeWorkspace = app.ui.dashboardWorkspace || 'positioning';
-  const workspaceTab = (id, icon, label) => `<button type="button" class="dashboard-workspace-tab${activeWorkspace===id?' active':''}" data-workspace-tab="${id}" role="tab" aria-controls="workspace-${id}" aria-selected="${activeWorkspace===id?'true':'false'}" tabindex="${activeWorkspace===id?'0':'-1'}" onclick="switchDashboardWorkspace('${id}',this)"><span aria-hidden="true">${icon}</span>${label}</button>`;
-  h += `<nav class="dashboard-workspace-tabs" role="tablist" aria-label="Dashboard analysis workspace">
-    ${workspaceTab('positioning','⌗','Positioning')}
-    ${workspaceTab('flow','₹','Flow')}
-    ${workspaceTab('institutional','🏦','Institutional')}
-    ${workspaceTab('validation','✓','Strategy &amp; Risk')}
-  </nav>`;
+  const activeDestination = app.ui.dashboardDestination || 'home';
 
-  h += `<section id="workspace-positioning" class="dashboard-workspace" data-dashboard-workspace="positioning"${activeWorkspace==='positioning'?'':' hidden'}>`;
+  // Primary desktop destinations group the existing analytical workspaces.
+  // No analytics are duplicated or recomputed here.
+  const visibleWorkspaces = new Set(
+    activeDestination === 'market'
+      ? ['positioning', 'flow']
+      : activeDestination === 'analytics'
+        ? ['flow', 'institutional', 'validation']
+        : []
+  );
+
+  const workspaceVisible = id => visibleWorkspaces.has(id);
+
+  // Workspace navigation belongs to the persistent product rail.
+  // The old in-content workspace tab strip has been retired.
+
+  h += `<section id="workspace-positioning" class="dashboard-workspace" data-dashboard-workspace="positioning"${workspaceVisible('positioning')?'':' hidden'}>`;
 
   // NOTE: Conviction Multiplier Gauge moved into Advanced Analytics
   // (advanced-analytics-view.js) — it's a derived confirm/conflict check
@@ -551,7 +560,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Left owns capital/OI flow. Right stacks participant cash flow with
   // Vol/OI Velocity and its derived block-print summary. Keeping #sdt-panel
   // separate preserves its interactive subtree across live refreshes.
-  h += `<section id="workspace-flow" class="dashboard-workspace" data-dashboard-workspace="flow"${activeWorkspace==='flow'?'':' hidden'}><div id="oi-flow-section">
+  h += `<section id="workspace-flow" class="dashboard-workspace" data-dashboard-workspace="flow"${workspaceVisible('flow')?'':' hidden'}><div id="oi-flow-section">
 
   <div id="zone-capital-flow" class="zone-divider zone-divider--primary"><span class="zone-divider-title">Participation Evidence</span><span class="zone-divider-subtitle">Institutional activity and unusual block participation</span></div>
   <div class="capital-flow-story">
@@ -610,7 +619,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Advanced Analytics for now; it's a derived input to that card's
   // verdict, not a standalone ranking, so it doesn't map to Probability
   // the way the ranking itself did.
-  h += `<section id="workspace-institutional" class="dashboard-workspace" data-dashboard-workspace="institutional"${activeWorkspace==='institutional'?'':' hidden'}>`;
+  h += `<section id="workspace-institutional" class="dashboard-workspace" data-dashboard-workspace="institutional"${workspaceVisible('institutional')?'':' hidden'}>`;
   h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary"><span class="zone-divider-title">Institutional Activity</span><span class="zone-divider-subtitle">Large positioning and participant confirmation</span></div>';
   h += `<div class="institutional-crux-grid">
     ${greeksMoneynessHtml}
@@ -647,7 +656,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // strategy payoff / GEX-scenario exposure) — built earlier
   // (stratSimulatorHtml, needs strats/spot/greeksData in scope) but
   // appended here so build order matches display order.
-  h += `<section id="workspace-validation" class="dashboard-workspace" data-dashboard-workspace="validation"${activeWorkspace==='validation'?'':' hidden'}>`;
+  h += `<section id="workspace-validation" class="dashboard-workspace" data-dashboard-workspace="validation"${workspaceVisible('validation')?'':' hidden'}>`;
   h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary"><span class="zone-divider-title">Strategy, Risk &amp; Validation</span><span class="zone-divider-subtitle">Volatility, probability and scenario tools</span></div>';
   h += this.buildVolatilityHtml(d);
   h += this.buildProbabilityHtml(d);

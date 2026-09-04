@@ -81,6 +81,220 @@ window.updateStickyOffsets = (...args) => app.ui.updateStickyOffsets(...args);
 window.switchTimer = (...args) => app.ui.switchTimer(...args);
 window.toggleControlSidebar = (...args) => app.ui.toggleControlSidebar(...args);
 window.toggleNavigationRail = (...args) => app.ui.toggleNavigationRail(...args);
+
+/**
+ * Primary desktop product navigation.
+ *
+ * This is intentionally only a presentation/router layer. Existing
+ * dashboard sections, modals and trading panels remain authoritative.
+ */
+window.desktopPrimaryNav = function(name, button) {
+  switch (name) {
+    case 'home':
+      app.ui.switchDashboardDestination('home', button);
+      secJump('sec-decision');
+      break;
+
+    case 'market':
+      app.ui.switchDashboardDestination('market', button);
+      requestAnimationFrame(() => {
+        const target = document.getElementById('zone-structure');
+        if (target) {
+          const offset =
+            parseFloat(
+              getComputedStyle(document.documentElement)
+                .getPropertyValue('--panel-top')
+            ) || 60;
+
+          const y =
+            target.getBoundingClientRect().top +
+            window.scrollY -
+            offset -
+            8;
+
+          window.scrollTo({
+            top: Math.max(0, y),
+            behavior: 'smooth'
+          });
+        }
+      });
+      break;
+
+    case 'chain':
+      app.ui.switchDashboardDestination('chain', button);
+
+      if (typeof openOptionChainModal === 'function') {
+        openOptionChainModal();
+      }
+      break;
+
+    case 'analytics':
+      app.ui.switchDashboardDestination('analytics', button);
+
+      requestAnimationFrame(() => {
+        const target =
+          document.getElementById('zone-capital-flow') ||
+          document.getElementById('workspace-flow');
+
+        if (target) {
+          const offset =
+            parseFloat(
+              getComputedStyle(document.documentElement)
+                .getPropertyValue('--panel-top')
+            ) || 60;
+
+          const y =
+            target.getBoundingClientRect().top +
+            window.scrollY -
+            offset -
+            8;
+
+          window.scrollTo({
+            top: Math.max(0, y),
+            behavior: 'smooth'
+          });
+        }
+      });
+      break;
+
+    case 'trade':
+      app.ui.switchDashboardDestination('trade', button);
+
+      if (typeof togglePortfolioPanel === 'function') {
+        togglePortfolioPanel();
+      }
+      break;
+  }
+};
+
+function organizeDesktopDestinationOwnership() {
+  /*
+   * TRADE
+   *   Portfolio
+   *   Order
+   *
+   * ANALYTICS / STRATEGY & RISK
+   *   Backtest
+   */
+
+  /* ----------------------------------------------------------
+   * TRADE → ORDER
+   *
+   * #pt-panel-title belongs to ORDER ENTRY itself, so it must
+   * NOT be used as the Trade/Portfolio mounting target.
+   * ---------------------------------------------------------- */
+  const orderButton = document.getElementById('pt-order-toggle-btn');
+  const portfolioPanel = document.getElementById('pt-portfolio-panel');
+
+  if (orderButton && portfolioPanel) {
+    let tradeActions =
+      portfolioPanel.querySelector('#trade-context-actions');
+
+    if (!tradeActions) {
+      tradeActions = document.createElement('div');
+      tradeActions.id = 'trade-context-actions';
+      tradeActions.className = 'trade-context-actions';
+      tradeActions.setAttribute('aria-label', 'Trade actions');
+
+      /*
+       * Put Order at the TOP of Portfolio, before portfolio data.
+       * We deliberately do not move it into #pt-order-panel.
+       */
+      portfolioPanel.prepend(tradeActions);
+    }
+
+    if (orderButton.parentElement !== tradeActions) {
+      tradeActions.appendChild(orderButton);
+    }
+  }
+
+  /* ----------------------------------------------------------
+   * ANALYTICS → STRATEGY & RISK → BACKTEST
+   *
+   * Strategy is live-rendered, so do NOT physically move the
+   * original #backtest-toggle-btn into it. Create/recreate a
+   * lightweight contextual launcher instead.
+   * ---------------------------------------------------------- */
+  const originalBacktestButton =
+    document.getElementById('backtest-toggle-btn');
+
+  if (originalBacktestButton) {
+    /* Original rail launcher is retained for compatibility but hidden. */
+    originalBacktestButton.style.display = 'none';
+
+    const strategyHost =
+      document.getElementById('sec-strats') ||
+      document.getElementById('strategy-simulator-card');
+
+    if (strategyHost) {
+      let backtestAction =
+        strategyHost.querySelector('#strategy-backtest-action');
+
+      if (!backtestAction) {
+        backtestAction = document.createElement('button');
+        backtestAction.type = 'button';
+        backtestAction.id = 'strategy-backtest-action';
+        backtestAction.className = 'strategy-inline-action';
+        backtestAction.innerHTML =
+          '<span>Run Backtest</span><span aria-hidden="true">↗</span>';
+        backtestAction.title = 'Run strategy backtest';
+
+        backtestAction.addEventListener('click', () => {
+          if (typeof window.toggleBacktestModal === 'function') {
+            window.toggleBacktestModal();
+          } else {
+            originalBacktestButton.click();
+          }
+        });
+
+        const heading =
+          strategyHost.querySelector(
+            'h2,h3,.card-title,.section-title,.zone-title'
+          );
+
+        if (heading) {
+          let actionHost =
+            heading.parentElement.querySelector(
+              ':scope > .strategy-header-actions'
+            );
+
+          if (!actionHost) {
+            actionHost = document.createElement('div');
+            actionHost.className = 'strategy-header-actions';
+            heading.insertAdjacentElement('afterend', actionHost);
+          }
+
+          actionHost.appendChild(backtestAction);
+        } else {
+          strategyHost.prepend(backtestAction);
+        }
+      }
+    }
+  }
+}
+
+let desktopOwnershipFrame = 0;
+
+function scheduleDesktopDestinationOwnership() {
+  if (desktopOwnershipFrame) return;
+
+  desktopOwnershipFrame = requestAnimationFrame(() => {
+    desktopOwnershipFrame = 0;
+    organizeDesktopDestinationOwnership();
+  });
+}
+
+document.addEventListener(
+  'DOMContentLoaded',
+  scheduleDesktopDestinationOwnership
+);
+
+new MutationObserver(scheduleDesktopDestinationOwnership).observe(
+  document.documentElement,
+  { childList: true, subtree: true }
+);
+
+window.switchDashboardDestination = (...args) => app.ui.switchDashboardDestination(...args);
 window.switchDashboardWorkspace = (...args) => app.ui.switchDashboardWorkspace(...args);
 window.secJump = (...args) => app.ui.secJump(...args);
 window.connectWebSocket = (...args) => app.data.connectWebSocket(...args);

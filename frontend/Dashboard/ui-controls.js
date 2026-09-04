@@ -118,37 +118,92 @@ class UiControls {
   });
   }
 
-  switchDashboardWorkspace(name, invoker){
-  const allowed = new Set(['positioning','flow','institutional','validation']);
-  const next = allowed.has(name) ? name : 'positioning';
-  this.dashboardWorkspace = next;
+  switchDashboardDestination(name, invoker){
+  const allowed = new Set(['home','market','chain','analytics','trade']);
+  const next = allowed.has(name) ? name : 'home';
+
+  this.dashboardDestination = next;
+  document.body.dataset.dashboardDestination = next;
+
+  /*
+   * Desktop information architecture
+   *
+   * Home
+   *   Decision / executive anchor only.
+   *
+   * Market
+   *   Structure & Positioning + Flow.
+   *
+   * Analytics
+   *   Flow + Institutional + Strategy & Risk.
+   *
+   * Flow intentionally participates in both Market and Analytics because
+   * the existing workspace contains both market-flow observations and
+   * capital-flow analytics. The same DOM is reused; nothing is recomputed.
+   */
+  const visibleByDestination = {
+    home: [],
+    market: ['positioning','flow'],
+    chain: [],
+    analytics: ['flow','institutional','validation'],
+    trade: []
+  };
+
+  const visible = new Set(visibleByDestination[next]);
 
   document.querySelectorAll('[data-dashboard-workspace]').forEach(section=>{
-    section.hidden = section.dataset.dashboardWorkspace !== next;
+    section.hidden = !visible.has(section.dataset.dashboardWorkspace);
   });
-  document.querySelectorAll('[data-workspace-tab]').forEach(button=>{
-    const active = button.dataset.workspaceTab === next;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-selected', active ? 'true' : 'false');
-    button.tabIndex = active ? 0 : -1;
-  });
-  const railTarget = {
-    positioning:'zone-structure',
-    flow:'zone-capital-flow',
-    institutional:'zone-institutional',
-    validation:'zone-confirmation'
-  }[next];
-  document.querySelectorAll('#sec-nav-bar .sec-btn').forEach(button=>{
-    const fn = button.getAttribute('onclick') || '';
-    button.classList.toggle('active', fn.includes(`secJump('${railTarget}')`));
+
+  document.querySelectorAll('[data-primary-nav]').forEach(button=>{
+    const active = button.dataset.primaryNav === next;
+    button.classList.toggle('primary-active', active);
+    button.setAttribute('aria-current', active ? 'page' : 'false');
   });
 
   if(invoker) invoker.focus({preventScroll:true});
+
   requestAnimationFrame(()=>{
     updateStickyOffsets();
-    if(next==='positioning' && window.resizeGreeksMoneynessChart) resizeGreeksMoneynessChart('greeksChart');
-    if(next==='validation' && window.updateScenarioPnlChart) updateScenarioPnlChart(_data, true);
+
+    if(
+      visible.has('positioning') &&
+      window.resizeGreeksMoneynessChart
+    ){
+      resizeGreeksMoneynessChart('greeksChart');
+    }
+
+    if(
+      visible.has('validation') &&
+      window.updateScenarioPnlChart
+    ){
+      updateScenarioPnlChart(_data, true);
+    }
   });
+  }
+
+  /*
+   * Compatibility router for existing section jumps.
+   * Old analytical names remain valid internally, but they now resolve
+   * into the correct primary desktop destination.
+   */
+  switchDashboardWorkspace(name, invoker){
+  const allowed = new Set([
+    'positioning',
+    'flow',
+    'institutional',
+    'validation'
+  ]);
+
+  const next = allowed.has(name) ? name : 'positioning';
+  this.dashboardWorkspace = next;
+
+  const destination =
+    next === 'positioning'
+      ? 'market'
+      : 'analytics';
+
+  this.switchDashboardDestination(destination, invoker);
   }
 
   secJump(id){

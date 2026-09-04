@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="70" viewBox="150 35 380 70" role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">Qderiv SFatima</title>
+  <desc id="logo-desc">Qderiv SFatima wordmark with payoff-kink icon.</desc>
+  <rect x="150" y="35" width="380" height="70" rx="10" fill="#0a1410" stroke="#16302422" stroke-width="0.5"/>
+<path d="M166 78 L176 78 L186 62" fill="none" stroke="#d97706" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="174" y="74" width="7" height="7" fill="#d97706"/>
+<text x="196" y="80" font-size="28" font-weight="700" fill="#d97706" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">Qderiv</text>
+<text x="336" y="80" font-size="17" font-weight="400" fill="#9fb0aa" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">SFatima</text>
+</svg>

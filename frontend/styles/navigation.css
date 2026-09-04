@@ -388,51 +388,6 @@
 .pcr-toggle:hover{border-color:var(--info);color:var(--info);}
 
 .pcr-toggle.on{background:rgba(51,154,240,0.12);color:var(--info);border-color:rgba(51,154,240,0.3);}
-
-/* ── DASHBOARD WORKSPACE TABS ──
-   The decision remains the stable page anchor; these tabs switch the
-   analytical workspace below it so the dashboard is no longer a long,
-   undifferentiated stack. */
-.dashboard-workspace-tabs{
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:6px;
-  position:sticky;
-  top:var(--panel-top,72px);
-  z-index:calc(var(--z-sticky) - 1);
-  margin:10px 0 14px;
-  padding:6px;
-  border:1px solid var(--border);
-  border-radius:var(--radius-md);
-  background:rgba(22,24,29,.96);
-  box-shadow:0 5px 18px rgba(0,0,0,.24);
-  backdrop-filter:blur(12px);
-}
-
-.dashboard-workspace-tab{
-  min-height:40px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:7px;
-  border:1px solid transparent;
-  border-radius:var(--radius-sm);
-  background:transparent;
-  color:var(--text-tertiary);
-  font-family:var(--font-display);
-  font-size:var(--fs-sm);
-  font-weight:700;
-  cursor:pointer;
-  transition:background .15s ease,border-color .15s ease,color .15s ease;
-}
-.dashboard-workspace-tab:hover{color:var(--text-primary);background:var(--bg-2);}
-.dashboard-workspace-tab:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;}
-.dashboard-workspace-tab.active{
-  color:var(--info);
-  border-color:color-mix(in srgb,var(--info) 40%,var(--border));
-  background:var(--info-dim);
-}
-
 .dashboard-workspace[hidden]{display:none!important;}
 
 /* ── VERTICAL SECTION NAV (left rail) ──
@@ -722,3 +677,297 @@ body.rail-collapsed .db{padding-left:72px;}
 /* PDS-01 P1 — distinguish zone navigation from utility controls. */
 .sec-nav-label-tools{margin-top:var(--space-2);padding-top:var(--space-3);border-top:1px solid var(--border);background:transparent;border-radius:0;color:var(--text-tertiary)}
 .chart-expand-wrap[role="button"]:focus-visible,.verdict-mini-chart[role="button"]:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+
+
+/* ============================================================
+   PRIMARY PRODUCT NAVIGATION
+   Desktop equivalent of the mobile Home / Market / Chain /
+   Analytics / Trade bottom bar.
+
+   Fine-grained section jumps and operational actions remain
+   underneath inside the Tools disclosure.
+   ============================================================ */
+
+.desktop-primary-nav{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin:2px 0 10px;
+  padding:0 0 10px;
+  border-bottom:1px solid var(--border);
+}
+
+.desktop-primary-nav .primary-nav-btn{
+  position:relative;
+  min-height:40px;
+  font-weight:700;
+  letter-spacing:.01em;
+}
+
+.desktop-primary-nav .primary-nav-btn strong{
+  font:inherit;
+  font-weight:700;
+}
+
+.desktop-primary-nav .primary-nav-btn > span{
+  width:18px;
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  font-size:14px;
+}
+
+.desktop-primary-nav .primary-nav-btn:hover{
+  background:var(--bg-2);
+  color:var(--text-primary);
+}
+
+.desktop-primary-nav .primary-nav-btn.primary-active{
+  color:var(--info);
+  background:color-mix(in srgb,var(--info) 10%,transparent);
+  border-color:color-mix(in srgb,var(--info) 34%,var(--border));
+}
+
+.desktop-primary-nav .primary-nav-btn.primary-active::before{
+  content:"";
+  position:absolute;
+  left:-1px;
+  top:7px;
+  bottom:7px;
+  width:2px;
+  border-radius:2px;
+  background:var(--info);
+}
+
+/* Home is the initial desktop destination. */
+.desktop-primary-nav .primary-nav-home{
+  color:var(--info);
+}
+
+body.rail-collapsed .desktop-primary-nav .primary-nav-btn strong{
+  display:none;
+}
+
+body.rail-collapsed .desktop-primary-nav .primary-nav-btn{
+  justify-content:center;
+  padding-left:0;
+  padding-right:0;
+}
+
+body.rail-collapsed .desktop-primary-nav .primary-nav-btn > span{
+  width:auto;
+}
+
+/* The old rail contents are now secondary operational controls. */
+.rail-tools-menu{
+  margin-top:2px;
+}
+
+.rail-tools-menu > .rail-group-toggle{
+  color:var(--text-tertiary);
+  font-size:var(--fs-2xs);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+
+
+/* DESKTOP DESTINATION CONTENT OWNERSHIP
+   -------------------------------------
+   The old renderer remains authoritative for computation/rendering.
+   These rules prevent detail surfaces from appearing under the wrong
+   primary product destination. */
+
+/* Market is for market state / positioning / flow.
+   Full chain and deeper analytical cards belong elsewhere. */
+body[data-dashboard-destination="market"] #sec-greeks-moneyness,
+body[data-dashboard-destination="market"] #greeks-alerts-card,
+body[data-dashboard-destination="market"] #volatility-card,
+body[data-dashboard-destination="market"] #voloi-detail-card,
+body[data-dashboard-destination="market"] #advanced-analytics-card,
+body[data-dashboard-destination="market"] #conviction-gauge-card,
+body[data-dashboard-destination="market"] #probability-card,
+body[data-dashboard-destination="market"] #scenario-analysis-card,
+body[data-dashboard-destination="market"] #strategy-simulator-card{
+  display:none !important;
+}
+
+/* Home is intentionally an executive surface.
+   Old analytical workspaces are not shown beneath Decision. */
+body[data-dashboard-destination="home"] .dashboard-workspace{
+  display:none !important;
+}
+
+/* Chain uses the existing authoritative Option Chain modal/surface.
+   Do not leave Market/Analytics workspaces underneath it visually. */
+body[data-dashboard-destination="chain"] .dashboard-workspace{
+  display:none !important;
+}
+
+/* Trade owns portfolio/order/execution surfaces, not analysis workspaces. */
+body[data-dashboard-destination="trade"] .dashboard-workspace{
+  display:none !important;
+}
+
+/* Contextual Analytics utility area. */
+
+
+/* Context actions belong inside their functional destination,
+   not in the global navigation rail. */
+.trade-context-actions,
+.analytics-strategy-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:10px 0 14px;
+}
+
+/* Re-homed rail buttons become ordinary contextual actions. */
+.trade-context-actions .sec-btn,
+.analytics-strategy-actions .sec-btn{
+  position:static !important;
+  inset:auto !important;
+  width:auto !important;
+  min-width:0;
+  margin:0;
+}
+
+/* Backtest visually belongs to Strategy & Risk rather than looking
+   like a new Analytics primary navigation item. */
+.analytics-strategy-actions{
+  padding-top:2px;
+  border-top:0;
+}
+
+
+/* Strategy contextual action — deliberately not styled like rail navigation. */
+.analytics-strategy-actions{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  margin:2px 0 10px;
+}
+
+.strategy-inline-action{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:3px 0;
+  border:0;
+  background:transparent;
+  color:var(--accent, #7aa2f7);
+  font:inherit;
+  font-size:.82rem;
+  font-weight:600;
+  cursor:pointer;
+  opacity:.88;
+}
+
+.strategy-inline-action:hover{
+  opacity:1;
+  text-decoration:underline;
+}
+
+.strategy-inline-action span:last-child{
+  transition:transform .16s ease;
+}
+
+.strategy-inline-action:hover span:last-child{
+  transform:translateX(2px);
+}
+
+
+
+/* Strategy → Backtest contextual CTA.
+   Important enough to notice, but still subordinate to the Strategy section. */
+.strategy-header-actions{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  margin:8px 0 14px;
+}
+
+#strategy-backtest-action.strategy-inline-action{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+
+  padding:7px 12px;
+
+  border:1px solid var(--accent, #7aa2f7);
+  border-radius:8px;
+
+  background:color-mix(
+    in srgb,
+    var(--accent, #7aa2f7) 12%,
+    transparent
+  );
+
+  color:var(--accent, #7aa2f7);
+
+  font:inherit;
+  font-size:.84rem;
+  font-weight:700;
+  line-height:1;
+
+  cursor:pointer;
+  white-space:nowrap;
+
+  box-shadow:0 2px 10px rgba(0,0,0,.12);
+
+  transition:
+    background .16s ease,
+    transform .16s ease,
+    box-shadow .16s ease;
+}
+
+#strategy-backtest-action.strategy-inline-action:hover{
+  background:color-mix(
+    in srgb,
+    var(--accent, #7aa2f7) 20%,
+    transparent
+  );
+
+  transform:translateY(-1px);
+  box-shadow:0 4px 14px rgba(0,0,0,.18);
+  text-decoration:none;
+}
+
+#strategy-backtest-action.strategy-inline-action span:last-child{
+  transition:transform .16s ease;
+}
+
+#strategy-backtest-action.strategy-inline-action:hover span:last-child{
+  transform:translateX(3px);
+}
+
+/* Breathing room between Strategy heading and Backtest CTA */
+.strategy-header-actions{
+  margin-top:16px !important;
+  margin-bottom:16px !important;
+}
+
+/* Force visible separation below Strategy heading.
+   Padding is intentional here: unlike margin it cannot collapse. */
+#sec-strats .strategy-header-actions,
+#strategy-simulator-card .strategy-header-actions{
+  margin:0 !important;
+  padding-top:18px !important;
+  padding-bottom:12px !important;
+}
+
+/* Strategy action row: keep compact, separate actions horizontally */
+#sec-strats .strategy-header-actions,
+#strategy-simulator-card .strategy-header-actions{
+  margin:0 !important;
+  padding:0 !important;
+  min-height:0 !important;
+  height:auto !important;
+  gap:14px !important;
+  column-gap:14px !important;
+}
+
+/* Ensure Run Backtest does not touch Strategy Payoff */
+#strategy-backtest-action{
+  margin-left:14px !important;
+}

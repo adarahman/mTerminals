@@ -8,6 +8,8 @@
      type was reading soft/blurry at normal zoom. -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles/theme.css">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a1410'/%3E%3Cpath d='M18 24 L32 46 L48 16' fill='none' stroke='%23d97706' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Qderiv SFatima</title>
 <link rel="stylesheet" href="../styles/components.css">
 <link rel="stylesheet" href="../styles/animations.css">
 <link rel="stylesheet" href="../styles/layout.css">
@@ -64,9 +66,35 @@
      full width, same body-scroll treatment as the other modals'
      .greeks-modal-body when content overflows a very short viewport. */
   .chart-modal-body{ flex:1; min-height:0; overflow-y:auto; padding:16px 20px 20px; }
+
+  /* External Qderiv SFatima brand asset */
+  /* Small brand mark: keep it inside the unused top-left corner so it
+     never overlaps the NIFTY/price/feed fields in the top bar. */
+  .brand-logo {
+    position: fixed;
+    top: 3px;
+    right: 9px;
+    width: 180px;
+    height: 33px;
+    z-index: 1000;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .brand-logo img {
+    display: block;
+    width: 180px;
+    height: 33px;
+    object-fit: contain;
+    object-position: left center;
+  }
 </style>
 </head>
 <body><div class="db">
+
+<!-- Qderiv SFatima brand mark. External optimized asset. -->
+<div class="brand-logo" aria-hidden="true">
+  <img src="favicon.svg" alt="">
+</div>
 
 <!-- Canonical Option Chain is the compact red/green dashboard snapshot;
      strike actions stay in-page and open the Strike Detail report. -->
@@ -556,12 +584,59 @@
      option list and current selection survive live ticks). -->
 <div class="sec-nav" id="sec-nav-bar">
   <button type="button" class="rail-collapse-btn" id="rail-collapse-btn" onclick="toggleNavigationRail(this)" aria-expanded="true" aria-label="Collapse dashboard navigation" title="Collapse navigation">‹</button>
-  <details class="rail-tools-menu" id="rail-tools-menu" open>
+
+  <!-- Primary product navigation.
+       Mirrors the mobile information architecture while retaining the
+       existing desktop dashboard sections and business logic. -->
+  <nav class="desktop-primary-nav" aria-label="mTerminals primary navigation">
+
+    <button type="button"
+            class="sec-btn primary-nav-btn primary-nav-home primary-active"
+            data-primary-nav="home"
+            onclick="desktopPrimaryNav('home', this)"
+            title="Home — decision and executive overview"
+            aria-current="page">
+      <span>⌂</span><strong>Home</strong>
+    </button>
+
+    <button type="button"
+            class="sec-btn primary-nav-btn"
+            data-primary-nav="market"
+            onclick="desktopPrimaryNav('market', this)"
+            title="Market — positioning, futures and OI flow">
+      <span>▥</span><strong>Market</strong>
+    </button>
+
+    <button type="button"
+            class="sec-btn primary-nav-btn"
+            data-primary-nav="chain"
+            onclick="desktopPrimaryNav('chain', this)"
+            title="Option Chain">
+      <span>≋</span><strong>Chain</strong>
+    </button>
+
+    <button type="button"
+            class="sec-btn primary-nav-btn"
+            data-primary-nav="analytics"
+            onclick="desktopPrimaryNav('analytics', this)"
+            title="Analytics — capital flow, institutional and validation">
+      <span>◫</span><strong>Analytics</strong>
+    </button>
+
+    <button type="button"
+            class="sec-btn primary-nav-btn"
+            data-primary-nav="trade"
+            onclick="desktopPrimaryNav('trade', this)"
+            title="Trade — portfolio, positions, orders and P&amp;L">
+      <span>↗</span><strong>Trade</strong>
+    </button>
+
+  </nav>
+
+  <details class="rail-tools-menu" id="rail-tools-menu">
     <summary class="rail-group-toggle" id="rail-tools-toggle">Tools</summary>
     <div class="rail-tools-list">
-  <button class="sec-btn sec-btn-decision" onclick="secJump('sec-decision')"><span>🎯</span>Decision</button>
-  <button class="sec-btn" onclick="secJump('zone-structure')"><span>⌗</span>Position</button>
-  <button class="sec-btn" id="oi-flow-open-btn" onclick="openOIDashboardModal()" title="Open OI Flow chart"><span>🌊</span>OI Flow</button>
+<button class="sec-btn" id="oi-flow-open-btn" onclick="openOIDashboardModal()" title="Open OI Flow chart"><span>🌊</span>OI Flow</button>
   <!-- Algo status and Paper trading toggles — relocated here (2026-08-02)
        from their old floating fixed positions (bottom-left/bottom-right
        of the viewport, always visible on top of whatever table row
@@ -582,8 +657,7 @@
        (see renderTopBarHtml/renderFundPillHtml removal in
        chain/chain-template.js). #pt-order-toggle-btn is new. -->
   <button class="sec-btn" id="pt-order-toggle-btn" onclick="toggleOrderPanel()" title="Place a paper/live order"><span>📝</span>Order</button>
-  <button class="sec-btn" id="pt-toggle-btn" onclick="togglePortfolioPanel()" title="Portfolio tracker — P&amp;L, fund, positions, trade log"><span>📊</span>Portfolio</button>
-  <button class="sec-btn" id="backtest-toggle-btn" onclick="toggleBacktestModal()" title="Backtest decision engine thresholds"><span>📈</span>Backtest</button>
+<button class="sec-btn" id="backtest-toggle-btn" onclick="toggleBacktestModal()" title="Backtest decision engine thresholds"><span>📈</span>Backtest</button>
   <button class="sec-btn" id="broker-feed-toggle" data-running="true" onclick="toggleBrokerFeed()" title="Stop the complete shared market-data cycle"><span>■</span>Stop Stream</button>
     </div>
   </details>

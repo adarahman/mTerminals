@@ -251,7 +251,26 @@ function ptMountOrderPanel(){
 }
 
 function toggleOrderPanel(){
+  const orderPanel = document.getElementById('pt-order-panel');
+  const portfolioPanel = document.getElementById('pt-portfolio-panel');
+
   ptTogglePanelNear('pt-order-panel', 'pt-order-toggle-btn');
+
+  /*
+   * Order is launched from inside the Trade/Portfolio panel.
+   * Keep Portfolio open behind it, but always raise Order Entry
+   * above Portfolio so the form cannot be hidden underneath.
+   */
+  if (orderPanel && orderPanel.classList.contains('open')) {
+    if (portfolioPanel) {
+      portfolioPanel.classList.add('trade-panel-background');
+    }
+
+    orderPanel.classList.add('trade-panel-foreground');
+  } else {
+    orderPanel?.classList.remove('trade-panel-foreground');
+    portfolioPanel?.classList.remove('trade-panel-background');
+  }
 }
 window.toggleOrderPanel = toggleOrderPanel;
 
