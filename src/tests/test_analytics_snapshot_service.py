@@ -105,6 +105,7 @@ def test_builds_history_engine_context_and_export_payload():
         {"rows": 1, "symbol": "SENSEX", "previous": {"previous": True}}
     ]
     assert engine_calls[0]["lot_size"] == 20
+    assert engine_calls[0]["df_clean"]["Spot"].iloc[0] == 80000.0
     assert engine_calls[0]["near_expiry"] == "03-Sep-2026"
     assert engine_calls[0]["far_expiry"] == "24-Sep-2026"
     assert exports[0]["EXPIRY"] == "03-Sep-2026"

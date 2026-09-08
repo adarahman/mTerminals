@@ -115,6 +115,12 @@ export function connectMTerminalsWS(
                   'Control request failed',
               ),
             );
+          } else if (
+            message.action === 'switch_data_source' &&
+            message.result === true &&
+            typeof message.dataSource === 'string'
+          ) {
+            marketStore.setDataSource(message.dataSource);
           }
           return;
         }

@@ -92,6 +92,27 @@ def reset_spot_rsi_history() -> None:
     _minute_closes.clear()
 
 
+def recent_spot_closes(
+    symbol: str,
+    max_points: int = 20,
+) -> list[tuple[int, float]]:
+    """
+    Read-only access to the existing minute-level spot history.
+
+    The history is owned by this module; callers must not maintain a
+    second rolling price series. Results are returned as a new list so
+    callers cannot mutate the underlying deque.
+    """
+    if not symbol or max_points <= 0:
+        return []
+
+    series = _minute_closes.get(symbol)
+    if not series:
+        return []
+
+    return list(series)[-max_points:]
+
+
 def recent_momentum_pct(symbol: str, lookback_minutes: int = 5) -> float | None:
     """% change in spot over the last `lookback_minutes` one-minute closes
     already retained for RSI (see update_spot_rsi) — reused rather than

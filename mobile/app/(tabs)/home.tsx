@@ -28,14 +28,24 @@ export default function HomeScreen() {
         : '#ef7777';
   const market: any = payload?.market ?? {};
 
-  const decision = readDecision(market.decision);
+  // Decision Engine publishes the canonical decision at payload.decision.
+  // Keep market.decision as a compatibility fallback.
+  const rawDecision =
+    market.decision ??
+    payload?.decision ??
+    null;
+
+  const decision = readDecision(rawDecision);
+  const shortHorizon = readShortHorizon(
+    rawDecision?.shortHorizon,
+  );
   const bias =
     textValue(market.compositeBias) ||
     textValue(market.spotBias) ||
     decision.bias ||
     '—';
 
-  const confidence = readConfidence(market.decision);
+  const confidence = readConfidence(rawDecision);
 
   return (
     <SafeAreaView
@@ -152,6 +162,8 @@ export default function HomeScreen() {
             </Text>
           ) : null}
         </View>
+
+        <ShortHorizonCard data={shortHorizon} />
 
         <View style={styles.row}>
           <MetricCard
@@ -335,6 +347,12 @@ const styles = {
     padding: 18,
   },
 
+  shortHorizonCard: {
+    backgroundColor: '#15191f',
+    borderRadius: 18,
+    padding: 18,
+  },
+
   label: {
     color: '#7f8a99',
     fontSize: 11,
@@ -462,6 +480,114 @@ function AlertRow({
       </Text>
     </View>
   );
+}
+
+function ShortHorizonCard({
+  data,
+}: {
+  data: ReturnType<typeof readShortHorizon>;
+}) {
+  const direction = textValue(data.direction) || 'NEUTRAL';
+  const state = textValue(data.state) || 'NEUTRAL';
+  const probability = `${formatNumber(data.probability, 0)}%`;
+
+  const directionColor =
+    direction === 'UP'
+      ? '#63d297'
+      : direction === 'DOWN'
+        ? '#ef7777'
+        : '#8c96a5';
+
+  return (
+    <View style={styles.shortHorizonCard}>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Text style={styles.label}>2–3 MIN MOVE</Text>
+
+        <Text
+          style={{
+            color: '#7f8a99',
+            fontSize: 11,
+            fontWeight: '700',
+          }}
+        >
+          {textValue(data.horizon) || '2–3m'}
+        </Text>
+      </View>
+
+      <Text
+        style={{
+          color: directionColor,
+          fontSize: 24,
+          fontWeight: '900',
+          marginTop: 8,
+        }}
+      >
+        {direction}
+      </Text>
+
+      <View
+        style={{
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 18,
+          marginTop: 8,
+        }}
+      >
+        <SmallText label="STATE" value={state} />
+        <SmallText label="MOVE LIKELIHOOD" value={probability} />
+        <SmallText
+          label="SCORE"
+          value={formatNumber(data.score, 2)}
+        />
+      </View>
+
+      {data.evidence.length > 0 ? (
+        <Text
+          style={{
+            color: '#9ba5b4',
+            fontSize: 11,
+            lineHeight: 17,
+            marginTop: 12,
+          }}
+          numberOfLines={3}
+        >
+          {data.evidence.join(' · ')}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function readShortHorizon(value: any) {
+  const source =
+    value && typeof value === 'object'
+      ? value
+      : {};
+
+  const evidence = Array.isArray(source.evidence)
+    ? source.evidence
+        .map((item: unknown) => textValue(item))
+        .filter(Boolean)
+    : [];
+
+  return {
+    horizon: textValue(source.horizon) || '2–3m',
+    state: textValue(source.state) || 'NEUTRAL',
+    direction: textValue(source.direction) || 'NEUTRAL',
+    probability: Number.isFinite(Number(source.probability))
+      ? Number(source.probability)
+      : 0,
+    score: Number.isFinite(Number(source.score))
+      ? Number(source.score)
+      : 0,
+    evidence,
+  };
 }
 
 function readDecision(value: any) {

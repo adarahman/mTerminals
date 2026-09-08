@@ -25,7 +25,7 @@ the same source of truth instead of each one recomputing its own.
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, fields, field
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -77,6 +77,18 @@ else:
         + ". SMARTAPI_* settings will be None unless set some other way "
         "(shell environment, launcher script, etc.)."
     )
+
+
+def _env_mtime_ns() -> int | None:
+    if not ENV_PATH:
+        return None
+    try:
+        return os.stat(ENV_PATH).st_mtime_ns
+    except OSError:
+        return None
+
+
+_ENV_LAST_MTIME_NS = _env_mtime_ns()
 
 
 @dataclass(frozen=True)
@@ -305,6 +317,28 @@ class Settings:
 
 
 settings = Settings()
+
+
+def refresh_settings_from_env() -> bool:
+    """Refresh the shared settings object after a deliberate .env edit.
+
+    Normal application configuration remains stable for a running process.
+    The broker-health path invokes this function so a newly pasted OAuth
+    token can be checked without restarting the dashboard process.
+    """
+    global _ENV_LAST_MTIME_NS
+
+    current_mtime = _env_mtime_ns()
+    if current_mtime is None or current_mtime == _ENV_LAST_MTIME_NS:
+        return False
+
+    load_dotenv(ENV_PATH, override=True)
+    refreshed = Settings()
+    for item in fields(Settings):
+        object.__setattr__(settings, item.name, getattr(refreshed, item.name))
+    _ENV_LAST_MTIME_NS = current_mtime
+    logger.info("Reloaded broker settings from updated .env")
+    return True
 
 # ── Execution-broker validation ──────────────────────────────────────────
 # Keep this registry deliberately separate from the market-data registry:

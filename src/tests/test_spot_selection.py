@@ -50,3 +50,37 @@ def test_missing_prices_fail_closed():
             [],
             _config("EQ"),
         )
+
+
+def test_auto_uses_futures_when_cash_quote_is_stale_near_close(monkeypatch):
+    chain = pd.DataFrame([{"Spot": 23635.1}])
+    futures = pd.DataFrame([{"LTP": 23746.6}])
+    indices = [{"Symbol": "NIFTY", "Last Price": 23635.1}]
+
+    class FixedDateTime:
+        @classmethod
+        def now(cls):
+            from datetime import datetime
+
+            return datetime(2026, 9, 8, 15, 29, 0)
+
+    monkeypatch.setattr(
+        "application.market_pipeline.spot_selection.datetime",
+        FixedDateTime,
+    )
+    monkeypatch.setattr(
+        "nse_eod_fetch.is_trading_day",
+        lambda value: True,
+    )
+
+    selected, spot, source = select_runtime_spot(
+        chain,
+        23635.1,
+        futures,
+        indices,
+        _config("AUTO", broker_enabled=True),
+    )
+
+    assert spot == 23746.6
+    assert source == "FUT"
+    assert selected.iloc[0]["Spot"] == 23746.6

@@ -89,6 +89,7 @@ class AnalyticsSnapshotService:
             .sort_values("StrikePrice")
             .copy()
         )
+        clean_frame["Spot"] = spot
         from brokers.market_data_registry import get_active_provider
         data_provider = get_active_provider()
         clean_frame.attrs["data_provider"] = data_provider

@@ -154,6 +154,7 @@ class DecisionResult:
     trade_grade: str = ""
     risk_warning: str = ""
     important_levels: dict[str, Any] = field(default_factory=dict)
+    short_horizon: dict[str, Any] = field(default_factory=dict)
     _debug: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -205,6 +206,7 @@ class DecisionResult:
             "tradeGrade": self.trade_grade,
             "riskWarning": self.risk_warning,
             "importantLevels": self.important_levels,
+            "shortHorizon": self.short_horizon,
             "autoStrategy": self.auto_strategy,
             "_debug": self._debug,
         }

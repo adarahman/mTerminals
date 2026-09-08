@@ -344,6 +344,7 @@ class EngineResult:
     # old VIX pill slot (see market-context.js).
     fut_change: float = 0.0
     fut_chg_pct: float = 0.0
+    fut_ltp: float = 0.0
 
     def to_ctx_dict(self) -> dict:
         """Adapter so existing render_*.py functions written for a plain
@@ -690,4 +691,5 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
         market_regime=market_regime,
         fut_oi=fut_oi, fut_oi_chg=fut_oi_chg, fut_oi_chg_pct=fut_oi_chg_pct,
         fut_change=fut_change, fut_chg_pct=fut_chg_pct,
+        fut_ltp=float(futures_ltp or 0.0),
     )

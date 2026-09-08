@@ -15,7 +15,10 @@ Actual provider implementations stay in brokers.market_data.
 import logging
 import time
 
-from infrastructure.config import settings as _md_settings
+from infrastructure.config import (
+    refresh_settings_from_env,
+    settings as _md_settings,
+)
 from brokers.connection import check_connection
 from brokers.logging import broker_event
 from brokers.provider_registry import (
@@ -266,6 +269,17 @@ def set_active_provider(name: str) -> bool:
 
 
 def provider_status() -> list[dict]:
+    if refresh_settings_from_env():
+        # A fresh OAuth token must not inherit the old token's result or wait
+        # for its cache TTL. This session is shared by health and market data.
+        _PROVIDER_HEALTH_CACHE.clear()
+        try:
+            from brokers.upstox.client import _session as upstox_session
+
+            upstox_session.set_token(_md_settings.upstox_access_token or "")
+        except Exception:  # optional provider dependency must remain optional
+            logger.debug("Could not refresh the Upstox session token", exc_info=True)
+
     out = []
     now = time.time()
 

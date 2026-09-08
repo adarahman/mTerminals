@@ -39,6 +39,7 @@ from decision.signal_builder import (
     verdict_pcr, verdict_iv, verdict_dte,
 )
 from decision.confidence import derive_bias, compute_confidence
+from decision.short_horizon import detect_short_horizon
 from decision.strategy_selection import derive_action, suggest_strategy
 from analytics.oversold_oi_support import (
     evaluate_oversold_oi_support,
@@ -116,6 +117,16 @@ class DecisionEngine:
         sm_score   = score_smart_money(smart_money_top, spot, atm, strike_step, out)
 
         score_walls(ce_wall, pe_wall, spot, atm, strike_step, out)
+
+        # ── Short-horizon move observation ────────────────────────────────────
+        # Reuse the existing OI and futures scores. This is observation-only:
+        # it must not alter composite, confidence, action, strategy, or execution.
+        out.short_horizon = detect_short_horizon(
+            symbol,
+            oi_score=oi_score,
+            fut_score=fut_score,
+            fut_ltp=getattr(er, "fut_ltp", 0.0),
+        )
 
         # ── Conflict detection ────────────────────────────────────────────────
         # A conflict exists when directional sub-scores point opposite ways strongly

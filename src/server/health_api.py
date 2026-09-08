@@ -16,6 +16,10 @@ _BROKER_PROVIDERS = [
     "BREEZE",
     "SHOONYA",
     "SMARTAPI",
+    # Public NSE/BSE data has no account login but is still a selectable
+    # desktop data source. Include it so the top-bar status poll can show
+    # its real POLLING state without waiting for a full market payload.
+    "NSE_BSE",
 ]
 
 

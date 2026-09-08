@@ -86,6 +86,31 @@ export const marketStore = {
     });
   },
 
+  setDataSource(value: string) {
+    const source = value.trim().toUpperCase();
+    if (!source) return;
+
+    // A successful source-switch acknowledgement arrives before the next
+    // analytics snapshot. Reflect it immediately so the selector never shows
+    // the previous provider while the new source is beginning its poll.
+    const current = snapshot.payload ?? {};
+    const market =
+      current.market && typeof current.market === 'object'
+        ? current.market
+        : {};
+
+    update({
+      payload: {
+        ...current,
+        dataSource: source,
+        market: {
+          ...market,
+          dataSource: source,
+        },
+      },
+    });
+  },
+
   setError(value: string | null) {
     if (value) {
       this.setConnectionStatus('error', value);

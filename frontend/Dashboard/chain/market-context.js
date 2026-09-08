@@ -254,13 +254,58 @@ window.switchActiveIndex = switchActiveIndex;
 // together (see switch_data_source()'s docstring for the full sequence).
 function switchDataSource(ds) {
   if (!ds) return;
+  const source = ds.toUpperCase();
+  // The server applies this switch before sending the next market snapshot.
+  // Do not leave the prior provider's AVAILABLE state visible during that
+  // hand-off; NSE/BSE is REST polling rather than a persistent live feed.
+  const statusPill = document.getElementById('data-source-status-pill');
+  if (statusPill) {
+    statusPill.textContent = source === 'NSE_BSE' ? 'POLLING' : 'CHECKING';
+    statusPill.dataset.status = source === 'NSE_BSE' ? 'polling' : 'unknown';
+  }
   const [base, query] = (_wsUrl || '').split('?');
   const params = new URLSearchParams(query || '');
-  params.set('dataSource', ds.toUpperCase());
+  params.set('dataSource', source);
   connectWebSocket(`${base}?${params.toString()}`);
-  if (window.eventBus) window.eventBus.emit('dataSource:change', { dataSource: ds.toUpperCase() });
+  if (window.eventBus) window.eventBus.emit('dataSource:change', { dataSource: source });
 }
 window.switchDataSource = switchDataSource;
+
+// Source metadata normally arrives with a full market snapshot. That makes
+// the status pill stale when a provider changes between snapshots (or when a
+// daily access token is replaced). Poll the small health endpoint separately
+// and patch only this display; it does not rebuild the dashboard or trigger a
+// market-data request.
+async function refreshDataSourceStatus(){
+  try {
+    const response = await fetch('/api/broker-health', { cache: 'no-store' });
+    if (!response.ok) return;
+    const body = await response.json();
+    const providers = body && body.providers;
+    if (!providers || typeof providers !== 'object') return;
+
+    const select = document.getElementById('dataSourceSelect');
+    // The select reflects the runtime market source supplied by the latest
+    // snapshot. The health endpoint's `active` marker can lag one hand-off,
+    // so never let it overwrite the selected source's status in the UI.
+    const selectedId = (select && select.value) || '';
+    const source = providers[selectedId] || Object.values(providers).find(
+      provider => provider && provider.active,
+    );
+    const pill = document.getElementById('data-source-status-pill');
+    if (!source || !pill) return;
+
+    const status = String(source.status || 'unknown').toUpperCase();
+    pill.textContent = status;
+    pill.dataset.status = status.toLowerCase().replaceAll('_', '-');
+    pill.title = source.error || 'Active market-data source status';
+  } catch (_error) {
+    // The market WebSocket remains authoritative; a transient status request
+    // must never interrupt it or replace an already-visible state.
+  }
+}
+window.refreshDataSourceStatus = refreshDataSourceStatus;
+setInterval(refreshDataSourceStatus, 1000);
 
 function onDataSourcePicked(val){
   switchDataSource(val);

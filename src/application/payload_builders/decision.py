@@ -29,6 +29,21 @@ def build_decision(engine_result, ctx_dict, last_updated, symbol, expiry):
                 "[build_decision] decision snapshot logging failed (%s)",
                 snapshot_error,
             )
+
+        try:
+            from backtest.short_horizon_recorder import (
+                record_short_horizon_observation,
+            )
+
+            record_short_horizon_observation(
+                engine_result,
+                decision,
+            )
+        except Exception as recorder_error:
+            logger.warning(
+                "[build_decision] short-horizon recording failed (%s)",
+                recorder_error,
+            )
         return decision
     except Exception as decision_error:
         logger.warning(

@@ -625,6 +625,64 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       peVal: stableWallOi('pe', peWallStrike, peWallRow, 'peOI'),
     };
 
+    // ── SHORT HORIZON ─────────────────────────────────────────
+    // Forward-looking 2–3 minute observation. This is deliberately
+    // separate from Evidence Confidence: confidence describes the
+    // current decision, while probability describes experimental
+    // short-horizon move likelihood.
+    const sh = dec.shortHorizon || {};
+    const shPrice = sh.price || {};
+    const shOi = sh.oi || {};
+    const shFutures = sh.futures || {};
+    const shCompression = sh.compression || {};
+
+    const shDirection = String(sh.direction || 'NEUTRAL').toUpperCase();
+    const shState = String(sh.state || 'NEUTRAL').toUpperCase();
+
+    const shProbability = Number.isFinite(Number(sh.probability))
+      ? Number(sh.probability)
+      : 0;
+
+    const shScore = Number.isFinite(Number(sh.score))
+      ? Number(sh.score)
+      : 0;
+
+    const shVelocity = Number.isFinite(Number(shPrice.velocityPctPerMin))
+      ? Number(shPrice.velocityPctPerMin)
+      : 0;
+
+    const shAcceleration = Number.isFinite(Number(shPrice.accelerationPctPerMin2))
+      ? Number(shPrice.accelerationPctPerMin2)
+      : 0;
+
+    const shDirectionColor =
+      shDirection === 'UP' ? 'var(--pos)' :
+      shDirection === 'DOWN' ? 'var(--neg)' :
+      'var(--text-tertiary)';
+
+    const shStateColor =
+      shState === 'MOVE' ? shDirectionColor :
+      shState === 'BREAKOUT_TRIGGER' ? 'var(--warn)' :
+      shState === 'PRESSURE_BUILDING' ? 'var(--warn)' :
+      'var(--text-tertiary)';
+
+    const shConfirmed = value =>
+      value === true ? '✓ Confirmed' : '· Neutral';
+
+    const shConfirmedColor = value =>
+      value === true ? 'var(--pos)' : 'var(--text-tertiary)';
+
+    const shCompressionText =
+      shCompression.active && shCompression.expanding
+        ? 'Active → Expanding'
+        : shCompression.active
+          ? 'Active'
+          : shCompression.expanding
+            ? 'Expanding'
+            : 'Inactive';
+
+    const shHasData = !!dec.shortHorizon;
+
     return `
 <!-- Single root wrapper is required here: chain-renderer.js's live-tick
      path does document.getElementById('sec-decision').outerHTML =
@@ -704,6 +762,73 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         </div>
       </section>
     </div>
+
+    ${shHasData ? `
+    <section class="short-horizon" aria-label="Short horizon move observation">
+      <div class="short-horizon-head">
+        <div>
+          <div class="short-horizon-label">
+            Short Horizon · ${escapeHtml(String(sh.horizon || '2–3m'))}
+          </div>
+          <div class="short-horizon-call">
+            <span style="color:${shDirectionColor};">${escapeHtml(shDirection)}</span>
+            <span class="short-horizon-state" style="color:${shStateColor};">
+              ${escapeHtml(shState.replaceAll('_', ' '))}
+            </span>
+          </div>
+        </div>
+
+        <div class="short-horizon-probability">
+          <div class="short-horizon-prob-label">Move Likelihood</div>
+          <div class="short-horizon-prob-value" style="color:${shDirectionColor};">
+            ${shProbability}%
+          </div>
+          <div class="short-horizon-prob-note">
+            ${sh.probabilityCalibrated === true
+              ? 'Calibrated'
+              : 'Experimental · uncalibrated'}
+          </div>
+        </div>
+      </div>
+
+      <div class="short-horizon-grid">
+        <div class="short-horizon-metric">
+          <span>Score</span>
+          <strong>${shScore >= 0 ? '+' : ''}${shScore.toFixed(2)}</strong>
+        </div>
+
+        <div class="short-horizon-metric">
+          <span>Velocity</span>
+          <strong>${shVelocity >= 0 ? '+' : ''}${shVelocity.toFixed(3)}%/min</strong>
+        </div>
+
+        <div class="short-horizon-metric">
+          <span>Acceleration</span>
+          <strong>${shAcceleration >= 0 ? '+' : ''}${shAcceleration.toFixed(3)}%/min²</strong>
+        </div>
+
+        <div class="short-horizon-metric">
+          <span>OI</span>
+          <strong style="color:${shConfirmedColor(shOi.confirmed)};">
+            ${shConfirmed(shOi.confirmed)}
+          </strong>
+        </div>
+
+        <div class="short-horizon-metric">
+          <span>Futures</span>
+          <strong style="color:${shConfirmedColor(shFutures.confirmed)};">
+            ${shConfirmed(shFutures.confirmed)}
+          </strong>
+        </div>
+
+        <div class="short-horizon-metric">
+          <span>Compression</span>
+          <strong>${escapeHtml(shCompressionText)}</strong>
+        </div>
+      </div>
+    </section>
+    ` : ''}
+
   </div>
 
   <!-- ── DECISION DETAIL — Tier-3 collapsible ── -->
