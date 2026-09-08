@@ -289,7 +289,7 @@ async function refreshDataSourceStatus(){
     // snapshot. The health endpoint's `active` marker can lag one hand-off,
     // so never let it overwrite the selected source's status in the UI.
     const selectedId = (select && select.value) || '';
-    const source = providers[selectedId] || Object.values(providers).find(
+    const source = selectedId ? providers[selectedId] : Object.values(providers).find(
       provider => provider && provider.active,
     );
     const pill = document.getElementById('data-source-status-pill');
