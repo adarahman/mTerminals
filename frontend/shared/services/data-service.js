@@ -57,6 +57,17 @@ class DataService {
     // transport is active but must not keep a frozen market snapshot LIVE.
     this.wsManager.on('message', (raw) => {
       this._markTransportMessage();
+
+      if (raw && raw.type === 'control_ack' && raw.action === 'switch_data_source') {
+        if (typeof window.applyDataSourceStatus === 'function') {
+          window.applyDataSourceStatus(raw.status, raw.error);
+        }
+      } else if (raw && raw.type === 'control_error' && raw.action === 'switch_data_source') {
+        if (typeof window.applyDataSourceStatus === 'function') {
+          window.applyDataSourceStatus('unknown', raw.error);
+        }
+      }
+
       if (this.pendingSymbol && this._isMarketSnapshotMessage(raw)) {
         // A closing socket can have one buffered payload, and a newly opened
         // socket must establish a full baseline before any deltas are safe.

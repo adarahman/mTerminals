@@ -198,6 +198,20 @@ def get_active_provider() -> str:
     return _active_provider_name
 
 
+def get_provider_health(name: str) -> dict:
+    """Return the latest cached health result for a provider."""
+    name = normalize_provider(name)
+
+    cached = _PROVIDER_HEALTH_CACHE.get(name)
+    if cached:
+        return dict(cached[1])
+
+    connection = check_connection(name)
+    health = _health_from_connection(name, connection)
+    _PROVIDER_HEALTH_CACHE[name] = (time.time(), health)
+    return dict(health)
+
+
 def set_active_provider(name: str) -> bool:
     global _active_provider_name, _active_provider_instance
 

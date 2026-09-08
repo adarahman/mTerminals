@@ -421,6 +421,8 @@ class DashboardBridge:
 
                     try:
                         result = await self._switch_data_source(requested)
+                        from brokers.market_data_registry import get_provider_health
+                        health = get_provider_health(requested)
                     except ValueError as exc:
                         await websocket.send_json({
                             "type": "control_error",
@@ -447,6 +449,9 @@ class DashboardBridge:
                         "action": action,
                         "dataSource": requested,
                         "result": result,
+                        "status": health.get("status", "unknown"),
+                        "ready": bool(health.get("ready", False)),
+                        "error": health.get("error"),
                     })
                     continue
 

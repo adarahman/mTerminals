@@ -305,6 +305,19 @@ async function refreshDataSourceStatus(){
   }
 }
 window.refreshDataSourceStatus = refreshDataSourceStatus;
+
+function applyDataSourceStatus(status, error){
+  const pill = document.getElementById('data-source-status-pill');
+  if (!pill) return;
+
+  const normalized = String(status || 'unknown').toUpperCase();
+  pill.textContent = normalized;
+  pill.dataset.status = normalized.toLowerCase().replaceAll('_', '-');
+  pill.title = error || 'Selected market-data source status';
+}
+
+window.applyDataSourceStatus = applyDataSourceStatus;
+
 setInterval(refreshDataSourceStatus, 1000);
 
 function onDataSourcePicked(val){

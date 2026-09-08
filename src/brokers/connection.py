@@ -147,7 +147,13 @@ def check_connection(provider: str) -> ConnectionStatus:
             status=_classify_error(error)
         )
     except Exception as exc:  # optional SDK/import failures must not crash a switch
-        status = ConnectionStatus(provider=name, ready=False, error=str(exc))
+        error = str(exc)
+        status = ConnectionStatus(
+            provider=name,
+            ready=False,
+            error=error,
+            status=_classify_error(error),
+        )
     broker_event(
         logger,
         provider=name,
