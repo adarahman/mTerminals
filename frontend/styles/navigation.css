@@ -99,8 +99,7 @@
   background:rgba(22,24,29,0.95);
   box-shadow:0 2px 12px rgba(0,0,0,0.30);
 }
-.top-bar-left{grid-area:left;}
-.expiry-strip{grid-area:strip;align-self:center;}
+/* Top bar uses flex layout; these elements are flex children. */
 
 /* ── STRATEGY DROPDOWNS ── */
 
@@ -127,6 +126,7 @@
   box-sizing:border-box;
   min-height:58px;
   padding:3px 7px 3px 3px;
+  flex:0 0 auto;
   flex-wrap:nowrap;
 }
 
@@ -134,6 +134,26 @@
   display:flex;flex-direction:column;align-items:center;
   padding:3px 7px;
   gap:1px;
+}
+
+.topbar-expiry-pill{
+  flex:0 0 auto;
+  min-width:126px;
+  height:58px;
+  box-sizing:border-box;
+  justify-content:center;
+  border-left:1px solid var(--border);
+  padding-left:12px;
+}
+.topbar-expiry-pill .expiry-row:first-child{
+  justify-content:flex-start;
+}
+.topbar-expiry-pill .expiry-row:last-child{
+  justify-content:flex-start;
+}
+.topbar-expiry-pill #expiry-slot{
+  max-width:150px;
+  overflow:hidden;
 }
 
 .expiry-pill-label{
@@ -220,7 +240,7 @@
   background:var(--bg-1);box-shadow:0 2px 8px rgba(0,0,0,0.16);flex:0 0 auto;
 }
 .active-symbol-pill .symbol-select{
-  width:clamp(132px,12vw,188px);min-width:0;padding:0 16px 0 0;border:0;border-radius:0;
+  width:10ch;min-width:10ch;max-width:10ch;padding:0 16px 0 0;border:0;border-radius:0;
   background-color:transparent;box-shadow:none;background-position:right center;
   font-size:var(--fs-lg);line-height:1.15;
 }
@@ -290,7 +310,7 @@
 .feed-health-pill{min-width:150px;}
 .feed-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;width:100%;white-space:nowrap;}
 .feed-row .expiry-pill-label{text-align:left;}
-.feed-row .data-source-select{text-align:left;width:100%;padding:2px 12px 2px 2px;background-position:right center;}
+.feed-row .data-source-select{text-align:left;width:16ch;max-width:16ch;min-width:16ch;padding:2px 12px 2px 2px;background-position:right center;}
 .feed-row .data-source-status-pill{text-align:right;}
 
 /* Data-source status readout (POLLING/LIVE/UNAVAILABLE/SESSION_REQUIRED)

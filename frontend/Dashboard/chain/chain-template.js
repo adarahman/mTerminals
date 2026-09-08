@@ -152,7 +152,14 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
           <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
         </span>`:''}
       </span>
-      ${renderIndexTicker(d)}
+      <div class="expiry-pill topbar-expiry-pill">
+       <span class="expiry-row">
+         <span class="expiry-pill-label">Expiry</span>
+         <span class="expiry-dte" id="dte-display">${(d.dte||0)}d</span>
+       </span>
+       <span class="expiry-row"><span id="expiry-slot"></span></span>
+     </div>
+     ${renderIndexTicker(d)}
     </div>
     <div class="expiry-strip">
       <div class="expiry-pill feed-health-pill">
@@ -183,20 +190,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
           })()}
         </span>
       </div>
-      <div class="expiry-divider"></div>
-      <!-- Expiry is its own dedicated pill, separate from DTE, and sits
-           leftmost in the strip. The same persistent <select> node from
-           #expiry-select-holder is re-parented into #expiry-slot on every
-           render (see moveExpirySelectIntoTopBar()) rather than rebuilt,
-           so its option list and current value survive live ticks. -->
-      <div class="expiry-pill">
-        <span class="expiry-row">
-          <span class="expiry-pill-label">Expiry</span>
-          <span class="expiry-dte" id="dte-display">${(d.dte||0)}d</span>
-        </span>
-        <span class="expiry-row"><span id="expiry-slot"></span></span>
-      </div>
-      <div class="expiry-divider"></div>
+
       <div class="expiry-pill">
         <span class="expiry-pill-label">Updated</span>
         <span class="expiry-pill-val time-val" id="time-display">${d.refreshTime||'--'}</span>
