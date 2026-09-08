@@ -292,7 +292,7 @@ def provider_status() -> list[dict]:
                 {
                     "id": key,
                     "label": PROVIDER_DISPLAY_NAMES.get(key, key),
-                    "status": "POLLING",
+                    "status": "AVAILABLE",
                     "active": key == _active_provider_name,
                     "ready": True,
                     "error": None,
