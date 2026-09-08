@@ -73,11 +73,7 @@ const icon =
     status === "API_UNAVAILABLE" ? "🔴" :
     "⚪";
 
-const display =
-    status === "AVAILABLE"
-        ? `${icon} ${label}`
-        : `${icon} ${label} (${status.replaceAll("_"," ").toLowerCase()})`;
-
+const display = `${icon} ${label}`;
 return `<option value="${id}"${s.active?' selected':''} title="Status: ${escapeHtml(status)}">${escapeHtml(display)}</option>`;
   }).join('');
 };

@@ -161,14 +161,12 @@
     <div class="oc-modal-bar">
       <div class="oc-modal-id">
         <button id="oi-modal-close" class="oc-modal-back" onclick="closeOIDashboardModal()" aria-label="Close OI Flow chart">←</button>
-        <span class="oc-modal-title">🌊 OI Flow by Strike</span>
-      </div>
-      <div class="oi-native-tabs" role="group" aria-label="OI Flow measure">
         <span class="oi-native-view-tabs" role="group" aria-label="OI chart presentation">
           <button type="button" class="tab-btn active-oif" data-oi-native-view="butterfly" onclick="switchNativeOiFlowView('butterfly',this)">Butterfly</button>
           <button type="button" class="tab-btn" data-oi-native-view="bar" onclick="switchNativeOiFlowView('bar',this)">OI Bar Chart</button>
         </span>
-        <span class="oi-native-tab-sep" aria-hidden="true"></span>
+      </div>
+      <div class="oi-native-tabs" role="group" aria-label="OI Flow measure">
         <button type="button" class="tab-btn" data-oi-native-mode="oi" onclick="switchNativeOiFlowChart('oi',this)">Open Interest</button>
         <button type="button" class="tab-btn" data-oi-native-mode="chg" onclick="switchNativeOiFlowChart('chg',this)">OI Chg</button>
         <button type="button" class="tab-btn active-oif" data-oi-native-mode="combined" onclick="switchNativeOiFlowChart('combined',this)">Combined</button>
