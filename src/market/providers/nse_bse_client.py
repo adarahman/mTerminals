@@ -483,72 +483,89 @@ def fetch_bse_index_quote(symbol: str) -> dict | None:
         "Change": change,
     }
 def fetch_nifty_futures(index: str = "nse50_fut") -> pd.DataFrame:
-    url = f"https://www.nseindia.com/api/liveEquity-derivatives?index={index}"
-    data = nse_request(url, referer="https://www.nseindia.com/")
+    """Fetch NSE index or stock futures from the current public derivatives API.
+
+    The current NextApi returns options and futures in one flat ``data`` list.
+    Known index keys are mapped to their NSE symbols and filtered as FUTIDX.
+    ``stock_fut:<SYMBOL>`` is used internally for stock futures and filtered
+    as FUTSTK, preserving the generic public-futures routing contract.
+    """
+    symbol_by_index = {
+        "nse50_fut": ("NIFTY", "FUTIDX"),
+        "nifty_bank_fut": ("BANKNIFTY", "FUTIDX"),
+        "nifty_finservice_fut": ("FINNIFTY", "FUTIDX"),
+        "nifty_mid_select_fut": ("MIDCPNIFTY", "FUTIDX"),
+        "nifty_next50_fut": ("NIFTYNXT50", "FUTIDX"),
+    }
+
+    index_key = (index or "").strip()
+
+    if index_key.lower().startswith("stock_fut:"):
+        symbol = index_key.split(":", 1)[1].strip().upper()
+        instrument_type = "FUTSTK"
+    else:
+        mapped = symbol_by_index.get(index_key.lower())
+        if not mapped:
+            logger.info(
+                "[fetch_nifty_futures] unsupported public futures index: %s",
+                index,
+            )
+            return pd.DataFrame()
+        symbol, instrument_type = mapped
+
+    if not symbol:
+        return pd.DataFrame()
+
+    url = _cache_bust(
+        "https://www.nseindia.com/api/NextApi/apiClient/"
+        f"GetQuoteApi?functionName=getSymbolDerivativesData&symbol={symbol}"
+    )
+    data = nse_request(
+        url,
+        referer="https://www.nseindia.com/market-data/",
+    )
+
     if not data:
         return pd.DataFrame()
 
     rows = []
     for rec in data.get("data", []):
-        ltp  = rec.get("lastPrice") or 0
+        if not isinstance(rec, dict):
+            continue
+
+        if str(rec.get("instrumentType", "")).upper() != instrument_type:
+            continue
+
+        ltp = rec.get("lastPrice") or 0
         spot = rec.get("underlyingValue") or 0
-
-        # "volume" was never a real field on NSE's derivative-quote schema —
-        # NSE names it numberOfContractsTraded (contracts) alongside
-        # totalTurnover (rupee turnover for those contracts), same pattern
-        # as the priceInfo/tradeInfo split on the equity side. rec.get
-        # ("volume") was silently returning None here the whole time, the
-        # same class of bug as the index Value/Volume VWAP mixup — just
-        # unnoticed because nothing rendered this column yet.
-        #
-        # Turnover is what makes this contract's own VWAP legitimate
-        # (Turnover / Volume), unlike the index case: futures are an
-        # actually-traded instrument, so their own turnover/volume ratio
-        # IS this contract's session VWAP — no basket-aggregation issue.
-        # Falling back through a few plausible key spellings defensively
-        # since this hasn't been confirmed against a live tick yet — print
-        # rec.keys() on a live run and drop the ones that don't hit.
-        volume = (rec.get("numberOfContractsTraded")
-                  or rec.get("tradedVolume")
-                  or rec.get("volume"))
-        turnover = (rec.get("totalTurnover")
-                    or rec.get("turnover")
-                    or rec.get("tradedValue"))
-
-        # Self-diagnosing rather than silently-wrong: if every guessed key
-        # missed, print the actual keys once so the real field name is
-        # obvious on the first live run instead of hiding as another
-        # quiet None (same failure mode fetch_bse_index_quote() guards
-        # against with its own "got response but ... all empty" print).
-        if volume is None or turnover is None:
-            logger.info(f"[fetch_nifty_futures] {rec.get('contract')}: "
-                  f"volume={volume} turnover={turnover} — guessed keys missed, "
-                  f"raw fields available: {sorted(rec.keys())}")
+        volume = rec.get("totalTradedVolume")
+        turnover = rec.get("totalTurnover")
 
         rows.append({
-            "Contract":   rec.get("contract"),
+            "Contract": rec.get("identifier"),
             "Underlying": rec.get("underlying"),
-            "Expiry":     rec.get("expiryDate"),
-            "LTP":        ltp,
-            "Change":     rec.get("change"),
-            "PctChange":  rec.get("pChange"),
-            "Open":       rec.get("openPrice"),
-            "High":       rec.get("highPrice"),
-            "Low":        rec.get("lowPrice"),
-            "PrevClose":  rec.get("closePrice"),
-            "Volume":     volume,
-            # Raw rupee-scale turnover (NOT pre-divided into crore) so a
-            # VWAP = Turnover/Volume can be computed to full precision,
-            # same convention as parse_index_records()'s "Value" field.
-            # UNVERIFIED UNIT: NSE derivative turnover has historically
-            # been published in absolute rupees on some endpoints and in
-            # lakhs on others — sanity-check the first live value against
-            # LTP * Volume * lot_size before trusting the VWAP this feeds.
-            "Turnover":   turnover,
-            "OI":         rec.get("openInterest"),
-            "Spot":       spot,
-            "Basis":      round(ltp - spot, 2),
+            "Expiry": rec.get("expiryDate"),
+            "LTP": ltp,
+            "Change": rec.get("change"),
+            "PctChange": rec.get("pchange"),
+            "Open": rec.get("openPrice"),
+            "High": rec.get("highPrice"),
+            "Low": rec.get("lowPrice"),
+            "PrevClose": rec.get("prevClose"),
+            "Volume": volume,
+            "Turnover": turnover,
+            "OI": rec.get("openInterest"),
+            "Spot": spot,
+            "Basis": round(ltp - spot, 2),
         })
+
+    if not rows:
+        logger.info(
+            "[fetch_nifty_futures] %s: response received but no %s records",
+            symbol,
+            instrument_type,
+        )
+        return pd.DataFrame()
 
     return pd.DataFrame(rows)
 
@@ -560,7 +577,6 @@ _PUBLIC_FUTURES_INDEX_KEYS = {
     "MIDCPNIFTY": "nifty_mid_select_fut",
     "NIFTYNXT50": "nifty_next50_fut",
 }
-
 
 def fetch_public_futures(symbol: str, which: str = "NEAR") -> pd.DataFrame:
     """Fetch one NEAR/NEXT/FAR futures contract without broker login.
@@ -578,7 +594,7 @@ def fetch_public_futures(symbol: str, which: str = "NEAR") -> pd.DataFrame:
         if frame is None:
             return pd.DataFrame()
     else:
-        frame = fetch_nifty_futures(_PUBLIC_FUTURES_INDEX_KEYS.get(symbol, "stock_fut"))
+        frame = fetch_nifty_futures(_PUBLIC_FUTURES_INDEX_KEYS.get(symbol, f"stock_fut:{symbol}"))
         if frame is None or frame.empty:
             return pd.DataFrame()
         if symbol not in _PUBLIC_FUTURES_INDEX_KEYS and "Underlying" in frame.columns:

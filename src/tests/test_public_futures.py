@@ -49,3 +49,101 @@ def test_futures_switch_skips_stale_socket_handoff():
     assert "futures_switched = True" in query_source
     assert "not query_result.futures_reference_switched" in websocket_source
     assert "self._invalidate_market_baseline()" in query_source
+
+
+def test_fetch_nifty_futures_parses_nextapi_futidx(monkeypatch):
+    payload = {
+        "data": [
+            {
+                "instrumentType": "FUTIDX",
+                "identifier": "FUTIDXNIFTY29-09-2026XX0.00",
+                "underlying": "NIFTY",
+                "expiryDate": "29-Sep-2026",
+                "lastPrice": 23744.1,
+                "underlyingValue": 23635.1,
+                "change": -123.6,
+                "pchange": -0.5178,
+                "openPrice": 23828,
+                "highPrice": 23830,
+                "lowPrice": 23725,
+                "prevClose": 23867.7,
+                "totalTradedVolume": 33466,
+                "totalTurnover": 51700204441.6,
+                "openInterest": 275179,
+            },
+            {
+                "instrumentType": "OPTIDX",
+                "identifier": "OPTION-SHOULD-BE-IGNORED",
+                "underlying": "NIFTY",
+                "expiryDate": "29-Sep-2026",
+                "lastPrice": 100,
+            },
+        ]
+    }
+
+    monkeypatch.setattr(
+        market_api,
+        "nse_request",
+        lambda url, referer=None: payload,
+    )
+
+    result = market_api.fetch_nifty_futures("nse50_fut")
+
+    assert len(result) == 1
+    row = result.iloc[0]
+
+    assert row["Contract"] == "FUTIDXNIFTY29-09-2026XX0.00"
+    assert row["Underlying"] == "NIFTY"
+    assert row["LTP"] == 23744.1
+    assert row["Spot"] == 23635.1
+    assert row["Basis"] == 109.0
+    assert row["PrevClose"] == 23867.7
+    assert row["Volume"] == 33466
+    assert row["Turnover"] == 51700204441.6
+    assert row["OI"] == 275179
+
+
+def test_fetch_nifty_futures_parses_nextapi_futstk(monkeypatch):
+    payload = {
+        "data": [
+            {
+                "instrumentType": "FUTSTK",
+                "identifier": "FUTSTKRELIANCE29-09-2026XX0.00",
+                "underlying": "RELIANCE",
+                "expiryDate": "29-Sep-2026",
+                "lastPrice": 1296.2,
+                "underlyingValue": 1294.9,
+                "prevClose": 1300.0,
+                "totalTradedVolume": 19326,
+                "totalTurnover": 12561030330,
+                "openInterest": 257099,
+            },
+            {
+                "instrumentType": "FUTIDX",
+                "identifier": "FUTIDXNIFTY29-09-2026XX0.00",
+                "underlying": "NIFTY",
+                "expiryDate": "29-Sep-2026",
+                "lastPrice": 23744.1,
+            },
+        ]
+    }
+
+    monkeypatch.setattr(
+        market_api,
+        "nse_request",
+        lambda url, referer=None: payload,
+    )
+
+    result = market_api.fetch_nifty_futures("stock_fut:RELIANCE")
+
+    assert len(result) == 1
+    row = result.iloc[0]
+
+    assert row["Contract"] == "FUTSTKRELIANCE29-09-2026XX0.00"
+    assert row["Underlying"] == "RELIANCE"
+    assert row["LTP"] == 1296.2
+    assert row["Spot"] == 1294.9
+    assert row["Basis"] == 1.3
+    assert row["Volume"] == 19326
+    assert row["Turnover"] == 12561030330
+    assert row["OI"] == 257099
