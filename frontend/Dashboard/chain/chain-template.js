@@ -74,7 +74,8 @@ const icon =
     "⚪";
 
 const display = `${icon} ${label}`;
-return `<option value="${id}"${s.active?' selected':''} title="Status: ${escapeHtml(status)}">${escapeHtml(display)}</option>`;
+const reason = s.error ? ` — ${s.error}` : '';
+return `<option value="${id}"${s.active ? ' selected' : ''} title="Status: ${escapeHtml(status)}${escapeHtml(reason)}">${escapeHtml(display)}</option>`;
   }).join('');
 };
 
