@@ -240,7 +240,7 @@
   background:var(--bg-1);box-shadow:0 2px 8px rgba(0,0,0,0.16);flex:0 0 auto;
 }
 .active-symbol-pill .symbol-select{
-  width:10ch;min-width:10ch;max-width:10ch;padding:0 16px 0 0;border:0;border-radius:0;
+  width:12ch;min-width:12ch;max-width:12ch;padding:0;border:0;border-radius:0;
   background-color:transparent;box-shadow:none;background-position:right center;
   font-size:var(--fs-lg);line-height:1.15;
 }
