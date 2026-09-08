@@ -5,12 +5,39 @@ import { MarketContextBar } from '../../src/components/MarketContextBar';
 import { useMarketData } from '../../src/hooks/useMarketData';
 
 export default function AnalyticsScreen() {
-  const { payload, connected, error } = useMarketData();
+  const { payload, connected, connectionStatus, error } = useMarketData();
+
+  const connectionLabel =
+    connectionStatus === 'connected'
+      ? '● CONNECTED'
+      : connectionStatus === 'reconnecting'
+        ? '● RECONNECTING…'
+        : connectionStatus === 'connecting'
+          ? '● CONNECTING…'
+          : connectionStatus === 'error'
+            ? '● CONNECTION ERROR'
+            : '● OFFLINE';
+
+  const connectionColor =
+    connectionStatus === 'connected'
+      ? '#63d297'
+      : connectionStatus === 'reconnecting' ||
+          connectionStatus === 'connecting'
+        ? '#e8b45b'
+        : '#ef7777';
   const m: any = payload?.market ?? {};
 
   const ceFlow = number(m.totalCeCapitalFlow);
   const peFlow = number(m.totalPeCapitalFlow);
   const netFlow = number(m.netCapitalFlow);
+  const concentration = m.capitalConcentration;
+  const concentrationStrikes = Array.isArray(concentration?.topStrikes)
+    ? concentration.topStrikes.length
+    : 0;
+  const concentrationPct = number(concentration?.concentrationPct);
+  const hasConcentration = concentrationStrikes > 0 &&
+    (number(concentration?.totalCapital) ?? 0) > 0 &&
+    concentrationPct !== null && concentrationPct >= 0 && concentrationPct <= 100;
 
   return (
     <SafeAreaView
@@ -50,14 +77,12 @@ export default function AnalyticsScreen() {
 
           <Text
             style={{
-              color: connected
-                ? '#63d297'
-                : '#ef7777',
+              color: connectionColor,
               fontSize: 12,
               fontWeight: '800',
             }}
           >
-            {connected ? '● LIVE' : '● OFFLINE'}
+            {connectionLabel}
           </Text>
         </View>
 
@@ -108,11 +133,19 @@ export default function AnalyticsScreen() {
 
             <Metric
               label="CONCENTRATION"
-              value={formatFlexible(
-                m.capitalConcentration,
-              )}
+              value={hasConcentration ? `${concentrationPct.toFixed(1)}%` : '—'}
+              sub={hasConcentration
+                ? `Premium value in top ${concentrationStrikes} strikes`
+                : 'Waiting for concentration data'}
             />
           </View>
+
+          {hasConcentration ? (
+            <Insight
+              label="What concentration means"
+              value={`The top ${concentrationStrikes} strike prices hold ${concentrationPct.toFixed(1)}% of the analyzed chain’s option premium value (${money(concentration.topCapital)} of ${money(concentration.totalCapital)}). A higher percentage means more value is clustered at fewer strikes.`}
+            />
+          ) : null}
 
           <FlowBalance
             ce={Math.abs(ceFlow || 0)}
@@ -896,6 +929,7 @@ const styles = {
 };
 
 function number(value: any): number | null {
+  if (value == null || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }

@@ -1,10 +1,18 @@
 export type MarketPayload = Record<string, any>;
 
+export type ConnectionStatus =
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'error'
+  | 'disconnected';
+
 type Listener = () => void;
 
 type MarketSnapshot = {
   payload: MarketPayload | null;
   connected: boolean;
+  connectionStatus: ConnectionStatus;
   error: string | null;
 };
 
@@ -13,6 +21,7 @@ const listeners = new Set<Listener>();
 let snapshot: MarketSnapshot = {
   payload: null,
   connected: false,
+  connectionStatus: 'disconnected',
   error: null,
 };
 
@@ -23,6 +32,15 @@ function emit() {
 }
 
 function update(next: Partial<MarketSnapshot>) {
+  const changed = Object.entries(next).some(
+    ([key, value]) =>
+      snapshot[key as keyof MarketSnapshot] !== value,
+  );
+
+  if (!changed) {
+    return;
+  }
+
   snapshot = {
     ...snapshot,
     ...next,
@@ -44,18 +62,22 @@ export const marketStore = {
     };
   },
 
-  setConnected(value: boolean) {
-    if (
-      snapshot.connected === value &&
-      !(value && snapshot.error !== null)
-    ) {
-      return;
-    }
-
+  setConnectionStatus(
+    status: ConnectionStatus,
+    error: string | null = null,
+  ) {
     update({
-      connected: value,
-      ...(value ? { error: null } : {}),
+      connectionStatus: status,
+      connected: status === 'connected',
+      error,
     });
+  },
+
+  setConnected(value: boolean) {
+    this.setConnectionStatus(
+      value ? 'connected' : 'disconnected',
+      null,
+    );
   },
 
   setPayload(value: MarketPayload) {
@@ -65,12 +87,13 @@ export const marketStore = {
   },
 
   setError(value: string | null) {
-    if (snapshot.error === value) {
+    if (value) {
+      this.setConnectionStatus('error', value);
       return;
     }
 
     update({
-      error: value,
+      error: null,
     });
   },
 };

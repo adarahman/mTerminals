@@ -30,6 +30,7 @@ __all__ = [
     "_atm_window",
     "compute_max_pain",
     "compute_total_pcr",
+    "compute_oi_change_pcr",
     "_build_greeks_table",
     "_summarize_gex",
     "_build_smart_money_top",
@@ -96,6 +97,15 @@ def compute_max_pain(df: pd.DataFrame) -> float:
             best_loss, best_strike = loss, candidate
 
     return best_strike
+
+
+def compute_oi_change_pcr(df: pd.DataFrame) -> float:
+    """Return change-in-OI PCR only when net call OI is building."""
+    ce = float(df["CE_ChgOI"].sum(min_count=1))
+    pe = float(df["PE_ChgOI"].sum(min_count=1))
+    if not math.isfinite(ce) or not math.isfinite(pe) or ce <= 0:
+        return float("nan")
+    return pe / ce
 
 
 def compute_total_pcr(df: pd.DataFrame) -> float:

@@ -368,7 +368,7 @@ def export_dashboard_json(
         "peWall":        _to_int(ctx_dict.get("pe_wall",        0)),
 
         "totalPCR":      _r(ctx_dict.get("total_pcr",    1.0), 2),
-        "oiChgPCR":      _r(ctx_dict.get("oi_chg_pcr",   0.0), 2),
+        "oiChgPCR":      _nullable_r(ctx_dict.get("oi_chg_pcr"), 2),
         "pcrSentiment":  str(ctx_dict.get("pcr_sentiment", "Balanced")),
 
         # ── capital-weighted chain rollup (Executive Card / Smart Money) ──

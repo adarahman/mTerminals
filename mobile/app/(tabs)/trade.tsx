@@ -5,7 +5,26 @@ import { MarketContextBar } from '../../src/components/MarketContextBar';
 import { useMarketData } from '../../src/hooks/useMarketData';
 
 export default function TradeScreen() {
-  const { payload, connected, error } = useMarketData();
+  const { payload, connected, connectionStatus, error } = useMarketData();
+
+  const connectionLabel =
+    connectionStatus === 'connected'
+      ? '● CONNECTED'
+      : connectionStatus === 'reconnecting'
+        ? '● RECONNECTING…'
+        : connectionStatus === 'connecting'
+          ? '● CONNECTING…'
+          : connectionStatus === 'error'
+            ? '● CONNECTION ERROR'
+            : '● OFFLINE';
+
+  const connectionColor =
+    connectionStatus === 'connected'
+      ? '#63d297'
+      : connectionStatus === 'reconnecting' ||
+          connectionStatus === 'connecting'
+        ? '#e8b45b'
+        : '#ef7777';
 
   const trade: any = payload?.trade ?? {};
   const portfolio: any = trade.portfolio ?? {};
@@ -49,12 +68,12 @@ export default function TradeScreen() {
 
           <Text
             style={{
-              color: connected ? '#63d297' : '#ef7777',
+              color: connectionColor,
               fontSize: 12,
               fontWeight: '800',
             }}
           >
-            {connected ? '● LIVE' : '● OFFLINE'}
+            {connectionLabel}
           </Text>
         </View>
 

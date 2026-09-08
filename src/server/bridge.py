@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 import orjson
-from aiohttp import web
+from aiohttp import WSMsgType, web
 
 from analytics.fii_dii_market_bias import get_market_bias_report
 from analytics.fii_dii_sentiment import get_report_for_trading_day
@@ -53,12 +53,16 @@ class DashboardBridge:
         self._flow = {"value": None, "fetched_at": 0.0}
         self._bias = {"value": None, "fetched_at": 0.0}
         self._futures = {"value": None, "fetched_at": 0.0}
-        self._mobile_runner = None
 
         # Read-only sources for the mobile Trade screen.
         # No execution/control functions are exposed here.
         self._paper_snapshot = None
         self._trading_status = None
+
+        # Authenticated mobile market-data control only.
+        # Trading/execution controls are never attached here.
+        self._switch_data_source = None
+        self._switch_symbol = None
 
     @property
     def clients(self) -> set[Any]:
@@ -234,6 +238,16 @@ class DashboardBridge:
         self._paper_snapshot = paper_snapshot
         self._trading_status = trading_status
 
+    def configure_mobile_controls(
+        self,
+        *,
+        switch_data_source: Callable[[str], Any],
+        switch_symbol: Callable[[str, str | None], Any],
+    ) -> None:
+        """Attach the narrow authenticated mobile market controls."""
+        self._switch_data_source = switch_data_source
+        self._switch_symbol = switch_symbol
+
     def _build_trade_snapshot(self) -> dict[str, Any]:
         portfolio: dict[str, Any] = {}
         orders: list[Any] = []
@@ -290,7 +304,7 @@ class DashboardBridge:
             return False
 
     async def handle_mobile(self, request):
-        """Read-only authenticated WebSocket endpoint for mobile clients."""
+        """Authenticated mobile WebSocket with narrow market-data control."""
 
         if not self._mobile_token_valid(request):
             return web.Response(status=401, text="Unauthorized")
@@ -308,77 +322,144 @@ class DashboardBridge:
                 ).decode()
             )
 
-            # Deliberately ignore all inbound mobile messages.
-            #
-            # Mobile clients receive market state only. They cannot:
-            #   - switch brokers
-            #   - switch symbols
-            #   - place/cancel orders
-            #   - invoke trading controls
-            async for _ in websocket:
-                pass
+            # Only market-data source switching is accepted from mobile.
+            # Trading, order, execution, kill-switch, and algo controls
+            # remain unavailable through this endpoint.
+            async for message in websocket:
+                if message.type != WSMsgType.TEXT:
+                    continue
+
+                try:
+                    command = orjson.loads(message.data)
+                except (orjson.JSONDecodeError, TypeError):
+                    await websocket.send_json({
+                        "type": "control_error",
+                        "error": "invalid_json",
+                    })
+                    continue
+
+                if not isinstance(command, dict):
+                    await websocket.send_json({
+                        "type": "control_error",
+                        "error": "invalid_command",
+                    })
+                    continue
+
+                action = str(command.get("type") or "").strip()
+
+                if action == "switch_symbol":
+                    requested_symbol = str(
+                        command.get("symbol") or ""
+                    ).strip().upper()
+
+                    requested_expiry = command.get("expiry")
+                    if requested_expiry is not None:
+                        requested_expiry = (
+                            str(requested_expiry).strip() or None
+                        )
+
+                    if not requested_symbol:
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "action": action,
+                            "error": "missing_symbol",
+                        })
+                        continue
+
+                    if self._switch_symbol is None:
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "action": action,
+                            "error": "symbol_switch_unavailable",
+                        })
+                        continue
+
+                    try:
+                        result = self._switch_symbol(
+                            requested_symbol,
+                            requested_expiry,
+                        )
+                    except Exception as exc:
+                        print(
+                            f"[mobile-ws] symbol switch failed: {exc}",
+                            flush=True,
+                        )
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "action": action,
+                            "symbol": requested_symbol,
+                            "error": "symbol_switch_failed",
+                        })
+                        continue
+
+                    await websocket.send_json({
+                        "type": "control_ack",
+                        "action": action,
+                        "symbol": requested_symbol,
+                        "result": result,
+                    })
+                    continue
+
+                if action == "switch_data_source":
+                    requested = str(
+                        command.get("dataSource") or ""
+                    ).strip().upper()
+
+                    if not requested:
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "error": "missing_data_source",
+                        })
+                        continue
+
+                    if self._switch_data_source is None:
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "error": "data_source_switch_unavailable",
+                        })
+                        continue
+
+                    try:
+                        result = await self._switch_data_source(requested)
+                    except ValueError as exc:
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "action": action,
+                            "dataSource": requested,
+                            "error": str(exc),
+                        })
+                        continue
+                    except Exception as exc:
+                        print(
+                            f"[mobile-ws] data-source switch failed: {exc}",
+                            flush=True,
+                        )
+                        await websocket.send_json({
+                            "type": "control_error",
+                            "action": action,
+                            "dataSource": requested,
+                            "error": "data_source_switch_failed",
+                        })
+                        continue
+
+                    await websocket.send_json({
+                        "type": "control_ack",
+                        "action": action,
+                        "dataSource": requested,
+                        "result": result,
+                    })
+                    continue
+
+                await websocket.send_json({
+                    "type": "control_error",
+                    "action": action,
+                    "error": "unsupported_action",
+                })
+
         finally:
             self._clients.discard(websocket)
 
         return websocket
-
-    async def _start_mobile_listener(self):
-        enabled = (
-            os.getenv("MTERMINALS_MOBILE_WS_ENABLED", "")
-            .strip()
-            .lower()
-            in {"1", "true", "yes", "on"}
-        )
-
-        if not enabled:
-            return
-
-        token = os.getenv("MTERMINALS_MOBILE_TOKEN", "").strip()
-
-        if not token:
-            raise RuntimeError(
-                "MTERMINALS_MOBILE_WS_ENABLED=true requires "
-                "MTERMINALS_MOBILE_TOKEN"
-            )
-
-        host = os.getenv(
-            "MTERMINALS_MOBILE_WS_HOST",
-            "0.0.0.0",
-        ).strip() or "0.0.0.0"
-
-        try:
-            port = int(
-                os.getenv(
-                    "MTERMINALS_MOBILE_WS_PORT",
-                    "5501",
-                )
-            )
-        except ValueError as exc:
-            raise RuntimeError(
-                "MTERMINALS_MOBILE_WS_PORT must be an integer"
-            ) from exc
-
-        app = web.Application()
-        app.router.add_get("/mobile-ws", self.handle_mobile)
-
-        runner = web.AppRunner(app)
-        await runner.setup()
-
-        site = web.TCPSite(
-            runner,
-            host,
-            port,
-        )
-
-        await site.start()
-
-        self._mobile_runner = runner
-
-        print(
-            f"[mobile-ws] read-only listener at "
-            f"ws://{host}:{port}/mobile-ws",
-            flush=True,
-        )
 
     async def handle(self, request):
         if not self._origin_allowed(request):
@@ -395,8 +476,6 @@ class DashboardBridge:
         return websocket
 
     async def run(self):
-        await self._start_mobile_listener()
-
         while True:
             if self.clients:
                 await self._refresh_all()

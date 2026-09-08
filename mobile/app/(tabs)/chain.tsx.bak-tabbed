@@ -1,0 +1,879 @@
+import { useMemo, useState } from 'react';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { MarketContextBar } from '../../src/components/MarketContextBar';
+import { useMarketData } from '../../src/hooks/useMarketData';
+import { formatPcrChange } from '../../src/utils/pcr';
+
+const RANGE_OPTIONS = [3, 5, 10, 15, 9999];
+
+export default function ChainScreen() {
+  const { payload, connectionStatus, error } = useMarketData();
+
+  const connectionLabel =
+    connectionStatus === 'connected'
+      ? '● CONNECTED'
+      : connectionStatus === 'reconnecting'
+        ? '● RECONNECTING…'
+        : connectionStatus === 'connecting'
+          ? '● CONNECTING…'
+          : connectionStatus === 'error'
+            ? '● CONNECTION ERROR'
+            : '● OFFLINE';
+
+  const connectionColor =
+    connectionStatus === 'connected'
+      ? '#63d297'
+      : connectionStatus === 'reconnecting' ||
+          connectionStatus === 'connecting'
+        ? '#e8b45b'
+        : '#ef7777';
+  const market: any = payload?.market ?? payload ?? {};
+
+  const chain = useMemo(() => {
+    const greeks = new Map<number, any>((market.greeks || []).map((r: any) => [Number(r.strike), r]));
+    return (Array.isArray(market.chain) ? market.chain : []).map((row: any) => {
+      const g = greeks.get(Number(row.strike)) || {};
+      return { ...row, ceDelta: g.cDelta, peDelta: g.pDelta,
+        ceGamma: g.cGamma, peGamma: g.pGamma, ceTheta: g.cTheta,
+        peTheta: g.pTheta, ceVega: g.cVega, peVega: g.pVega };
+    });
+  }, [market.chain, market.greeks]);
+
+  const atm = Number(market.atm);
+  const [range, setRange] = useState(5);
+  const [selected, setSelected] = useState<{ strike: number; symbol: string; expiry: string } | null>(null);
+  const [tableView, setTableView] = useState('Positioning');
+  const selectedRow = selected?.symbol === market.symbol && selected?.expiry === market.expiry
+    ? chain.find((row: any) => Number(row.strike) === selected?.strike) ?? null : null;
+
+  const visibleRows = useMemo(() => {
+    if (!chain.length) return [];
+    if (range === 9999) return chain;
+
+    const sorted = [...chain].sort(
+      (a: any, b: any) =>
+        Number(a.strike) - Number(b.strike),
+    );
+
+    const atmIndex = sorted.findIndex(
+      (row: any) => row.atm || Number(row.strike) === atm,
+    );
+
+    if (atmIndex < 0) {
+      return sorted;
+    }
+
+    const start = Math.max(0, atmIndex - range);
+    const end = Math.min(
+      sorted.length,
+      atmIndex + range + 1,
+    );
+
+    return sorted.slice(start, end);
+  }, [chain, atm, range]);
+
+  return (
+    <SafeAreaView
+      style={{
+        flex: 1,
+        backgroundColor: '#0b0d10',
+      }}
+      edges={['top']}
+    >
+      <MarketContextBar />
+
+      <ScrollView
+        contentContainerStyle={{
+          padding: 14,
+          paddingBottom: 40,
+          gap: 12,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+          }}
+        >
+          <View>
+            <Text
+              style={{
+                color: '#ffffff',
+                fontSize: 25,
+                fontWeight: '800',
+              }}
+            >
+              Option Chain
+            </Text>
+
+            <Text
+              style={{
+                color: '#7f8a99',
+                fontSize: 12,
+                marginTop: 4,
+              }}
+            >
+              {market.symbol || '—'}
+              {'  •  '}
+              {market.expiry || '—'}
+              {'  •  ATM '}
+              {market.atm ?? '—'}
+            </Text>
+          </View>
+
+          <Text
+            style={{
+              color: connectionColor,
+              fontSize: 12,
+              fontWeight: '700',
+            }}
+          >
+            {connectionLabel}
+          </Text>
+        </View>
+
+        {error ? (
+          <Card>
+            <Text style={{ color: '#ef7777' }}>
+              {error}
+            </Text>
+          </Card>
+        ) : null}
+
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: 8,
+          }}
+        >
+          <SummaryChip
+            label="SPOT"
+            value={formatNumber(market.spot, 2)}
+          />
+
+          <SummaryChip
+            label="CE WALL"
+            value={formatNumber(market.ceWall, 0)}
+          />
+
+          <SummaryChip
+            label="PE WALL"
+            value={formatNumber(market.peWall, 0)}
+          />
+        </View>
+
+        <Card>
+          <Text style={styles.sectionTitle}>
+            STRIKE RANGE
+          </Text>
+
+          <View
+            style={{
+              flexDirection: 'row',
+              gap: 8,
+              marginTop: 10,
+            }}
+          >
+            {RANGE_OPTIONS.map(value => (
+              <Pressable
+                key={value}
+                onPress={() => setRange(value)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  backgroundColor:
+                    range === value
+                      ? '#2a313a'
+                      : '#101419',
+                }}
+              >
+                <Text
+                  style={{
+                    color:
+                      range === value
+                        ? '#ffffff'
+                        : '#7f8a99',
+                    fontWeight: '700',
+                    fontSize: 12,
+                  }}
+                >
+                  {value === 9999 ? 'All' : `±${value}`}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Card>
+
+        <RangeSummary rows={visibleRows} />
+
+        <View
+          style={{
+            backgroundColor: '#15191f',
+            borderRadius: 16,
+            overflow: 'hidden',
+          }}
+        >
+          <ScrollView horizontal contentContainerStyle={{ padding: 8, gap: 8 }}>
+            {['Positioning', 'Quotes', 'Greeks', 'Capital'].map(mode => (
+              <Pressable key={mode} onPress={() => setTableView(mode)} style={{ padding: 10, borderRadius: 8, backgroundColor: tableView === mode ? '#303946' : '#101419' }}>
+                <Text style={{ color: '#fff' }}>{mode}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Text style={{ color: '#9ba5b4', padding: 10 }}>Swipe for columns · Tap a strike for live details</Text>
+          <ScrollView horizontal><View>
+          <DesktopChainHeader mode={tableView} />
+
+          {visibleRows.map((row: any) => (
+            <DesktopChainRow key={String(row.strike)} row={row} mode={tableView} atm={atm}
+              ceWall={Number(market.ceWall)} peWall={Number(market.peWall)}
+              onPress={() => setSelected({ strike: Number(row.strike), symbol: market.symbol, expiry: market.expiry })}
+            />
+          ))}
+          {!visibleRows.length && <Text style={{ color: '#9ba5b4', padding: 20 }}>Waiting for option chain data…</Text>}
+          </View></ScrollView>
+        </View>
+
+        <Card>
+          <Text style={styles.sectionTitle}>
+            ATM DETAIL
+          </Text>
+
+          <AtmDetail
+            row={chain.find(
+              (row: any) =>
+                Number(row.strike) === atm,
+            )}
+          />
+        </Card>
+      </ScrollView>
+
+    <StrikeDetailSheet
+      row={selectedRow}
+      visible={selectedRow !== null}
+      onClose={() => setSelected(null)}
+      atm={atm}
+      ceWall={Number(market.ceWall)}
+      peWall={Number(market.peWall)}
+      spot={market.spot}
+      symbol={market.symbol}
+      expiry={market.expiry}
+    />
+
+  </SafeAreaView>
+  );
+}
+
+function StrikeDetailSheet({
+  row,
+  visible,
+  onClose,
+  atm,
+  ceWall,
+  peWall,
+  spot,
+  symbol,
+  expiry,
+}: {
+  row: any;
+  visible: boolean;
+  onClose: () => void;
+  atm: number;
+  ceWall: number;
+  peWall: number;
+  spot: any;
+  symbol: any;
+  expiry: any;
+}) {
+  if (!row) return null;
+
+  const strike = Number(row.strike);
+  const context = [
+    strike === atm ? 'ATM' : null,
+    strike === ceWall ? 'CE WALL' : null,
+    strike === peWall ? 'PE WALL' : null,
+  ]
+    .filter(Boolean)
+    .join(' • ');
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        onPress={onClose}
+        style={styles.sheetBackdrop}
+      >
+        <Pressable
+          onPress={() => {}}
+          style={styles.sheet}
+        >
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetStrike}>
+                {formatNumber(strike, 0)}
+              </Text>
+
+              <Text style={styles.sheetSubtext}>
+                {symbol || '—'}
+                {'  •  '}
+                {expiry || '—'}
+                {'  •  Spot '}
+                {formatNumber(spot, 2)}
+              </Text>
+
+              {context ? (
+                <Text style={styles.sheetContext}>
+                  {context}
+                </Text>
+              ) : null}
+            </View>
+
+            <Pressable
+              onPress={onClose}
+              style={styles.closeButton}
+            >
+              <Text style={styles.closeButtonText}>✕</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{
+              paddingBottom: 34,
+              gap: 14,
+            }}
+          >
+            <StrikeSection title="QUOTE">
+              <StrikeGrid>
+                <StrikeMetric label="CE LTP" value={formatNumber(row.ceLTP, 2)} tone="ce" />
+                <StrikeMetric label="PE LTP" value={formatNumber(row.peLTP, 2)} tone="pe" />
+                <StrikeMetric label="CE BID" value={formatNumber(firstValue(row, ['ceBid', 'ceBidPrice', 'ceBestBid']), 2)} />
+                <StrikeMetric label="CE ASK" value={formatNumber(firstValue(row, ['ceAsk', 'ceAskPrice', 'ceBestAsk']), 2)} />
+                <StrikeMetric label="PE BID" value={formatNumber(firstValue(row, ['peBid', 'peBidPrice', 'peBestBid']), 2)} />
+                <StrikeMetric label="PE ASK" value={formatNumber(firstValue(row, ['peAsk', 'peAskPrice', 'peBestAsk']), 2)} />
+              </StrikeGrid>
+            </StrikeSection>
+
+            <StrikeSection title="OPEN INTEREST">
+              <StrikeGrid>
+                <StrikeMetric label="CE OI" value={compactNumber(row.ceOI)} tone="ce" />
+                <StrikeMetric label="PE OI" value={compactNumber(row.peOI)} tone="pe" />
+                <StrikeMetric label="CE ΔOI" value={signedCompact(row.ceChgOI)} valueColor={changeColor(row.ceChgOI)} />
+                <StrikeMetric label="PE ΔOI" value={signedCompact(row.peChgOI)} valueColor={changeColor(row.peChgOI)} />
+                <StrikeMetric label="CE VOLUME" value={compactNumber(firstValue(row, ['ceVolume', 'ceVol']))} />
+                <StrikeMetric label="PE VOLUME" value={compactNumber(firstValue(row, ['peVolume', 'peVol']))} />
+              </StrikeGrid>
+            </StrikeSection>
+
+            <StrikeSection title="VOLATILITY & GREEKS">
+              <StrikeGrid>
+                <StrikeMetric label="CE IV" value={formatNumber(row.ceIV, 2)} tone="ce" />
+                <StrikeMetric label="PE IV" value={formatNumber(row.peIV, 2)} tone="pe" />
+                <StrikeMetric label="CE DELTA" value={formatNumber(firstValue(row, ['ceDelta', 'callDelta']), 4)} />
+                <StrikeMetric label="PE DELTA" value={formatNumber(firstValue(row, ['peDelta', 'putDelta']), 4)} />
+                <StrikeMetric label="CE GAMMA" value={formatNumber(firstValue(row, ['ceGamma', 'callGamma']), 6)} />
+                <StrikeMetric label="PE GAMMA" value={formatNumber(firstValue(row, ['peGamma', 'putGamma']), 6)} />
+                <StrikeMetric label="CE THETA" value={formatNumber(firstValue(row, ['ceTheta', 'callTheta']), 3)} />
+                <StrikeMetric label="PE THETA" value={formatNumber(firstValue(row, ['peTheta', 'putTheta']), 3)} />
+              </StrikeGrid>
+            </StrikeSection>
+
+            <StrikeSection title="CAPITAL FLOW">
+              <StrikeGrid>
+                <StrikeMetric label="CE FLOW" value={signedCompact(row.ceCapitalFlow)} tone="ce" />
+                <StrikeMetric label="PE FLOW" value={signedCompact(row.peCapitalFlow)} tone="pe" />
+                <StrikeMetric label="CE LOCKED" value={compactNumber(firstValue(row, ['cePremiumLocked', 'ceCapitalLocked']))} />
+                <StrikeMetric label="PE LOCKED" value={compactNumber(firstValue(row, ['pePremiumLocked', 'peCapitalLocked']))} />
+                <StrikeMetric label="CE TURNOVER" value={compactNumber(firstValue(row, ['cePremiumTurnover', 'ceTurnover']))} />
+                <StrikeMetric label="PE TURNOVER" value={compactNumber(firstValue(row, ['pePremiumTurnover', 'peTurnover']))} />
+              </StrikeGrid>
+            </StrikeSection>
+
+            <StrikeSection title="EXPOSURE">
+              <StrikeGrid>
+                <StrikeMetric label="CE DELTA EXP" value={signedCompact(firstValue(row, ['ceDeltaExposure', 'ceDeltaCapital']))} tone="ce" />
+                <StrikeMetric label="PE DELTA EXP" value={signedCompact(firstValue(row, ['peDeltaExposure', 'peDeltaCapital']))} tone="pe" />
+                <StrikeMetric label="CE GAMMA EXP" value={signedCompact(firstValue(row, ['ceGammaExposure', 'ceGammaCapital']))} />
+                <StrikeMetric label="PE GAMMA EXP" value={signedCompact(firstValue(row, ['peGammaExposure', 'peGammaCapital']))} />
+                <StrikeMetric label="CE NOTIONAL" value={compactNumber(firstValue(row, ['ceNotionalExposure', 'ceNotional']))} />
+                <StrikeMetric label="PE NOTIONAL" value={compactNumber(firstValue(row, ['peNotionalExposure', 'peNotional']))} />
+              </StrikeGrid>
+            </StrikeSection>
+
+            <StrikeSection title="SMART MONEY / FOOTPRINT">
+              <StrikeGrid>
+                <StrikeMetric label="FOOTPRINT" value={formatNumber(row.footprintScore, 1)} />
+                <StrikeMetric label="CE SIGNAL" value={row.ceSignal || '—'} tone="ce" />
+                <StrikeMetric label="PE SIGNAL" value={row.peSignal || '—'} tone="pe" />
+                <StrikeMetric label="SUPPORT SCORE" value={formatNumber(firstValue(row, ['supportScore', 'support_score']), 1)} />
+                <StrikeMetric label="RESISTANCE" value={formatNumber(firstValue(row, ['resistanceScore', 'resistance_score']), 1)} />
+                <StrikeMetric label="INSTITUTIONAL" value={formatNumber(firstValue(row, ['institutionalScore', 'institutional_score']), 1)} />
+              </StrikeGrid>
+
+              {row.footprintFactors ? (
+                <View style={styles.factorBox}>
+                  <Text style={styles.factorLabel}>
+                    FOOTPRINT FACTORS
+                  </Text>
+                  <Text style={styles.factorText}>
+                    {stringifyCompact(row.footprintFactors)}
+                  </Text>
+                </View>
+              ) : null}
+            </StrikeSection>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function StrikeSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View>
+      <Text style={styles.sheetSectionTitle}>{title}</Text>
+      <View style={{ marginTop: 8 }}>{children}</View>
+    </View>
+  );
+}
+
+function StrikeGrid({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return <View style={styles.strikeGrid}>{children}</View>;
+}
+
+function StrikeMetric({
+  label,
+  value,
+  tone,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  tone?: 'ce' | 'pe';
+  valueColor?: string;
+}) {
+  const toneColor =
+    tone === 'ce'
+      ? '#ef7777'
+      : tone === 'pe'
+        ? '#63d297'
+        : '#ffffff';
+
+  return (
+    <View style={styles.strikeMetric}>
+      <Text style={styles.strikeMetricLabel}>{label}</Text>
+      <Text
+        numberOfLines={2}
+        style={[
+          styles.strikeMetricValue,
+          { color: valueColor ?? toneColor },
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function firstValue(row: any, keys: string[]): any {
+  for (const key of keys) {
+    const value = row?.[key];
+
+    if (
+      value !== undefined &&
+      value !== null &&
+      value !== ''
+    ) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function stringifyCompact(value: any): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.join(' • ');
+
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, item]) => `${key}: ${String(item)}`)
+      .join(' • ');
+  }
+
+  return String(value);
+}
+
+function AtmDetail({ row }: { row: any }) {
+  if (!row) {
+    return (
+      <Text
+        style={{
+          color: '#7f8a99',
+          marginTop: 10,
+        }}
+      >
+        ATM row unavailable.
+      </Text>
+    );
+  }
+
+  return (
+    <View style={{ marginTop: 10, gap: 10 }}>
+      <View style={styles.detailRow}>
+        <DetailMetric
+          label="CE IV"
+          value={formatNumber(row.ceIV, 2)}
+        />
+
+        <DetailMetric
+          label="PE IV"
+          value={formatNumber(row.peIV, 2)}
+        />
+
+        <DetailMetric
+          label="FOOTPRINT"
+          value={formatNumber(row.footprintScore, 1)}
+        />
+      </View>
+
+      <View style={styles.detailRow}>
+        <DetailMetric
+          label="CE SIGNAL"
+          value={row.ceSignal || '—'}
+        />
+
+        <DetailMetric
+          label="PE SIGNAL"
+          value={row.peSignal || '—'}
+        />
+      </View>
+
+      <View style={styles.detailRow}>
+        <DetailMetric
+          label="CE CAPITAL"
+          value={signedCompact(row.ceCapitalFlow)}
+        />
+
+        <DetailMetric
+          label="PE CAPITAL"
+          value={signedCompact(row.peCapitalFlow)}
+        />
+      </View>
+    </View>
+  );
+}
+
+function SummaryChip({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: '#15191f',
+        borderRadius: 12,
+        padding: 11,
+      }}
+    >
+      <Text style={styles.sectionTitle}>
+        {label}
+      </Text>
+
+      <Text
+        style={{
+          color: '#ffffff',
+          fontSize: 15,
+          fontWeight: '800',
+          marginTop: 4,
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function DetailMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: '#101419',
+        borderRadius: 10,
+        padding: 10,
+      }}
+    >
+      <Text style={styles.sectionTitle}>
+        {label}
+      </Text>
+
+      <Text
+        numberOfLines={2}
+        style={{
+          color: '#ffffff',
+          fontSize: 12,
+          fontWeight: '700',
+          marginTop: 5,
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        backgroundColor: '#15191f',
+        borderRadius: 16,
+        padding: 14,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+const styles = {
+  sectionTitle: {
+    color: '#7f8a99',
+    fontSize: 10,
+    fontWeight: '700' as const,
+    letterSpacing: 0.7,
+  },
+
+  headerCell: {
+    color: '#7f8a99',
+    fontSize: 8,
+    fontWeight: '800' as const,
+  },
+
+  chainCell: {
+    color: '#d7dde5',
+    fontSize: 10,
+    fontWeight: '600' as const,
+  },
+
+  detailRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+  },
+
+  sheetBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end' as const,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+  },
+
+  sheet: {
+    maxHeight: '88%' as const,
+    backgroundColor: '#15191f',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+
+  sheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3b434d',
+    alignSelf: 'center' as const,
+    marginBottom: 14,
+  },
+
+  sheetHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'flex-start' as const,
+    marginBottom: 18,
+  },
+
+  sheetStrike: {
+    color: '#ffffff',
+    fontSize: 26,
+    fontWeight: '900' as const,
+  },
+
+  sheetSubtext: {
+    color: '#8c96a5',
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  sheetContext: {
+    color: '#e8b45b',
+    fontSize: 10,
+    fontWeight: '800' as const,
+    marginTop: 6,
+  },
+
+  closeButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#242a32',
+  },
+
+  closeButtonText: {
+    color: '#cbd2db',
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+
+  sheetSectionTitle: {
+    color: '#9ba5b4',
+    fontSize: 10,
+    fontWeight: '800' as const,
+    letterSpacing: 0.8,
+  },
+
+  strikeGrid: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+  },
+
+  strikeMetric: {
+    width: '48%' as const,
+    minHeight: 60,
+    backgroundColor: '#101419',
+    borderRadius: 11,
+    padding: 10,
+  },
+
+  strikeMetricLabel: {
+    color: '#727d8b',
+    fontSize: 9,
+    fontWeight: '700' as const,
+    letterSpacing: 0.5,
+  },
+
+  strikeMetricValue: {
+    fontSize: 13,
+    fontWeight: '800' as const,
+    marginTop: 5,
+  },
+
+  factorBox: {
+    backgroundColor: '#101419',
+    borderRadius: 11,
+    padding: 11,
+    marginTop: 8,
+  },
+
+  factorLabel: {
+    color: '#727d8b',
+    fontSize: 9,
+    fontWeight: '700' as const,
+    letterSpacing: 0.5,
+  },
+
+  factorText: {
+    color: '#d7dde5',
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+};
+
+function formatNumber(
+  value: any,
+  decimals = 2,
+): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return '—';
+
+  return n.toLocaleString('en-IN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function compactNumber(value: any): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return '—';
+
+  const abs = Math.abs(n);
+
+  if (abs >= 10000000)
+    return `${(n / 10000000).toFixed(2)}Cr`;
+
+  if (abs >= 100000)
+    return `${(n / 100000).toFixed(1)}L`;
+
+  if (abs >= 1000)
+    return `${(n / 1000).toFixed(1)}K`;
+
+  return n.toFixed(0);
+}
+
+function signedCompact(value: any): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return '—';
+
+  if (n === 0) return '0';
+
+  return `${n > 0 ? '+' : '-'}${compactNumber(
+    Math.abs(n),
+  )}`;
+}
+
+function changeColor(value: any): string {
+  const n = Number(value);
+
+  if (!Number.isFinite(n) || n === 0)
+    return '#8c96a5';
+
+  return n > 0 ? '#63d297' : '#ef7777';
+}

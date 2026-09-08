@@ -49,6 +49,7 @@ def build_http_runtime(
     port: int,
     symbol: Callable[[], str],
     middleware,
+    mobile_websocket=None,
     starter=start_http_server,
 ) -> HttpRuntime:
     """Assemble HTTP routes and bind configuration from app-level handlers."""
@@ -64,6 +65,7 @@ def build_http_runtime(
             backtest=backtest,
             lot_sizes=lot_sizes,
             symbols=symbols,
+            mobile_websocket=mobile_websocket,
         ),
         host=host,
         port=port,

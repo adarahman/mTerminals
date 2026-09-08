@@ -32,6 +32,9 @@ def test_control_page_contains_minimum_launcher_controls():
     assert 'id="stop"' in page
     assert "Start Backend" in page
     assert "mTerminals Launcher" in page
+    assert 'id="mobile-mode"' in page
+    assert 'id="mobile-start"' in page
+    assert 'id="mobile-stop"' in page
 
 
 def test_start_and_stop_manage_only_the_owned_backend(monkeypatch, tmp_path):
@@ -110,3 +113,57 @@ def test_update_env_quotes_special_characters_and_rejects_newlines(monkeypatch, 
     assert "SHOONYA_PASSWORD='secret #1'" in (tmp_path / ".env").read_text()
     with pytest.raises(ValueError, match="new line"):
         control_server.update_env({"SHOONYA_PASSWORD": "secret\nINJECTED=yes"})
+
+
+@pytest.mark.parametrize("mode,script", [("expo", "start"), ("web", "web"), ("android", "android"), ("ios", "ios")])
+def test_mobile_launch_and_process_group_cleanup(monkeypatch, tmp_path, mode, script):
+    from unittest.mock import Mock
+
+    (tmp_path / "mobile" / "node_modules").mkdir(parents=True)
+    monkeypatch.setattr(control_server, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(control_server.shutil, "which", lambda _: "/usr/bin/npm")
+    process = Mock(pid=12345)
+    popen = Mock(return_value=process)
+    killpg = Mock()
+    monkeypatch.setattr(control_server.subprocess, "Popen", popen)
+    monkeypatch.setattr(control_server.os, "killpg", killpg)
+    mobile = control_server.MobileSupervisor(host="192.168.1.20")
+    mobile.start(mode, 8090)
+    environment = popen.call_args.kwargs["env"]
+    assert environment["EXPO_PUBLIC_MTERMINALS_WS"].startswith("ws://192.168.1.20:5500/mobile-ws?token=")
+    popen.assert_called_once_with(
+        ["/usr/bin/npm", "run", script, "--", "--port", "8090"],
+        cwd=tmp_path / "mobile", env=environment, start_new_session=True,
+    )
+    mobile.stop()
+    mobile.stop()
+    killpg.assert_called_once_with(12345, control_server.signal.SIGTERM)
+    process.wait.assert_called_once_with(timeout=10)
+
+
+def test_mobile_reports_missing_dependencies_and_rejects_invalid_mode(monkeypatch):
+    monkeypatch.setattr(control_server.shutil, "which", lambda _: None)
+    mobile = control_server.MobileSupervisor()
+    mobile.start("web", 8081)
+    assert not mobile.status()["running"]
+    assert "install Node.js" in mobile.status()["error"]
+    with pytest.raises(ValueError, match="valid mobile mode"):
+        mobile.start("invalid", 8081)
+    mobile.stop()
+    assert mobile.status()["error"] == ""
+
+
+def test_mobile_configuration_reuses_token_and_custom_backend_port(monkeypatch, tmp_path):
+    from dotenv import dotenv_values
+    from urllib.parse import urlsplit, parse_qs
+    monkeypatch.setattr(control_server, 'PROJECT_ROOT', tmp_path)
+    mobile = control_server.MobileSupervisor(backend_port=5599)
+    first = mobile.connection_environment('web')
+    second = mobile.connection_environment('ios')
+    assert first['EXPO_PUBLIC_MTERMINALS_WS'] == second['EXPO_PUBLIC_MTERMINALS_WS']
+    url = urlsplit(first['EXPO_PUBLIC_MTERMINALS_WS'])
+    values = dotenv_values(tmp_path / '.env')
+    assert url.hostname == '127.0.0.1'
+    assert url.port == 5599
+    assert parse_qs(url.query)['token'] == [values['MTERMINALS_MOBILE_TOKEN']]
+    assert values['MTERMINALS_MOBILE_WS_ENABLED'] == 'true'

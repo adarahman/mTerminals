@@ -69,6 +69,7 @@ from oi.chain_metrics import (
     _summarize_gex,
     compute_max_pain,
     compute_total_pcr,
+    compute_oi_change_pcr,
 )
 from oi.futures_oi_tracker import get_tracker as _get_futures_oi_tracker
 from oi.oi_analysis import build_master_table_nse, get_oi_velocity, get_strike_step
@@ -469,19 +470,7 @@ def build_engine_result(df: pd.DataFrame, df_clean: pd.DataFrame,
     total_ce_oi = df_clean["CE_OI"].fillna(0).sum()
     total_pe_oi = df_clean["PE_OI"].fillna(0).sum()
     total_pcr = compute_total_pcr(df_clean)
-    total_ce_oi_chg = df_clean["CE_ChgOI"].sum()
-    total_pe_oi_chg = df_clean["PE_ChgOI"].sum()
-    # CE_ChgOI <= 0 means calls are net unwinding chain-wide — a bullish
-    # tell (short covering) on its own. Previously this branch replaced
-    # the *whole ratio* with a hardcoded 0.1, which reads as extreme
-    # BEARISH downstream (score_pcr/verdict_pcr) regardless of what
-    # PE_ChgOI was doing — backwards. Clamping just the denominator to a
-    # small positive epsilon instead lets the numerator's sign/magnitude
-    # drive the result: PE_ChgOI > 0 (puts building while calls unwind)
-    # saturates toward extreme bullish, as intended.
-    if total_ce_oi_chg <= 0:
-        total_ce_oi_chg = 0.1
-    oi_chg_pcr = total_pe_oi_chg / total_ce_oi_chg
+    oi_chg_pcr = compute_oi_change_pcr(df_clean)
 
     ce_wall = (df_clean.loc[df_clean["CE_OI"].fillna(0).idxmax(), "StrikePrice"]
                if total_ce_oi > 0 else atm)

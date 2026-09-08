@@ -124,6 +124,13 @@ def build_runtime_stack(
         trading_status=live.supervisor.build_status,
     )
 
+    # Mobile may switch market context only.
+    # No trading/execution controls are exposed here.
+    core_runtime.bridge.configure_mobile_controls(
+        switch_data_source=core_runtime.data_source_switcher.switch,
+        switch_symbol=core_runtime.symbol_switcher.switch,
+    )
+
     dashboard = build_dashboard_transport(
         runtime_state=runtime_state,
         encode=encode,

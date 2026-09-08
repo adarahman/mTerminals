@@ -10,7 +10,7 @@ def test_server_application_assembles_http_health_and_runtime_services():
         DASHBOARD_WS_HANDLER=object(),
     )
     feed_manager = SimpleNamespace(_create_background_task=lambda *_args: None)
-    bridge = SimpleNamespace(handle=lambda _request: None, run=lambda: None)
+    bridge = SimpleNamespace(handle=lambda _request: None, handle_mobile=lambda _request: None, run=lambda: None)
 
     application = build_server_application(
         runtime_state=state,

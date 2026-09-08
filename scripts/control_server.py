@@ -13,10 +13,14 @@ import json
 import os
 import re
 import signal
+import shutil
+import secrets
+import socket
 import subprocess
 import sys
 import threading
 import urllib.request
+from urllib.parse import urlencode
 import webbrowser
 from datetime import datetime
 from http import HTTPStatus
@@ -106,6 +110,13 @@ button:disabled{opacity:.4;cursor:not-allowed}.msg{min-height:16px;margin-top:7p
 <label for="modify-credentials">Modify credentials?</label><select id="modify-credentials"><option value="no" selected>No</option><option value="yes">Yes</option></select>
 <div id="credential-fields" class="credential-grid" hidden></div><p id="credential-hint" class="hint" hidden>Leave a field blank to keep its existing value in .env.</p></fieldset>
 <p style="margin:7px 0 0;color:#7186a4;font-size:11px">Live-order execution broker remains the protected <code>EXECUTION_BROKER</code> configured in .env.</p>
+<fieldset class="credentials"><legend>Mobile app</legend>
+<div id="mobile-status" class="hint">Checking mobile server…</div>
+<label for="mobile-mode">Open mobile in</label>
+<select id="mobile-mode"><option value="expo">Expo (QR code)</option><option value="web">Web browser</option><option value="android">Android emulator</option><option value="ios">iOS simulator</option></select>
+<div class="actions" style="margin-top:10px"><button id="mobile-start">Start Mobile</button><button id="mobile-stop">Stop Mobile</button></div>
+<p class="hint">Stop mobile before choosing another mode. Expo QR code appears in the terminal.</p>
+<div id="mobile-msg" class="msg"></div></fieldset>
 </div><div class="footer">
 <div class="actions"><button id="start">Start Backend</button><button id="stop">Stop Backend</button></div>
 <a id="dashboard" class="button disabled" href="http://127.0.0.1:5500/dist/Dashboard/DashboardPro.html" target="_blank" rel="noopener">Open Dashboard</a>
@@ -122,7 +133,11 @@ $('broker').onchange=drawCredentials;
 $('modify-credentials').onchange=drawCredentials;
 $('start').onclick=async()=>{busy=true;$('msg').textContent='Saving configuration and starting…';try{paint(await request('/api/start',{symbol:$('symbol').value,expiry:$('expiry').value,broker:$('broker').value,credentials:credentials()}))}catch(e){$('msg').textContent=e.message}finally{busy=false;refresh()}};
 $('stop').onclick=async()=>{if(!confirm('Stop the analytics backend completely?'))return;busy=true;$('msg').textContent='Stopping…';try{paint(await request('/api/stop',{}));$('msg').textContent='Backend stopped.'}catch(e){$('msg').textContent=e.message}finally{busy=false;refresh()}};
-drawCredentials();refresh();setInterval(refresh,1000);
+let mobileBusy=false;
+async function refreshMobile(){try{const s=await request('/api/mobile/status');$('mobile-status').textContent=s.running?'Mobile server running ('+s.mode+')':'Mobile server stopped';$('mobile-start').disabled=mobileBusy||s.running;$('mobile-stop').disabled=mobileBusy||!s.running;$('mobile-mode').disabled=mobileBusy||s.running;if(s.running)$('mobile-mode').value=s.mode;$('mobile-msg').textContent=s.error||''}catch(e){$('mobile-msg').textContent=e.message}}
+async function mobileAction(action){mobileBusy=true;await refreshMobile();try{await request('/api/mobile/'+action,{mode:$('mobile-mode').value})}catch(e){$('mobile-msg').textContent=e.message}finally{mobileBusy=false;await refreshMobile()}}
+$('mobile-start').onclick=()=>mobileAction('start');$('mobile-stop').onclick=()=>mobileAction('stop');
+drawCredentials();refresh();refreshMobile();setInterval(refresh,1000);setInterval(refreshMobile,1500);
 </script></body></html>"""
 
 
@@ -245,8 +260,93 @@ class BackendSupervisor:
             self.log_handle = None
 
 
+class MobileSupervisor:
+    """Own the Expo process group so its child server exits with the launcher."""
+
+    def __init__(self, *, backend_port: int = 5500, host: str | None = None) -> None:
+        self.process: subprocess.Popen | None = None
+        self.mode = "expo"
+        self.last_error = ""
+        self.lock = threading.RLock()
+        self.backend_port = backend_port
+        self.host = host
+
+    def connection_environment(self, mode: str) -> dict[str, str]:
+        from dotenv import dotenv_values
+
+        values = dotenv_values(_env_path())
+        token = values.get("MTERMINALS_MOBILE_TOKEN") or secrets.token_urlsafe(32)
+        update_env({"MTERMINALS_MOBILE_WS_ENABLED": "true", "MTERMINALS_MOBILE_TOKEN": token})
+        host = self.host
+        if not host and mode in {"web", "ios"}:
+            host = "127.0.0.1"
+        if not host:
+            try:
+                # Routing lookup only: UDP connect sends no packets.
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                    probe.connect(("192.0.2.1", 9))
+                    host = probe.getsockname()[0]
+            except OSError as exc:
+                raise ValueError("Cannot find the computer's network address. Use --mobile-host with its Wi-Fi IP.") from exc
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        environment = os.environ.copy()
+        environment["EXPO_PUBLIC_MTERMINALS_WS"] = (
+            f"ws://{host}:{self.backend_port}/mobile-ws?{urlencode({'token': token})}"
+        )
+        return environment
+
+    def status(self) -> dict:
+        running = self.process is not None and self.process.poll() is None
+        error = self.last_error
+        if self.process is not None and not running:
+            error = error or "Mobile server exited. Check the terminal output."
+        return {"running": running, "mode": self.mode, "error": error}
+
+    def start(self, mode: str, port: int) -> None:
+        if mode not in {"expo", "web", "android", "ios"}:
+            raise ValueError("Select a valid mobile mode.")
+        if self.status()["running"]:
+            return
+        self.stop()
+        self.mode = mode
+        self.last_error = ""
+        npm = shutil.which("npm")
+        if npm is None or not (PROJECT_ROOT / "mobile" / "node_modules").is_dir():
+            self.last_error = "Mobile startup unavailable: install Node.js and run npm install in mobile."
+            print(f"[control] {self.last_error}")
+            return
+        command = [npm, "run", "start" if mode == "expo" else mode, "--", "--port", str(port)]
+        try:
+            environment = self.connection_environment(mode)
+            # Inherit the terminal so Expo can display its QR code and shortcuts.
+            self.process = subprocess.Popen(command, cwd=PROJECT_ROOT / "mobile", env=environment, start_new_session=True)
+        except (OSError, ValueError) as exc:
+            self.last_error = f"Could not start mobile: {exc}"
+            print(f"[control] {self.last_error}")
+
+    def stop(self) -> None:
+        self.last_error = ""
+        process = self.process
+        if process is None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+        except ProcessLookupError:
+            process.wait(timeout=5)
+        finally:
+            self.process = None
+
+
 class ControlHandler(BaseHTTPRequestHandler):
     supervisor: BackendSupervisor
+    mobile: MobileSupervisor
+    mobile_port: int = 8081
 
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
@@ -269,6 +369,9 @@ class ControlHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/api/status":
             self._json(HTTPStatus.OK, self.supervisor.status())
+        elif self.path == "/api/mobile/status":
+            with self.mobile.lock:
+                self._json(HTTPStatus.OK, self.mobile.status())
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
@@ -287,6 +390,13 @@ class ControlHandler(BaseHTTPRequestHandler):
                 )
             elif self.path == "/api/stop":
                 result = self.supervisor.stop()
+            elif self.path in {"/api/mobile/start", "/api/mobile/stop"}:
+                with self.mobile.lock:
+                    if self.path.endswith("/start"):
+                        self.mobile.start(payload.get("mode", "expo"), self.mobile_port)
+                    else:
+                        self.mobile.stop()
+                    result = self.mobile.status()
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
                 return
@@ -303,6 +413,10 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5400)
     parser.add_argument("--backend-port", type=int, default=5500)
+    parser.add_argument("--mobile", choices=("expo", "web", "android", "ios", "off"), default="expo",
+                        help="Mobile startup mode (default: expo); use off for backend-only operation.")
+    parser.add_argument("--mobile-port", type=int, default=8081)
+    parser.add_argument("--mobile-host", help="Override the automatically detected computer IP for mobile data.")
     parser.add_argument(
         "--no-browser",
         action="store_true",
@@ -315,10 +429,13 @@ def main() -> None:
     supervisor = BackendSupervisor(backend_port=args.backend_port)
     ControlHandler.supervisor = supervisor
     server = ThreadingHTTPServer((args.host, args.port), ControlHandler)
+    mobile = MobileSupervisor(backend_port=args.backend_port, host=args.mobile_host)
+    ControlHandler.mobile = mobile
+    ControlHandler.mobile_port = args.mobile_port
     atexit.register(supervisor.stop)
+    atexit.register(mobile.stop)
 
     def shutdown(_signum, _frame):
-        supervisor.stop()
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, shutdown)
@@ -330,11 +447,14 @@ def main() -> None:
         opener.daemon = True
         opener.start()
     try:
+        if args.mobile != "off":
+            mobile.start(args.mobile, args.mobile_port)
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        mobile.stop()
         supervisor.stop()
 
 

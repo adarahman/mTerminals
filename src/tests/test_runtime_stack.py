@@ -113,7 +113,10 @@ def test_runtime_stack_composes_services_and_installs_dashboard(monkeypatch):
         analytics=SimpleNamespace(run=lambda: None),
         symbol_switcher=SimpleNamespace(switch=lambda *_args: None),
         data_source_switcher=SimpleNamespace(switch=lambda *_args: None),
-        bridge=object(),
+        bridge=SimpleNamespace(
+            configure_trade_sources=lambda **_kwargs: None,
+            configure_mobile_controls=lambda **_kwargs: None,
+        ),
     )
     brokers = SimpleNamespace(
         resolve_option_contract=None,

@@ -3,9 +3,29 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MarketContextBar } from '../../src/components/MarketContextBar';
 import { useMarketData } from '../../src/hooks/useMarketData';
+import { formatPcrChange } from '../../src/utils/pcr';
 
 export default function HomeScreen() {
-  const { payload, connected, error } = useMarketData();
+  const { payload, connected, connectionStatus, error } = useMarketData();
+
+  const connectionLabel =
+    connectionStatus === 'connected'
+      ? '● CONNECTED'
+      : connectionStatus === 'reconnecting'
+        ? '● RECONNECTING…'
+        : connectionStatus === 'connecting'
+          ? '● CONNECTING…'
+          : connectionStatus === 'error'
+            ? '● CONNECTION ERROR'
+            : '● OFFLINE';
+
+  const connectionColor =
+    connectionStatus === 'connected'
+      ? '#63d297'
+      : connectionStatus === 'reconnecting' ||
+          connectionStatus === 'connecting'
+        ? '#e8b45b'
+        : '#ef7777';
   const market: any = payload?.market ?? {};
 
   const decision = readDecision(market.decision);
@@ -62,12 +82,12 @@ export default function HomeScreen() {
 
           <Text
             style={{
-              color: connected ? '#63d297' : '#ef7777',
+              color: connectionColor,
               fontWeight: '700',
               fontSize: 12,
             }}
           >
-            {connected ? '● LIVE' : '● OFFLINE'}
+            {connectionLabel}
           </Text>
         </View>
 
@@ -189,8 +209,9 @@ export default function HomeScreen() {
           />
 
           <MetricCard
-            title="OI CHG PCR"
-            value={formatNumber(market.oiChgPCR, 2)}
+            title="PCR CHANGE"
+            value={formatPcrChange(market.chain)}
+            secondary="Since previous close · All strikes"
           />
         </View>
 
@@ -521,6 +542,7 @@ function formatNumber(
   value: any,
   decimals = 2,
 ): string {
+  if (value == null || value === '') return '—';
   const number = Number(value);
 
   if (!Number.isFinite(number)) return '—';

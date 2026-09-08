@@ -17,6 +17,7 @@ class ServerRoutes:
     backtest: Callable[..., Any]
     lot_sizes: Callable[..., Any]
     symbols: Callable[..., Any]
+    mobile_websocket: Callable[..., Any] | None = None
 
 class HttpRouteHandlers:
     """Adapt HTTP requests to injected server services."""

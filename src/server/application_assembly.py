@@ -107,6 +107,7 @@ def build_server_application(
         metrics=handlers.metrics,
         websocket=dashboard_websocket,
         bridge_websocket=bridge.handle,
+        mobile_websocket=bridge.handle_mobile,
         spot_history=handlers.spot_history,
         history=handlers.history,
         backtest=handlers.backtest,
