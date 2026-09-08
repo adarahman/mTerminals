@@ -258,7 +258,7 @@ function switchDataSource(ds) {
   // The server applies this switch before sending the next market snapshot.
   // Do not leave the prior provider's AVAILABLE state visible during that
   // hand-off; NSE/BSE is REST polling rather than a persistent live feed.
-  const statusPill = document.getElementById('data-source-status-pill');
+  const statusPill = document.querySelector('.data-source-status-pill');
   if (statusPill) {
     statusPill.textContent = source === 'NSE_BSE' ? 'POLLING' : 'CHECKING';
     statusPill.dataset.status = source === 'NSE_BSE' ? 'polling' : 'unknown';
@@ -292,7 +292,7 @@ async function refreshDataSourceStatus(){
     const source = selectedId ? providers[selectedId] : Object.values(providers).find(
       provider => provider && provider.active,
     );
-    const pill = document.getElementById('data-source-status-pill');
+    const pill = document.querySelector('.data-source-status-pill');
     if (!source || !pill) return;
 
     const status = String(source.status || 'unknown').toUpperCase();
@@ -307,7 +307,7 @@ async function refreshDataSourceStatus(){
 window.refreshDataSourceStatus = refreshDataSourceStatus;
 
 function applyDataSourceStatus(status, error){
-  const pill = document.getElementById('data-source-status-pill');
+  const pill = document.querySelector('.data-source-status-pill');
   if (!pill) return;
 
   const normalized = String(status || 'unknown').toUpperCase();
