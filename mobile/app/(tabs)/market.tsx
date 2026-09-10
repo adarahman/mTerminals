@@ -1,4 +1,5 @@
-import { ScrollView, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MarketContextBar } from '../../src/components/MarketContextBar';
@@ -81,21 +82,7 @@ export default function MarketScreen() {
           </Card>
         ) : null}
 
-        <Card>
-          <SectionTitle>INDICES</SectionTitle>
-
-          <View style={{ marginTop: 8 }}>
-            {indices.map((item: any) => (
-              <IndexRow
-                key={item.BackendSymbol || item.Symbol}
-                symbol={item.Symbol}
-                price={item['Last Price']}
-                change={item.Change}
-                pct={item['% Change']}
-              />
-            ))}
-          </View>
-        </Card>
+        <IndexTicker indices={indices} />
 
         <Card>
           <View
@@ -441,65 +428,166 @@ function VelocityBar({
   );
 }
 
-function IndexRow({
-  symbol,
-  price,
-  change,
-  pct,
-}: {
-  symbol: string;
-  price: any;
-  change: any;
-  pct: any;
-}) {
-  const dir = direction(change);
+function IndexTicker({ indices }: { indices: any[] }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [contentWidth, setContentWidth] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
 
+  const copyCount =
+    contentWidth > 0 && containerWidth > 0
+      ? Math.max(3, Math.ceil(containerWidth / contentWidth) + 2)
+      : 4;
+
+  useEffect(() => {
+    if (!contentWidth) return;
+
+    translateX.setValue(0);
+
+    const animation = Animated.loop(
+      Animated.timing(translateX, {
+        toValue: -contentWidth,
+        duration: Math.max(9000, contentWidth * 45),
+        useNativeDriver: true,
+      }),
+    );
+
+    animation.start();
+
+    return () => animation.stop();
+  }, [contentWidth, translateX]);
+
+  if (!indices.length) {
+    return (
+      <View
+        style={{
+          height: 32,
+          borderRadius: 8,
+          backgroundColor: '#15191f',
+          justifyContent: 'center',
+          overflow: 'hidden',
+        }}
+      >
+        <Text
+          style={{
+            color: '#7f8a99',
+            fontSize: 11,
+            paddingHorizontal: 10,
+          }}
+        >
+          No index data
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View
+      onLayout={event => setContainerWidth(event.nativeEvent.layout.width)}
+      style={{
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: '#15191f',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      <Animated.View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          alignSelf: 'flex-start',
+          transform: [{ translateX }],
+        }}
+      >
+        <View
+          onLayout={event => setContentWidth(event.nativeEvent.layout.width)}
+        >
+          <IndexTickerContent indices={indices} />
+        </View>
+
+        {Array.from({ length: copyCount - 1 }).map((_, index) => (
+          <IndexTickerContent
+            key={`ticker-copy-${index}`}
+            indices={indices}
+          />
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+function IndexTickerContent({ indices }: { indices: any[] }) {
   return (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 10,
-        borderTopWidth: 1,
-        borderTopColor: '#232830',
+        paddingLeft: 10,
+        paddingRight: 22,
       }}
     >
-      <Text
-        style={{
-          flex: 1,
-          color: '#ffffff',
-          fontWeight: '700',
-        }}
-      >
-        {symbol}
-      </Text>
+      {indices.map((item: any, index) => {
+        const dir = direction(item.Change);
 
-      <Text
-        style={{
-          width: 105,
-          color: '#ffffff',
-          textAlign: 'right',
-          fontWeight: '700',
-        }}
-      >
-        {formatNumber(price, 2)}
-      </Text>
+        return (
+          <View
+            key={`${item.BackendSymbol || item.Symbol}-${index}`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginRight: 22,
+            }}
+          >
+            <Text
+              style={{
+                color: '#ffffff',
+                fontSize: 11,
+                fontWeight: '800',
+              }}
+            >
+              {item.Symbol}
+            </Text>
 
-      <Text
-        style={{
-          width: 82,
-          color:
-            dir === 'up'
-              ? '#63d297'
-              : dir === 'down'
-                ? '#ef7777'
-                : '#8c96a5',
-          textAlign: 'right',
-          fontWeight: '700',
-        }}
-      >
-        {percentText(pct)}
-      </Text>
+            <Text
+              style={{
+                color: '#ffffff',
+                fontSize: 11,
+                fontWeight: '700',
+                marginLeft: 6,
+              }}
+            >
+              {formatNumber(item['Last Price'], 2)}
+            </Text>
+
+            <Text
+              style={{
+                color:
+                  dir === 'up'
+                    ? '#63d297'
+                    : dir === 'down'
+                      ? '#ef7777'
+                      : '#8c96a5',
+                fontSize: 11,
+                fontWeight: '800',
+                marginLeft: 4,
+              }}
+            >
+              {dir === 'up' ? '▲' : dir === 'down' ? '▼' : '•'}{' '}
+              {percentText(item['% Change'])}
+            </Text>
+
+            <Text
+              style={{
+                color: '#4f5864',
+                fontSize: 11,
+                marginLeft: 12,
+              }}
+            >
+              •
+            </Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
