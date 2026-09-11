@@ -642,7 +642,7 @@ function Metric({
         width: '48%',
         backgroundColor: '#101419',
         borderRadius: 12,
-        padding: 12,
+        padding: 10,
       }}
     >
       <Text
@@ -660,7 +660,7 @@ function Metric({
           color: '#ffffff',
           fontSize: 17,
           fontWeight: '800',
-          marginTop: 5,
+          marginTop: 4,
         }}
       >
         {value}
