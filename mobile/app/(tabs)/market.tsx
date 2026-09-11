@@ -161,7 +161,7 @@ export default function MarketScreen() {
             windows.
           </Text>
 
-          <View style={{ marginTop: 12, gap: 10 }}>
+          <View style={{ marginTop: 9, gap: 8 }}>
             {velocity.length ? (
               velocity.map((window: any) => (
                 <VelocityWindow
