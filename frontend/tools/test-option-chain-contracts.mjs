@@ -21,7 +21,19 @@ const checks = [
   ['standalone Option Chain page is not built', !build.includes('OptionChain/option-chain.html')],
   ['strike navigation stays in dashboard', sync.includes('openStrikeDetailReportModal(n)') && !sync.includes('window.open(')],
   ['chain header no longer advertises a duplicate full page', !template.includes('Open full option chain')],
-  ['snapshot header has range dropdown and Option Chain link', template.includes('data-chain-range-select') && template.includes('buildRangeSelectOptionsHtml(_chainRange)') && template.includes('Option Chain <span') && template.includes('openOptionChainModal(this)') && sync.includes("openOptionChainModal(button)")],
+  ['snapshot header has left SVG-only Option Chain action and range dropdown',
+    template.includes('class="oi-snap-open-link"') &&
+    template.includes('onclick="openOptionChainModal(this)"') &&
+    template.includes('aria-label="Open Option Chain"') &&
+    template.includes('title="Open Option Chain"') &&
+    template.includes('<svg viewBox="0 0 16 16" aria-hidden="true">') &&
+    template.includes('data-chain-range-select') &&
+    template.includes('buildRangeSelectOptionsHtml(_chainRange)') &&
+    !template.includes('Option Chain <span aria-hidden="true">↗</span>') &&
+    template.indexOf('class="oi-snap-open-link"') <
+      template.indexOf('class="oi-snap-header-actions"') &&
+    sync.includes("openOptionChainModal(button)")],
+  ['rail does not duplicate OI Flow', !dashboardHtml.includes('id="oi-flow-open-btn"') && dashboardHtml.includes('data-primary-nav="market"') && template.includes('aria-label="Open OI Flow chart"')],
   ['live ticks preserve an open range dropdown', analyticsRenderer.includes("document.activeElement.matches('[data-chain-range-select]')") && analyticsRenderer.includes('return rangeSelectOpen ||')],
   ['metric views use a Price Chart-style context rail while All columns stays dense', dashboardHtml.includes('id="option-chain-focus-grid"') && dashboardHtml.includes('id="option-chain-context"') && modalManager.includes("chainLedgerView==='all'") && modalManager.includes("layout.classList.toggle('dense-all',allColumns)") && sync.includes('renderOptionChainContext(_data)') && styles.includes('.option-chain-focus-grid.dense-all .option-chain-context{display:none;}')],
   ['range selection releases the live-tick guard before recalculation', chainView.includes("el.matches('[data-chain-range-select]')") && chainView.includes('el.blur();') && chainView.indexOf('el.blur();') < chainView.indexOf('if(_data) _rerenderChainPanels();')],

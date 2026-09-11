@@ -957,10 +957,12 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
     return `
   <div class="section-card sc-green" id="chain-summary-card">
     <div class="section-header oi-snap-toolbar">
+      <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table" aria-label="Open Option Chain" title="Open Option Chain">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+      </button>
       <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
       <div class="oi-snap-header-actions">
         <label class="oi-snap-range"><span>Range</span><select data-chain-range-select onchange="switchChainRange(Number(this.value),this)" aria-label="Option chain strike range">${typeof buildRangeSelectOptionsHtml === 'function' ? buildRangeSelectOptionsHtml(_chainRange) : ''}</select></label>
-        <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table">Option Chain <span aria-hidden="true">↗</span></button>
       </div>
     </div>
     <div class="dd-empty">Awaiting chain data…</div>
@@ -1024,13 +1026,15 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   return `
   <div class="section-card sc-green" id="chain-summary-card">
     <div class="section-header oi-snap-toolbar">
+      <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table" aria-label="Open Option Chain" title="Open Option Chain">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+      </button>
       <span class="oi-snap-heading nav-card-header-label">
         <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--ce)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pe)"/></svg>
         Option Chain Snapshot
       </span>
       <div class="oi-snap-header-actions">
         <label class="oi-snap-range"><span>Range</span><select data-chain-range-select onchange="switchChainRange(Number(this.value),this)" aria-label="Option chain strike range">${typeof buildRangeSelectOptionsHtml === 'function' ? buildRangeSelectOptionsHtml(_chainRange) : ''}</select></label>
-        <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table">Option Chain <span aria-hidden="true">↗</span></button>
       </div>
     </div>
 
