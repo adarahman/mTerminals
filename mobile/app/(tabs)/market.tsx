@@ -691,8 +691,8 @@ const styles = {
     flexDirection: 'row' as const,
     flexWrap: 'wrap' as const,
     justifyContent: 'space-between' as const,
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
+    marginTop: 10,
   },
 };
 
