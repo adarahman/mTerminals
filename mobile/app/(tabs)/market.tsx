@@ -282,8 +282,8 @@ function VelocityWindow({
     <View
       style={{
         backgroundColor: '#101419',
-        borderRadius: 13,
-        padding: 13,
+        borderRadius: 11,
+        padding: 10,
       }}
     >
       <View
@@ -318,14 +318,14 @@ function VelocityWindow({
         </Text>
       </View>
 
-      <View style={{ marginTop: 8 }}>
+      <View style={{ marginTop: 6 }}>
         {shown.map((row: any) => (
           <View
             key={String(row.strike)}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              paddingVertical: 6,
+              paddingVertical: 4,
               borderTopWidth: 1,
               borderTopColor: '#20252c',
             }}
