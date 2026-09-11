@@ -269,6 +269,27 @@ class DecisionEngine:
             composite, conflict, vix_tag, pos, neg, dte, pcr_score, oi_score, sm_score,
             evidence_coverage=out.evidence_coverage / 100.0,
             critical_inputs_missing=critical_missing)
+
+        # Canonical confidence provenance. This does not change the
+        # confidence calculation; it exposes the evidence used to derive it.
+        out.confidence_version = "v1"
+        out.confidence_basis = {
+            "composite": round(composite, 3),
+            "evidenceCoverage": out.evidence_coverage,
+            "conflict": conflict,
+            "criticalInputsMissing": critical_missing,
+            "positiveContributors": pos,
+            "negativeContributors": neg,
+        }
+
+        # Canonical market regime package.
+        # EngineResult already owns the regime classification; do not
+        # recalculate it here or on the client.
+        regime = getattr(er, "market_regime", None) or {}
+        out.market = {
+            "regime": regime.get("regime", "Indeterminate"),
+            "regimeConfidence": regime.get("confidence", 0),
+        }
         out.action, out.action_type, out.suggested_strike = derive_action(
             out.bias, out.bias_strength, atm, strike_step, vix_tag, iv_rank)
 

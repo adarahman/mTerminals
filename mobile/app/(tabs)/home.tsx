@@ -29,10 +29,10 @@ export default function HomeScreen() {
   const market: any = payload?.market ?? {};
 
   // Decision Engine publishes the canonical decision at payload.decision.
-  // Keep market.decision as a compatibility fallback.
+  // Legacy market.decision remains fallback-only.
   const rawDecision =
-    market.decision ??
     payload?.decision ??
+    market.decision ??
     null;
 
   const decision = readDecision(rawDecision);
@@ -632,22 +632,12 @@ function readDecision(value: any) {
 function readConfidence(value: any): number | null {
   if (!value || typeof value !== 'object') return null;
 
-  const candidate =
-    value.confidence ??
-    value.confidencePct ??
-    value.confidence_pct ??
-    value.score ??
-    null;
+  // Canonical Decision Engine confidence.
+  // Do not fall back to score/confidencePct because those can represent
+  // different metrics and cause desktop/mobile confidence divergence.
+  const number = Number(value.confidence);
 
-  const number = Number(candidate);
-
-  if (!Number.isFinite(number)) return null;
-
-  if (number >= 0 && number <= 1) {
-    return number * 100;
-  }
-
-  return number;
+  return Number.isFinite(number) ? number : null;
 }
 
 function textValue(value: any): string {

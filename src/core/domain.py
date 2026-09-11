@@ -140,6 +140,9 @@ class DecisionResult:
     bias: str = "NEUTRAL"
     bias_strength: str = "WEAK"
     confidence: int = 0
+    # Canonical confidence contract shared by desktop/mobile.
+    confidence_version: str = "v1"
+    confidence_basis: dict[str, Any] = field(default_factory=dict)
     conflict_flag: bool = False
     action: str = ""
     action_type: str = "WAIT"
@@ -154,6 +157,8 @@ class DecisionResult:
     trade_grade: str = ""
     risk_warning: str = ""
     important_levels: dict[str, Any] = field(default_factory=dict)
+    # Canonical market package. Populated by the decision builder.
+    market: dict[str, Any] = field(default_factory=dict)
     short_horizon: dict[str, Any] = field(default_factory=dict)
     _debug: dict[str, Any] = field(default_factory=dict)
 
@@ -184,6 +189,8 @@ class DecisionResult:
             "bias": self.bias,
             "biasStrength": self.bias_strength,
             "confidence": self.confidence,
+            "confidenceVersion": self.confidence_version,
+            "confidenceBasis": self.confidence_basis,
             "conflictFlag": self.conflict_flag,
             "action": self.action,
             "actionType": self.action_type,
@@ -206,6 +213,7 @@ class DecisionResult:
             "tradeGrade": self.trade_grade,
             "riskWarning": self.risk_warning,
             "importantLevels": self.important_levels,
+            "market": self.market,
             "shortHorizon": self.short_horizon,
             "autoStrategy": self.auto_strategy,
             "_debug": self._debug,

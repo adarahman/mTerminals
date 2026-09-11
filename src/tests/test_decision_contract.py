@@ -39,6 +39,23 @@ def test_decision_contract_has_provenance_and_visible_evidence():
     assert result["tradeGrade"] == "A"
     assert result["importantLevels"]["atm"] == 24000
 
+    # Canonical confidence contract shared by desktop and mobile.
+    assert result["confidenceVersion"] == "v1"
+    assert result["confidenceBasis"]["composite"] == 0.535
+    assert result["confidenceBasis"]["evidenceCoverage"] == 85
+    assert result["confidenceBasis"]["criticalInputsMissing"] is False
+
+    # Canonical market package comes from the backend decision layer.
+    assert result["market"]["regime"] == "Indeterminate"
+    assert result["market"]["regimeConfidence"] == 0
+
+    # Short-horizon observation is separate from Decision Engine confidence.
+    assert result["shortHorizon"]["horizon"] == "2-3m"
+    assert result["shortHorizon"]["probability"] == 0
+    assert result["shortHorizon"]["probabilityCalibrated"] is False
+    assert result["shortHorizon"]["score"] == 0.0
+
+
 
 def test_missing_required_input_degrades_and_disables_execution():
     result = DecisionEngine().evaluate(_engine_result(total_pcr=0), {}).to_dict()
