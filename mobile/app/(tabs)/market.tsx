@@ -471,7 +471,7 @@ function IndexTicker({ indices }: { indices: any[] }) {
           style={{
             color: '#7f8a99',
             fontSize: 11,
-            paddingHorizontal: 10,
+            paddingHorizontal: 8,
           }}
         >
           No index data
@@ -535,7 +535,7 @@ function IndexTickerContent({ indices }: { indices: any[] }) {
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              marginRight: 22,
+              marginRight: 16,
             }}
           >
             <Text
