@@ -40,9 +40,9 @@ export default function HomeScreen() {
     rawDecision?.shortHorizon,
   );
   const bias =
+    decision.bias ||
     textValue(market.compositeBias) ||
     textValue(market.spotBias) ||
-    decision.bias ||
     '—';
 
   const confidence = readConfidence(rawDecision);
