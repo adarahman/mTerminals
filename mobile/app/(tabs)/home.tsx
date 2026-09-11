@@ -618,7 +618,6 @@ function readDecision(value: any) {
 
     bias:
       textValue(value.bias) ||
-      textValue(value.direction) ||
       '',
 
     reason:
