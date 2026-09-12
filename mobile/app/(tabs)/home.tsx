@@ -36,6 +36,7 @@ export default function HomeScreen() {
     null;
 
   const decision = readDecision(rawDecision);
+  const biasStrength = decision.biasStrength;
   const shortHorizon = readShortHorizon(
     rawDecision?.shortHorizon,
   );
@@ -131,7 +132,11 @@ export default function HomeScreen() {
           >
             <SmallText
               label="BIAS"
-              value={bias}
+              value={
+                biasStrength
+                  ? `${bias} · ${biasStrength}`
+                  : bias
+              }
             />
 
             <SmallText
@@ -595,6 +600,7 @@ function readDecision(value: any) {
     return {
       action: '',
       bias: '',
+      biasStrength: '',
       reason: '',
     };
   }
@@ -603,6 +609,7 @@ function readDecision(value: any) {
     return {
       action: value,
       bias: '',
+      biasStrength: '',
       reason: '',
     };
   }
@@ -618,6 +625,9 @@ function readDecision(value: any) {
 
     bias:
       textValue(value.bias) ||
+      '',
+    biasStrength:
+      textValue(value.biasStrength) ||
       '',
 
     reason:
