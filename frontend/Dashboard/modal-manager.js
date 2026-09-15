@@ -178,15 +178,7 @@ class ModalManager {
 }
 
   _updateOptionChainContext(){
-  const context = document.getElementById('option-chain-modal-context');
-  if(!context || typeof _data === 'undefined' || !_data) return;
-  const parts = [_data.symbol, _data.expiry].filter(Boolean);
-  if(_data.spot != null && _data.spot !== ''){
-    const spot = Number(_data.spot);
-    parts.push(`Spot ${Number.isFinite(spot) ? spot.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : _data.spot}`);
-  }
-  if(_data.dte != null) parts.push(`${_data.dte}D`);
-  context.textContent = parts.join(' · ');
+  if(typeof _data === 'undefined' || !_data) return;
   this.renderOptionChainContext(_data);
 }
 
