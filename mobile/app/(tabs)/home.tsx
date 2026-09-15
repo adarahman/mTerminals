@@ -91,15 +91,31 @@ export default function HomeScreen() {
             </Text>
           </View>
 
-          <Text
-            style={{
-              color: connectionColor,
-              fontWeight: '700',
-              fontSize: 12,
-            }}
-          >
-            {connectionLabel}
-          </Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text
+              style={{
+                color: '#ffffff',
+                fontSize: 20,
+                fontWeight: '800',
+              }}
+            >
+              {formatNumber(market.spot, 2)}
+            </Text>
+
+            <Text
+              style={{
+                color:
+                  Number(market.spotChange) >= 0
+                    ? '#55d68a'
+                    : '#ef7777',
+                fontSize: 12,
+                fontWeight: '700',
+                marginTop: 2,
+              }}
+            >
+              {changeText(market.spotChange, market.spotChgPct)}
+            </Text>
+          </View>
         </View>
 
         {error ? (
@@ -169,113 +185,6 @@ export default function HomeScreen() {
         </View>
 
         <ShortHorizonCard data={shortHorizon} />
-
-        <View style={styles.row}>
-          <MetricCard
-            title="SPOT"
-            value={formatNumber(market.spot, 2)}
-            secondary={changeText(
-              market.spotChange,
-              market.spotChgPct,
-            )}
-            direction={directionFromNumber(market.spotChange)}
-          />
-
-          <MetricCard
-            title="FUTURES"
-            value={formatNumber(market.future, 2)}
-            secondary={changeText(
-              market.futureChange,
-              market.futureChgPct,
-            )}
-            direction={directionFromNumber(market.futureChange)}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <MetricCard
-            title="FUT BASIS"
-            value={signedNumber(market.basis)}
-          />
-
-          <MetricCard
-            title="INDIA VIX"
-            value={formatNumber(market.indiaVix, 2)}
-            secondary={percentText(market.indiaVixChgPct)}
-            direction={directionFromNumber(market.indiaVixChgPct)}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <MetricCard
-            title="ATM"
-            value={formatNumber(market.atm, 0)}
-          />
-
-          <MetricCard
-            title="MAX PAIN"
-            value={formatNumber(market.maxPain, 0)}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <MetricCard
-            title="TOTAL PCR"
-            value={formatNumber(market.totalPCR, 2)}
-            secondary={textValue(market.pcrSentiment)}
-          />
-
-          <MetricCard
-            title="PCR CHANGE"
-            value={formatPcrChange(market.chain)}
-            secondary="Since previous close · All strikes"
-          />
-        </View>
-
-        <View style={styles.row}>
-          <MetricCard
-            title="CE WALL"
-            value={formatNumber(market.ceWall, 0)}
-          />
-
-          <MetricCard
-            title="PE WALL"
-            value={formatNumber(market.peWall, 0)}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>VOLATILITY</Text>
-
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              marginTop: 10,
-              gap: 12,
-            }}
-          >
-            <SmallText
-              label="ATM IV"
-              value={formatNumber(market.atmIV, 2)}
-            />
-
-            <SmallText
-              label="IV RANK"
-              value={formatNumber(market.ivRank, 1)}
-            />
-
-            <SmallText
-              label="HV30"
-              value={formatNumber(market.hv30, 2)}
-            />
-
-            <SmallText
-              label="VIX REGIME"
-              value={textValue(market.vixRegime) || '—'}
-            />
-          </View>
-        </View>
 
         <View style={styles.card}>
           <Text style={styles.label}>IMPORTANT ALERTS</Text>

@@ -48,34 +48,6 @@ export default function MarketScreen() {
           gap: 14,
         }}
       >
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <Text
-            style={{
-              color: '#ffffff',
-              fontSize: 26,
-              fontWeight: '800',
-            }}
-          >
-            Market
-          </Text>
-
-          <Text
-            style={{
-              color: connectionColor,
-              fontWeight: '700',
-              fontSize: 12,
-            }}
-          >
-            {connectionLabel}
-          </Text>
-        </View>
-
         {error ? (
           <Card>
             <Text style={{ color: '#ef7777' }}>{error}</Text>
@@ -149,17 +121,6 @@ export default function MarketScreen() {
         <Card>
           <SectionTitle>OI FLOW / VELOCITY</SectionTitle>
 
-          <Text
-            style={{
-              color: '#7f8a99',
-              fontSize: 12,
-              marginTop: 6,
-              lineHeight: 17,
-            }}
-          >
-            Change in open interest by strike across the backend velocity
-            windows.
-          </Text>
 
           <View style={{ marginTop: 9, gap: 8 }}>
             {velocity.length ? (

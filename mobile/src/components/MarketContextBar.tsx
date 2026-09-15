@@ -419,7 +419,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#303640',
     borderRadius: 12,
-    marginBottom: 16,
+    marginBottom: 8,
     backgroundColor: '#171a20',
     overflow: 'hidden',
   },
@@ -427,7 +427,7 @@ const styles = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    paddingVertical: 13,
+    paddingVertical: 9,
     paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
