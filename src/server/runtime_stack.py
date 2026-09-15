@@ -171,7 +171,7 @@ def build_runtime_stack(
         dashboard_websocket=dashboard.handler,
         bridge=core_runtime.bridge,
         broker_services_enabled=broker_services.BROKER_SERVICES_ENABLED,
-        index_tokens=broker_services.SMARTAPI_INDEX_TOKENS,
+        index_tokens=broker_services.get_smartapi_index_tokens(),
         get_candle_data=broker_services.get_candle_data,
         get_index_candles=broker_services.get_index_candles,
         run_backtest_call=run_backtest_call,

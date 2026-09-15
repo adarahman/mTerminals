@@ -126,7 +126,7 @@ def test_runtime_stack_composes_services_and_installs_dashboard(monkeypatch):
         get_order_book=lambda: [],
         get_funds=lambda: {},
         BROKER_SERVICES_ENABLED=False,
-        SMARTAPI_INDEX_TOKENS={},
+        get_smartapi_index_tokens=lambda: {},
         get_candle_data=lambda *_args: None,
         get_index_candles=lambda *_args: None,
     )

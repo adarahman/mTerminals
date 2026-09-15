@@ -101,6 +101,6 @@ class SmartApiMarketData:
         return get_fno_underlyings(force_refresh=force_refresh)
 
     def index_tokens(self):
-        from brokers.smartapi.client import INDEX_TOKENS
+        from brokers.smartapi.client import get_index_tokens
 
-        return INDEX_TOKENS
+        return get_index_tokens()

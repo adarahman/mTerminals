@@ -36,7 +36,7 @@ if BROKER_SERVICES_ENABLED:
     get_positions = _execution_adapter.get_positions
     get_funds = _execution_adapter.get_funds
     resolve_option_contract = getattr(_execution_adapter, "resolve_option_contract", None)
-    from brokers.smartapi.client import INDEX_TOKENS as SMARTAPI_INDEX_TOKENS  # noqa: F401
+    from brokers.smartapi.client import get_index_tokens as get_smartapi_index_tokens  # noqa: F401
     from brokers.smartapi.history import get_candle_data, get_index_candles  # noqa: F401
     from brokers.smartapi.websocket import EXCHANGE_TYPE, SmartTickStream  # noqa: F401
     from market.quotes.tick_aggregator import TickAggregator  # noqa: F401
@@ -85,7 +85,10 @@ else:
     resolve_option_contract = None
     get_index_candles = _disabled
     get_candle_data = _disabled
-    SMARTAPI_INDEX_TOKENS = {}
+
+    def get_smartapi_index_tokens():
+        return {}
+
     SmartTickStream = None
     TickAggregator = None
     EXCHANGE_TYPE = {}

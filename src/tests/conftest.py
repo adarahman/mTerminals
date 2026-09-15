@@ -6,12 +6,18 @@ three things no CI box (and no offline dev machine) can rely on:
 
   1. Parsed sys.argv with its own argparse.ArgumentParser — pytest's own
      CLI args (-k foo, -x, etc.) would blow it up.
-  2. Ran brokers/smartapi_client.py's `INDEX_TOKENS = _build_index_tokens()`
-     at import time, which downloads Angel One's ScripMaster over the
-     network with NO test seam — a real HTTP call as a side effect of
-     `import server.app`,
-     that raises if the network is unavailable
-     (or blocked, as it is in this sandbox) and there's no local cache yet.
+  2. (Historical — fixed) Used to run brokers/smartapi/client.py's
+     `INDEX_TOKENS = _build_index_tokens()` at import time, downloading
+     Angel One's ScripMaster over the network with NO test seam — a real
+     HTTP call as a side effect of `import server.app`, raising if the
+     network was unavailable (or blocked, as in this sandbox) and there
+     was no local cache yet. INDEX_TOKENS is now built lazily
+     (client.get_index_tokens(), backed by a module __getattr__ for
+     backward-compat imports) — importing client.py, or anything that
+     transitively imports it, no longer touches the network. This fixture
+     still seeds a fake ScripMaster cache below so any test that DOES
+     resolve index tokens gets deterministic data instead of a real
+     download.
   3. Wrote a live paper_trading.db / ScripMaster cache file into whatever
      the current working directory happened to be, via paths.py's
      CACHE_DIR.
@@ -52,22 +58,18 @@ _FAKE_SCRIP_MASTER = [
     },
 ]
 
-# NOTE: test_strategies.py (and likely others) has a PRE-EXISTING, separate
-# collection-time failure on a machine with no network access and no
-# previously-downloaded ScripMaster cache: it transitively imports
-# mTerminals_json.py -> brokers/market_data.py -> brokers/smartapi_client.py,
-# which runs `INDEX_TOKENS = _build_index_tokens()` at module level — a real
-# HTTP call with no test seam, same root cause as server/app.py's gap
-# below. This is a suite-wide hermeticity issue, not something specific to
-# OrderSubmissionService, and fixing it generally means adding a proper test
-# seam in smartapi_client.py itself (e.g. an env var or injectable loader
-# for the ScripMaster source) rather than a tests/-side workaround — a
-# tests/-only fix would either have to monkeypatch every affected module's
-# import chain individually, or write fake data into the same on-disk cache
-# path the real app reads from (runtime/cache/_scrip_master_cache.json),
-# which risks a dev machine silently running the real app against fake
-# 2-row test data after a test run. Left unfixed here deliberately; flagging
-# it rather than papering over it with a source-adjacent side effect.
+# NOTE (historical — fixed): this used to document a suite-wide,
+# collection-time failure — importing brokers/smartapi/client.py ran
+# `INDEX_TOKENS = _build_index_tokens()` at module level, a real HTTP call
+# with no test seam, breaking collection for any test that transitively
+# imported it (mTerminals_json.py -> brokers/market_data.py ->
+# brokers/smartapi/client.py, among others), independent of
+# OrderSubmissionService or ws_server_live below. The real fix landed in
+# smartapi/client.py itself: INDEX_TOKENS is now built lazily via
+# get_index_tokens(), so importing the module (directly or transitively)
+# no longer does network I/O — only an actual call to get_index_tokens()
+# does, at which point the fake ScripMaster cache seeded below (or a real
+# one, outside tests) is what gets read.
 
 
 @pytest.fixture(scope="session")

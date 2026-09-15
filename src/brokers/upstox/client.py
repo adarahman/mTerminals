@@ -116,9 +116,9 @@ def _angel_index_spot(underlying):
     never an arbitrary stock — so this stays a no-op unless the symbol is a
     recognized index AND the SmartAPI path is available."""
     try:
-        from brokers.smartapi.client import INDEX_TOKENS, get_index_quote
+        from brokers.smartapi.client import get_index_quote, get_index_tokens
 
-        if (underlying or "").upper() not in INDEX_TOKENS:
+        if (underlying or "").upper() not in get_index_tokens():
             return None
         q = get_index_quote(underlying)
         if not q:

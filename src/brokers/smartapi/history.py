@@ -13,7 +13,7 @@ Endpoints wrapped:
     getOIData()      -> historical Open Interest series for a derivative
 
 Both require a resolved (exchange, symboltoken) pair — reuse
-find_option_token() / INDEX_TOKENS from smartapi_client.py for that,
+find_option_token() / get_index_tokens() from smartapi_client.py for that,
 exactly like get_atm_chain() already does.
 
 Known constraint (Angel One docs): intraday intervals (ONE_MINUTE,
@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 
 from logzero import logger
 
-from brokers.smartapi.client import _session, INDEX_TOKENS, find_option_token
+from brokers.smartapi.client import _session, find_option_token, get_index_tokens
 
 # Valid interval strings per Angel One's historical API
 INTERVALS = [
@@ -173,7 +173,7 @@ def fetch_candles_chunked(exchange, symboltoken, interval, fromdate, todate,
 # ── Convenience wrappers matching get_atm_chain()'s ergonomics ─────────────
 def get_index_candles(underlying, interval, fromdate, todate):
     """e.g. get_index_candles('NIFTY', 'FIFTEEN_MINUTE', '2026-06-01 09:15', '2026-07-01 15:30')"""
-    info = INDEX_TOKENS.get(underlying.upper())
+    info = get_index_tokens().get(underlying.upper())
     if not info:
         logger.warning(f"[smartapi_history] Unknown index: {underlying}")
         return []

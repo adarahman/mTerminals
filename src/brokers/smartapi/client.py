@@ -642,7 +642,36 @@ def _load_scrip_master():
         raise
 
 
-INDEX_TOKENS = _build_index_tokens()
+# INDEX_TOKENS is built lazily (see get_index_tokens()/__getattr__ below)
+# instead of eagerly here. Eagerly calling _build_index_tokens() at module
+# level meant _load_scrip_master()'s network fetch ran as a side effect of
+# merely IMPORTING this module — which happens transitively any time
+# something imports application/selection_state.py, server/broker_services.py,
+# etc., regardless of whether that code path ever needs a broker session.
+# tests/conftest.py documents this exact failure mode (see its module
+# docstring) and flags it as needing a real source-level fix rather than a
+# tests/-only workaround; this is that fix.
+_INDEX_TOKENS_CACHE = None
+
+
+def get_index_tokens():
+    """Lazily build (once) and return the INDEX_TOKENS map. Safe to import
+    this module without triggering a ScripMaster fetch — the network/disk
+    I/O only happens on first actual call."""
+    global _INDEX_TOKENS_CACHE
+    if _INDEX_TOKENS_CACHE is None:
+        _INDEX_TOKENS_CACHE = _build_index_tokens()
+    return _INDEX_TOKENS_CACHE
+
+
+def __getattr__(name):
+    # PEP 562 module __getattr__: keeps `from brokers.smartapi.client import
+    # INDEX_TOKENS` working for existing callers, but only builds it (and
+    # only does the associated network/disk I/O) the moment that name is
+    # actually looked up — not merely because this module was imported.
+    if name == "INDEX_TOKENS":
+        return get_index_tokens()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def find_option_token(underlying, expiry_ddmmmyyyy, strike, opt_type, exchange="NFO"):
@@ -831,7 +860,7 @@ def get_index_quote(symbol):
     if cached is not None:
         return cached
 
-    info = INDEX_TOKENS.get(symbol)
+    info = get_index_tokens().get(symbol)
     if not info:
         logger.warning(f"[smartapi_client] Unknown index symbol: {symbol}")
         return None
@@ -878,8 +907,9 @@ def get_index_quotes_batch(symbols):
     # getMarketData/get_batch_quotes takes one exchange per call.
     by_exchange: dict[str, list] = {}
     unknown = []
+    index_tokens = get_index_tokens()
     for s in still_needed:
-        info = INDEX_TOKENS.get(s)
+        info = index_tokens.get(s)
         if not info:
             unknown.append(s)
             continue
@@ -963,7 +993,7 @@ def get_spot_quote(underlying):
     get_equity_quote() for everything else (individual F&O stocks). Use this
     instead of calling get_index_quote() directly whenever `underlying` might
     be a stock, e.g. in get_atm_chain()."""
-    if underlying.upper() in INDEX_TOKENS:
+    if underlying.upper() in get_index_tokens():
         return get_index_quote(underlying)
     equity = get_equity_quote(underlying)
     if equity:
