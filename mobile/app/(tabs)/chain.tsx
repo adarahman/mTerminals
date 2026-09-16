@@ -16,7 +16,7 @@ const TABS = [
   'Chain',
   'OI',
   'Greeks',
-  'Positioning',
+  'Capital',
   'Velocity',
   'Smart',
 ] as const;
@@ -457,8 +457,8 @@ export default function ChainScreen() {
           />
         ) : null}
 
-        {tab === 'Positioning' ? (
-          <PositioningTab
+        {tab === 'Capital' ? (
+          <CapitalTab
             rows={visibleRows}
             atm={atm}
           />
@@ -843,7 +843,7 @@ function GreeksTab({
   );
 }
 
-function PositioningTab({
+function CapitalTab({
   rows,
   atm,
 }: any) {
