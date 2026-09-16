@@ -179,19 +179,20 @@
 .pt-ltp-click{cursor:pointer; padding:1px 4px; border-radius:3px; transition:background .1s;}
 .pt-ltp-click:hover{background:rgba(59,130,246,.28); outline:1px dashed rgba(59,130,246,.6);}
 .pt-ltp-click:focus-visible{background:rgba(59,130,246,.28);outline:2px solid var(--info);outline-offset:-2px;}
-#pt-quick-popover{position:fixed; z-index:calc(var(--z-modal) + 2); width:190px; background:var(--bg-1); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:10px; font:var(--fs-sm)/1.4 inherit; box-shadow:var(--shadow-lg);}
-#pt-quick-popover .pt-qp-hdr{display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-2); font-weight:600;}
+#pt-quick-popover{position:fixed; z-index:calc(var(--z-modal) + 2); width:210px; box-sizing:border-box; background:var(--bg-1); color:var(--text-primary); border:1px solid var(--border); border-radius:9px; padding:10px; font:var(--fs-sm)/1.4 inherit; box-shadow:var(--shadow-lg);}
+#pt-quick-popover .pt-qp-hdr{display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-2); padding-bottom:6px; border-bottom:1px solid var(--border); font-weight:700;}
 #pt-quick-popover .pt-qp-close{cursor:pointer; opacity:.6;}
 #pt-quick-popover button.pt-qp-close,#pt-order-panel button.pt-close,#pt-portfolio-panel button.pt-close{background:none;border:0;color:inherit;padding:2px;}
 #pt-quick-popover button.pt-qp-close:focus-visible,#pt-order-panel button.pt-close:focus-visible,#pt-portfolio-panel button.pt-close:focus-visible,.pt-mode-toggle:focus-visible{outline:2px solid var(--info);outline-offset:2px;opacity:1;}
-#pt-quick-popover .pt-qp-ltp{font-size:var(--fs-xs); opacity:.75; margin-bottom:var(--space-2);}
-#pt-quick-popover .pt-qp-row{display:flex; gap:var(--space-2); margin-bottom:var(--space-2);}
+#pt-quick-popover .pt-qp-ltp{font-size:var(--fs-xs); opacity:1; margin-bottom:var(--space-2); padding:6px 7px; box-sizing:border-box; background:var(--bg-0); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-weight:600;}
+#pt-quick-popover .pt-qp-row{display:flex; gap:var(--space-2); margin-bottom:var(--space-2); min-width:0;}
 /* Shared field look moved to components.css — merged with .bt-field's
    and #pt-order-panel/#pt-portfolio-panel's inputs above. Padding
    normalized from 4px 5px to var(--space-1) var(--space-2) (4px 6px) —
    a 1px near-miss of the identical rule above, in this same file.
    background hardcode fixed the same way as above. */
-#pt-quick-popover .pt-qp-row input,#pt-quick-popover .pt-qp-row select{flex:1; padding:var(--space-1) var(--space-2); background:var(--bg-0);}
+#pt-quick-popover .pt-qp-row input,#pt-quick-popover .pt-qp-row select{flex:1 1 0; min-width:0; width:0; box-sizing:border-box; padding:var(--space-1) var(--space-2); background:var(--bg-0);}
+#pt-quick-popover #pt-qp-ordtype{flex:0 0 92px; width:92px; max-width:92px; min-width:92px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;}
 #pt-quick-popover .pt-qp-btns{display:flex; gap:var(--space-2);}
 #pt-quick-popover button{flex:1; border:none; border-radius:4px; padding:7px 0; font-weight:700; cursor:pointer; color:#fff;}
 #pt-quick-popover button.pt-qp-buy{background:var(--pos);}
