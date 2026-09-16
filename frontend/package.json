@@ -27,8 +27,8 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
-    "esbuild": "^0.28.1",
-    "postcss": "^8.5.26"
+    "@playwright/test": "^1.63.0",
+    "esbuild": "^0.28.2",
+    "postcss": "^8.5.28"
   }
 }
