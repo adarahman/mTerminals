@@ -971,6 +971,15 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   // Unit-aware K/L/Cr formatting comes from shared/utils/formatters.js.
   const signedFmt = (v) => (v>0?'+':'') + fmtCrLK(v);
+  const fmtCapital = (v) => {
+    if (v == null || isNaN(v)) return '—';
+    const a = Math.abs(v), sign = v > 0 ? '+' : v < 0 ? '-' : '';
+    if (a >= 1e12) return sign + '₹' + (a / 1e12).toFixed(2) + ' lakh Cr';
+    if (a >= 1e7) return sign + '₹' + (a / 1e7).toFixed(2) + 'Cr';
+    if (a >= 1e5) return sign + '₹' + (a / 1e5).toFixed(2) + 'L';
+    if (a >= 1e3) return sign + '₹' + (a / 1e3).toFixed(1) + 'K';
+    return sign + '₹' + Math.round(a);
+  };
   // signColor()'s default neutral is already --text-primary, matching the
   // reference mockup's "0 stays bold/white, not greyed out" behavior.
   // PCR movement is a ratio delta, not an OI quantity. Formatting it with
@@ -1111,7 +1120,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
       <div class="oc-native-scroll">
         <table class="oc-ledger-table" data-view="${ledgerView}" aria-label="Option Chain ledger by strike">
           <colgroup>
-            <col class="c-sig"><col class="c-ltp"><col class="c-ltp"><col class="c-strike"><col class="c-oi"><col class="c-chg">
+            <col class="c-sig"><col class="c-ltp"><col class="c-ltp"><col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-capital">
             <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-delta"><col class="c-gamma"><col class="c-theta"><col class="c-vega"><col class="c-foot"><col class="c-struct">
           </colgroup>
           <thead>
@@ -1122,6 +1131,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
               <th class="strike">Strike <small>PCR</small></th>
               <th class="oc-metric positioning">Open Int <small>PE / CE</small></th>
               <th class="oc-metric positioning">Chg OI <small>PE / CE</small></th>
+             <th class="oc-metric positioning">Capital Flow <small>PE / CE</small></th>
               <th class="oc-metric activity">IV <small>PE / CE</small></th>
               <th class="oc-metric activity">Volume <small>PE / CE</small></th>
               <th class="oc-metric activity">Premium ₹ <small>PE / CE</small></th>
@@ -1141,6 +1151,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
               <td class="strike"><button type="button" onclick="event.stopPropagation();openOptionChainAtStrike(${Number(r.strike)})" aria-label="Open Strike Detail for ${fmtI(r.strike)}"><strong>${fmtI(r.strike)}</strong><small>PCR ${r.ceOI?fmtN((r.peOI||0)/r.ceOI,2):'—'}</small></button></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${oiWinner==='pe'?'dominant':''}">${fmtCrLK(r.peOI)}</span><span class="side-value ce ${oiWinner==='ce'?'dominant':''}">${fmtCrLK(r.ceOI)}</span></div></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${chgWinner==='pe'?'dominant':''}">${signedFmt(r.peChgOI)}</span><span class="side-value ce ${chgWinner==='ce'?'dominant':''}">${signedFmt(r.ceChgOI)}</span></div></td>
+             <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe">${fmtCapital(r.peCapitalFlow)}</span><span class="side-value ce">${fmtCapital(r.ceCapitalFlow)}</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
