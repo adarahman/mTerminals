@@ -316,13 +316,9 @@ class AutoExecutor:
             self._record_history(symbol, outcome, "executed", outcome.reason)
             logger.info(f"[auto_executor] EXECUTED {symbol} {outcome.side} {outcome.instrument_type} "
                         f"{outcome.strike} — {outcome.reason}")
-            print(f"[auto_executor] EXECUTED {symbol} {outcome.side} {outcome.instrument_type} "
-                  f"{outcome.strike} — {outcome.reason}", flush=True)
         except Exception as e:
             self._record_history(symbol, outcome, "rejected", str(e))
             logger.error(f"[auto_executor] submit_order_fn raised for {symbol}: {e}")
-            print(f"[auto_executor] FAILED to submit {symbol} {outcome.side} {outcome.instrument_type} "
-                  f"{outcome.strike}: {e}", flush=True)
             return ExecutionDecision(False, f"submission failed: {e}")
 
         return outcome

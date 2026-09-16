@@ -1,6 +1,10 @@
 """Shared expiry gating and broadcast path for broker websocket ticks."""
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import time
 from collections.abc import Callable
 from datetime import date, datetime
@@ -88,7 +92,7 @@ async def _sync_and_broadcast_locked(message, matches_expiry):
             price_source=runtime_state.MARKET_SELECTION.price_source,
         )
     except Exception as exc:
-        print(f"[live-feed] state sync failed (broadcasting anyway): {exc}", flush=True)
+        logger.warning(f"state sync failed (broadcasting anyway): {exc}")
 
     if feed_update_applied and runtime_state.LAST_PAYLOAD is not None:
         runtime_state.LAST_PAYLOAD_AT = datetime.now().astimezone()
@@ -103,7 +107,6 @@ async def _sync_and_broadcast_locked(message, matches_expiry):
         if _PORTFOLIO_BROADCASTER is not None:
             await _PORTFOLIO_BROADCASTER(runtime_state.LAST_PAYLOAD)
     except Exception as exc:
-        print(
-            f"[paper-trading] fast-path portfolio broadcast failed: {exc}",
-            flush=True,
+        logger.warning(
+            f"fast-path portfolio broadcast failed: {exc}"
         )

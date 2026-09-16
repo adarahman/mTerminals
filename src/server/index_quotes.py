@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import time
 
 from market.quotes import quote_from_legacy
@@ -31,14 +35,14 @@ class IndexQuoteFetcher:
             rows = self.market_api.fetch_all_indices([self.market_api.NSE_INDEX])
             return {row["Symbol"]: quote for row in rows.to_dict("records") if row.get("Symbol") and (quote := self._map_market(row))}
         except Exception as exc:
-            print(f"[index-quote] NSE fetch failed: {exc}", flush=True)
+            logger.warning(f"NSE fetch failed: {exc}")
             return {}
 
     def public_bse(self, symbol):
         try:
             return self._map_market(self.market_api.fetch_bse_index_quote(symbol))
         except Exception as exc:
-            print(f"[index-quote] {symbol} failed: {exc}", flush=True)
+            logger.warning(f"{symbol} failed: {exc}")
             return None
 
     def provider(self):
@@ -52,7 +56,7 @@ class IndexQuoteFetcher:
                 except Exception as exc:
                     if time.monotonic() - self.warnings.get(f"{source}:{key}", 0) >= 60:
                         self.warnings[f"{source}:{key}"] = time.monotonic()
-                        print(f"[index-quote] {source.lower()} {key} failed: {exc}", flush=True)
+                        logger.warning(f"{source.lower()} {key} failed: {exc}")
                     continue
                 quote = quote_from_legacy(key, row)
                 if quote is not None:
@@ -73,7 +77,7 @@ class IndexQuoteFetcher:
         try:
             raw = self.market_data.get_batch_quotes_by_token("NSE", pairs, mode="FULL")
         except Exception as exc:
-            print(f"[index-quote] smartapi NSE batch failed: {exc}", flush=True)
+            logger.warning(f"smartapi NSE batch failed: {exc}")
             raw = {}
         for name, token in pairs:
             if row := raw.get(str(token)):

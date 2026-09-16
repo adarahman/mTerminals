@@ -317,7 +317,6 @@ class PositionReconciler:
             with open(self.kill_switch_path, "w") as f:
                 f.write(f"auto-tripped by position_reconciler: {reason}\n")
             logger.error(f"[position_reconciler] LIVE TRADING KILL SWITCH TRIPPED — {reason}")
-            print(f"[position_reconciler] LIVE TRADING KILL SWITCH TRIPPED — {reason}", flush=True)
         except OSError as e:
             # Same worst-case failure mode as account_guard._trip_kill_switch —
             # logged loudly rather than swallowed.

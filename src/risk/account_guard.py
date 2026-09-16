@@ -243,7 +243,6 @@ class LiveAccountRiskGuard:
             with open(self.kill_switch_path, "w") as f:
                 f.write(f"auto-tripped by account_guard: {reason}\n")
             logger.error(f"[account_guard] LIVE TRADING KILL SWITCH TRIPPED — {reason}")
-            print(f"[account_guard] LIVE TRADING KILL SWITCH TRIPPED — {reason}", flush=True)
         except OSError as e:
             # Can't write the kill-switch file — this is the worst-case
             # failure mode for this module (silent, unenforced trip), so

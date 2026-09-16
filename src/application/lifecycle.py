@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def build_background_jobs(
@@ -80,6 +83,6 @@ class ApplicationLifecycle:
         try:
             self._flush_state()
         except Exception as exc:
-            print(f"[shutdown] Could not flush buffered state: {exc}")
+            logger.error(f"[shutdown] Could not flush buffered state: {exc}")
         if http_runner is not None:
             await http_runner.cleanup()

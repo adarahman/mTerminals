@@ -1,9 +1,11 @@
 """Inbound dashboard WebSocket control-message routing."""
 from __future__ import annotations
 
-import traceback
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketMessageRouter:
@@ -42,8 +44,10 @@ class WebSocketMessageRouter:
             try:
                 await self._place_order(payload)
             except Exception as exc:
-                print(f"[paper-trading] place_order FAILED: {exc}", flush=True)
-                traceback.print_exc()
+                logger.error(
+                    f"[paper-trading] place_order FAILED: {exc}",
+                    exc_info=exc,
+                )
             return
 
         if message_type == "cancel_order":
@@ -51,15 +55,14 @@ class WebSocketMessageRouter:
                 order_id = payload.get("order_id")
                 if order_id:
                     success = self._cancel_order(order_id)
-                    print(
+                    logger.info(
                         f"[paper-trading] CANCEL {order_id}: "
-                        f"{'success' if success else 'failed'}",
-                        flush=True,
+                        f"{'success' if success else 'failed'}"
                     )
                     prices = self._build_current_prices(self._last_payload())
                     await self._broadcast_portfolio(prices)
             except Exception as exc:
-                print(f"[paper-trading] cancel_order FAILED: {exc}", flush=True)
+                logger.error(f"[paper-trading] cancel_order FAILED: {exc}")
             return
 
         if message_type == "toggle_live_mode":

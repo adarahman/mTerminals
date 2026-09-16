@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -33,17 +37,15 @@ class DailyMarketScheduler:
         self._session_date = now.date()
         for tag, aggregator in self._option_aggregators().items():
             aggregator.reset_session()
-            print(
+            logger.info(
                 f"[{tag}] Reset OI session baseline for new trading day "
-                f"{now.date()}",
-                flush=True,
+                f"{now.date()}"
             )
         futures_reset = self._reset_futures_session()
-        print(
+        logger.info(
             f"[futures_oi] "
             f"{'Reset futures OI session baseline for new trading day' if futures_reset is not False else 'Retained persisted futures OI baseline for'} "
-            f"{now.date()}",
-            flush=True,
+            f"{now.date()}"
         )
 
     def trigger_eod(self, now: datetime) -> None:
@@ -54,7 +56,7 @@ class DailyMarketScheduler:
         ):
             return
         self._eod_date = now.date()
-        print(f"[eod] triggering EOD fetch for {now.date()}", flush=True)
+        logger.info(f"[eod] triggering EOD fetch for {now.date()}")
         self._schedule_eod_jobs(now)
 
 

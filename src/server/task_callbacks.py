@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def report_failed_task(task: asyncio.Task, tag: str) -> bool:
@@ -12,8 +14,7 @@ def report_failed_task(task: asyncio.Task, tag: str) -> bool:
         return False
     exc = task.exception()
     if exc is not None:
-        print(f"[{tag}] FAILED: {exc!r}", flush=True)
-        traceback.print_exception(type(exc), exc, exc.__traceback__)
+        logger.error(f"[{tag}] FAILED: {exc!r}", exc_info=exc)
         return False
     return True
 
@@ -21,15 +22,14 @@ def report_failed_task(task: asyncio.Task, tag: str) -> bool:
 def eod_task_done(task: asyncio.Task) -> None:
     """Report completion of the participant-OI end-of-day fetch."""
     if report_failed_task(task, "eod"):
-        print("[eod] fetch_all_eod completed successfully", flush=True)
+        logger.info("[eod] fetch_all_eod completed successfully")
 
 
 def flow_task_done(task: asyncio.Task) -> None:
     """Report completion of the cash-market FII/DII flow fetch."""
     if report_failed_task(task, "flow"):
         ok = task.result()
-        print(
+        logger.info(
             f"[flow] record_today_flow "
-            f"{'succeeded' if ok else 'returned False (no data yet)'}",
-            flush=True,
+            f"{'succeeded' if ok else 'returned False (no data yet)'}"
         )

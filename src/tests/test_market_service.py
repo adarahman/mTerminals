@@ -491,7 +491,7 @@ def test_analytics_runner_contains_legacy_failure():
     assert runner.run_once() is None
 
 
-def test_analytics_runner_defers_first_timeout_and_escalates_repeats(capsys):
+def test_analytics_runner_defers_first_timeout_and_escalates_repeats(caplog):
     outcomes = iter(
         [TimeoutError("chain"), TimeoutError("chain"), None, TimeoutError("chain")]
     )
@@ -508,13 +508,16 @@ def test_analytics_runner_defers_first_timeout_and_escalates_repeats(capsys):
         captured_payload=lambda: {"ok": True},
     )
 
-    assert runner.run_once() is None
-    assert "warm-up snapshot deferred: chain" in capsys.readouterr().out
-    assert runner.run_once() is None
-    assert "[pipeline] FAILED: chain" in capsys.readouterr().out
+    with caplog.at_level("INFO"):
+        assert runner.run_once() is None
+    assert "warm-up snapshot deferred: chain" in caplog.text
+    with caplog.at_level("ERROR"):
+        assert runner.run_once() is None
+    assert "FAILED: chain" in caplog.text
     assert runner.run_once() == {"ok": True}
-    assert runner.run_once() is None
-    assert "warm-up snapshot deferred: chain" in capsys.readouterr().out
+    with caplog.at_level("INFO"):
+        assert runner.run_once() is None
+    assert "warm-up snapshot deferred: chain" in caplog.text
 
 
 def test_pipeline_runtime_configurator_builds_and_applies_default_config():

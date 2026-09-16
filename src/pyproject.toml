@@ -56,7 +56,6 @@ include = [
 py-modules = [
     "paths",
     "nse_eod_fetch",
-    "diag_lotsize", "smartapi_feed_adapter", "smartapi_pipeline_adapter",
     "operational_metrics", "operational_readiness",
 ]
 

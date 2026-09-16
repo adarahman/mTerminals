@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from collections.abc import Callable
 from typing import Any
 
@@ -33,15 +37,14 @@ class AnalyticsPipelineRunner:
         except TimeoutError as exc:
             self._consecutive_timeouts += 1
             if self._consecutive_timeouts == 1:
-                print(
-                    f"[pipeline] warm-up snapshot deferred: {exc}",
-                    flush=True,
+                logger.info(
+                    f"warm-up snapshot deferred: {exc}"
                 )
             else:
-                print(f"[pipeline] FAILED: {exc}", flush=True)
+                logger.error(f"FAILED: {exc}")
             return None
         except Exception as exc:
-            print(f"[pipeline] FAILED: {exc}", flush=True)
+            logger.error(f"FAILED: {exc}")
             return None
         self._consecutive_timeouts = 0
         return self._captured_payload()

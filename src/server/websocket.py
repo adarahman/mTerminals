@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import logging
+
+logger = logging.getLogger(__name__)
+
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
@@ -45,10 +49,9 @@ class DashboardWebSocketHandler:
 
     async def __call__(self, request):
         if not self._origin_allowed(request):
-            print(
-                f"[ws] REJECTED — disallowed Origin: "
-                f"{request.headers.get('Origin')!r}",
-                flush=True,
+            logger.warning(
+                f"REJECTED — disallowed Origin: "
+                f"{request.headers.get('Origin')!r}"
             )
             return web.Response(status=403, text="Origin not allowed")
 
@@ -77,7 +80,7 @@ class DashboardWebSocketHandler:
                     try:
                         data = self._decode(message.data)
                     except Exception as exc:
-                        print(f"[ws] bad inbound message, ignoring: {exc}", flush=True)
+                        logger.warning(f"bad inbound message, ignoring: {exc}")
                         continue
                     await self._dispatch_message(data)
                 elif message.type in {
@@ -86,10 +89,9 @@ class DashboardWebSocketHandler:
                     web.WSMsgType.CLOSING,
                     web.WSMsgType.CLOSED,
                 }:
-                    print(
-                        f"[ws] connection ended via {message.type} "
-                        f"close_code={websocket.close_code}",
-                        flush=True,
+                    logger.debug(
+                        f"connection ended via {message.type} "
+                        f"close_code={websocket.close_code}"
                     )
         finally:
             self._clients.discard(websocket)

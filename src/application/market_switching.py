@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote
@@ -42,10 +46,9 @@ class DataSourceSwitcher:
         async with self._execution_gate.exclusive_scope():
             valid_sources = set(self._valid_sources())
             if new_source not in valid_sources:
-                print(
-                    f"[data-source] rejecting invalid data source {new_source!r} "
-                    f"(valid: {sorted(valid_sources)})",
-                    flush=True,
+                logger.warning(
+                    f"rejecting invalid data source {new_source!r} "
+                    f"(valid: {sorted(valid_sources)})"
                 )
                 raise ValueError(
                     f"Unknown data source {new_source!r}. "
@@ -55,25 +58,22 @@ class DataSourceSwitcher:
             old_source = self._current_source()
             if new_source == old_source:
                 return None
-            print(
-                f"[data-source] switch requested: {old_source} -> {new_source}",
-                flush=True,
+            logger.info(
+                f"switch requested: {old_source} -> {new_source}"
             )
             try:
                 switched = self._activate_provider(new_source)
             except Exception as exc:
-                print(
-                    f"[data-source] switch to {new_source} failed; "
-                    f"remaining on {old_source}: {exc}",
-                    flush=True,
+                logger.error(
+                    f"switch to {new_source} failed; "
+                    f"remaining on {old_source}: {exc}"
                 )
                 self._signal_refresh()
                 return False
             if not switched:
-                print(
-                    f"[data-source] {new_source} unavailable; "
-                    f"remaining on {old_source}",
-                    flush=True,
+                logger.warning(
+                    f"{new_source} unavailable; "
+                    f"remaining on {old_source}"
                 )
                 self._signal_refresh()
                 return False
@@ -87,7 +87,7 @@ class DataSourceSwitcher:
                     self._current_expiry(),
                 )
             self._signal_refresh()
-            print(f"[data-source] switched to {new_source}", flush=True)
+            logger.info(f"switched to {new_source}")
             return True
 
 
@@ -122,9 +122,8 @@ class SymbolSwitcher:
         ):
             return None
 
-        print(
-            f"[ws] symbol switch requested: {old_symbol} -> {new_symbol}",
-            flush=True,
+        logger.info(
+            f"symbol switch requested: {old_symbol} -> {new_symbol}"
         )
         self._commit_selection(new_symbol, requested_expiry)
         self._signal_refresh()

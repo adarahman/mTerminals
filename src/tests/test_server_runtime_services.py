@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -61,22 +62,24 @@ def test_starts_allowed_live_feed_and_records_loop():
     assert services.feed_manager.started == [("SMARTAPI", loop)]
 
 
-def test_reports_disabled_overlay_without_starting(capsys):
+def test_reports_disabled_overlay_without_starting(caplog):
     services, _state = _services(allowed=False)
 
-    services.start_live_services(object())
+    with caplog.at_level(logging.INFO):
+        services.start_live_services(object())
 
     assert services.feed_manager.started == []
-    assert "websocket overlay not started" in capsys.readouterr().out
+    assert "websocket overlay not started" in caplog.text
 
 
-def test_reports_disabled_broker_services(capsys):
+def test_reports_disabled_broker_services(caplog):
     services, _state = _services(enabled=False)
 
-    services.start_live_services(object())
+    with caplog.at_level(logging.INFO):
+        services.start_live_services(object())
 
     assert services.feed_manager.started == []
-    assert "authenticated services disabled" in capsys.readouterr().out
+    assert "authenticated services disabled" in caplog.text
 
 
 def test_builds_jobs_and_flushes_state():

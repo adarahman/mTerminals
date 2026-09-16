@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -42,14 +46,13 @@ class CanonicalPayloadPublisher:
                 diff = await asyncio.to_thread(self._compute_diff, previous, payload)
                 elapsed = time.monotonic() - started_at
                 if elapsed > 0.25:
-                    print(
-                        f"[ws] WARNING: compute_diff took {elapsed:.2f}s",
-                        flush=True,
+                    logger.warning(
+                        f"compute_diff took {elapsed:.2f}s"
                     )
                 if diff is not None:
                     await self._broadcast({"type": "delta", "payload": diff})
                 else:
-                    print("[ws] tick unchanged, skipping broadcast", flush=True)
+                    logger.debug("tick unchanged, skipping broadcast")
             self._store_previous_payload(payload)
 
 
@@ -73,10 +76,9 @@ class MarketTickPacer:
         remaining = self._poll_seconds - (time.monotonic() - tick_started_at)
         if remaining <= 0:
             if pipeline_elapsed > self._poll_seconds:
-                print(
-                    f"[ws] WARNING: pipeline took {pipeline_elapsed:.2f}s, "
-                    f"longer than poll interval {self._poll_seconds}s",
-                    flush=True,
+                logger.warning(
+                    f"pipeline took {pipeline_elapsed:.2f}s, "
+                    f"longer than poll interval {self._poll_seconds}s"
                 )
             return
         floor_remaining = self._minimum_recompute_seconds - (
@@ -102,13 +104,12 @@ class MarketTickPacer:
                 await asyncio.gather(*pending, return_exceptions=True)
             if switch_waiter in done:
                 self._symbol_switch_event.clear()
-                print("[ws] symbol switch — ticking early", flush=True)
+                logger.debug("symbol switch — ticking early")
             elif tick_waiter in done:
                 self._tick_activity_event.clear()
-                print(
-                    f"[ws] tick activity — ticking early "
-                    f"(floor={self._minimum_recompute_seconds}s)",
-                    flush=True,
+                logger.debug(
+                    f"tick activity — ticking early "
+                    f"(floor={self._minimum_recompute_seconds}s)"
                 )
         except Exception as exc:
             switch_waiter.cancel()
@@ -116,9 +117,8 @@ class MarketTickPacer:
             await asyncio.gather(
                 switch_waiter, tick_waiter, return_exceptions=True
             )
-            print(
-                f"[ws] WARNING: wake-wait failed, falling back to plain sleep: {exc}",
-                flush=True,
+            logger.warning(
+                f"wake-wait failed, falling back to plain sleep: {exc}"
             )
             await asyncio.sleep(remaining)
 
@@ -185,16 +185,14 @@ class MarketEngineCycle:
                     for key, value in timings.items()
                     if isinstance(value, (int, float))
                 )
-                print(
-                    f"[ws] broadcast tick -> {self._connected_count()} client(s) "
-                    f"(pipeline {pipeline_elapsed:.2f}s) | {breakdown}",
-                    flush=True,
+                logger.debug(
+                    f"broadcast tick -> {self._connected_count()} client(s) "
+                    f"(pipeline {pipeline_elapsed:.2f}s) | {breakdown}"
                 )
             else:
-                print(
-                    f"[ws] broadcast tick -> {self._connected_count()} client(s) "
-                    f"(pipeline {pipeline_elapsed:.2f}s)",
-                    flush=True,
+                logger.debug(
+                    f"broadcast tick -> {self._connected_count()} client(s) "
+                    f"(pipeline {pipeline_elapsed:.2f}s)"
                 )
             current_prices = self._build_current_prices(payload)
             self._check_pending_orders(current_prices)

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -46,18 +50,16 @@ class ServerRuntimeServices:
         if state.USE_SMARTAPI and self.feed_manager._feed_allowed(state.LIVE_FEED_PROVIDER):
             self.feed_manager._start_live_feed(state.LIVE_FEED_PROVIDER, loop)
         elif state.USE_SMARTAPI:
-            print(
-                f"[feed] websocket overlay not started "
+            logger.info(
+                f"websocket overlay not started "
                 f"(data source={state.MARKET_SELECTION.data_source}, "
-                f"feed provider={state.LIVE_FEED_PROVIDER})",
-                flush=True,
+                f"feed provider={state.LIVE_FEED_PROVIDER})"
             )
         else:
-            print(
+            logger.info(
                 "[broker] authenticated services disabled "
                 "(BROKER_SERVICES_ENABLED=false) — no broker login, account/order "
-                "REST call, or websocket connection; public daily ScripMaster allowed",
-                flush=True,
+                "REST call, or websocket connection; public daily ScripMaster allowed"
             )
 
     def background_jobs(self):

@@ -1,9 +1,13 @@
 """HTTP serialization for the decision-history backtest endpoint."""
 from __future__ import annotations
 
+import logging
+
 from typing import Any, Awaitable, Callable
 
 from aiohttp import web
+
+logger = logging.getLogger(__name__)
 
 
 async def handle_backtest(
@@ -38,7 +42,7 @@ async def handle_backtest(
             override_execute_recommended=enabled("overrideExecuteRecommended"),
         )
     except Exception as exc:
-        print(f"[http] /api/backtest failed for {symbol}: {exc}", flush=True)
+        logger.error(f"[http] /api/backtest failed for {symbol}: {exc}")
         return web.json_response({"error": str(exc)}, status=500)
 
     cumulative = 0.0

@@ -1,6 +1,10 @@
 """Market-history HTTP endpoints, isolated from live-feed orchestration."""
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import asyncio
 import time
 from collections.abc import Callable
@@ -55,7 +59,7 @@ class MarketHistoryApi:
                 now.strftime("%Y-%m-%d %H:%M"),
             )
         except Exception as exc:
-            print(f"[http] /api/spot-history failed for {symbol}: {exc}", flush=True)
+            logger.error(f"/api/spot-history failed for {symbol}: {exc}")
             return web.json_response([])
         rows = []
         for candle in candles or []:
@@ -137,7 +141,7 @@ class MarketHistoryApi:
         try:
             return web.json_response(await self._cached(symbol, range_key, config))
         except Exception as exc:
-            print(f"[http] /api/history failed for {symbol} range={range_key}: {exc}", flush=True)
+            logger.error(f"/api/history failed for {symbol} range={range_key}: {exc}")
             return web.json_response([])
 
     async def lot_sizes(self, _request):
@@ -145,7 +149,7 @@ class MarketHistoryApi:
             from brokers.smartapi.instruments import get_all_lot_sizes
             return web.json_response(await asyncio.to_thread(get_all_lot_sizes))
         except Exception as exc:
-            print(f"[http] /api/lot-sizes failed: {exc}", flush=True)
+            logger.error(f"/api/lot-sizes failed: {exc}")
             return web.json_response({"error": str(exc)}, status=500)
 
 

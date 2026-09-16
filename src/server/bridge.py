@@ -1,6 +1,10 @@
 """Dashboard-relay service kept separate from the live trading coordinator."""
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import asyncio
 import hmac
 import os
@@ -93,7 +97,7 @@ class DashboardBridge:
                 row["LTP"], row.get("Change"), row.get("PctChange"),
             )
         except Exception as exc:
-            print(f"[bridge] futures fetch failed: {exc}", flush=True)
+            logger.warning(f"futures fetch failed: {exc}")
             return None
 
     def _build_quotes(self):
@@ -142,7 +146,7 @@ class DashboardBridge:
                 result.append({"name": name, "tag": "—", "cls": "tag-neutral", "stocks": stocks})
             return result
         except Exception as exc:
-            print(f"[bridge] sector fetch failed: {exc}", flush=True)
+            logger.warning(f"sector fetch failed: {exc}")
             return []
 
     @staticmethod
@@ -163,7 +167,7 @@ class DashboardBridge:
             long, short = raw.get("future_index_long", 0.0), raw.get("future_index_short", 0.0)
             return (round(long / (long + short) * 1000) / 10 if long + short else None), oi
         except Exception as exc:
-            print(f"[bridge] OI fetch failed: {exc}", flush=True)
+            logger.warning(f"OI fetch failed: {exc}")
             return None, None
 
     @staticmethod
@@ -172,7 +176,7 @@ class DashboardBridge:
             result = get_flow_series(30)
             return result if result.get("fii") and result.get("dii") else None
         except Exception as exc:
-            print(f"[bridge] flow fetch failed: {exc}", flush=True)
+            logger.warning(f"flow fetch failed: {exc}")
             return None
 
     @staticmethod
@@ -180,7 +184,7 @@ class DashboardBridge:
         try:
             return get_market_bias_report(datetime.now())
         except Exception as exc:
-            print(f"[bridge] bias fetch failed: {exc}", flush=True)
+            logger.warning(f"bias fetch failed: {exc}")
             return None
 
     async def _refresh(self, cache, ttl, fetch, *keys):
@@ -225,7 +229,7 @@ class DashboardBridge:
     async def broadcast(self, payload):
         message = orjson.dumps(payload, default=self._json_default).decode()
         await self._clients.broadcast(
-            message, on_error=lambda error: print(f"[bridge] broadcast failed: {error}")
+            message, on_error=lambda error: logger.error(f"broadcast failed: {error}")
         )
 
     def configure_trade_sources(
@@ -257,18 +261,16 @@ class DashboardBridge:
             try:
                 portfolio, orders = self._paper_snapshot()
             except Exception as exc:
-                print(
-                    f"[mobile-ws] paper portfolio snapshot failed: {exc}",
-                    flush=True,
+                logger.warning(
+                    f"paper portfolio snapshot failed: {exc}"
                 )
 
         if self._trading_status is not None:
             try:
                 supervision = self._trading_status() or {}
             except Exception as exc:
-                print(
-                    f"[mobile-ws] trading status snapshot failed: {exc}",
-                    flush=True,
+                logger.warning(
+                    f"trading status snapshot failed: {exc}"
                 )
 
         live_enabled = bool(
@@ -380,9 +382,8 @@ class DashboardBridge:
                             requested_expiry,
                         )
                     except Exception as exc:
-                        print(
-                            f"[mobile-ws] symbol switch failed: {exc}",
-                            flush=True,
+                        logger.warning(
+                            f"symbol switch failed: {exc}"
                         )
                         await websocket.send_json({
                             "type": "control_error",
@@ -432,9 +433,8 @@ class DashboardBridge:
                         })
                         continue
                     except Exception as exc:
-                        print(
-                            f"[mobile-ws] data-source switch failed: {exc}",
-                            flush=True,
+                        logger.warning(
+                            f"data-source switch failed: {exc}"
                         )
                         await websocket.send_json({
                             "type": "control_error",

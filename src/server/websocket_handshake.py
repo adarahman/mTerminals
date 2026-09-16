@@ -1,6 +1,10 @@
 """Initial state delivery for newly connected dashboard clients."""
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from collections.abc import Callable
 from typing import Any
 
@@ -113,9 +117,8 @@ class WebSocketHandshakeSender:
             ):
                 return
         except Exception as exc:
-            print(
-                f"[algo-status] initial snapshot failed: {exc}",
-                flush=True,
+            logger.warning(
+                f"algo-status initial snapshot failed: {exc}"
             )
 
         alert = self._reconciliation_alert()
@@ -128,9 +131,8 @@ class WebSocketHandshakeSender:
                 ):
                     return
             except Exception as exc:
-                print(
-                    f"[position_reconciler] initial alert snapshot failed: {exc}",
-                    flush=True,
+                logger.warning(
+                    f"position_reconciler initial alert snapshot failed: {exc}"
                 )
 
         try:
@@ -150,7 +152,6 @@ class WebSocketHandshakeSender:
             )
 
         except Exception as exc:
-            print(
-                f"[paper-trading] initial snapshot failed: {exc}",
-                flush=True,
+            logger.warning(
+                f"paper-trading initial snapshot failed: {exc}"
             )

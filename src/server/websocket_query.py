@@ -1,6 +1,10 @@
 """Validation and application of dashboard WebSocket query controls."""
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -47,25 +51,22 @@ class WebSocketQueryController:
             try:
                 await self._switch_data_source(data_source)
             except ValueError as exc:
-                print(
-                    f"[ws] ignoring invalid ?dataSource={data_source!r}: {exc}",
-                    flush=True,
+                logger.warning(
+                    f"ignoring invalid ?dataSource={data_source!r}: {exc}"
                 )
 
         price_source = query.get("priceSource")
         if price_source:
             normalized = price_source.strip().upper()
             if normalized not in self.PRICE_SOURCES:
-                print(
-                    f"[ws] ignoring invalid ?priceSource={price_source!r} "
-                    "(must be AUTO, EQ or FUT)",
-                    flush=True,
+                logger.warning(
+                    f"ignoring invalid ?priceSource={price_source!r} "
+                    "(must be AUTO, EQ or FUT)"
                 )
             elif normalized != self._current_price_source():
-                print(
-                    f"[ws] price source switch requested: "
-                    f"{self._current_price_source()} -> {normalized}",
-                    flush=True,
+                logger.info(
+                    f"price source switch requested: "
+                    f"{self._current_price_source()} -> {normalized}"
                 )
                 self._set_price_source(normalized)
                 self._invalidate_market_baseline()
@@ -75,16 +76,14 @@ class WebSocketQueryController:
         if futures_expiry:
             normalized = futures_expiry.strip().upper()
             if normalized not in self.FUTURES_EXPIRIES:
-                print(
-                    f"[ws] ignoring invalid ?futuresExpiry={futures_expiry!r} "
-                    "(must be NEAR, NEXT, or FAR)",
-                    flush=True,
+                logger.warning(
+                    f"ignoring invalid ?futuresExpiry={futures_expiry!r} "
+                    "(must be NEAR, NEXT, or FAR)"
                 )
             elif normalized != self._current_futures_expiry():
-                print(
-                    f"[ws] futures expiry switch requested: "
-                    f"{self._current_futures_expiry()} -> {normalized}",
-                    flush=True,
+                logger.info(
+                    f"futures expiry switch requested: "
+                    f"{self._current_futures_expiry()} -> {normalized}"
                 )
                 self._set_futures_expiry(normalized)
                 self._invalidate_market_baseline()

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -66,10 +70,9 @@ class MarketPipelineService:
             self._task = None
             self._task_source = None
             if task_source != current_source:
-                print(
-                    f"[pipeline] discarding stale {task_source} result; "
-                    f"active provider is {current_source}",
-                    flush=True,
+                logger.debug(
+                    f"discarding stale {task_source} result; "
+                    f"active provider is {current_source}"
                 )
                 return None
             timings = payload.get("pipelineTimings") if isinstance(payload, dict) else None
@@ -90,10 +93,9 @@ class MarketPipelineService:
                 self._delayed_reason(self._timeout_seconds),
                 elapsed,
             )
-            print(
-                f"[pipeline] DELAYED after {elapsed:.2f}s — "
-                f"{self._delayed_overlay()}",
-                flush=True,
+            logger.warning(
+                f"DELAYED after {elapsed:.2f}s — "
+                f"{self._delayed_overlay()}"
             )
             return None
         except Exception as exc:
@@ -102,7 +104,7 @@ class MarketPipelineService:
             await self._publish_status(
                 "DELAYED", f"Analytics pipeline failed: {exc}"
             )
-            print(f"[pipeline] FAILED: {exc}", flush=True)
+            logger.error(f"FAILED: {exc}")
             return None
 
 
