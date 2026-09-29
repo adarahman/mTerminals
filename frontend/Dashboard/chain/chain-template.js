@@ -909,7 +909,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 
   <!-- ── DECISION DETAIL — always visible ── -->
   <section class="card" id="decision-detail-card" style="margin-bottom:10px;">
-    <div class="card-head"><span class="ic">🧭</span>Full Evidence &amp; Risk Levels</div>
+    <div class="card-head"><span class="ic">🧭</span>Risk Level</div>
     <div class="detail-body">
 
       <!-- Active Signals (left) + S & R Levels (right), 2-column grid
