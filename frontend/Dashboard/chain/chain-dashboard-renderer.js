@@ -99,7 +99,8 @@ ChainView.prototype.refreshDecisionBoxGuarded = function(d) {
     // meant to fix in the first place. _decisionDetailPending (set/cleared
     // by _bindDecisionDetailGuard) covers exactly that gap.
     const clickInFlight = !!this._decisionDetailPending;
-    if (!decisionDetailWasOpen && !clickInFlight) {
+    const decisionHoverActive = !!decEl.querySelector('.decision-engine-hover:hover');
+    if (!decisionDetailWasOpen && !clickInFlight && !decisionHoverActive) {
       decEl.outerHTML = this.renderDecisionBoxHtml(d, { open: decisionDetailWasOpen });
       this._bindDecisionDetailGuard();
     }
