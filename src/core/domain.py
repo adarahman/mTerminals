@@ -157,6 +157,10 @@ class DecisionResult:
     trade_grade: str = ""
     risk_warning: str = ""
     important_levels: dict[str, Any] = field(default_factory=dict)
+    # Canonical execution/readiness summary shared by desktop and mobile.
+    tradeability: str = "NO_TRADE"
+    tradeability_reason: str = ""
+    confirmation_levels: dict[str, Any] = field(default_factory=dict)
     # Canonical market package. Populated by the decision builder.
     market: dict[str, Any] = field(default_factory=dict)
     short_horizon: dict[str, Any] = field(default_factory=dict)
@@ -213,6 +217,9 @@ class DecisionResult:
             "tradeGrade": self.trade_grade,
             "riskWarning": self.risk_warning,
             "importantLevels": self.important_levels,
+            "tradeability": self.tradeability,
+            "tradeabilityReason": self.tradeability_reason,
+            "confirmationLevels": self.confirmation_levels,
             "market": self.market,
             "shortHorizon": self.short_horizon,
             "autoStrategy": self.auto_strategy,

@@ -12,6 +12,9 @@ assert.match(source, /\['futures', 'Futures positioning', 20\]/,
   'decision detail must retain a visible futures-positioning row when evidence is missing');
 assert.match(source, /dec\.degraded/, 'decision view must expose degraded state');
 assert.match(source, /dec\.missingInputs/, 'decision view must expose missing inputs');
+assert.match(source, /dec\.tradeability/, 'decision view must consume backend tradeability');
+assert.match(source, /dec\.tradeabilityReason/, 'decision view must consume backend tradeability reason');
+assert.match(source, /dec\.confirmationLevels/, 'decision view must consume backend confirmation levels');
 assert.doesNotMatch(source, /confidence\s*=\s*.*(?:pcr|oi_score|composite)/i,
   'frontend must not recompute decision confidence');
 assert.match(source, /escapeHtml\(s\.text\)/,

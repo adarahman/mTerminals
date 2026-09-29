@@ -190,6 +190,56 @@
 .verdict-conf-label{font-size:var(--fs-xs);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.07em;}
 .verdict-conf-big{font-family:var(--font-mono);font-size:var(--fs-3xl);font-weight:700;line-height:1.15;}
 .verdict-conf-msg{font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px;white-space:nowrap;}
+/* Canonical decision readiness — rendered from backend DecisionResult. */
+.verdict-tradeability{
+  display:inline-flex;
+  align-items:center;
+  margin-top:5px;
+  padding:3px 8px;
+  border:1px solid var(--border-2);
+  border-radius:999px;
+  font-size:var(--fs-xs);
+  font-weight:800;
+  letter-spacing:.07em;
+  line-height:1.2;
+  text-transform:uppercase;
+}
+.verdict-tradeability.tradeable{
+  color:var(--pos);
+  border-color:color-mix(in srgb, var(--pos) 45%, var(--border-2));
+}
+.verdict-tradeability.conditional{
+  color:var(--warn);
+  border-color:color-mix(in srgb, var(--warn) 45%, var(--border-2));
+}
+.verdict-tradeability.no-trade{
+  color:var(--neg);
+  border-color:color-mix(in srgb, var(--neg) 45%, var(--border-2));
+}
+.verdict-tradeability-reason{
+  margin-top:4px;
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+  line-height:1.35;
+  max-width:240px;
+}
+.decision-confirmation{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 14px;
+  margin-top:10px;
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+.decision-confirmation span{
+  white-space:nowrap;
+}
+.decision-confirmation strong{
+  margin-left:3px;
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:var(--fs-sm);
+}
 
 /* Trade Grade — far right of the same header line, same label/value
    pattern as Confidence but right-aligned and single-line (no message

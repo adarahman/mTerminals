@@ -345,4 +345,45 @@ class DecisionEngine:
             "ceWall": ce_wall, "peWall": pe_wall,
         }
 
+        # ── Canonical tradeability/readiness contract ──────────────────────
+        # This is deliberately derived from the existing decision gates.
+        # It does not introduce a second confidence or directional score.
+        if out.degraded:
+            out.tradeability = "NO_TRADE"
+            out.tradeability_reason = "Required decision evidence is missing"
+        elif out.conflict_flag:
+            out.tradeability = "NO_TRADE"
+            out.tradeability_reason = "Sub-signals are split"
+        elif out.confidence < T.CONFIDENCE_EXECUTE_MIN:
+            out.tradeability = "NO_TRADE"
+            out.tradeability_reason = (
+                f"Confidence {out.confidence}% below "
+                f"{T.CONFIDENCE_EXECUTE_MIN}% execution threshold"
+            )
+        elif out.action_type == "WAIT":
+            out.tradeability = "NO_TRADE"
+            out.tradeability_reason = "Decision engine verdict is WAIT — no directional edge"
+        elif out.action_type in {
+            "SPREAD_BEAR", "SPREAD_BULL",
+            "STRADDLE", "STRANGLE", "CONDOR",
+        }:
+            out.tradeability = "CONDITIONAL"
+            out.tradeability_reason = (
+                "Execution conditions satisfied; multi-leg strategy "
+                "requires manual confirmation"
+            )
+        else:
+            out.tradeability = "TRADEABLE"
+            out.tradeability_reason = "Execution conditions satisfied"
+
+        # Confirmation levels are structural levels already calculated by
+        # the decision engine. They are not additional predictions.
+        # Keep the contract direction-neutral so desktop/mobile can render
+        # the same range-break framework regardless of current bias.
+        out.confirmation_levels = {
+            "atm": int(round(atm)),
+            "aboveResistance": ce_wall,
+            "belowSupport": pe_wall,
+        }
+
         return out

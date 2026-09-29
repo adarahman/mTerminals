@@ -39,6 +39,13 @@ def test_decision_contract_has_provenance_and_visible_evidence():
     assert result["tradeGrade"] == "A"
     assert result["importantLevels"]["atm"] == 24000
 
+    # Canonical tradeability contract shared by desktop and mobile.
+    assert result["tradeability"] in {"TRADEABLE", "CONDITIONAL", "NO_TRADE"}
+    assert result["tradeabilityReason"]
+    assert result["confirmationLevels"]["atm"] == 24000
+    assert "aboveResistance" in result["confirmationLevels"]
+    assert "belowSupport" in result["confirmationLevels"]
+
     # Canonical confidence contract shared by desktop and mobile.
     assert result["confidenceVersion"] == "v1"
     assert result["confidenceBasis"]["composite"] == 0.535
@@ -65,6 +72,8 @@ def test_missing_required_input_degrades_and_disables_execution():
     assert result["suggestedStrike"] is None
     assert result["executeRecommended"] is False
     assert "Required decision evidence" in result["strategyCaution"]
+    assert result["tradeability"] == "NO_TRADE"
+    assert "evidence" in result["tradeabilityReason"].lower()
 
 
 def test_missing_futures_quote_is_not_scored_as_bearish_evidence():
@@ -106,6 +115,9 @@ def test_directional_setup_fails_closed_below_execution_confidence():
     assert result["suggestedStrike"] is None
     assert "below execution threshold" in result["action"]
     assert result["executeRecommended"] is False
+    assert result["tradeability"] == "NO_TRADE"
+    assert "Confidence 23%" in result["tradeabilityReason"]
+    assert "execution threshold" in result["tradeabilityReason"]
 
 
 def test_falling_session_cannot_emit_moderate_bullish_trade():

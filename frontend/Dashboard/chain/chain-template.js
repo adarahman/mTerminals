@@ -441,6 +441,29 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const conf = dec.confidence || 0;
     const act  = dec.action || '—';
     const conflict = dec.conflictFlag || false;
+
+    // Canonical tradeability comes from the backend DecisionResult.
+    // The frontend renders it; it must not infer/recompute readiness.
+    const tradeability = String(dec.tradeability || 'NO_TRADE').toUpperCase();
+    const tradeabilityReason = String(
+      dec.tradeabilityReason || dec.strategyCaution || 'Decision state unavailable'
+    );
+    const confirmationLevels =
+      dec.confirmationLevels && typeof dec.confirmationLevels === 'object'
+        ? dec.confirmationLevels
+        : {};
+
+    const tradeabilityLabel = tradeability === 'TRADEABLE'
+      ? 'TRADEABLE'
+      : tradeability === 'CONDITIONAL'
+        ? 'CONDITIONAL'
+        : 'NO TRADE';
+
+    const tradeabilityCls = tradeability === 'TRADEABLE'
+      ? 'tradeable'
+      : tradeability === 'CONDITIONAL'
+        ? 'conditional'
+        : 'no-trade';
     const contributors = Array.isArray(dec.contributors) ? dec.contributors : [];
     // Required evidence must remain visible even when a degraded/legacy
     // decision payload omits contributor records. Otherwise the most useful
@@ -707,6 +730,9 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       <div>
         <div class="verdict-label">Decision Engine</div>
         <div class="verdict-call">${bias}${str?' · '+str:''}${conflict?' ⚡':''}</div>
+        <div class="verdict-tradeability ${tradeabilityCls}">
+          ${tradeabilityLabel}
+        </div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}
       </div>
       ${this._buildMiniChartHtml(d)}
@@ -714,6 +740,9 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-conf-label">Evidence Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
         <div class="verdict-conf-msg">Coverage ${evidenceCoverage}%</div>
+        <div class="verdict-tradeability-reason" title="${escapeHtml(tradeabilityReason)}">
+          ${escapeHtml(tradeabilityReason)}
+        </div>
         ${decisionDegraded ? `<div class="verdict-data-quality" title="Missing: ${decisionMissing.join(', ')}">DEGRADED${decisionMissing.length ? ' · '+decisionMissing.join(', ') : ''}</div>` : ''}
         ${partialData ? `<div class="verdict-data-quality" title="Missing: ${partialMissing.join(', ')}">PARTIAL DATA${partialMissing.length ? ' · '+partialMissing.join(', ') : ''}</div>` : ''}
       </div>
@@ -750,6 +779,19 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="decision-flow-action-meta">
           <span>Grade <strong style="color:${gradeColor};">${risk.tradeGrade || '—'}</strong></span>
           <span>IV <strong style="color:${ivRgColor};">${risk.ivRegime || '—'}</strong></span>
+        </div>
+
+        <div class="decision-confirmation" aria-label="Confirmation levels">
+          ${confirmationLevels.belowSupport != null
+            ? `<span>Below <strong>${fmtI(confirmationLevels.belowSupport)}</strong></span>`
+            : ''}
+          ${confirmationLevels.aboveResistance != null
+            ? `<span>Above <strong>${fmtI(confirmationLevels.aboveResistance)}</strong></span>`
+            : ''}
+          ${confirmationLevels.belowSupport == null &&
+            confirmationLevels.aboveResistance == null
+            ? `<span>ATM <strong>${confirmationLevels.atm != null ? fmtI(confirmationLevels.atm) : '—'}</strong></span>`
+            : ''}
         </div>
       </section>
     </div>
