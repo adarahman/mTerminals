@@ -756,7 +756,15 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
               ? 'Why — Conditions'
               : 'Why — Evidence'
         }</div>
-        <div class="decision-flow-content">${heroWhyHtml}</div>
+        <div class="decision-flow-content">
+          ${tradeability !== 'TRADEABLE'
+            ? `<div class="decision-flow-line decision-flow-reason">
+                <span class="decision-flow-dot">•</span>
+                <span title="${escapeHtml(tradeabilityReason)}">${escapeHtml(tradeabilityReason)}</span>
+              </div>`
+            : ''}
+          ${heroWhyHtml}
+        </div>
         <div class="decision-flow-foot" title="${vrd.pcr || ''} · ${vrd.vix || ''}">PCR ${shortVal(vrd.pcr)} · VIX ${shortVal(vrd.vix)}</div>
       </section>
       <section class="decision-flow-block decision-flow-levels">

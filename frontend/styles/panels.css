@@ -265,6 +265,7 @@
 .decision-flow-label{margin-bottom:8px;color:var(--text-tertiary);font-size:var(--fs-xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
 .decision-flow-content{display:grid;gap:5px;}
 .decision-flow-line{display:flex;gap:8px;min-width:0;color:var(--text-secondary);font-size:var(--fs-sm);}
+.decision-flow-reason{color:var(--text-primary);font-weight:700;}
 .decision-flow-line span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .decision-flow-dot{flex:0 0 auto;font-weight:800;}
 .decision-flow-foot{margin-top:8px;color:var(--text-tertiary);font-family:var(--font-mono);font-size:var(--fs-xs);}
