@@ -735,7 +735,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-tradeability-reason" title="${escapeHtml(tradeabilityReason)}">
           ${escapeHtml(tradeabilityReason)}
         </div>
-        <div class="verdict-call verdict-bias">${bias}${str?' · '+str:''}${conflict?' ⚡':''}</div>
+        <div class="verdict-call verdict-bias">${bias}${str?` · <span class="verdict-bias-strength">${str}</span>`:''}${conflict?' ⚡':''}</div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}
       </div>
       ${this._buildMiniChartHtml(d)}
