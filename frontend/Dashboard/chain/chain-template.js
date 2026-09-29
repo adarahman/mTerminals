@@ -432,7 +432,6 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
 };
 
 ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
-    const detailOpen = !!(opts && opts.open);
     const dec  = d.decision || {};
     const vrd  = dec.verdicts || {};
     const sigs = dec.activeSignals || [];
@@ -728,7 +727,42 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
   <div class="verdict ${biasCardCls}">
     <div class="verdict-top">
       <div>
-        <div class="verdict-label">Decision Engine</div>
+        <div class="decision-engine-hover">
+          <div class="verdict-label">Decision Engine</div>
+          <div class="decision-engine-evidence" role="tooltip">
+            <div class="decision-engine-evidence-title">Decision Evidence</div>
+            <div class="decision-engine-evidence-summary">
+              <span>Confidence <strong>${conf}%</strong></span>
+              <span>Coverage <strong>${evidenceCoverage}%</strong></span>
+            </div>
+            <div class="decision-engine-evidence-list">
+              ${visibleContributors.map(c => {
+                const available = c.available !== false;
+                const contribution = available && c.weightedContribution != null
+                  ? `${Number(c.weightedContribution) >= 0 ? '+' : ''}${Number(c.weightedContribution).toFixed(3)}`
+                  : 'unavailable';
+                const contributionColor = !available
+                  ? 'var(--neg)'
+                  : Number(c.weightedContribution) > 0
+                    ? 'var(--pos)'
+                    : Number(c.weightedContribution) < 0
+                      ? 'var(--neg)'
+                      : 'var(--text-tertiary)';
+                return `<div class="decision-engine-evidence-row">
+                  <span>${escapeHtml(c.label || c.key || 'Signal')}</span>
+                  <strong style="color:${contributionColor};">${available ? `${c.weight || 0}% · ${contribution}` : 'Missing'}</strong>
+                </div>`;
+              }).join('')}
+            </div>
+            <div class="decision-engine-evidence-footer">
+              <span>Signals ${sigs.length} · Bullish ${bullishSignalCount} · Bearish ${bearishSignalCount}</span>
+              <span>${escapeHtml(signalFreshness)} · Observed ${escapeHtml(signalObservedLabel)}</span>
+            </div>
+            ${decisionMissing.length
+              ? `<div class="decision-engine-evidence-missing">Missing: ${escapeHtml(decisionMissing.join(', '))}</div>`
+              : ''}
+          </div>
+        </div>
         <div class="verdict-tradeability ${tradeabilityCls}">
           ${tradeabilityLabel}
         </div>
@@ -873,12 +907,9 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 
   </div>
 
-  <!-- ── DECISION DETAIL — Tier-3 collapsible ── -->
-  <details class="card" id="decision-detail-card" style="margin-bottom:10px;" ${detailOpen ? 'open' : ''}>
-    <summary>
-      <div class="card-head"><span class="ic">🧭</span>Full Evidence &amp; Risk Levels</div>
-      <span class="chev">▶</span>
-    </summary>
+  <!-- ── DECISION DETAIL — always visible ── -->
+  <section class="card" id="decision-detail-card" style="margin-bottom:10px;">
+    <div class="card-head"><span class="ic">🧭</span>Full Evidence &amp; Risk Levels</div>
     <div class="detail-body">
 
       <div class="dd-col" style="margin-bottom:10px;">
@@ -978,7 +1009,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       </div>
 
     </div>
-  </details>
+  </section>
 </div>`;
 };
 
