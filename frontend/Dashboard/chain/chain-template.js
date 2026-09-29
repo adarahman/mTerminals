@@ -912,23 +912,6 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     <div class="card-head"><span class="ic">🧭</span>Full Evidence &amp; Risk Levels</div>
     <div class="detail-body">
 
-      <div class="dd-col" style="margin-bottom:10px;">
-        <div class="dd-col-title">Decision Evidence · ${evidenceCoverage}% coverage</div>
-        <div class="dd-sig-list">
-          ${visibleContributors.map(c => {
-            const available = c.available !== false;
-            const contribution = available && c.weightedContribution != null
-              ? `${Number(c.weightedContribution) >= 0 ? '+' : ''}${Number(c.weightedContribution).toFixed(3)}`
-              : 'unavailable';
-            return `<div class="dd-sig">
-              <span style="color:${available?'var(--text-primary)':'var(--neg)'};font-weight:700;min-width:170px;">${escapeHtml(c.label || c.key || 'Signal')}</span>
-              <span style="color:var(--text-tertiary);">${available ? `${c.weight || 0}% weight · ${contribution}` : 'Missing — excluded from score'}</span>
-            </div>`;
-          }).join('')}
-          ${dec.decisionTimestamp ? `<div class="dd-sig"><span style="color:var(--text-tertiary);">State ${dec.stateVersion || '—'} · ${dec.decisionTimestamp}</span></div>` : ''}
-        </div>
-      </div>
-
       <!-- Active Signals (left) + S & R Levels (right), 2-column grid
            (.dd-grid, panels.css). Trap Warning used to be its own
            full-width strip above this grid; it's folded into the S&R
