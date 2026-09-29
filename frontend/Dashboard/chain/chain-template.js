@@ -749,7 +749,13 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     </div>
     <div class="decision-flow" aria-label="Decision summary">
       <section class="decision-flow-block decision-flow-why">
-        <div class="decision-flow-label">Why</div>
+        <div class="decision-flow-label">${
+          tradeability === 'NO_TRADE'
+            ? 'Why — Blockers'
+            : tradeability === 'CONDITIONAL'
+              ? 'Why — Conditions'
+              : 'Why — Evidence'
+        }</div>
         <div class="decision-flow-content">${heroWhyHtml}</div>
         <div class="decision-flow-foot" title="${vrd.pcr || ''} · ${vrd.vix || ''}">PCR ${shortVal(vrd.pcr)} · VIX ${shortVal(vrd.vix)}</div>
       </section>
