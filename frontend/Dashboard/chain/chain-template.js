@@ -729,10 +729,13 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     <div class="verdict-top">
       <div>
         <div class="verdict-label">Decision Engine</div>
-        <div class="verdict-call">${bias}${str?' · '+str:''}${conflict?' ⚡':''}</div>
         <div class="verdict-tradeability ${tradeabilityCls}">
           ${tradeabilityLabel}
         </div>
+        <div class="verdict-tradeability-reason" title="${escapeHtml(tradeabilityReason)}">
+          ${escapeHtml(tradeabilityReason)}
+        </div>
+        <div class="verdict-call verdict-bias">${bias}${str?' · '+str:''}${conflict?' ⚡':''}</div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}
       </div>
       ${this._buildMiniChartHtml(d)}
@@ -740,9 +743,6 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-conf-label">Evidence Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
         <div class="verdict-conf-msg">Coverage ${evidenceCoverage}%</div>
-        <div class="verdict-tradeability-reason" title="${escapeHtml(tradeabilityReason)}">
-          ${escapeHtml(tradeabilityReason)}
-        </div>
         ${decisionDegraded ? `<div class="verdict-data-quality" title="Missing: ${decisionMissing.join(', ')}">DEGRADED${decisionMissing.length ? ' · '+decisionMissing.join(', ') : ''}</div>` : ''}
         ${partialData ? `<div class="verdict-data-quality" title="Missing: ${partialMissing.join(', ')}">PARTIAL DATA${partialMissing.length ? ' · '+partialMissing.join(', ') : ''}</div>` : ''}
       </div>
