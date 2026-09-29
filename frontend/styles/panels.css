@@ -237,6 +237,10 @@
   color:var(--text-tertiary);
   font-size:var(--fs-xs);
 }
+.decision-confirmation-label{
+  color:var(--text-secondary);
+  font-weight:700;
+}
 .decision-confirmation span{
   white-space:nowrap;
 }

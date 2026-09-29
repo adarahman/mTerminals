@@ -782,6 +782,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         </div>
 
         <div class="decision-confirmation" aria-label="Confirmation levels">
+           <span class="decision-confirmation-label">${tradeability === 'NO_TRADE' ? 'Upgrade when' : 'Confirm at'}</span>
           ${confirmationLevels.belowSupport != null
             ? `<span>Below <strong>${fmtI(confirmationLevels.belowSupport)}</strong></span>`
             : ''}
