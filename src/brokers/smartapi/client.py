@@ -450,6 +450,11 @@ def _rate_limit_wait(fn_name: str) -> None:
 _QUOTE_CACHE_TTL_S = settings.quote_cache_ttl_s
 _quote_cache = TTLKeyCache(ttl_seconds=_QUOTE_CACHE_TTL_S)
 
+# Collapse concurrent cold-cache requests for the same symbol into one
+# SmartAPI ltpData call. Different symbols remain fully concurrent.
+_quote_inflight_lock = threading.Lock()
+_quote_inflight = {}
+
 
 def _quote_cache_get(symbol):
     return _quote_cache.get(symbol.upper())
@@ -457,6 +462,49 @@ def _quote_cache_get(symbol):
 
 def _quote_cache_set(symbol, quote):
     _quote_cache.set(symbol.upper(), quote)
+
+
+def _quote_singleflight(symbol, fetch):
+    """Fetch one quote while coalescing concurrent requests for its symbol."""
+    key = symbol.upper()
+
+    cached = _quote_cache_get(key)
+    if cached is not None:
+        return cached
+
+    with _quote_inflight_lock:
+        state = _quote_inflight.get(key)
+        if state is None:
+            state = {
+                "event": threading.Event(),
+                "result": None,
+            }
+            _quote_inflight[key] = state
+            leader = True
+        else:
+            leader = False
+
+    if not leader:
+        state["event"].wait()
+        return state["result"]
+
+    try:
+        # Another path may have populated the cache while we acquired
+        # ownership of the in-flight slot.
+        cached = _quote_cache_get(key)
+        if cached is not None:
+            state["result"] = cached
+            return cached
+
+        result = fetch()
+        if result is not None:
+            _quote_cache_set(key, result)
+        state["result"] = result
+        return result
+    finally:
+        with _quote_inflight_lock:
+            _quote_inflight.pop(key, None)
+            state["event"].set()
 
 
 _session = SmartApiSession()
@@ -849,33 +897,30 @@ def _spot_quote(symbol, data):
 def get_index_quote(symbol):
     """LTP + basic OHLC for an index (NIFTY, BANKNIFTY, SENSEX, ...).
 
-    Served from a short TTL cache (SMARTAPI_QUOTE_TTL_S, default 1.5s) when
-    a fresh-enough value is already on hand — see _quote_cache_get/set.
-    For fetching several index symbols together (e.g. the ticker strip),
-    prefer get_index_quotes_batch() instead of calling this in a loop: that
-    uses one getMarketData call instead of one ltpData call per symbol.
+    Served from a short TTL cache when a fresh-enough value is already
+    available. Concurrent cold-cache requests for the same symbol share
+    one SmartAPI ltpData request.
     """
     symbol = symbol.upper()
-    cached = _quote_cache_get(symbol)
-    if cached is not None:
-        return cached
 
-    info = get_index_tokens().get(symbol)
-    if not info:
-        logger.warning(f"[smartapi_client] Unknown index symbol: {symbol}")
-        return None
+    def fetch():
+        info = get_index_tokens().get(symbol)
+        if not info:
+            logger.warning(f"[smartapi_client] Unknown index symbol: {symbol}")
+            return None
 
-    result = _session.call(
-        "ltpData", info["exchange"], symbol, info["token"]
-    )
-    if not result.get("status"):
-        logger.warning(f"[smartapi_client] get_index_quote failed for {symbol}: {result}")
-        return None
+        result = _session.call(
+            "ltpData", info["exchange"], symbol, info["token"]
+        )
+        if not result.get("status"):
+            logger.warning(
+                f"[smartapi_client] get_index_quote failed for {symbol}: {result}"
+            )
+            return None
 
-    d = result["data"]
-    quote = _spot_quote(symbol, d)
-    _quote_cache_set(symbol, quote)
-    return quote
+        return _spot_quote(symbol, result["data"])
+
+    return _quote_singleflight(symbol, fetch)
 
 
 def get_index_quotes_batch(symbols):
@@ -965,27 +1010,27 @@ def get_equity_quote(symbol):
     """LTP + basic OHLC for an individual F&O stock (e.g. SUNPHARMA, RELIANCE),
     resolved dynamically via the ScripMaster rather than a hardcoded table.
     Counterpart to get_index_quote() for the ~200+ stock underlyings that
-    aren't in INDEX_TOKENS."""
+    aren't in INDEX_TOKENS.
+    """
     symbol = symbol.upper()
-    cached = _quote_cache_get(symbol)
-    if cached is not None:
-        return cached
 
-    info = _find_equity_token(symbol)
-    if not info:
-        return None
+    def fetch():
+        info = _find_equity_token(symbol)
+        if not info:
+            return None
 
-    result = _session.call(
-        "ltpData", "NSE", info["tradingsymbol"], info["token"]
-    )
-    if not result.get("status"):
-        logger.warning(f"[smartapi_client] get_equity_quote failed for {symbol}: {result}")
-        return None
+        result = _session.call(
+            "ltpData", "NSE", info["tradingsymbol"], info["token"]
+        )
+        if not result.get("status"):
+            logger.warning(
+                f"[smartapi_client] get_equity_quote failed for {symbol}: {result}"
+            )
+            return None
 
-    d = result["data"]
-    quote = _spot_quote(symbol, d)
-    _quote_cache_set(symbol, quote)
-    return quote
+        return _spot_quote(symbol, result["data"])
+
+    return _quote_singleflight(symbol, fetch)
 
 
 def get_spot_quote(underlying):

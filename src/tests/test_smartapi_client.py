@@ -12,6 +12,7 @@ place of the real SmartAPI SDK object, and `time.sleep` /
 `_rate_limit_wait` are stubbed out so retry/backoff paths run instantly
 instead of actually sleeping.
 """
+import threading
 import requests
 import pytest
 from unittest.mock import MagicMock
@@ -226,3 +227,67 @@ def test_place_order_fails_closed_when_tag_preflight_is_unavailable(smartapi_mod
             "NIFTY", "123", "NFO", "BUY", 65, order_tag="liveorder00000001",
         )
     assert submit_calls == []
+
+
+def test_get_spot_quote_coalesces_concurrent_cold_cache_requests(
+    smartapi_modules, monkeypatch
+):
+    smartapi_client, _ = smartapi_modules
+
+    # Isolate this test from the session-scoped module cache.
+    monkeypatch.setattr(
+        smartapi_client,
+        "_quote_cache",
+        smartapi_client.TTLKeyCache(ttl_seconds=60),
+    )
+    monkeypatch.setattr(
+        smartapi_client,
+        "get_index_tokens",
+        lambda: {"NIFTY": {"exchange": "NSE", "token": "999"}},
+    )
+
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_call(fn_name, exchange, symbol, token):
+        calls.append((fn_name, exchange, symbol, token))
+        started.set()
+        assert release.wait(timeout=2)
+        return {
+            "status": True,
+            "data": {
+                "ltp": "25000",
+                "open": "24900",
+                "high": "25100",
+                "low": "24800",
+                "close": "24950",
+            },
+        }
+
+    monkeypatch.setattr(smartapi_client._session, "call", fake_call)
+
+    results = []
+
+    def worker():
+        results.append(smartapi_client.get_spot_quote("NIFTY"))
+
+    first = threading.Thread(target=worker)
+    second = threading.Thread(target=worker)
+
+    first.start()
+    assert started.wait(timeout=2)
+
+    second.start()
+
+    # Give the second caller enough time to enter the in-flight path.
+    second.join(timeout=0.1)
+    release.set()
+
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert len(calls) == 1
+    assert len(results) == 2
+    assert results[0] == results[1]
+    assert results[0]["ltp"] == 25000

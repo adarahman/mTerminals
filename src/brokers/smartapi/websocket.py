@@ -95,6 +95,16 @@ class SmartTickStream:
             retry_duration=60,
         )
 
+        # websocket-client >= 1.9 calls on_close(wsapp, status_code, message),
+        # while the installed SmartAPI SDK's _on_close accepts only wsapp.
+        # Adapt the SDK callback at our boundary instead of modifying site-packages.
+        sdk_on_close = self._ws._on_close
+
+        def _compatible_on_close(wsapp, *_args):
+            return sdk_on_close(wsapp)
+
+        self._ws._on_close = _compatible_on_close
+
         self._ws.on_open = self._handle_open
         self._ws.on_data = self._handle_data
         self._ws.on_error = self._handle_error
