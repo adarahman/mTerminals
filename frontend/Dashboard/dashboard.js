@@ -185,8 +185,10 @@ function organizeDesktopDestinationOwnership() {
    * ---------------------------------------------------------- */
   const orderButton = document.getElementById('pt-order-toggle-btn');
   const portfolioPanel = document.getElementById('pt-portfolio-panel');
+  const portfolioHeader =
+    portfolioPanel?.querySelector('.pt-portfolio-header');
 
-  if (orderButton && portfolioPanel) {
+  if (orderButton && portfolioPanel && portfolioHeader) {
     let tradeActions =
       portfolioPanel.querySelector('#trade-context-actions');
 
@@ -195,12 +197,13 @@ function organizeDesktopDestinationOwnership() {
       tradeActions.id = 'trade-context-actions';
       tradeActions.className = 'trade-context-actions';
       tradeActions.setAttribute('aria-label', 'Trade actions');
+    }
 
-      /*
-       * Put Order at the TOP of Portfolio, before portfolio data.
-       * We deliberately do not move it into #pt-order-panel.
-       */
-      portfolioPanel.prepend(tradeActions);
+    if (tradeActions.parentElement !== portfolioHeader) {
+      portfolioHeader.insertBefore(
+        tradeActions,
+        portfolioHeader.children[1] ?? null
+      );
     }
 
     if (orderButton.parentElement !== tradeActions) {

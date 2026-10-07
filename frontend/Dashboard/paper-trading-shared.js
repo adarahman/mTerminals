@@ -425,10 +425,7 @@ function ptToast(message, kind){
 // session.
 //
 // Lives here (not in order-entry.js) because it's read by ptComputeFundSummary
-// and ptDispatchOrder above/below, and because toggling it updates DOM in
-// BOTH panels (#pt-mode-toggle pill on the order panel, #pt-portfolio-mode-badge
-// on the portfolio panel) — it's genuinely cross-panel state, not
-// order-entry-specific.
+// and ptDispatchOrder above/below; the order panel exposes the mode switch.
 let _ptLiveMode = false;
 function ptIsLiveMode(){ return _ptLiveMode; }
 window.ptIsLiveMode = ptIsLiveMode;
@@ -450,21 +447,10 @@ function ptToggleLiveMode(){
   _ptLiveMode = !_ptLiveMode;
   const pill = $i('pt-mode-toggle');
   const panel = $i('pt-order-panel');
-  // #pt-toggle-btn is the dedicated "Portfolio" rail button now (see
-  // DashboardPro.html's 2026-08-04 order/portfolio split) — it no longer
-  // doubles as a paper/live mode indicator, so its label is left alone.
-  // The portfolio panel's own mode readout (pt-portfolio-mode-badge) is
-  // synced here instead, mirroring the order panel's pt-mode-toggle pill.
-  const portfolioBadge = $i('pt-portfolio-mode-badge');
   if(pill){
     pill.textContent = _ptLiveMode ? '🔴 LIVE' : '📝 PAPER';
     pill.classList.toggle('live', _ptLiveMode);
     pill.classList.toggle('paper', !_ptLiveMode);
-  }
-  if(portfolioBadge){
-    portfolioBadge.textContent = _ptLiveMode ? '🔴 LIVE' : '📝 PAPER';
-    portfolioBadge.classList.toggle('live', _ptLiveMode);
-    portfolioBadge.classList.toggle('paper', !_ptLiveMode);
   }
   const title = $i('pt-panel-title');
   if(title) title.textContent = _ptLiveMode ? 'Live Trading' : 'Paper Trading';

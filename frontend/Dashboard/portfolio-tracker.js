@@ -23,7 +23,7 @@ function ptMountPortfolioPanel(){
   const portfolioPanel = document.createElement('div');
   portfolioPanel.id = 'pt-portfolio-panel';
   portfolioPanel.innerHTML = `
-    <h4 class="pt-portfolio-header"><span>Portfolio Tracker</span> <span id="pt-portfolio-mode-badge" class="pt-mode-toggle paper" title="Order mode — toggle from the Order GUI panel">📝 PAPER</span> <button type="button" class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')" aria-label="Close portfolio panel">✕</button></h4>
+    <h4 class="pt-portfolio-header"><span>Portfolio Tracker</span> <button type="button" class="pt-close" onclick="ptClosePanel('pt-portfolio-panel','pt-toggle-btn')" aria-label="Close portfolio panel">✕</button></h4>
     <div class="pt-section pt-simulation-note" id="pt-portfolio-source-note">
       <strong>SIMULATION ONLY</strong> — fills are not exchange confirmations. MARKET fills use the backend's latest live tick; LIMIT fills use the live tick that crosses the limit. No added slippage or artificial delay; quantity is lots × resolved lot size.
     </div>

@@ -86,10 +86,11 @@
   border:1px solid rgba(91,192,174,.62);
   box-shadow:0 18px 52px rgba(0,0,0,.48),0 0 0 1px rgba(91,192,174,.08),var(--shadow-lg);
 }
-#pt-portfolio-panel .pt-portfolio-header{margin:-4px -2px 10px;padding:4px 2px 11px;border-bottom:1px solid rgba(91,192,174,.24);color:#e8fffa;letter-spacing:.02em;}
+#pt-portfolio-panel .pt-portfolio-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-4px -2px 10px;padding:4px 2px 11px;border-bottom:1px solid rgba(91,192,174,.24);color:#e8fffa;letter-spacing:.02em;}
 #pt-portfolio-panel .pt-close{color:#a9c9c2;transition:color .15s ease,opacity .15s ease;}
 #pt-portfolio-panel .pt-close:hover{color:#fff;opacity:1;}
-#pt-portfolio-mode-badge.paper{background:rgba(215,181,109,.13);border-color:rgba(215,181,109,.55);color:#e5c987;}
+#pt-portfolio-panel .trade-context-actions{flex:0 0 auto;margin:0 0 0 auto;}
+#pt-portfolio-panel .trade-context-actions .sec-btn{flex-direction:row;gap:6px;padding:6px 10px;}
 #pt-portfolio-panel .pt-section{border-top-color:rgba(91,192,174,.18);}
 #pt-portfolio-panel .pt-simulation-note{padding:9px 10px;border:1px solid rgba(215,181,109,.22);border-radius:8px;background:rgba(215,181,109,.055);color:#9eb4b0;font-size:10px;line-height:1.5;}
 #pt-portfolio-panel .pt-simulation-note strong{color:#e5c987;letter-spacing:.06em;}

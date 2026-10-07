@@ -16,6 +16,30 @@ test('dashboard loads and exposes primary tools without page errors', async ({ p
   expect(pageErrors).toEqual([]);
 });
 
+test('Trade panel places a compact Order action in its header', async ({ page }) => {
+  await openDashboard(page);
+  await page.locator('button[data-primary-nav="trade"]').evaluate(button => button.click());
+
+  const panel = page.locator('#pt-portfolio-panel');
+  await expect(panel).toHaveClass(/open/);
+  await expect(panel.locator('#pt-portfolio-mode-badge')).toHaveCount(0);
+
+  const actions = panel.locator('#trade-context-actions');
+  expect(await actions.evaluate(el => el.parentElement.classList.contains('pt-portfolio-header'))).toBe(true);
+
+  const orderButton = actions.locator('#pt-order-toggle-btn');
+  const buttonLayout = await orderButton.evaluate(el => ({
+    flexDirection: getComputedStyle(el).flexDirection,
+    height: el.getBoundingClientRect().height,
+  }));
+  expect(buttonLayout.flexDirection).toBe('row');
+  expect(buttonLayout.height).toBeLessThan(50);
+
+  await orderButton.click();
+  await expect(page.locator('#pt-order-panel')).toHaveClass(/open/);
+  await expect(page.locator('#pt-mode-toggle')).toHaveText(/PAPER/);
+});
+
 test('native OI Flow chart opens and switches measure', async ({ page }) => {
   await openDashboard(page);
   await page.getByRole('button', { name:'Open OI Flow chart' }).first().click();
