@@ -231,6 +231,14 @@
   min-width:0;
 }
 
+.cas-indicative{
+  display:inline-flex;align-items:baseline;gap:4px;margin-top:2px;
+  color:var(--text-tertiary);font-family:var(--font-display);
+  font-size:9px;font-weight:700;letter-spacing:.04em;white-space:nowrap;
+}
+.cas-indicative strong{color:var(--warning,var(--accent));font-size:11px;}
+.cas-indicative small{color:var(--text-tertiary);font-size:8px;font-weight:500;}
+
 /* Active underlying mirrors the bordered, two-line FUT reference pill:
    the editable symbol remains first, while its instrument reference is a
    deliberately quiet micro-label underneath. */

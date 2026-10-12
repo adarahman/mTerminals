@@ -41,9 +41,15 @@ def _session_client():
 class KotakTickStream:
     """Wraps the async SFeed WebSocket into the shared stream_factory API."""
 
-    def __init__(self, on_tick: Callable[[dict], None], mode: str = "full") -> None:
+    def __init__(
+        self,
+        on_tick: Callable[[dict], None],
+        mode: str = "full",
+        on_raw: Callable[[str | bytes], None] | None = None,
+    ) -> None:
         self._on_tick = on_tick
         self._mode = mode
+        self._on_raw = on_raw
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ws: Any = None
         self._pending: list = []
@@ -106,6 +112,8 @@ class KotakTickStream:
 
         client = _session_client()
         ws: SFeedWebSocket = client.create_websocket()
+        if self._on_raw is not None:
+            ws.on_raw = self._on_raw
         async with ws:
             self._ws = ws
             self._connected.set()

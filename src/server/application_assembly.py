@@ -22,6 +22,12 @@ from server.routes import HttpRouteHandlers
 from server.runtime_services import ServerRuntimeServices, flush_oi_history
 
 
+def _start_nifty_cas_feed() -> None:
+    from application.cas_indicative import start_nifty_cas_feed
+
+    start_nifty_cas_feed()
+
+
 @dataclass(frozen=True, slots=True)
 class ServerApplication:
     runtime_state: Any
@@ -129,6 +135,7 @@ def build_server_application(
         reconcile=reconcile,
         live_trading_enabled=live_trading_enabled,
         flush_history=flush_oi_history,
+        start_cas_feed=_start_nifty_cas_feed,
     )
     return ServerApplication(
         runtime_state=runtime_state,

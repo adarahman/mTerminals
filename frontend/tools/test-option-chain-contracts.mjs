@@ -49,7 +49,7 @@ const checks = [
   ['net OI is the sole positioning headline', template.includes('class="oi-snap-overview"') && template.includes('class="oi-snap-head-net"><small>Net OI · PE−CE') && template.includes('class="oi-snap-head-net"><small>Net ΔOI') && !template.includes('<small>Total OI</small>') && !template.includes('Net positioning · PE−CE')],
   ['PCR change uses ratio precision instead of OI units', template.includes('const signedPcrDelta') && template.includes('signedPcrDelta(pcrShift)')],
   ['structure column uses shared per-strike classifier', template.includes('marketStructureLabels(chain') && template.includes('structureByStrike[Number(r.strike)]')],
-  ['ATM ±15 is the real frontend and backend default', rangeTabs.includes('RANGE_TAB_DEFAULT = 15') && chainView.includes('this.chainRange = 15') && server.includes('default=15')],
+  ['ATM ±5 is the fallback and the selected frontend range persists independently of backend analytics width', rangeTabs.includes('CHAIN_RANGE_FALLBACK = 5') && rangeTabs.includes('CHAIN_RANGE_STORAGE_KEY') && chainView.includes('this.chainRange = RANGE_TAB_DEFAULT') && chainView.includes('localStorage.setItem(CHAIN_RANGE_STORAGE_KEY') && server.includes('default=15')],
   ['PDS permits paired bilateral stacks', spec.includes('paired bilateral PE/CE stacks')],
 ];
 

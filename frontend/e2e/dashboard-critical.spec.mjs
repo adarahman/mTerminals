@@ -40,6 +40,73 @@ test('Trade panel places a compact Order action in its header', async ({ page })
   await expect(page.locator('#pt-mode-toggle')).toHaveText(/PAPER/);
 });
 
+test('sticky trade plan shows backend triggers and unavailable risk levels', async ({ page }) => {
+  const sessionDate = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+  const [year, month, day] = sessionDate.split('-').map(Number);
+  const marketOpen = Date.UTC(year, month - 1, day, 3, 45);
+  const historyRows = [
+    { t:marketOpen, o:24800, h:24810, l:24790, c:24805, v:10 },
+    { t:marketOpen + 15 * 60_000, o:24805, h:24820, l:24800, c:24815, v:20 },
+    { t:marketOpen + 30 * 60_000, o:24815, h:24830, l:24810, c:24825, v:30 },
+  ];
+  await page.route('**/api/**', route => {
+    const body = route.request().url().includes('/api/history') ? historyRows : {};
+    return route.fulfill({ status:200, contentType:'application/json', body:JSON.stringify(body) });
+  });
+  await page.routeWebSocket('**/ws', () => {});
+  await openDashboard(page);
+  await page.evaluate(() => window.parseAndRender(JSON.stringify({
+    symbol:'NIFTY', expiry:'31-DEC-2099', spot:24800, atm:24800,
+    chain:[{ strike:24800, ceLTP:100, peLTP:100, ceOI:1000, peOI:1000 }],
+    greeks:[], oiVelocity:[], lastUpdated:new Date().toISOString(),
+    decision:{
+      tradeability:'NO_TRADE', tradeabilityReason:'Compression with conflicting evidence',
+      bias:'RANGE', confidence:38,
+      confirmationLevels:{ aboveResistance:25000, belowSupport:24600 },
+    },
+  })));
+
+  const plan = page.locator('#decision-sticky-plan');
+  await expect(plan).toContainText('NO TRADE');
+  await expect(plan).toContainText('RANGE');
+  await expect(plan).toContainText('Above 25,000');
+  await expect(plan).toContainText('Below 24,600');
+  await expect(plan).toContainText('Compression with conflicting evidence');
+  await expect(plan).toContainText('Unavailable');
+  await expect(plan).toContainText('Session high / low');
+  await expect(plan).toContainText('24,830.00 / 24,790.00');
+  await expect(plan).toContainText('Opening range · 09:15-09:45');
+  await expect(plan).toContainText('24,790.00 - 24,820.00');
+  await expect(plan).toContainText('Session VWAP');
+  expect(await plan.evaluate(el => getComputedStyle(el).position)).toBe('sticky');
+  expect(await page.evaluate(() => {
+    const decision = document.querySelector('#sec-decision');
+    const actionPlan = document.querySelector('#decision-sticky-plan');
+    return !!(decision.compareDocumentPosition(actionPlan) & Node.DOCUMENT_POSITION_FOLLOWING);
+  })).toBe(true);
+  expect(await page.evaluate(() => window._chainRange)).toBe(5);
+  const stickyTop = await plan.evaluate(el => parseFloat(getComputedStyle(el).top));
+  await page.evaluate(() => {
+    const spacer = document.createElement('div');
+    spacer.style.height = '1200px';
+    document.querySelector('#dashboard').append(spacer);
+    window.scrollBy(0, 900);
+  });
+  await expect.poll(() => plan.evaluate(el => el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(stickyTop - 2);
+  await expect.poll(() => plan.evaluate((el, top) => Math.abs(el.getBoundingClientRect().top - top), stickyTop)).toBeLessThan(3);
+});
+
+test('selected option-chain range survives a page refresh', async ({ page }) => {
+  await openDashboard(page);
+  await page.evaluate(() => window.switchChainRange(10, null));
+  expect(await page.evaluate(() => window._chainRange)).toBe(10);
+
+  await page.reload();
+  await expect(page.locator('#sec-nav-bar')).toBeVisible();
+  expect(await page.evaluate(() => window._chainRange)).toBe(10);
+  await expect(page.locator('#range-tabs-chain .active-range')).toHaveText('±10');
+});
+
 test('native OI Flow chart opens and switches measure', async ({ page }) => {
   await openDashboard(page);
   await page.getByRole('button', { name:'Open OI Flow chart' }).first().click();

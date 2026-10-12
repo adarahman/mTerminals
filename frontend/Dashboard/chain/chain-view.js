@@ -71,7 +71,7 @@ class ChainView {
     this.velWin = 5;
     this.centerChainOnATM = true;
     this.grkView = 'delta';
-    this.chainRange = 15;
+    this.chainRange = RANGE_TAB_DEFAULT;
     this.greeksVisible = false;
     this.pcrVisible = false;
     this.selStrike = null;
@@ -113,6 +113,7 @@ class ChainView {
 
   switchChainRange(range, el) {
   _chainRange = range;
+  try { localStorage.setItem(CHAIN_RANGE_STORAGE_KEY, String(range)); } catch (_) {}
   this.centerChainOnATM = true;
 
   ['range-tabs-chain','range-tabs-grk','range-tabs-iv'].forEach(gid => {

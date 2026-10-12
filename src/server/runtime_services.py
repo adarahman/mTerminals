@@ -33,6 +33,7 @@ class ServerRuntimeServices:
     reconcile: Callable
     live_trading_enabled: bool
     flush_history: Callable[[], Any]
+    start_cas_feed: Callable[[], Any] | None = None
 
     def validate_startup(self) -> None:
         if not self.host_is_loopback(self.host):
@@ -61,6 +62,8 @@ class ServerRuntimeServices:
                 "(BROKER_SERVICES_ENABLED=false) — no broker login, account/order "
                 "REST call, or websocket connection; public daily ScripMaster allowed"
             )
+        if state.USE_SMARTAPI and self.start_cas_feed is not None:
+            self.start_cas_feed()
 
     def background_jobs(self):
         return build_background_jobs(

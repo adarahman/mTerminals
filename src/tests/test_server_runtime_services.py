@@ -18,7 +18,9 @@ class FeedManager:
         self.started.append((provider, loop))
 
 
-def _services(*, enabled=True, allowed=True, loopback=True, flushed=None):
+def _services(
+    *, enabled=True, allowed=True, loopback=True, flushed=None, cas_started=None
+):
     state = SimpleNamespace(
         USE_SMARTAPI=enabled,
         LIVE_FEED_PROVIDER="SMARTAPI",
@@ -40,6 +42,7 @@ def _services(*, enabled=True, allowed=True, loopback=True, flushed=None):
         reconcile=worker,
         live_trading_enabled=False,
         flush_history=lambda: flushed.append(True) if flushed is not None else None,
+        start_cas_feed=cas_started,
     )
     return services, state
 
@@ -62,6 +65,15 @@ def test_starts_allowed_live_feed_and_records_loop():
     assert services.feed_manager.started == [("SMARTAPI", loop)]
 
 
+def test_starts_cas_feed_independently_of_selected_live_feed():
+    started = []
+    services, _state = _services(cas_started=lambda: started.append(True))
+
+    services.start_live_services(object())
+
+    assert started == [True]
+
+
 def test_reports_disabled_overlay_without_starting(caplog):
     services, _state = _services(allowed=False)
 
@@ -73,13 +85,18 @@ def test_reports_disabled_overlay_without_starting(caplog):
 
 
 def test_reports_disabled_broker_services(caplog):
-    services, _state = _services(enabled=False)
+    started = []
+    services, _state = _services(
+        enabled=False,
+        cas_started=lambda: started.append(True),
+    )
 
     with caplog.at_level(logging.INFO):
         services.start_live_services(object())
 
     assert services.feed_manager.started == []
     assert "authenticated services disabled" in caplog.text
+    assert started == []
 
 
 def test_builds_jobs_and_flushes_state():

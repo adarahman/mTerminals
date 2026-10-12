@@ -128,6 +128,18 @@ class AnalyticsSnapshotService:
         )
         timings["engine"] = round(self._clock() - engine_started, 4)
         context = engine_result.to_ctx_dict()
+        if runtime_config.symbol == "NIFTY":
+            from application.cas_indicative import get_nifty_cas_indicative
+
+            context["casIndicative"] = get_nifty_cas_indicative(indices)
+        else:
+            context["casIndicative"] = {
+                "status": "unavailable",
+                "value": None,
+                "source": "Kotak Neo CAS IEP",
+                "coverage": {"available": 0, "total": 0},
+                "coveragePct": 0.0,
+            }
         self._patch_bse_spot_change(
             context, all_indices, runtime_config.symbol
         )

@@ -23,7 +23,19 @@ const RANGE_TAB_OPTIONS = [
   { value: 15,   label: '\u00B115' },
   { value: 9999, label: 'All' },
 ];
-const RANGE_TAB_DEFAULT = 15;
+const CHAIN_RANGE_STORAGE_KEY = 'mterminals.chainRange.v1';
+const CHAIN_RANGE_FALLBACK = 5;
+function getSavedChainRange() {
+  try {
+    const saved = Number(localStorage.getItem(CHAIN_RANGE_STORAGE_KEY));
+    return RANGE_TAB_OPTIONS.some(function (option) { return option.value === saved; })
+      ? saved
+      : CHAIN_RANGE_FALLBACK;
+  } catch (_) {
+    return CHAIN_RANGE_FALLBACK;
+  }
+}
+const RANGE_TAB_DEFAULT = getSavedChainRange();
 
 function buildRangeTabsHtml(options, defaultValue) {
   options = options || RANGE_TAB_OPTIONS;
@@ -46,8 +58,11 @@ function buildRangeSelectOptionsHtml(selectedValue, options) {
 // (e.g. after a modal's markup is rebuilt) — it just overwrites innerHTML,
 // it doesn't care whether this is the first pass or a re-render.
 function renderRangeTabs(root) {
+  const selectedRange = typeof _chainRange !== 'undefined'
+    ? Number(_chainRange)
+    : RANGE_TAB_DEFAULT;
   (root || document).querySelectorAll('[data-range-tabs]').forEach(function (el) {
-    el.innerHTML = buildRangeTabsHtml();
+    el.innerHTML = buildRangeTabsHtml(RANGE_TAB_OPTIONS, selectedRange);
   });
 }
 

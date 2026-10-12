@@ -151,6 +151,11 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
           <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
           <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
         </span>`:''}
+        ${activeSymbol === 'NIFTY' && d.casIndicative?.status === 'live' && Number.isFinite(Number(d.casIndicative.value)) ? `
+        <span class="cas-indicative" title="Kotak Neo CAS IEP · ${escapeHtml(String(d.casIndicative.coveragePct ?? 0))}% constituent coverage · As of ${escapeHtml(String(d.casIndicative.asOf || ''))}">
+          CAS <strong>${Number(d.casIndicative.value).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
+          <small>${escapeHtml(String(d.casIndicative.asOf || '').slice(11, 16))}</small>
+        </span>` : ''}
       </span>
       <div class="expiry-pill topbar-expiry-pill">
        <span class="expiry-row">
@@ -429,6 +434,127 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPriceChartModal();}">
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
       </div>`;
+};
+
+ChainView.prototype._loadDecisionSessionContext = function(symbol) {
+    const now = Date.now();
+    const sameSymbol = this._decisionSessionSymbol === symbol;
+    if (!symbol || (sameSymbol && this._decisionSessionLoading) ||
+        (sameSymbol && this._decisionSessionLoaded && now - this._decisionSessionLoadedAt < 60_000)) return;
+    this._decisionSessionSymbol = symbol;
+    this._decisionSessionLoading = true;
+    this._decisionSessionLoaded = false;
+    this._decisionSessionContext = null;
+
+    const request = window.fetchMarketHistory
+      ? window.fetchMarketHistory(symbol, '1m', false, 'EQ', '')
+      : fetch(`${Config.api.history}?${new URLSearchParams({symbol, range:'1m', instrument:'EQ'})}`)
+          .then(response => response.ok ? response.json() : []);
+    Promise.resolve(request)
+      .then(rows => {
+        if (this._decisionSessionSymbol !== symbol || !Array.isArray(rows)) return;
+        const istParts = new Intl.DateTimeFormat('en-GB', {
+          timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit',
+          hour:'2-digit', minute:'2-digit', hourCycle:'h23',
+        });
+        const sessionBars = rows.slice().sort((a, b) => Number(a.t) - Number(b.t)).map(row => {
+          const timestamp = Number(row.t);
+          if (!Number.isFinite(timestamp)) return null;
+          const parts = Object.fromEntries(istParts.formatToParts(new Date(timestamp)).map(part => [part.type, part.value]));
+          const minute = Number(parts.hour) * 60 + Number(parts.minute);
+          const bar = {
+            day: `${parts.year}-${parts.month}-${parts.day}`,
+            minute,
+            high: Number(row.h),
+            low: Number(row.l),
+            close: Number(row.c),
+            volume: Number(row.v),
+          };
+          return minute >= 555 && minute <= 930 && Number.isFinite(bar.high) && Number.isFinite(bar.low) ? bar : null;
+        }).filter(Boolean);
+        if (!sessionBars.length) return;
+
+        const latestDay = sessionBars[sessionBars.length - 1].day;
+        const todayBars = sessionBars.filter(bar => bar.day === latestDay);
+        const openingBars = todayBars.filter(bar => bar.minute < 585);
+        let weightedPrice = 0;
+        let tradedVolume = 0;
+        todayBars.forEach(bar => {
+          if (bar.volume > 0 && Number.isFinite(bar.close)) {
+            weightedPrice += ((bar.high + bar.low + bar.close) / 3) * bar.volume;
+            tradedVolume += bar.volume;
+          }
+        });
+        this._decisionSessionContext = {
+          symbol,
+          day:latestDay,
+          high:Math.max(...todayBars.map(bar => bar.high)),
+          low:Math.min(...todayBars.map(bar => bar.low)),
+          openingHigh:openingBars.length ? Math.max(...openingBars.map(bar => bar.high)) : null,
+          openingLow:openingBars.length ? Math.min(...openingBars.map(bar => bar.low)) : null,
+          vwap:tradedVolume > 0 ? weightedPrice / tradedVolume : null,
+        };
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (this._decisionSessionSymbol !== symbol) return;
+        this._decisionSessionLoading = false;
+        this._decisionSessionLoaded = true;
+        this._decisionSessionLoadedAt = Date.now();
+        const planEl = document.getElementById('decision-sticky-plan');
+        if (planEl) {
+          const payload = typeof _data !== 'undefined' && _data ? _data : {symbol};
+          planEl.outerHTML = this.renderDecisionActionBarHtml(payload);
+        }
+      });
+};
+
+ChainView.prototype.renderDecisionActionBarHtml = function(d) {
+    const dec = d.decision || {};
+    const confirmation = dec.confirmationLevels || {};
+    const symbol = d.symbol || 'NIFTY';
+    this._loadDecisionSessionContext(symbol);
+    const session = this._decisionSessionSymbol === symbol ? this._decisionSessionContext : null;
+    const tradeability = String(dec.tradeability || 'NO_TRADE').toUpperCase();
+    const status = tradeability === 'TRADEABLE'
+      ? 'TRADEABLE'
+      : tradeability === 'CONDITIONAL'
+        ? 'CONDITIONAL'
+        : 'NO TRADE';
+    const bias = dec.bias || d.compositeBias || '—';
+    const confidence = Number.isFinite(Number(dec.confidence)) ? Number(dec.confidence) : 0;
+    const reason = dec.tradeabilityReason || dec.strategyCaution || 'Waiting for decision evidence.';
+    const longTrigger = confirmation.aboveResistance != null
+      ? `Above ${fmtI(confirmation.aboveResistance)}`
+      : 'Not supplied';
+    const shortTrigger = confirmation.belowSupport != null
+      ? `Below ${fmtI(confirmation.belowSupport)}`
+      : 'Not supplied';
+    const spot = Number(d.spot);
+    const todayIst = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+    const sessionIsToday = !!session && session.day === todayIst;
+    const sessionHigh = session && sessionIsToday && Number.isFinite(spot) ? Math.max(session.high, spot) : session && session.high;
+    const sessionLow = session && sessionIsToday && Number.isFinite(spot) ? Math.min(session.low, spot) : session && session.low;
+    const vwapText = session && session.vwap != null
+      ? `${fmtI(session.vwap)}${sessionIsToday && Number.isFinite(spot) ? ` · spot ${spot >= session.vwap ? '+' : ''}${fmtI(Math.round(spot - session.vwap))}` : ''}`
+      : 'Unavailable';
+    const sessionRangeText = session ? `${fmtI(sessionHigh)} / ${fmtI(sessionLow)}` : this._decisionSessionLoading ? 'Loading' : 'Unavailable';
+    const openingRangeText = session && session.openingHigh != null
+      ? `${fmtI(session.openingLow)} - ${fmtI(session.openingHigh)}`
+      : session ? 'Unavailable' : this._decisionSessionLoading ? 'Loading' : 'Unavailable';
+
+    return `<section id="decision-sticky-plan" class="decision-sticky-plan ${tradeability.toLowerCase()}" aria-label="Trade decision summary">
+      <div class="decision-plan-state"><span>${status}</span><strong>${escapeHtml(bias)}</strong><small>${confidence}% evidence</small></div>
+      <div class="decision-plan-level"><span>Long confirm</span><strong>${longTrigger}</strong></div>
+      <div class="decision-plan-level"><span>Short confirm</span><strong>${shortTrigger}</strong></div>
+      <div class="decision-plan-reason" title="${escapeHtml(reason)}"><span>Rationale</span><strong>${escapeHtml(reason)}</strong></div>
+      <div class="decision-plan-risk" title="Stop and target levels are not provided by the current decision data.">Stop / target<strong>Unavailable</strong></div>
+      <div class="decision-plan-session" aria-label="Intraday price context">
+        <div title="VWAP estimated from 1-minute candle typical price multiplied by traded volume."><span>Session VWAP</span><strong>${vwapText}</strong></div>
+        <div><span>Session high / low</span><strong>${sessionRangeText}</strong></div>
+        <div title="High and low from 09:15 through 09:44 India time."><span>Opening range · 09:15-09:45</span><strong>${openingRangeText}</strong></div>
+      </div>
+    </section>`;
 };
 
 ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {

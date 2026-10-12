@@ -77,6 +77,10 @@
 
 /* was inline after: .exec-grid  —  @media (max-width:900px) */
 @media (max-width:900px){
+  .decision-sticky-plan{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;}
+  .decision-plan-session{gap:8px;}
+  .decision-plan-reason{grid-column:1/-1;}
+  .decision-plan-risk{grid-column:1/-1;display:flex;justify-content:space-between;gap:8px;}
   .exec-grid{grid-template-columns:1fr;}
   .exec-grid .exec-card.c-movers{grid-column:1 / -1;}
 }

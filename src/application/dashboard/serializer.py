@@ -427,6 +427,13 @@ def export_dashboard_json(
 
         "refreshTime":   refresh_time,
         "lastUpdated":   last_updated,   # <-- NEW: full ISO timestamp
+        "casIndicative": ctx_dict.get("casIndicative") or {
+            "status": "unavailable",
+            "value": None,
+            "source": "Kotak Neo CAS IEP",
+            "coverage": {"available": 0, "total": 0},
+            "coveragePct": 0.0,
+        },
 
         "signals":       signals,
         "strategies":    strategies,

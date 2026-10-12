@@ -5,56 +5,57 @@
    silently running on the fallback hex values only. Now points at the
    real shared tokens. */
 
-/* ── Quick-order panel (floats over price-chart-canvas) ── */
-.pc-chart-wrap{ position:relative; }
-
+/* ── Quick-order controls beside the Price Chart modal title ── */
+.price-chart-order-host{
+  display:flex;
+  align-items:center;
+  flex:1 1 500px;
+  min-width:0;
+  margin-left:10px;
+}
 .pc-order-panel{
-  position:absolute;
-  left:50%; bottom:10px; transform:translateX(-50%);
-  width:min(640px, 94%);
-  background:rgba(20,22,30,0.97);
-  border:1px solid var(--border);
-  border-radius:var(--radius-md);
-  box-shadow:0 8px 24px rgba(0,0,0,0.4);
-  z-index:5;
+  flex:1 1 auto;
+  min-width:0;
+  max-width:100%;
   font-size:12px;
 }
-.pc-order-head{
-  display:flex; align-items:center; gap: var(--space-3);
-  padding: var(--space-2) var(--space-4); border-bottom:1px solid var(--border);
-}
-.pc-order-name{ font-weight:600; }
-.pc-order-chg.pc-pos{ color:var(--pos); }
-.pc-order-chg.pc-neg{ color:var(--neg); }
-
 .pc-order-body{
-  display:flex; align-items:center; gap: var(--space-2); flex-wrap:wrap;
-  padding:8px 10px;
+  display:flex; align-items:center; gap:5px; flex-wrap:wrap;
 }
+.pc-order-body>*{ flex:0 0 auto; }
 .pc-order-lbl{ color:var(--text-secondary); font-size:11px; }
-.pc-order-qty{ width:48px; text-align:center; }
-.pc-order-price{ width:88px; }
+.pc-order-qty{ width:42px; text-align:center; }
+.pc-order-price{ width:72px; }
+.pc-order-body select{ min-width:64px; }
+.pc-order-strike{ width:210px; max-width:100%; }
+.pc-order-type-toggle{ white-space:nowrap; }
 
 .pc-order-panel .pc-seg{
   display:flex; border:1px solid var(--border);
   border-radius:var(--radius-sm); overflow:hidden;
+  align-items:center; justify-content:center;
 }
-.pc-order-panel .pc-seg button{
+.pc-order-panel .pc-seg.pc-toggle{
   border:none; background:transparent; color:var(--text-secondary);
-  padding: var(--space-2) var(--space-4); font-size:12px; font-weight:600; cursor:pointer;
+  padding:4px 7px; font-size:11px; font-weight:600; font-family:inherit; cursor:pointer;
 }
 /* #1FAE8A (buy) and #7C5CFF (neutral/spread leg) are deliberately their
    own shades, not --pos/--info — kept distinct rather than force-fit
    into the shared palette. Flag for a follow-up decision if you'd
    rather they match --pos exactly. */
-.pc-order-panel .pc-seg button.pc-active.pc-buy{ background:#1FAE8A; color:#fff; }
-.pc-order-panel .pc-seg button.pc-active.pc-sell{ background:var(--neg); color:#fff; }
-.pc-order-panel .pc-seg button.pc-active:not(.pc-buy):not(.pc-sell){ background:#7C5CFF; color:#fff; }
+.pc-order-panel .pc-seg.pc-toggle.pc-active.pc-buy{ background:#1FAE8A; color:#fff; }
+.pc-order-panel .pc-seg.pc-toggle.pc-active.pc-sell{ background:var(--neg); color:#fff; }
+.pc-order-panel .pc-seg.pc-toggle.pc-active:not(.pc-buy):not(.pc-sell){ background:#7C5CFF; color:#fff; }
 
 .pc-order-submit{
-  margin-left:auto;
   background:#1FAE8A; color:#fff; border:none;
-  border-radius:var(--radius-sm); padding: var(--space-3) var(--space-5); font-size:12px; font-weight:700;
+  border-radius:var(--radius-sm); padding:5px 8px; font-size:11px; font-weight:700;
   cursor:pointer;
 }
 .pc-order-submit.pc-sell{ background:var(--neg); }
+
+@media (max-width:600px){
+  .price-chart-order-host{ flex:1 1 100%; margin:4px 0 0; }
+  .pc-order-panel{ flex-basis:100%; }
+  .pc-order-strike{ width:min(210px, 100%); }
+}

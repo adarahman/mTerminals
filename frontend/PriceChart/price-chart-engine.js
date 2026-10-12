@@ -232,6 +232,9 @@ class PriceChartEngine {
       if(!mountEl) return;
       mountEl.replaceChildren(host);
     }
+    const orderPanel = host.querySelector('#pc-order-panel');
+    const orderHost = $i('price-chart-order-host');
+    if(orderPanel && orderHost) orderHost.replaceChildren(orderPanel);
     this._attachHandlers();
     this._refreshToolbarState();
     if(!this._resizeAttached){
@@ -264,6 +267,7 @@ class PriceChartEngine {
           <span class="pc-spacer"></span>
           <button class="pc-btn pc-settings-btn" id="pc-settings-toggle" title="Chart settings">⚙</button>
         </div>
+        <div hidden>${this._orderPanelHtml()}</div>
         <div class="pc-toolbar pc-toolbar-sub" id="pc-settings-row" style="display:none;">
           <label class="pc-field">
             Field
@@ -300,7 +304,6 @@ class PriceChartEngine {
         <div class="pc-chart-wrap">
           <div class="pc-watermark" id="pc-watermark">—</div>
           <canvas id="price-chart-canvas" role="img" aria-label="Price history chart in Indian rupees over time" style="width:100%;display:block;" height="800">Price history is unavailable without canvas support.</canvas>
-          ${this._orderPanelHtml()}
         </div>
 
         <div class="pc-win-bar" id="pc-win-bar">
@@ -312,42 +315,33 @@ class PriceChartEngine {
       </div>`;
   }
 
-  // Floating quick-order panel, docked over the chart canvas (bottom-center).
+  // Compact quick-order controls, moved into the Price Chart modal header
+  // after the chart section is mounted.
   // Strike offsets are relative to ATM in step-of-1 units — resolving that
   // to an actual tradeable strike/symbol is the caller's job (see
   // window.pcPlaceOrder below), since this module has no option-chain data.
   _orderPanelHtml(){
     return `
       <div class="pc-order-panel" id="pc-order-panel">
-        <div class="pc-order-head">
-          <span class="pc-order-name" id="pc-order-symbol">—</span>
-          <span class="pc-order-chg" id="pc-order-chg"></span>
-        </div>
         <div class="pc-order-body">
-          <div class="pc-seg" id="pc-order-side">
-            <button class="pc-active pc-buy" data-side="BUY">B</button>
-            <button data-side="SELL">S</button>
-          </div>
-          <div class="pc-seg" id="pc-order-opt">
-            <button class="pc-active" data-opt="CALL">CALL</button>
-            <button data-opt="PUT">PUT</button>
-          </div>
-          <select id="pc-order-strike">
-            <option value="0">ATM</option>
-            <option value="-1">ITM 1</option>
-            <option value="-2">ITM 2</option>
-            <option value="1">OTM 1</option>
-            <option value="2">OTM 2</option>
+          <button class="pc-seg pc-toggle pc-active pc-buy" id="pc-order-side"
+            type="button" aria-label="Order side: BUY; click to switch to SELL" aria-pressed="false">BUY</button>
+          <button class="pc-seg pc-toggle pc-active" id="pc-order-opt"
+            type="button" aria-label="Option type: CE; click to switch to PE" aria-pressed="false">CE</button>
+          <select class="pc-order-strike" id="pc-order-strike">
+            <option value="0" data-label="ATM">ATM</option>
+            <option value="-1" data-label="ITM 1">ITM 1</option>
+            <option value="-2" data-label="ITM 2">ITM 2</option>
+            <option value="1" data-label="OTM 1">OTM 1</option>
+            <option value="2" data-label="OTM 2">OTM 2</option>
           </select>
           <input class="pc-order-qty" id="pc-order-lots" type="number" value="1" min="1" />
           <span class="pc-order-lbl">Lots</span>
-          <select id="pc-order-type">
-            <option value="LIMIT">LIMIT</option>
-            <option value="MARKET">MARKET</option>
-          </select>
+          <button class="pc-seg pc-toggle pc-order-type-toggle" id="pc-order-type"
+            type="button" data-order-type="LIMIT" aria-label="Order type: LIMIT; click to switch to MARKET"
+            aria-pressed="false">LIMIT</button>
           <input class="pc-order-price" id="pc-order-price" type="text" value="" />
           <button class="pc-order-submit" id="pc-order-submit">BUY</button>
-          <button class="pc-btn" id="pc-order-sltgt">SL/TGT</button>
         </div>
       </div>`;
   }
@@ -557,26 +551,28 @@ class PriceChartEngine {
 
     this._orderState = { side: 'BUY', opt: 'CALL' };
 
-    const sideSeg = $i('pc-order-side');
-    sideSeg.querySelectorAll('button').forEach(b => {
-      b.onclick = () => {
-        sideSeg.querySelectorAll('button').forEach(x => x.classList.remove('pc-active','pc-buy','pc-sell'));
-        b.classList.add('pc-active', b.dataset.side === 'BUY' ? 'pc-buy' : 'pc-sell');
-        this._orderState.side = b.dataset.side;
-        this._refreshOrderSubmit();
-      };
-    });
+    const sideToggle = $i('pc-order-side');
+    sideToggle.onclick = () => {
+      this._orderState.side = this._orderState.side === 'BUY' ? 'SELL' : 'BUY';
+      const isSell = this._orderState.side === 'SELL';
+      sideToggle.textContent = this._orderState.side;
+      sideToggle.classList.toggle('pc-buy', !isSell);
+      sideToggle.classList.toggle('pc-sell', isSell);
+      sideToggle.setAttribute('aria-pressed', String(isSell));
+      sideToggle.setAttribute('aria-label', `Order side: ${this._orderState.side}; click to switch to ${isSell ? 'BUY' : 'SELL'}`);
+      this._refreshOrderSubmit();
+    };
 
-    const optSeg = $i('pc-order-opt');
-    optSeg.querySelectorAll('button').forEach(b => {
-      b.onclick = () => {
-        optSeg.querySelectorAll('button').forEach(x => x.classList.remove('pc-active'));
-        b.classList.add('pc-active');
-        this._orderState.opt = b.dataset.opt;
-        delete $i('pc-order-price').dataset.touched;
-        this._syncOrderPanel(this._lastOrderTick);
-      };
-    });
+    const optToggle = $i('pc-order-opt');
+    optToggle.onclick = () => {
+      this._orderState.opt = this._orderState.opt === 'CALL' ? 'PUT' : 'CALL';
+      const isPut = this._orderState.opt === 'PUT';
+      optToggle.textContent = isPut ? 'PE' : 'CE';
+      optToggle.setAttribute('aria-pressed', String(isPut));
+      optToggle.setAttribute('aria-label', `Option type: ${isPut ? 'PE' : 'CE'}; click to switch to ${isPut ? 'CE' : 'PE'}`);
+      delete $i('pc-order-price').dataset.touched;
+      this._syncOrderPanel(this._lastOrderTick);
+    };
 
     $i('pc-order-strike').onchange = () => {
       delete $i('pc-order-price').dataset.touched;
@@ -586,10 +582,15 @@ class PriceChartEngine {
     const priceInput = $i('pc-order-price');
     const orderType = $i('pc-order-type');
     priceInput.oninput = () => this._refreshOrderSubmit();
-    orderType.onchange = () => {
+    orderType.onclick = () => {
+      const isMarket = orderType.dataset.orderType !== 'MARKET';
+      orderType.dataset.orderType = isMarket ? 'MARKET' : 'LIMIT';
+      orderType.textContent = isMarket ? 'MARKET' : 'LIMIT';
+      orderType.setAttribute('aria-pressed', String(isMarket));
+      orderType.setAttribute('aria-label', `Order type: ${orderType.dataset.orderType}; click to switch to ${isMarket ? 'LIMIT' : 'MARKET'}`);
       // MARKET orders don't take a limit price — disable but keep the last
       // value around in case the user switches back to LIMIT.
-      priceInput.disabled = orderType.value === 'MARKET';
+      priceInput.disabled = isMarket;
       this._refreshOrderSubmit();
     };
 
@@ -609,8 +610,8 @@ class PriceChartEngine {
         strike: contract.strike,
         ltp: contract.ltp,
         lots: parseInt($i('pc-order-lots').value, 10) || 1,
-        orderType: orderType.value,
-        price: orderType.value === 'MARKET' ? null : parseFloat(priceInput.value) || null,
+        orderType: orderType.dataset.orderType,
+        price: orderType.dataset.orderType === 'MARKET' ? null : parseFloat(priceInput.value) || null,
       };
       if(typeof window.pcPlaceOrder === 'function'){
         window.pcPlaceOrder(payload);
@@ -633,28 +634,26 @@ class PriceChartEngine {
     const orderType = $i('pc-order-type');
     const side = this._orderState ? this._orderState.side : 'BUY';
     btn.classList.toggle('pc-sell', side === 'SELL');
-    const priceTxt = (orderType && orderType.value === 'MARKET') ? 'MKT' : (priceInput ? priceInput.value : '');
+    const priceTxt = (orderType && orderType.dataset.orderType === 'MARKET') ? 'MKT' : (priceInput ? priceInput.value : '');
     btn.textContent = priceTxt ? `${side} @ ${priceTxt}` : side;
   }
 
-  // Called from render() so the panel's header and default LIMIT price
+  // Called from render() so the selected contract and default LIMIT price
   // track the live feed instead of sitting stale at whatever they were on
   // mount.
   _syncOrderPanel(lastTick){
     if(lastTick) this._lastOrderTick = lastTick;
-    const nameEl = $i('pc-order-symbol');
-    const chgEl = $i('pc-order-chg');
+    const strikeSelect = $i('pc-order-strike');
     const priceInput = $i('pc-order-price');
-    if(!nameEl || !lastTick) return;
+    if(!strikeSelect || !lastTick) return;
     const contract = this._resolveOrderContract(lastTick);
-    nameEl.textContent = contract
-      ? `${fmtI(contract.strike)} ${contract.instrumentType} · ${contract.expiry}`
-      : 'Option data unavailable';
-    const change = contract ? contract.change : null;
-    if(chgEl){
-      chgEl.textContent = Number.isFinite(change) ? `${sign(change)}${fmtI(Math.abs(change))}` : '';
-      chgEl.classList.toggle('pc-neg', Number.isFinite(change) && change < 0);
-      chgEl.classList.toggle('pc-pos', Number.isFinite(change) && change >= 0);
+    Array.from(strikeSelect.options).forEach(option => {
+      option.textContent = option.dataset.label || option.textContent;
+    });
+    const selectedOption = strikeSelect.selectedOptions[0];
+    if(selectedOption && contract){
+      const label = selectedOption.dataset.label || selectedOption.textContent;
+      selectedOption.textContent = `${label} · ${fmtI(contract.strike)} · ${contract.expiry}`;
     }
     // Only auto-fill the price while the user hasn't started editing it,
     // so a live tick doesn't yank the field out from under someone mid-type.
@@ -690,14 +689,12 @@ class PriceChartEngine {
     const row = valid[Math.max(0, Math.min(valid.length-1, rowIndex))];
     const isCall = this._orderState.opt === 'CALL';
     const ltp = Number(isCall ? row.ceLTP : row.peLTP);
-    const change = Number(isCall ? row.ceChg : row.peChg);
     return {
       symbol: ws.symbol || PRICE_CHART_DEFAULT_SYMBOL,
       expiry,
       strike: Number(row.strike),
       instrumentType: isCall ? 'CE' : 'PE',
       ltp: Number.isFinite(ltp) ? ltp : null,
-      change: Number.isFinite(change) ? change : null,
     };
   }
 
