@@ -238,6 +238,7 @@
 }
 .cas-indicative strong{color:var(--warning,var(--accent));font-size:11px;}
 .cas-indicative small{color:var(--text-tertiary);font-size:8px;font-weight:500;}
+.cas-indicative.cas-unavailable strong{color:var(--text-tertiary);}
 
 /* Active underlying mirrors the bordered, two-line FUT reference pill:
    the editable symbol remains first, while its instrument reference is a

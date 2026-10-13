@@ -275,25 +275,36 @@ class StrategyView {
   const legsEl = document.getElementById('strat-legs-row');
   if(legsEl){
     // Pin label
-    const nameTag=`<span style="font-size:11px;font-weight:800;color:var(--muted);margin-right:2px;">📌 ${s.name||'Strategy'}</span>`;
-    // Execute-whole-strategy button — fires one place_order per leg through
-    // the same ptDispatchOrder() path the option-chain quick popover and
-    // the main panel's "Place Order" button already use, so confirmations/
-    // toasts/pending rows/portfolio refresh all behave identically no
-    // matter where the order originated.
-    const execAllBtn = `<button type="button" onclick="ptExecuteStrategy()" title="Place all legs of this strategy as paper orders"
-      style="cursor:pointer;font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;
-      background:var(--accent,#3b82f6);color:#fff;margin-left:8px;border:0;">▶ Execute Strategy</button>`;
-    const symbolForLegs = _data.symbol || '';
+    const nameTag=`<span style="font-size:11px;font-weight:800;color:var(--muted);margin-right:2px;">📌 Payoff preview · ${escapeHtml(s.name||'Strategy')}</span>`;
+    const decision = _data.decision || {};
+    const engineStrategy = decision.autoStrategy || {};
+    const engineLegs = Array.isArray(engineStrategy.legs) ? engineStrategy.legs : [];
+    const executionReady = decision.executeRecommended === true;
+    const engineLegPills = engineLegs.map(l => {
+      const action = String(l.action || '').toUpperCase();
+      const actionColor = action === 'BUY' ? 'var(--green)' : 'var(--red)';
+      const type = String(l.type || '').toUpperCase();
+      const legExpiry = ptResolveStrategyExpiry(l.expiry || engineStrategy.expiry || _data.expiry || '');
+      return `<span style="display:inline-flex;gap:4px;padding:3px 7px;border:1px solid var(--border);border-radius:5px;font-family:var(--mono);font-size:10px;">
+        <strong style="color:${actionColor};">${escapeHtml(action)}</strong>
+        <span>${fmtI(Number(l.strike))} ${escapeHtml(type)}</span>
+        ${legExpiry ? `<span style="color:var(--muted);">${escapeHtml(ptFmtExpiry(legExpiry))}</span>` : ''}
+      </span>`;
+    }).join('');
+    const executionReason = decision.strategyCaution || decision.tradeabilityReason || 'Decision Engine does not recommend execution.';
+    const enginePickHtml = `<div style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px 0;border-top:1px solid var(--border);">
+      <strong style="font-size:11px;">Decision Engine pick · ${escapeHtml(engineStrategy.name || 'Unavailable')}</strong>
+      ${engineLegPills || '<span style="font-size:10px;color:var(--muted);">No strategy legs available.</span>'}
+      <button type="button" onclick="ptExecuteDecisionStrategy()" title="Submits the Decision Engine strategy shown here; the payoff preview selection does not change these legs"
+        ${executionReady && engineLegs.length ? '' : 'disabled'}
+        style="cursor:${executionReady && engineLegs.length ? 'pointer' : 'not-allowed'};font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;
+        background:var(--accent,#3b82f6);color:#fff;margin-left:4px;border:0;opacity:${executionReady && engineLegs.length ? '1' : '.5'};">▶ Execute Engine Pick</button>
+      ${executionReady ? '' : `<span style="font-size:10px;color:var(--muted);" title="${escapeHtml(executionReason)}">${escapeHtml(executionReason)}</span>`}
+      <span style="flex-basis:100%;font-size:9px;color:var(--muted);">The payoff preview below is for simulation; execution uses the Decision Engine legs above.</span>
+    </div>`;
     const expiryForLegs = s.expiry || _data.expiry || '';
-    // BUGFIX: this pill used to show the raw, unresolved expiryForLegs —
-    // so a cached strategy suggestion still carrying a rolled-off date
-    // (e.g. "24-Jun" after that expiry has already passed) displayed as
-    // if it were a live, tradeable expiry, with nothing on screen hinting
-    // that "▶ Execute Strategy" was about to submit a dead contract.
-    // Resolve it the same way execution does (ptExecuteStrategy /
-    // ptExecuteLeg both call ptResolveStrategyExpiry) so the pill always
-    // reflects what will actually be sent to the backend.
+    // Resolve a preview expiry for display; only the Engine Pick above can
+    // submit orders from this panel.
     const expiryForLegsReal = ptResolveStrategyExpiry(expiryForLegs);
     // Per-leg expiry: prefer the leg's own `expiry` field if the backend
     // ever sends one (forward-compatible), else fall back to the
@@ -335,10 +346,6 @@ class StrategyView {
       const legExpTag = (l.expiry && l.expiry !== expiryForLegs)
         ? `<span style="color:var(--amber,#eda100);font-size:9px;" title="${l.expiry} → ${legExpiryReal}">(${ptFmtExpiry(l.expiry)})</span>`
         : '';
-      const execBtn = `<button type="button" onclick="ptExecuteLeg('${symbolForLegs}','${legExpiryReal}',${l.strike},'${legType}','${l.action}',${l.lots||1},${ltp})"
-        title="Execute this leg as a paper order (expiry ${legExpiryReal||'—'})"
-        style="cursor:pointer;font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px;
-        background:${ac};color:#0b0d12;margin-left:2px;border:0;" aria-label="Execute ${l.action} ${fmtI(l.strike)} ${legType} leg">▶</button>`;
       return `<span style="display:inline-flex;align-items:center;gap:4px;
         padding:5px 10px;border-radius:6px;border:1px solid ${border};
         background:${acBg};font-family:var(--mono);font-size:11px;font-weight:700;">
@@ -347,10 +354,9 @@ class StrategyView {
         ${legExpTag}
         <span style="color:var(--muted);">@</span>
         <span style="color:${ac};">₹${fmtN(ltp,2)}</span>
-        ${execBtn}
       </span>`;
     }).join('');
-    setHtmlIfChanged(legsEl, nameTag + expiryPill + staleExpiryWarn + multiExpiryWarn + execAllBtn + pillsHtml);
+    setHtmlIfChanged(legsEl, nameTag + expiryPill + staleExpiryWarn + multiExpiryWarn + pillsHtml + enginePickHtml);
   }
 }
 

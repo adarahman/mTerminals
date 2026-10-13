@@ -34,6 +34,8 @@ assert.match(orderEntry, /AppState\.wsState\.future/,
   'FUT LTP must use the canonical futures price field');
 assert.match(orderEntry, /const liveLtp = ptResolveLtp\(symbol, instrument_type, expiry, Number\(strike\)\)/,
   'strategy execution must reprice each displayed leg from the live chain');
+assert.match(orderEntry, /if\(decision\.executeRecommended !== true\)/,
+  'Decision Engine strategy execution must fail closed when execution is not recommended');
 assert.match(orderEntry, /Strategy not sent — no displayed leg has a live priceable contract/,
   'strategy execution must report complete failure instead of false success');
 assert.match(tracker, /if\(_ptLiveMode\).*Live square-off blocked/s,

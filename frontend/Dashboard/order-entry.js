@@ -804,27 +804,19 @@ function ptExecuteDecisionStrategy(){
     return;
   }
   if(!_data){ ptToast('No live data yet — nothing to execute', 'err'); return; }
-  const auto = (_data.decision && _data.decision.autoStrategy) || {};
+  const decision = _data.decision || {};
+  if(decision.executeRecommended !== true){
+    const reason = decision.strategyCaution || decision.tradeabilityReason || 'Decision Engine does not recommend execution';
+    ptToast('Decision strategy not sent — ' + reason, 'err');
+    return;
+  }
+  const auto = decision.autoStrategy || {};
   const legs = auto.legs || [];
   if(!legs.length){ ptToast('No strategy legs to execute', 'err'); return; }
   const symbol = _data.symbol || '';
   let sent = 0, skipped = 0;
   legs.forEach(l=>{
     const ltp = parseFloat(l.ltp);
-    const legLabel = (l.action||'') + ' ' + (l.strike||'') + ' ' + (l.type||'').toUpperCase();
-    if(!(ltp > 0)){
-      // BUGFIX: this used to `return` here with no toast at all — the pill's
-      // own ▶ button is hidden for a leg with no live LTP so there was
-      // nothing to click, but the bulk Execute button has no equivalent
-      // per-leg cue, so a skipped leg here just looked like nothing
-      // happened. Surface it instead: which leg, and the raw ltp value,
-      // so a missing/zero price from the decision engine's payload (as
-      // opposed to a frontend bug) is visible immediately.
-      skipped++;
-      Logger.warn('decision-box', 'skipped leg — no live LTP:', l);
-      ptToast(legLabel + ' — no live price, not sent', 'err');
-      return;
-    }
     const legExpiry = ptResolveStrategyExpiry(l.expiry || auto.expiry || _data.expiry || '');
     if(ptExecuteLeg(symbol, legExpiry, l.strike||0, (l.type||'').toUpperCase(), l.action, l.lots||1, ltp)) sent++;
     else skipped++;

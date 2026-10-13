@@ -24,6 +24,11 @@ assert.match(dashboardRenderer, /planEl\.outerHTML = this\.renderDecisionActionB
 assert.match(source, /window\.fetchMarketHistory\(symbol, '1m'/, 'session context must reuse the shared one-minute market-history cache');
 assert.match(source, /openingHigh:openingBars/, 'session context must compute the opening range from session candles');
 assert.match(source, /weightedPrice \/ tradedVolume/, 'VWAP must use candle volume and become unavailable when volume is missing');
+assert.match(source, /cas-unavailable/, 'NIFTY CAS must remain visible when the indicative value is unavailable');
+assert.match(source, /casCoverageLabel/, 'unavailable CAS state must expose received constituent coverage');
+assert.match(source, /casVisible = activeSymbol === 'NIFTY' && Boolean\(cas\?\.status\)/,
+  'NIFTY CAS status must remain visible outside the auction window');
+assert.match(source, /available only 15:20/, 'outside-window CAS state must explain its availability window');
 assert.doesNotMatch(source, /confidence\s*=\s*.*(?:pcr|oi_score|composite)/i,
   'frontend must not recompute decision confidence');
 assert.match(source, /escapeHtml\(s\.text\)/,
@@ -40,5 +45,13 @@ assert.match(dashboardRenderer, /d\.decision\.suggestedStrategy/,
   'strategy section must default to the Decision Engine recommendation');
 assert.match(strategyView, /this\.selectionTouched = true/,
   'manual strategy selection must remain under user control');
+assert.match(strategyView, /onclick="ptExecuteDecisionStrategy\(\)"/,
+  'strategy-panel execution must submit the Decision Engine strategy');
+assert.match(strategyView, /decision\.autoStrategy/,
+  'strategy panel must identify the exact Engine Pick being executed');
+assert.match(strategyView, /payoff preview below is for simulation/,
+  'simulated payoff legs must be distinguished from the executable Engine Pick');
+assert.doesNotMatch(strategyView, /ptExecuteLeg\(/,
+  'simulated payoff legs must not bypass the Decision Engine execution path');
 
 console.log('Decision contracts passed');

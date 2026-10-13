@@ -85,6 +85,18 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   // builder. Do not maintain a partial browser-side company-name table.
   const symbolName = d.symbolName || d.companyName || d.displayName
     || activeSymbol;
+  const cas = d.casIndicative;
+  const casLive = cas?.status === 'live' && cas.value !== null
+    && cas.value !== undefined && Number.isFinite(Number(cas.value));
+  const casVisible = activeSymbol === 'NIFTY' && Boolean(cas?.status);
+  const casCoverage = cas?.coverage || {};
+  const casCoverageLabel = `${Number(casCoverage.available) || 0}/${Number(casCoverage.total) || 0}`;
+  const casReason = ({
+    outside_cas_window: 'available only 15:20-15:30 IST',
+    constituent_data_unavailable: 'constituent data unavailable',
+    insufficient_iep_coverage: 'IEP coverage below threshold',
+    invalid_calculation: 'invalid calculation',
+  })[cas?.reason] || 'no live constituent IEPs';
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
@@ -151,10 +163,12 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
           <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
           <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
         </span>`:''}
-        ${activeSymbol === 'NIFTY' && d.casIndicative?.status === 'live' && Number.isFinite(Number(d.casIndicative.value)) ? `
-        <span class="cas-indicative" title="Kotak Neo CAS IEP · ${escapeHtml(String(d.casIndicative.coveragePct ?? 0))}% constituent coverage · As of ${escapeHtml(String(d.casIndicative.asOf || ''))}">
-          CAS <strong>${Number(d.casIndicative.value).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
-          <small>${escapeHtml(String(d.casIndicative.asOf || '').slice(11, 16))}</small>
+        ${casVisible ? `
+        <span class="cas-indicative${casLive ? '' : ' cas-unavailable'}" title="${casLive
+          ? `Kotak Neo CAS IEP · ${escapeHtml(String(cas.coveragePct ?? 0))}% constituent coverage · As of ${escapeHtml(String(cas.asOf || ''))}`
+          : `Kotak Neo CAS IEP unavailable · ${escapeHtml(casReason)}${cas.reason === 'outside_cas_window' ? '' : ` · ${escapeHtml(casCoverageLabel)} constituents`}`}">
+          CAS <strong>${casLive ? Number(cas.value).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</strong>
+          <small>${casLive ? escapeHtml(String(cas.asOf || '').slice(11, 16)) : cas.reason === 'outside_cas_window' ? 'inactive' : escapeHtml(casCoverageLabel)}</small>
         </span>` : ''}
       </span>
       <div class="expiry-pill topbar-expiry-pill">
