@@ -1,10 +1,32 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pandas as pd
+
 from analytics.oversold_oi_support import reset_spot_rsi_history, update_spot_rsi
 from decision.confidence import compute_confidence
 from decision.decision_engine import DecisionEngine
+from decision.signal_builder import score_capital_flow
 from decision.types import ActiveSignal, DecisionResult
+
+
+def _capital_metrics(net_flow, total_locked=10_000):
+    return pd.DataFrame([{
+        "strike": 24000,
+        "ce_premium_locked": total_locked / 2,
+        "pe_premium_locked": total_locked / 2,
+        "ce_capital_flow": 0.0,
+        "pe_capital_flow": net_flow,
+        "ce_gamma_exposure": None,
+        "pe_gamma_exposure": None,
+        "net_delta_exposure": None,
+        "ce_notional_exposure": 0.0,
+        "pe_notional_exposure": 0.0,
+        "ce_notional_exposure_spot": 0.0,
+        "pe_notional_exposure_spot": 0.0,
+        "ce_premium_turnover": 0.0,
+        "pe_premium_turnover": 0.0,
+    }])
 
 
 def _engine_result(**overrides):
@@ -30,10 +52,13 @@ def test_decision_contract_has_provenance_and_visible_evidence():
 
     assert result["decisionTimestamp"] == "2026-08-08T10:00:00+05:30"
     assert result["stateVersion"].startswith("NIFTY:")
-    assert result["evidenceCoverage"] == 85
+    assert result["evidenceCoverage"] == 73
     assert result["degraded"] is False
-    assert result["missingInputs"] == ["oi_velocity"]
-    assert len(result["contributors"]) == 6
+    assert result["missingInputs"] == ["oi_velocity", "capital_flow"]
+    assert len(result["contributors"]) == 7
+    assert result["contributors"][-2]["available"] is False
+    assert result["contributors"][-2]["score"] is None
+    assert result["contributors"][-2]["key"] == "capital_flow"
     assert result["contributors"][-1]["key"] == "oversold_oi_support"
     assert result["contributors"][-1]["state"] == "unavailable"
     assert result["tradeGrade"] == "A"
@@ -48,8 +73,7 @@ def test_decision_contract_has_provenance_and_visible_evidence():
 
     # Canonical confidence contract shared by desktop and mobile.
     assert result["confidenceVersion"] == "v1"
-    assert result["confidenceBasis"]["composite"] == 0.535
-    assert result["confidenceBasis"]["evidenceCoverage"] == 85
+    assert result["confidenceBasis"]["evidenceCoverage"] == 73
     assert result["confidenceBasis"]["criticalInputsMissing"] is False
 
     # Canonical market package comes from the backend decision layer.
@@ -104,6 +128,40 @@ def test_flat_futures_oi_is_neutral_but_not_missing():
     assert result["degraded"] is False
 
 
+def test_capital_flow_score_is_normalized_and_ignores_small_flows():
+    assert score_capital_flow(200, 10_000) == 0.0
+    assert abs(score_capital_flow(600, 10_000) - 0.5) < 1e-12
+    assert score_capital_flow(10_000, 10_000) == 1.0
+    assert score_capital_flow(-10_000, 10_000) == -1.0
+    assert score_capital_flow(10_000, 0) == 0.0
+
+
+def test_capital_flow_contributes_ten_percent_without_being_required():
+    engine = DecisionEngine()
+    neutral = engine.evaluate(
+        _engine_result(capital_metrics=_capital_metrics(200)), {}
+    ).to_dict()
+    bullish = engine.evaluate(
+        _engine_result(capital_metrics=_capital_metrics(10_000)), {}
+    ).to_dict()
+    bearish = engine.evaluate(
+        _engine_result(capital_metrics=_capital_metrics(-10_000)), {}
+    ).to_dict()
+
+    neutral_flow = next(c for c in neutral["contributors"] if c["key"] == "capital_flow")
+    bullish_flow = next(c for c in bullish["contributors"] if c["key"] == "capital_flow")
+    bearish_flow = next(c for c in bearish["contributors"] if c["key"] == "capital_flow")
+    assert neutral_flow["available"] is True
+    assert neutral_flow["score"] == 0.0
+    assert bullish_flow["weight"] == 10
+    assert bullish_flow["score"] == 1.0
+    assert bullish_flow["weightedContribution"] == 0.1
+    assert bearish_flow["score"] == -1.0
+    assert bullish["confidenceBasis"]["composite"] > neutral["confidenceBasis"]["composite"]
+    assert bearish["confidenceBasis"]["composite"] < neutral["confidenceBasis"]["composite"]
+    assert bullish["degraded"] is False
+
+
 def test_directional_setup_fails_closed_below_execution_confidence():
     # Expiry-day decay can leave the weighted direction intact while reducing
     # confidence below the execution boundary. The headline must not continue
@@ -116,7 +174,7 @@ def test_directional_setup_fails_closed_below_execution_confidence():
     assert "below execution threshold" in result["action"]
     assert result["executeRecommended"] is False
     assert result["tradeability"] == "NO_TRADE"
-    assert "Confidence 23%" in result["tradeabilityReason"]
+    assert "Confidence 18%" in result["tradeabilityReason"]
     assert "execution threshold" in result["tradeabilityReason"]
 
 

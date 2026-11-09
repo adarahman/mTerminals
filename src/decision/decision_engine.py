@@ -34,10 +34,12 @@ from __future__ import annotations
 from core.domain import ActiveSignal, DecisionResult
 from decision.types import T
 from decision.signal_builder import (
-    score_pcr, score_engine_bias, score_futures, score_vix, score_iv_crush,
-    score_max_pain, score_oi_velocity, score_walls, score_smart_money,
+    score_pcr, score_capital_flow, score_engine_bias, score_futures,
+    score_vix, score_iv_crush, score_max_pain, score_oi_velocity,
+    score_walls, score_smart_money,
     verdict_pcr, verdict_iv, verdict_dte,
 )
+from oi.capital_metrics import compute_chain_metrics
 from decision.confidence import derive_bias, compute_confidence
 from decision.short_horizon import detect_short_horizon
 from decision.strategy_selection import derive_action, suggest_strategy
@@ -90,6 +92,7 @@ class DecisionEngine:
         vol_oi_ratios  = getattr(er, "vol_oi_ratios", {}) or {}
         # Smart money top strikes (DataFrame | None)
         smart_money_top = getattr(er, "smart_money_top", None)
+        capital_metrics = getattr(er, "capital_metrics", None)
         futures_oi = float(getattr(er, "fut_oi", 0.0) or 0.0)
         symbol = str(getattr(er, "symbol", "") or "")
         spot_rsi = update_spot_rsi(symbol, spot, out.decision_timestamp)
@@ -116,6 +119,22 @@ class DecisionEngine:
         # Smart money: top vol/OI strikes as a lightweight confirmation signal
         sm_score   = score_smart_money(smart_money_top, spot, atm, strike_step, out)
 
+        capital_summary = None
+        if capital_metrics is not None and not getattr(capital_metrics, "empty", True):
+            capital_summary = compute_chain_metrics(capital_metrics, spot=spot)
+        total_premium_locked = (
+            capital_summary["total_ce_premium_locked"]
+            + capital_summary["total_pe_premium_locked"]
+            if capital_summary is not None else 0.0
+        )
+        capital_flow_available = total_premium_locked > 0
+        capital_flow_score = (
+            score_capital_flow(
+                capital_summary["net_capital_flow"], total_premium_locked
+            )
+            if capital_flow_available else 0.0
+        )
+
         score_walls(ce_wall, pe_wall, spot, atm, strike_step, out)
 
         # ── Short-horizon move observation ────────────────────────────────────
@@ -131,8 +150,8 @@ class DecisionEngine:
         # ── Conflict detection ────────────────────────────────────────────────
         # A conflict exists when directional sub-scores point opposite ways strongly
         weights = {
-            "pcr": 0.30, "engine_bias": 0.30, "futures": 0.20,
-            "max_pain": 0.05, "oi_velocity": 0.15,
+            "pcr": 0.25, "engine_bias": 0.25, "futures": 0.18,
+            "max_pain": 0.05, "oi_velocity": 0.17, "capital_flow": 0.10,
         }
         availability = {
             "pcr": total_pcr > 0,
@@ -143,15 +162,18 @@ class DecisionEngine:
             "max_pain": spot > 0 and max_pain > 0,
             "oi_velocity": vel_df is not None and not getattr(vel_df, "empty", False),
             "smart_money": smart_money_top is not None and not getattr(smart_money_top, "empty", False),
+            "capital_flow": capital_flow_available,
         }
         score_map = {
             "pcr": pcr_score, "engine_bias": bias_score, "futures": fut_score,
             "max_pain": mp_score, "oi_velocity": oi_score, "smart_money": sm_score,
+            "capital_flow": capital_flow_score,
         }
         labels = {
             "pcr": "PCR positioning", "engine_bias": "Combined market bias",
             "futures": "Futures positioning", "max_pain": "Max-pain gravity",
             "oi_velocity": "OI velocity", "smart_money": "Volume / OI confirmation",
+            "capital_flow": "Capital flow",
         }
         required = {"pcr", "engine_bias", "futures", "max_pain"}
         out.missing_inputs = [key for key in weights if not availability[key]]
@@ -196,9 +218,8 @@ class DecisionEngine:
 
         # ── Composite score (conviction-weighted) ─────────────────────────────
         # Weights must sum to 1.0.
-        # PCR + bias remain the twin anchors (0.26 each after making room for vol/sm).
-        # OI velocity gains weight now that it's volume-confirmed (0.14).
-        # Smart money is a small confirmation nudge (0.08).
+        # PCR and combined bias remain the anchors; capital flow starts at 10%
+        # and is normalized against premium locked to avoid raw-value scaling.
         composite = (
             sum(score_map[key] * weight for key, weight in weights.items()
                 if availability[key])

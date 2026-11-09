@@ -36,6 +36,10 @@ _VOL_CONFIRM_MODERATE = 0.30   # vol/OI ≥ 0.3 → confirmed         (multiplie
 _VOL_CONFIRM_WEAK     = 0.05   # vol/OI ≥ 0.05 → marginal          (multiplier 1.0)
 # Below _VOL_CONFIRM_WEAK → price-only adjustment, penalise conviction (×0.75)
 
+# Initial capital-flow cutoffs; validate against backtests before tuning.
+_CAPITAL_FLOW_NOISE_RATIO = 0.02
+_CAPITAL_FLOW_FULL_SCORE_RATIO = 0.10
+
 
 def _vol_multiplier(vol_oi: float) -> float:
     """Convert a vol/OI ratio into a [0.75 – 1.30] conviction multiplier."""
@@ -60,6 +64,25 @@ def score_pcr(pcr: float) -> float:
     if pcr <= T.PCR_BEAR:         return -0.65
     # linear across neutral band [0.90 – 1.10]
     return (pcr - 1.0) / (T.PCR_NEUTRAL_HI - 1.0) * 0.35
+
+
+def score_capital_flow(net_capital_flow: float, total_premium_locked: float) -> float:
+    """Normalize net option capital flow against chain premium, with a noise band."""
+    if total_premium_locked <= 0:
+        return 0.0
+
+    flow_ratio = net_capital_flow / total_premium_locked
+    magnitude = abs(flow_ratio)
+    if magnitude <= _CAPITAL_FLOW_NOISE_RATIO:
+        return 0.0
+
+    # The deadband keeps small session changes from adding noise.
+    strength = min(
+        1.0,
+        (magnitude - _CAPITAL_FLOW_NOISE_RATIO)
+        / (_CAPITAL_FLOW_FULL_SCORE_RATIO - _CAPITAL_FLOW_NOISE_RATIO),
+    )
+    return strength if flow_ratio > 0 else -strength
 
 
 def score_engine_bias(bias_str: str) -> float:
