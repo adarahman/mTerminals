@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 def build_background_jobs(
     *,
     index_quotes,
+    provider_quotes,
     bridge,
     algo_status,
     reconcile,
@@ -21,6 +22,7 @@ def build_background_jobs(
     """Create the runtime's named coroutine set without starting tasks."""
     jobs = [
         ("index_quote_loop", index_quotes()),
+        ("provider_indicative_quote_loop", provider_quotes()),
         ("bridge_loop", bridge()),
         ("algo_status_loop", algo_status()),
     ]

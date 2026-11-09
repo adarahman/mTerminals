@@ -116,6 +116,8 @@ def build_runtime_stack(
         paper_price_book=paper_price_book,
         paper_engine=paper_engine,
         paper_portfolio=core_runtime.paper_portfolio,
+        fetch_provider_spot_quotes=broker_services.fetch_provider_spot_quotes,
+        store_provider_spot_quotes=broker_services.store_provider_spot_quotes,
     )
     # Read-only Trade state for the authenticated mobile bridge.
     # Deliberately does NOT expose place_order/cancel_order/control callables.
@@ -179,6 +181,7 @@ def build_runtime_stack(
         market_session_status=selection_state._market_session_status,
         host_is_loopback=host_is_loopback,
         index_quotes=market.index_quotes.run,
+        provider_quotes=market.provider_quotes.run,
         algo_status=market.algo_status.run,
         reconcile=market.reconciliation.run,
         live_trading_enabled=live_trading_config.enabled,

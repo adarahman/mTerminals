@@ -26,6 +26,7 @@ if BROKER_SERVICES_ENABLED:
         get_active_provider as md_get_active_provider,
         provider_has_credentials as md_provider_has_credentials,
         provider_status as md_provider_status,
+        fetch_provider_spot_quotes,
         set_active_provider as md_set_active_provider,
     )
     from brokers.connection import get_execution_adapter
@@ -40,6 +41,9 @@ if BROKER_SERVICES_ENABLED:
     from brokers.smartapi.history import get_candle_data, get_index_candles  # noqa: F401
     from brokers.smartapi.websocket import EXCHANGE_TYPE, SmartTickStream  # noqa: F401
     from market.quotes.tick_aggregator import TickAggregator  # noqa: F401
+    from application.provider_indicative_quotes import (
+        store_provider_spot_quotes,
+    )
 else:
     # Public-only mode: NSE/BSE public API is the only data source. Any
     # accidentally reached broker-only path raises instead of logging in.
@@ -67,6 +71,37 @@ else:
                 "capabilities": dict(MD_PROVIDER_CAPABILITIES["NSE_BSE"]),
             }
         ]
+
+    def fetch_provider_spot_quotes(symbol):
+        from market.providers.nse_bse import NseBseMarketData
+
+        quote = NseBseMarketData().get_spot_quote(symbol)
+        if not isinstance(quote, dict):
+            return {}
+        try:
+            price = float(
+                quote.get("ltp")
+                or quote.get("last_price")
+                or quote.get("lastPrice")
+            )
+        except (TypeError, ValueError):
+            return {}
+        import math
+
+        if not math.isfinite(price) or price <= 0:
+            return {}
+        from datetime import datetime
+
+        return {
+            "NSE_BSE": {
+                "price": round(price, 2),
+                "asOf": datetime.now().astimezone().isoformat(timespec="seconds"),
+            }
+        }
+
+    from application.provider_indicative_quotes import (
+        store_provider_spot_quotes,
+    )
 
     class _DisabledMarketData:
         index_tokens = staticmethod(lambda: {})

@@ -100,6 +100,8 @@ def test_market_runtime_installs_engine_transport_and_background_services():
         paper_price_book=_PriceBook(),
         paper_engine=_PaperEngine(),
         paper_portfolio=_Portfolio(),
+        fetch_provider_spot_quotes=lambda _symbol: {},
+        store_provider_spot_quotes=lambda _symbol, _quotes: None,
     )
 
     assert state.NODE_RELAY is runtime.node_relay
@@ -107,6 +109,7 @@ def test_market_runtime_installs_engine_transport_and_background_services():
     assert state.CANONICAL_PAYLOAD_PUBLISHER is not None
     assert state.MARKET_TICK_PACER is not None
     assert runtime.index_quotes is not None
+    assert runtime.provider_quotes is not None
     assert runtime.funds is not None
     assert runtime.reconciliation is not None
     assert runtime.algo_status is not None

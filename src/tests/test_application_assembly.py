@@ -29,6 +29,7 @@ def test_server_application_assembles_http_health_and_runtime_services():
         market_session_status=lambda *_args: "CLOSED",
         host_is_loopback=lambda _host: True,
         index_quotes=lambda: None,
+        provider_quotes=lambda: None,
         algo_status=lambda: None,
         reconcile=lambda: None,
         live_trading_enabled=False,

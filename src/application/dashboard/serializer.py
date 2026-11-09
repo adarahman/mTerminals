@@ -295,7 +295,7 @@ def export_dashboard_json(
     # ── 10. Full payload ──────────────────────────────────────────────
     _symbol_name = _get_symbol_display_name(SYMBOL)
     _ds_active = _active_data_source()
-    _ds_payload = _data_sources_payload()
+    _ds_payload = _data_sources_payload(SYMBOL)
     _fno_symbols = _get_fno_symbols()
     payload = {
         "dataContract": {

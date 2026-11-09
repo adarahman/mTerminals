@@ -321,6 +321,8 @@
 .feed-row .expiry-pill-label{text-align:left;}
 .feed-row .data-source-select{text-align:left;width:16ch;max-width:16ch;min-width:16ch;padding:2px 12px 2px 2px;background-position:right center;}
 .feed-row .data-source-status-pill{text-align:right;}
+.data-source-meta{display:flex;align-items:center;gap:6px;}
+.data-source-indicative-price{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
 
 /* Data-source status readout (POLLING/LIVE/UNAVAILABLE/SESSION_REQUIRED)
    under the dropdown — the SMALLEST text on the bar, set in the same tiny

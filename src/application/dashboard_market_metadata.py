@@ -94,10 +94,22 @@ def active_data_source():
         return "SMARTAPI"
 
 
-def data_sources_payload():
+def data_sources_payload(symbol=None):
     try:
         from brokers.market_data_registry import provider_status
 
-        return provider_status()
+        sources = provider_status()
     except Exception:
         return []
+    if not symbol:
+        return sources
+
+    from application.provider_indicative_quotes import get_provider_spot_quotes
+
+    quotes = get_provider_spot_quotes(symbol)
+    for source in sources:
+        quote = quotes.get(str(source.get("id") or "").upper())
+        if quote:
+            source["indicativePrice"] = quote.get("price")
+            source["indicativeAsOf"] = quote.get("asOf")
+    return sources

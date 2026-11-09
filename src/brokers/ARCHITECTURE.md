@@ -43,6 +43,7 @@ directly (it goes through `brokers/market_data_registry.py`).
 | Execution routing | `brokers/connection.py` | Loads one normalized order/account adapter via `EXECUTION_ADAPTERS` and runs readiness checks. |
 | Live-feed routing | `server/feed_manager.py` | Broker-neutral lifecycle for a provider's persistent tick feed. |
 | Market-data pipeline | `application/market_pipeline/` | Canonical broker-neutral pipeline (coordinator, quotes, option_chain, futures) producing wide DataFrames. |
+| Provider spot indications | `application/provider_indicative_quotes.py`, `server/background_loops.py` | Periodically fetch and cache the selected symbol's quote per configured source for the dashboard's broker picker. |
 | History API | `server/market_history_api.py` | SmartAPI-backed candle history, decoupled from the active feed source. |
 | Live orchestration | `src/server/app.py` (composition root) | Owns process-wide runtime state, starts/stops feeds, wires `server/*` into the running process. |
 

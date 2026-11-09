@@ -100,6 +100,7 @@ def test_background_job_composition_respects_live_trading_mode():
 
     jobs = build_background_jobs(
         index_quotes=worker,
+        provider_quotes=worker,
         bridge=worker,
         algo_status=worker,
         reconcile=worker,
@@ -108,6 +109,7 @@ def test_background_job_composition_respects_live_trading_mode():
 
     assert [name for name, _coroutine in jobs] == [
         "index_quote_loop",
+        "provider_indicative_quote_loop",
         "bridge_loop",
         "algo_status_loop",
         "position_reconcile_loop",

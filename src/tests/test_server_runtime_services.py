@@ -37,6 +37,7 @@ def _services(
         feed_manager=FeedManager(allowed),
         host_is_loopback=lambda host: host == "localhost",
         index_quotes=worker,
+        provider_quotes=worker,
         bridge=worker,
         algo_status=worker,
         reconcile=worker,
@@ -106,6 +107,7 @@ def test_builds_jobs_and_flushes_state():
     jobs = services.background_jobs()
     assert [name for name, _coroutine in jobs] == [
         "index_quote_loop",
+        "provider_indicative_quote_loop",
         "bridge_loop",
         "algo_status_loop",
     ]

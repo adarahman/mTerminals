@@ -51,12 +51,11 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
 
 // DATA SOURCE options — the seven runtime market-data providers
 // (SMARTAPI/UPSTOX/KITE/SHOONYA/BREEZE/KOTAK/NSE_BSE) from the backend's
-// d.dataSources [{id,label,status,active,capabilities}]. The select text
-// stays compact (short label only) so the control doesn't dominate the
-// top bar; each provider's status (LIVE/POLLING/UNAVAILABLE/
-// SESSION_REQUIRED) rides in the option tooltip and is also shown
-// live by the separate data-source-status-pill next to the select. The
-// active one is pre-selected via the backend's `active` flag.
+// d.dataSources [{id,label,status,active,capabilities,
+// indicativePrice,indicativeAsOf}]. Each provider's spot indication and
+// status are visible in the option text and tooltip; the active provider's
+// status is also shown live by the separate status pill.
+// The active one is pre-selected via the backend's `active` flag.
 ChainView.prototype.renderDataSourceOptions = function(sources, active) {
   if (!Array.isArray(sources) || !sources.length) {
     const a = active || 'NSE_BSE';
@@ -73,10 +72,54 @@ const icon =
     status === "API_UNAVAILABLE" ? "🔴" :
     "⚪";
 
-const display = `${icon} ${label}`;
+const rawPrice = Number(s.indicativePrice);
+const hasPrice = s.indicativePrice != null && Number.isFinite(rawPrice) && rawPrice > 0;
+const price = hasPrice
+  ? rawPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})
+  : '—';
+const display = `${icon} ${label} · ₹${price}`;
 const reason = s.error ? ` — ${s.error}` : '';
-return `<option value="${id}"${s.active ? ' selected' : ''} title="Status: ${escapeHtml(status)}${escapeHtml(reason)}">${escapeHtml(display)}</option>`;
+const quoteDetail = hasPrice
+  ? ` · Indicative spot ₹${price}${s.indicativeAsOf ? ` · As of ${s.indicativeAsOf}` : ''}`
+  : ' · Indicative spot unavailable';
+return `<option value="${escapeHtml(id)}"${s.active ? ' selected' : ''} title="Status: ${escapeHtml(status)}${escapeHtml(reason)}${escapeHtml(quoteDetail)}">${escapeHtml(display)}</option>`;
   }).join('');
+};
+
+ChainView.prototype.patchProviderIndicativeQuotes = function(update) {
+  const state = window.AppState && AppState.wsState;
+  if(!state || !update
+      || String(update.symbol || '').toUpperCase() !== String(state.symbol || '').toUpperCase()) return;
+  const sources = Array.isArray(state.dataSources) ? state.dataSources : [];
+  const quotes = update.quotes && typeof update.quotes === 'object' ? update.quotes : {};
+  sources.forEach(source => {
+    const quote = quotes[source.id];
+    source.indicativePrice = quote && quote.price != null ? quote.price : null;
+    source.indicativeAsOf = quote && quote.asOf ? quote.asOf : null;
+  });
+  const select = document.getElementById('dataSourceSelect');
+  const selected = (select && select.value) || state.dataSource;
+  const active = sources.find(source => source.id === selected)
+    || sources.find(source => source.active)
+    || {};
+  const rawPrice = Number(active.indicativePrice);
+  const hasPrice = active.indicativePrice != null && Number.isFinite(rawPrice) && rawPrice > 0;
+  const price = hasPrice
+    ? `₹${rawPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`
+    : '₹—';
+  const priceElement = document.getElementById('data-source-indicative-price');
+  if(priceElement){
+    priceElement.textContent = price;
+    priceElement.title = hasPrice
+      ? `Indicative spot price from ${active.label || active.id}${active.indicativeAsOf ? ` · As of ${active.indicativeAsOf}` : ''}`
+      : `Indicative spot price unavailable from ${active.label || active.id || 'active provider'}`;
+  }
+  if(select){
+    select.innerHTML = this.renderDataSourceOptions(sources, state.dataSource);
+    if(Array.from(select.options).some(option => option.value === selected)){
+      select.value = selected;
+    }
+  }
 };
 
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
@@ -97,6 +140,19 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
     insufficient_iep_coverage: 'IEP coverage below threshold',
     invalid_calculation: 'invalid calculation',
   })[cas?.reason] || 'no live constituent IEPs';
+  const dataSources = Array.isArray(d.dataSources) ? d.dataSources : [];
+  const activeDataSource = dataSources.find(source => source.id === d.dataSource)
+    || dataSources.find(source => source.active)
+    || {};
+  const activeSourcePrice = Number(activeDataSource.indicativePrice);
+  const activeSourceHasPrice = activeDataSource.indicativePrice != null
+    && Number.isFinite(activeSourcePrice) && activeSourcePrice > 0;
+  const activeSourcePriceText = activeSourceHasPrice
+    ? `₹${activeSourcePrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`
+    : '₹—';
+  const activeSourceQuoteTitle = activeSourceHasPrice
+    ? `Indicative spot price from ${activeDataSource.label || activeDataSource.id}${activeDataSource.indicativeAsOf ? ` · As of ${activeDataSource.indicativeAsOf}` : ''}`
+    : `Indicative spot price unavailable from ${activeDataSource.label || d.dataSource || 'active provider'}`;
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
@@ -199,6 +255,8 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
              pill to its right. -->
         <span class="feed-row">
           <select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource)}</select>
+          <span class="data-source-meta">
+            <span id="data-source-indicative-price" class="data-source-indicative-price" title="${escapeHtml(activeSourceQuoteTitle)}">${activeSourcePriceText}</span>
           ${(() => {
             const list = Array.isArray(d.dataSources) ? d.dataSources : [];
             const active = list.find(s => s.active) || (d.dataSource ? list.find(s => s.id === d.dataSource) : null) || {};
@@ -207,6 +265,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
             // navigation.css) — the dropdown itself is the primary signal.
             return st ? `<span class="feed-status-pill data-source-status-pill" data-status="${String(st).toLowerCase()}" title="Active market-data source status">${escapeHtml(st)}</span>` : '';
           })()}
+          </span>
         </span>
       </div>
 

@@ -6,6 +6,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const dataService = read('shared/services/data-service.js');
 const template = read('Dashboard/chain/chain-template.js');
+const marketContext = read('Dashboard/chain/market-context.js');
 const styles = read('styles/navigation.css');
 const httpAppPy = read('../src/server/http_app.py');
 const healthPy = read('../src/server/health.py');
@@ -19,6 +20,8 @@ const checks = [
   ['analytics delay does not flash in the visible Feed reason', dataService.includes("reason: prev.reason === prev.pipelineReason ? '' : prev.reason") && dataService.includes('pipelineDetail')],
   ['dashboard renders a visible feed status', template.includes('id="feed-status-pill"') && template.includes('class="feed-row"')],
   ['data-source dropdown sits below the feed status', template.includes('feed-status-pill" id="feed-status-pill"') && template.includes('id="dataSourceSelect"')],
+  ['each provider displays its own indicative spot price', template.includes('indicativePrice') && template.includes('₹${price}') && template.includes('Indicative spot ₹${price}') && template.includes('id="data-source-indicative-price"') && dataService.includes("messageType === 'providerIndicativeQuotes'")],
+  ['futures reference disappears from ticker at 15:15 IST', marketContext.includes("timeZone: 'Asia/Kolkata'") && marketContext.includes('minute < 15') && marketContext.includes("isFuturesReferenceVisible() ? ['FUT'] : []") && marketContext.includes('setInterval(refreshFuturesReferenceVisibility, 30000)')],
   ['provider status is a tiny borderless readout', styles.includes('.data-source-status-pill') && styles.includes('border:0;background:transparent;padding:0')],
   ['feed capsule has stable two-column rows', styles.includes('.feed-row{display:grid;grid-template-columns:1fr auto') && styles.includes('.feed-health-pill{min-width:150px;}')],
   ['feed capsule keeps its reserved height', styles.includes('min-height:58px')],

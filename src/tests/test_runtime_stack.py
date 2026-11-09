@@ -62,6 +62,7 @@ def test_runtime_stack_composes_services_and_installs_dashboard(monkeypatch):
     market = SimpleNamespace(
         funds=SimpleNamespace(start=lambda: None, stop=lambda: None),
         index_quotes=SimpleNamespace(run=lambda: None),
+        provider_quotes=SimpleNamespace(run=lambda: None),
         algo_status=SimpleNamespace(run=lambda: None),
         reconciliation=SimpleNamespace(run=lambda: None),
     )
@@ -126,6 +127,8 @@ def test_runtime_stack_composes_services_and_installs_dashboard(monkeypatch):
         get_order_book=lambda: [],
         get_funds=lambda: {},
         BROKER_SERVICES_ENABLED=False,
+        fetch_provider_spot_quotes=lambda _symbol: {},
+        store_provider_spot_quotes=lambda _symbol, _quotes: None,
         get_smartapi_index_tokens=lambda: {},
         get_candle_data=lambda *_args: None,
         get_index_candles=lambda *_args: None,

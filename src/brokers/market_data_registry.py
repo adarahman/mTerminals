@@ -13,7 +13,9 @@ Actual provider implementations stay in brokers.market_data.
 """
 
 import logging
+import math
 import time
+from datetime import datetime
 
 from infrastructure.config import (
     refresh_settings_from_env,
@@ -144,6 +146,45 @@ def provider_has_credentials(name: str) -> bool:
         )
 
     return False
+
+
+def fetch_provider_spot_quotes(symbol: str) -> dict[str, dict]:
+    """Fetch the selected underlying's spot quote from configured providers."""
+    normalized_symbol = str(symbol or "").strip().upper()
+    if not normalized_symbol:
+        return {}
+
+    quotes: dict[str, dict] = {}
+    for key in PROVIDER_KEYS:
+        if key != "NSE_BSE" and not provider_has_credentials(key):
+            continue
+        try:
+            provider = _PROVIDERS[key]()
+            quote = provider.get_spot_quote(normalized_symbol)
+            if not isinstance(quote, dict):
+                continue
+            raw_price = (
+                quote.get("ltp")
+                or quote.get("last_price")
+                or quote.get("lastPrice")
+            )
+            price = float(raw_price)
+            if not math.isfinite(price) or price <= 0:
+                continue
+            quotes[key] = {
+                "price": round(price, 2),
+                "asOf": datetime.now().astimezone().isoformat(timespec="seconds"),
+            }
+        except (TypeError, ValueError):
+            continue
+        except Exception as exc:
+            logger.warning(
+                "[indicative-price] %s quote failed for %s: %s",
+                key,
+                normalized_symbol,
+                exc,
+            )
+    return quotes
 
 
 _PROVIDERS, _FallbackMarketData = _provider_classes()

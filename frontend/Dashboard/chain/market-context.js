@@ -1,6 +1,18 @@
 // Market context: index ticker, symbol/source selection and expiry state.
 // Loaded after chain-helpers.js and before the chain view/controller files.
 
+function isFuturesReferenceVisible(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const hour = Number(parts.find(part => part.type === 'hour')?.value);
+  const minute = Number(parts.find(part => part.type === 'minute')?.value);
+  return hour < 15 || (hour === 15 && minute < 15);
+}
+
 function renderIndexTicker(d) {
   if (!d) d = {};
 
@@ -26,7 +38,7 @@ function renderIndexTicker(d) {
     ? `<span class="idx-pill-chg ${futUp ? 'up' : 'down'}">${futUp ? '▲' : '▼'} ${Math.abs(futChg).toFixed(2)} ${Math.abs(futPct).toFixed(2)}%</span>`
     : '';
   const futBasisHtml = `<small id="topbar-basis" class="idx-pill-basis">${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}</small>`;
-  const futPill = `<div class="idx-pill idx-pill-fut" data-index-symbol="FUT" title="Near-month futures — confirmation only, does not change Greeks or confidence">
+  const futPill = isFuturesReferenceVisible() ? `<div class="idx-pill idx-pill-fut" data-index-symbol="FUT" title="Near-month futures — confirmation only, does not change Greeks or confidence">
     <span class="idx-pill-fut-row">
       <span class="idx-pill-sym">FUT</span>
       <span class="idx-pill-val" id="topbar-future">${futPrice > 0 ? fmtI(futPrice) : '—'}</span>
@@ -36,7 +48,7 @@ function renderIndexTicker(d) {
       ${futChgHtml}
       ${futBasisHtml}
     </span>
-  </div>`;
+  </div>` : '';
 
   const vix = Number(d.indiaVix) || 0;
   const vixPct = Number(d.indiaVixChgPct) || 0;
@@ -84,7 +96,8 @@ function patchIndexTicker(d) {
   if (!ticker) return;
   const active = d.symbol || 'NIFTY';
   const indices = (d.allIndices || []).filter((idx) => (idx.BackendSymbol || idx.Symbol) !== active);
-  const expected = ['FUT', 'VIX'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
+  const expected = (isFuturesReferenceVisible() ? ['FUT'] : [])
+    .concat(['VIX'], indices.map((idx) => idx.BackendSymbol || idx.Symbol));
   const existing = Array.from(ticker.querySelectorAll('[data-index-symbol]'))
     .map((el) => el.dataset.indexSymbol);
 
@@ -305,6 +318,16 @@ async function refreshDataSourceStatus(){
   }
 }
 window.refreshDataSourceStatus = refreshDataSourceStatus;
+
+function refreshFuturesReferenceVisibility() {
+  const state = window.AppState && AppState.wsState;
+  if(state && document.getElementById('index-ticker-bar')){
+    patchIndexTicker(state);
+  }
+}
+
+window.refreshFuturesReferenceVisibility = refreshFuturesReferenceVisibility;
+setInterval(refreshFuturesReferenceVisibility, 30000);
 
 function applyDataSourceStatus(status, error){
   const pill = document.querySelector('.data-source-status-pill');

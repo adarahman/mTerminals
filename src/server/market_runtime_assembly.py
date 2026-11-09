@@ -25,6 +25,7 @@ from server.background_loops import (
     FundsPoller,
     IndexQuoteLoop,
     NodeRelay,
+    ProviderIndicativeQuoteLoop,
     ReconciliationLoop,
 )
 from server.market_cycle_operations import MarketCycleOperations
@@ -33,6 +34,7 @@ from server.market_cycle_operations import MarketCycleOperations
 @dataclass(frozen=True, slots=True)
 class MarketRuntime:
     index_quotes: IndexQuoteLoop
+    provider_quotes: ProviderIndicativeQuoteLoop
     funds: FundsPoller
     reconciliation: ReconciliationLoop
     algo_status: AlgoStatusLoop
@@ -73,6 +75,8 @@ def build_market_runtime(
     paper_price_book: Any,
     paper_engine: Any,
     paper_portfolio: Any,
+    fetch_provider_spot_quotes: Callable[[str], dict],
+    store_provider_spot_quotes: Callable[[str, dict], None],
 ) -> MarketRuntime:
     index_quotes = IndexQuoteLoop(
         enabled=runtime_state.USE_INDEX_QUOTES,
@@ -82,6 +86,15 @@ def build_market_runtime(
         broadcast=broadcast,
         index_quotes=runtime_state.INDEX_QUOTES,
         poll_seconds=runtime_state.INDEX_QUOTE_SECONDS,
+        report=report,
+        paused=lambda: runtime_state.MARKET_CYCLE_PAUSED,
+    )
+    provider_quotes = ProviderIndicativeQuoteLoop(
+        symbol=lambda: runtime_state.MARKET_SELECTION.symbol,
+        fetch_quotes=fetch_provider_spot_quotes,
+        store_quotes=store_provider_spot_quotes,
+        broadcast=broadcast,
+        poll_seconds=max(60, runtime_state.INDEX_QUOTE_SECONDS),
         report=report,
         paused=lambda: runtime_state.MARKET_CYCLE_PAUSED,
     )
@@ -198,6 +211,7 @@ def build_market_runtime(
     runtime_state.MARKET_ENGINE_CYCLE = engine
     return MarketRuntime(
         index_quotes=index_quotes,
+        provider_quotes=provider_quotes,
         funds=funds,
         reconciliation=reconciliation,
         algo_status=algo_status,

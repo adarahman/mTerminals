@@ -87,6 +87,56 @@ class IndexQuoteLoop:
                 )
 
 
+class ProviderIndicativeQuoteLoop:
+    """Refresh per-provider spot indications without blocking market cycles."""
+
+    def __init__(
+        self,
+        *,
+        symbol: Callable[[], str],
+        fetch_quotes: Callable[[str], dict],
+        store_quotes: Callable[[str, dict], None],
+        broadcast: Callable[[dict], Awaitable[None]],
+        poll_seconds: float,
+        report: Callable[[str], None] = print,
+        paused: Callable[[], bool] = lambda: False,
+    ) -> None:
+        self._symbol = symbol
+        self._fetch_quotes = fetch_quotes
+        self._store_quotes = store_quotes
+        self._broadcast = broadcast
+        self._poll_seconds = poll_seconds
+        self._report = report
+        self._paused = paused
+
+    async def run(self) -> None:
+        while True:
+            await self.tick()
+            await asyncio.sleep(self._poll_seconds)
+
+    async def tick(self) -> None:
+        """Fetch and publish one provider quote snapshot."""
+        if self._paused():
+            return
+        symbol = str(self._symbol() or "").strip().upper()
+        if not symbol:
+            return
+        try:
+            quotes = await asyncio.to_thread(self._fetch_quotes, symbol)
+            quotes = quotes if isinstance(quotes, dict) else {}
+            self._store_quotes(symbol, quotes)
+            await self._broadcast(
+                {
+                    "type": "providerIndicativeQuotes",
+                    "payload": {"symbol": symbol, "quotes": quotes},
+                }
+            )
+        except Exception as exc:
+            self._report(
+                f"[indicative-price] provider quote refresh failed for {symbol}: {exc}"
+            )
+
+
 class FundsPoller:
     """Start/stop-able funds polling.
 

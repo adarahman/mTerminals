@@ -28,6 +28,7 @@ class ServerRuntimeServices:
     feed_manager: Any
     host_is_loopback: Callable[[str], bool]
     index_quotes: Callable
+    provider_quotes: Callable
     bridge: Callable
     algo_status: Callable
     reconcile: Callable
@@ -68,6 +69,7 @@ class ServerRuntimeServices:
     def background_jobs(self):
         return build_background_jobs(
             index_quotes=self.index_quotes,
+            provider_quotes=self.provider_quotes,
             bridge=self.bridge,
             algo_status=self.algo_status,
             reconcile=self.reconcile,

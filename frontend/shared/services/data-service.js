@@ -364,6 +364,12 @@ class DataService {
     if(window.patchIndexTicker) window.patchIndexTicker(AppState.wsState);
     return;
   }
+  if(messageType === 'providerIndicativeQuotes'){
+    if(app.chain && app.chain.patchProviderIndicativeQuotes){
+      app.chain.patchProviderIndicativeQuotes(AppState.wsState.providerIndicativeQuotes);
+    }
+    return;
+  }
   this._updateDataQuality(AppState.wsState);
 
   // Keep the native Price Chart buffer current even while its modal is
