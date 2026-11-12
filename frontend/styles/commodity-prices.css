@@ -1,0 +1,281 @@
+.commodity-prices-panel{
+  width:100%;
+  max-width:none;
+  height:100vh;
+  height:100dvh;
+  min-height:0;
+  max-height:none;
+  margin:0;
+  align-self:stretch;
+  border:0;
+  border-radius:0;
+  overflow:hidden;
+}
+
+.commodity-prices-panel .oc-modal-bar{
+  flex-wrap:wrap;
+  justify-content:space-between;
+}
+
+.commodity-picker-label{
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+  font-weight:600;
+}
+
+.commodity-picker{
+  min-width:150px;
+  padding:7px 10px;
+  color:var(--text-primary);
+  background:var(--bg-0);
+  border:1px solid var(--border);
+  border-radius:8px;
+}
+
+.commodity-prices-content{
+  flex:1;
+  min-height:0;
+  width:100%;
+  box-sizing:border-box;
+  padding:20px;
+  overflow:auto;
+}
+
+.commodity-price-status{
+  min-height:22px;
+  margin-bottom:12px;
+  color:var(--text-secondary);
+  font-size:var(--fs-sm);
+}
+
+.commodity-price-status[data-tone="error"]{color:var(--neg);}
+.commodity-price-status[data-tone="live"]{color:var(--pos);}
+
+.commodity-price-card{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px 20px;
+  padding:22px;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+}
+
+.commodity-price-symbol{
+  display:block;
+  font-family:var(--font-display);
+  font-size:var(--fs-lg);
+  font-weight:700;
+}
+
+.commodity-price-contract{
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-price-ltp{
+  grid-column:2;
+  grid-row:1;
+  align-self:center;
+  font-family:var(--font-mono);
+  font-size:clamp(24px,5vw,38px);
+  font-variant-numeric:tabular-nums;
+}
+
+.commodity-price-change{
+  grid-column:2;
+  grid-row:2;
+  justify-self:end;
+  font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums;
+}
+
+.commodity-price-change.up{color:var(--pos);}
+.commodity-price-change.down{color:var(--neg);}
+
+.commodity-price-details{
+  grid-column:1/-1;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+  margin-top:12px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+}
+
+.commodity-price-details span{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-price-details b{
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:var(--fs-sm);
+  font-variant-numeric:tabular-nums;
+}
+
+.commodity-analysis-card{
+  margin-top:14px;
+  padding:16px;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+}
+
+.commodity-analysis-heading{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.commodity-analysis-verdict{
+  padding:4px 9px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  color:var(--text-secondary);
+  font-size:var(--fs-xs);
+  font-weight:800;
+}
+
+.commodity-analysis-verdict[data-verdict="BULLISH"]{
+  color:var(--pos);
+  border-color:var(--pos);
+}
+
+.commodity-analysis-verdict[data-verdict="BEARISH"]{
+  color:var(--neg);
+  border-color:var(--neg);
+}
+
+.commodity-analysis-verdict[data-verdict="WAIT"]{
+  color:var(--warn);
+  border-color:var(--warn);
+}
+
+.commodity-analysis-card p{
+  margin:10px 0;
+  color:var(--text-secondary);
+  font-size:var(--fs-sm);
+}
+
+.commodity-analysis-metrics{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:10px;
+  margin:12px 0;
+}
+
+.commodity-analysis-metrics span{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-analysis-metrics b{
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:var(--fs-sm);
+  font-variant-numeric:tabular-nums;
+}
+
+.commodity-analysis-card > small{
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-price-note{
+  display:block;
+  margin-top:14px;
+  color:var(--text-tertiary);
+}
+
+.commodity-option-chain{
+  margin-top:22px;
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:hidden;
+  background:var(--bg-1);
+}
+
+.commodity-chain-heading{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 14px;
+  border-bottom:1px solid var(--border);
+}
+
+.commodity-chain-heading div{
+  display:flex;
+  flex:1;
+  flex-direction:column;
+  gap:3px;
+}
+
+.commodity-chain-heading small,
+.commodity-chain-heading label{
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-chain-heading .commodity-picker{min-width:132px;}
+
+.commodity-chain-status{
+  min-height:20px;
+  padding:8px 14px 0;
+  color:var(--text-secondary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-chain-status[data-tone="error"]{color:var(--neg);}
+
+.commodity-chain-scroll{overflow:auto;}
+
+.commodity-chain-table{
+  width:100%;
+  min-width:560px;
+  border-collapse:collapse;
+  font-family:var(--font-mono);
+  font-size:var(--fs-xs);
+  font-variant-numeric:tabular-nums;
+  text-align:right;
+}
+
+.commodity-chain-table th,
+.commodity-chain-table td{
+  padding:8px 10px;
+  border-bottom:1px solid var(--border);
+  white-space:nowrap;
+}
+
+.commodity-chain-table thead th{
+  position:sticky;
+  top:0;
+  z-index:1;
+  color:var(--text-secondary);
+  background:var(--bg-2);
+  text-align:center;
+}
+
+.commodity-chain-table td:nth-child(4),
+.commodity-chain-table thead tr:first-child th:nth-child(2){
+  color:var(--text-primary);
+  font-weight:700;
+  text-align:center;
+}
+
+.commodity-chain-table tbody tr.atm{background:color-mix(in srgb,var(--info) 12%,transparent);}
+.commodity-chain-table td.call-ltp{color:var(--pos);}
+.commodity-chain-table td.put-ltp{color:var(--neg);}
+
+@media(max-width:520px){
+  .commodity-price-details{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .commodity-analysis-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}
+}

@@ -313,6 +313,18 @@ class ModalManager {
     </section>`;
 }
 
+  openCommodityPricesModal(){
+  var modal=document.getElementById('commodity-prices-modal');
+  if(!modal)return;
+  this._openModal(modal,()=>this.closeCommodityPricesModal());
+  if(window.commodityPrices) window.commodityPrices.open();
+  }
+
+  closeCommodityPricesModal(){
+  if(window.commodityPrices) window.commodityPrices.close();
+  this._closeModal(document.getElementById('commodity-prices-modal'));
+  }
+
   closePriceChartModal(){
   var modal=document.getElementById('price-chart-modal');
   if(modal)this._closeModal(modal);

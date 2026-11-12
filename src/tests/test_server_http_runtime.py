@@ -21,6 +21,8 @@ def test_build_http_runtime_maps_handlers_and_configuration():
         backtest=_handler,
         lot_sizes=_handler,
         symbols=_handler,
+        commodity_quote=_handler,
+        commodity_option_chain=_handler,
         host="127.0.0.1",
         port=5500,
         symbol=lambda: selection["symbol"],
@@ -32,6 +34,8 @@ def test_build_http_runtime_maps_handlers_and_configuration():
     assert runtime.routes.bridge_websocket is _handler
     assert runtime.routes.lot_sizes is _handler
     assert runtime.routes.symbols is _handler
+    assert runtime.routes.commodity_quote is _handler
+    assert runtime.routes.commodity_option_chain is _handler
     assert runtime.config.host == "127.0.0.1"
     assert runtime.config.port == 5500
     assert runtime.config.symbol == "NIFTY"

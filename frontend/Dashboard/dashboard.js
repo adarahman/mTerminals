@@ -365,6 +365,8 @@ window.openOIDashboardModal = (...args) => app.modal.openOIDashboardModal(...arg
 window.closeOIDashboardModal = (...args) => app.modal.closeOIDashboardModal(...args);
 window.openPriceChartModal = (...args) => app.modal.openPriceChartModal(...args);
 window.closePriceChartModal = (...args) => app.modal.closePriceChartModal(...args);
+window.openCommodityPricesModal = (...args) => app.modal.openCommodityPricesModal(...args);
+window.closeCommodityPricesModal = (...args) => app.modal.closeCommodityPricesModal(...args);
 window.openGreeksModal = (...args) => app.modal.openGreeksModal(...args);
 window.closeGreeksModal = (...args) => app.modal.closeGreeksModal(...args);
 window._greeksEscHandler = (...args) => app.modal._greeksEscHandler(...args);

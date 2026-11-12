@@ -18,6 +18,8 @@ class ServerRoutes:
     lot_sizes: Callable[..., Any]
     symbols: Callable[..., Any]
     mobile_websocket: Callable[..., Any] | None = None
+    commodity_quote: Callable[..., Any] | None = None
+    commodity_option_chain: Callable[..., Any] | None = None
 
 class HttpRouteHandlers:
     """Adapt HTTP requests to injected server services."""
@@ -35,6 +37,7 @@ class HttpRouteHandlers:
         metrics_response,
         metrics,
         symbols,
+        commodity_prices=None,
     ):
         self._history_api = history_api
         self._backtest_response = backtest_response
@@ -46,6 +49,7 @@ class HttpRouteHandlers:
         self._metrics_response = metrics_response
         self._metrics = metrics
         self._symbols = symbols
+        self._commodity_prices = commodity_prices
 
 
     async def spot_history(self, request):
@@ -68,6 +72,24 @@ class HttpRouteHandlers:
             if str(symbol).strip()
         ]
         return web.json_response(sorted(set(values)))
+
+    async def commodity_quote(self, request):
+        from aiohttp import web
+
+        if self._commodity_prices is None:
+            return web.json_response(
+                {"error": "Commodity prices are not configured."}, status=501
+            )
+        return await self._commodity_prices.quote(request)
+
+    async def commodity_option_chain(self, request):
+        from aiohttp import web
+
+        if self._commodity_prices is None:
+            return web.json_response(
+                {"error": "Commodity option chains are not configured."}, status=501
+            )
+        return await self._commodity_prices.option_chain(request)
 
     async def backtest(self, request):
         return await self._backtest_response(

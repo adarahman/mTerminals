@@ -95,6 +95,101 @@ class SmartApiMarketData:
             "Basis": round(ltp - spot, 2) if spot and ltp else None,
             "FutSource": "SMARTAPI",
         }
+
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        from brokers.smartapi.instruments import get_commodity_futures_contract
+
+        future = get_commodity_futures_contract(underlying, which=which)
+        if not future:
+            return None
+        token = str(future.get("token") or "")
+        quotes = self.get_batch_quotes_by_token(
+            "MCX", [(future.get("symbol"), token)], mode="FULL"
+        )
+        quote = quotes.get(token) if quotes else None
+        if not quote:
+            return None
+        ltp = _safe_float(quote.get("ltp"))
+        if ltp is None:
+            return None
+        previous_close = _safe_float(quote.get("close"))
+        change = _safe_float(quote.get("netChange"))
+        percent_change = _safe_float(quote.get("percentChange"))
+        if percent_change is None and previous_close and ltp:
+            percent_change = round(
+                ((ltp - previous_close) / previous_close) * 100.0, 2
+            )
+        return {
+            "Contract": future.get("symbol"),
+            "Underlying": underlying,
+            "Exchange": "MCX",
+            "Expiry": datetime.strptime(
+                future["expiry"], "%d%b%Y"
+            ).strftime("%d-%b-%Y"),
+            "LTP": ltp,
+            "Change": change,
+            "PctChange": percent_change,
+            "Open": _safe_float(quote.get("open")),
+            "High": _safe_float(quote.get("high")),
+            "Low": _safe_float(quote.get("low")),
+            "PrevClose": previous_close,
+            "Volume": _safe_float(quote.get("tradeVolume")),
+            "OI": _safe_float(quote.get("opnInterest")),
+            "FutSource": "SMARTAPI",
+        }
+
+    def get_commodity_option_expiries(self, underlying):
+        from brokers.smartapi.instruments import get_commodity_option_expiries
+
+        return get_commodity_option_expiries(underlying)
+
+    def get_commodity_option_chain(
+        self, underlying, expiry, strikes_around_atm=10
+    ):
+        from brokers.smartapi.instruments import get_commodity_option_contracts
+
+        future = self.get_commodity_futures_quote(underlying)
+        if not future:
+            return None
+        contracts = get_commodity_option_contracts(
+            underlying,
+            expiry,
+            future["LTP"],
+            strikes_around_atm=strikes_around_atm,
+        )
+        if not contracts:
+            return None
+        pairs = [(row["symbol"], row["token"]) for row in contracts]
+        quotes = self.get_batch_quotes_by_token("MCX", pairs, mode="FULL")
+        rows = []
+        for contract in contracts:
+            quote = quotes.get(str(contract["token"]))
+            if not quote:
+                continue
+            rows.append(
+                {
+                    "strike": contract["strike"],
+                    "type": contract["type"],
+                    "ltp": _safe_float(quote.get("ltp")),
+                    "oi": _safe_float(quote.get("opnInterest")),
+                    "volume": _safe_float(quote.get("tradeVolume")),
+                    "net_change": _safe_float(quote.get("netChange")),
+                    "pct_change": _safe_float(quote.get("percentChange")),
+                }
+            )
+        rows.sort(key=lambda row: (row["strike"], row["type"]))
+        return {
+            "underlying": underlying.upper(),
+            "spot": future["LTP"],
+            "future_change_pct": future.get("PctChange"),
+            "atm_strike": min(
+                (row["strike"] for row in contracts),
+                key=lambda strike: abs(strike - future["LTP"]),
+            ),
+            "expiry": expiry,
+            "rows": rows,
+        }
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.smartapi.client import get_fno_underlyings
 

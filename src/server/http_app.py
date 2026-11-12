@@ -60,6 +60,12 @@ def create_app(routes: ServerRoutes, config: ServerConfig) -> web.Application:
     app.router.add_get("/api/backtest", routes.backtest)
     app.router.add_get("/api/lot-sizes", routes.lot_sizes)
     app.router.add_get("/api/symbols", routes.symbols)
+    if routes.commodity_quote is not None:
+        app.router.add_get("/api/commodities/quote", routes.commodity_quote)
+    if routes.commodity_option_chain is not None:
+        app.router.add_get(
+            "/api/commodities/option-chain", routes.commodity_option_chain
+        )
     app.router.add_get("/api/broker-health", routes.broker_health)
     app.router.add_static("/", path=config.frontend_dir, name="static")
     return app

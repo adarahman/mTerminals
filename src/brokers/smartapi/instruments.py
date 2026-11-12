@@ -91,6 +91,21 @@ INDEX_SPOT_TOKENS = {
 # option contracts in a given NSE lot-size revision.
 _FNO_FUT_TYPES = frozenset({"FUTSTK", "FUTIDX"})
 _FNO_EXCHANGES = frozenset({"NFO", "BFO"})
+_COMMODITY_UNDERLYINGS = frozenset(
+    {
+        "ALUMINIUM",
+        "COPPER",
+        "CRUDEOIL",
+        "GOLD",
+        "GOLDM",
+        "LEAD",
+        "NATURALGAS",
+        "SILVER",
+        "SILVERM",
+        "ZINC",
+    }
+)
+_COMMODITY_OPTION_TYPES = frozenset({"OPTFUT"})
 # AngelOne master mixes dummy/test underlyings (e.g. "011NSETEST") into the
 # FUT segment — drop them so they never surface in /api/lot-sizes.
 _TEST_SYMBOL_RE = re.compile(r"NSETEST", re.IGNORECASE)
@@ -110,6 +125,7 @@ class InstrumentResolver:
         # Public F&O symbol universe, split by the master's actual FUT type.
         self._fno_indices: set = set()
         self._fno_stocks: set = set()
+        self._commodity_option_index: dict = {}
 
     def _today_cache_path(self) -> Path:
         return self.cache_dir / CACHE_FILE_TEMPLATE.format(date=date.today().isoformat())
@@ -176,6 +192,7 @@ class InstrumentResolver:
         self._lot_size_map.clear()
         self._fno_indices.clear()
         self._fno_stocks.clear()
+        self._commodity_option_index.clear()
 
         for inst in self._instruments:
             itype = inst.get("instrumenttype") or ""
@@ -203,6 +220,25 @@ class InstrumentResolver:
                     lot = 0
                 if lot > 0 and name not in self._lot_size_map:
                     self._lot_size_map[name] = lot
+
+            if (
+                exch == "MCX"
+                and itype in _COMMODITY_OPTION_TYPES
+                and name in _COMMODITY_UNDERLYINGS
+            ):
+                symbol = inst.get("symbol", "")
+                option_type = symbol[-2:] if symbol.endswith(("CE", "PE")) else None
+                try:
+                    expiry = datetime.strptime(
+                        inst.get("expiry", ""), "%d%b%Y"
+                    ).strftime("%d%b%Y").upper()
+                    strike = round(float(inst.get("strike", "0")) / 100.0, 2)
+                except (TypeError, ValueError):
+                    continue
+                if option_type in ("CE", "PE"):
+                    self._commodity_option_index.setdefault(
+                        (name, expiry), {}
+                    )[(strike, option_type)] = inst
 
             if itype not in ("OPTIDX", "OPTSTK"):
                 continue
@@ -293,6 +329,99 @@ class InstrumentResolver:
             "stocks": sorted(self._fno_stocks),
         }
 
+    def get_commodity_futures_contract(
+        self, underlying: str, which: str = "NEAR"
+    ) -> Optional[dict]:
+        """Resolve a supported MCX commodity's nearest live FUTCOM contract."""
+        requested = (underlying or "").strip().upper()
+        if requested not in _COMMODITY_UNDERLYINGS:
+            return None
+
+        candidates = []
+        for row in self._instruments:
+            if (
+                row.get("exch_seg") != "MCX"
+                or row.get("instrumenttype") != "FUTCOM"
+                or str(row.get("name") or "").strip().upper() != requested
+            ):
+                continue
+            try:
+                expiry = datetime.strptime(row.get("expiry", ""), "%d%b%Y")
+            except (TypeError, ValueError):
+                continue
+            candidates.append((row, expiry))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda pair: pair[1])
+        today = datetime.combine(date.today(), datetime.min.time())
+        live = [(row, expiry) for row, expiry in candidates if expiry >= today]
+        if not live:
+            return None
+        index = min(
+            {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(which.upper(), 0),
+            len(live) - 1,
+        )
+        return live[index][0]
+
+    def get_commodity_option_expiries(self, underlying: str) -> list[str]:
+        """Return sorted, non-expired MCX commodity option expiries."""
+        requested = (underlying or "").strip().upper()
+        if requested not in _COMMODITY_UNDERLYINGS:
+            return []
+        today = date.today()
+        expiries = []
+        for name, expiry in self._commodity_option_index:
+            if name != requested:
+                continue
+            try:
+                parsed = datetime.strptime(expiry, "%d%b%Y").date()
+            except ValueError:
+                continue
+            if parsed >= today:
+                expiries.append((parsed, expiry))
+        return [expiry for _, expiry in sorted(expiries)]
+
+    def get_commodity_option_contracts(
+        self,
+        underlying: str,
+        expiry: str,
+        reference_price: float,
+        strikes_around_atm: int = 10,
+    ) -> list[dict]:
+        """Return CE/PE contracts for the available strikes nearest the future price."""
+        requested = (underlying or "").strip().upper()
+        if requested not in _COMMODITY_UNDERLYINGS:
+            return []
+        try:
+            normalized_expiry = datetime.strptime(expiry, "%d%b%Y").strftime(
+                "%d%b%Y"
+            ).upper()
+            reference = float(reference_price)
+        except (TypeError, ValueError):
+            return []
+
+        contracts = self._commodity_option_index.get(
+            (requested, normalized_expiry), {}
+        )
+        strikes = sorted({strike for strike, _ in contracts})
+        if not strikes:
+            return []
+        atm_index = min(range(len(strikes)), key=lambda index: abs(strikes[index] - reference))
+        start = max(0, atm_index - max(0, strikes_around_atm))
+        end = min(len(strikes), atm_index + max(0, strikes_around_atm) + 1)
+        return [
+            {
+                "strike": strike,
+                "type": option_type,
+                "symbol": row.get("symbol"),
+                "token": row.get("token"),
+            }
+            for strike in strikes[start:end]
+            for option_type in ("CE", "PE")
+            if (row := contracts.get((strike, option_type))) is not None
+        ]
+
     def build_ws_subscription_list(self, underlying: str, expiry: str) -> list:
         """
         Builds the token list block for AngelOneTicker.subscribe_tokens(),
@@ -348,6 +477,42 @@ def get_fno_underlyings(refresh: bool = False) -> dict:
     if refresh or _default_resolver is None:
         _default_resolver = InstrumentResolver().load(force_refresh=refresh)
     return _default_resolver.get_fno_underlyings()
+
+
+def get_commodity_futures_contract(
+    underlying: str, which: str = "NEAR", refresh: bool = False
+) -> Optional[dict]:
+    """Resolve a live MCX FUTCOM contract from the daily instrument master."""
+    global _default_resolver
+    if refresh or _default_resolver is None:
+        _default_resolver = InstrumentResolver().load(force_refresh=refresh)
+    return _default_resolver.get_commodity_futures_contract(underlying, which)
+
+
+def get_commodity_option_expiries(
+    underlying: str, refresh: bool = False
+) -> list[str]:
+    """Return live MCX option expiries from the daily instrument master."""
+    global _default_resolver
+    if refresh or _default_resolver is None:
+        _default_resolver = InstrumentResolver().load(force_refresh=refresh)
+    return _default_resolver.get_commodity_option_expiries(underlying)
+
+
+def get_commodity_option_contracts(
+    underlying: str,
+    expiry: str,
+    reference_price: float,
+    strikes_around_atm: int = 10,
+    refresh: bool = False,
+) -> list[dict]:
+    """Resolve MCX CE/PE tokens around a futures-price reference."""
+    global _default_resolver
+    if refresh or _default_resolver is None:
+        _default_resolver = InstrumentResolver().load(force_refresh=refresh)
+    return _default_resolver.get_commodity_option_contracts(
+        underlying, expiry, reference_price, strikes_around_atm
+    )
 
 
 def get_available_expiries(underlying: str, refresh: bool = False) -> list[str]:

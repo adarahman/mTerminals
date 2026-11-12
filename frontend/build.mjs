@@ -57,6 +57,7 @@ const pages = [
       "PriceChart/price-chart-components.css",
       "PriceChart/pc-order-panel.css",
       "styles/fiidii-report.css",
+      "styles/commodity-prices.css",
     ],
 
     js: [
@@ -122,6 +123,7 @@ const pages = [
         "Dashboard/panel-manager.js",
         "Dashboard/dashboard-panels.js",
         "Dashboard/dashboard.js",
+        "Dashboard/commodity-prices.js",
 
         "Dashboard/components/mt-button.js",
 

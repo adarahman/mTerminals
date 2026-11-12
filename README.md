@@ -3,7 +3,9 @@
 mTerminals is a live F&O decision dashboard for Indian index derivatives. It
 combines option-chain, OI, Greeks, capital-flow, institutional and volatility
 analytics with a provenance-aware decision engine, scenario analysis, guarded
-paper/live execution, and dedicated Option Chain and Price Chart surfaces.
+paper/live execution, and dedicated Option Chain, Price Chart, and read-only
+MCX futures, option-chain, and rule-based analysis surfaces. MCX quotes
+currently require Angel One SmartAPI as the active market-data provider.
 
 Current repository release: **v1.6.0**.
 

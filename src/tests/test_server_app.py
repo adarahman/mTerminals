@@ -13,7 +13,11 @@ async def _middleware(request, handler):
 
 
 def test_create_app_registers_routes_without_runtime_launcher(tmp_path: Path):
-    routes = ServerRoutes(*([_handler] * 10))
+    routes = ServerRoutes(
+        *([_handler] * 10),
+        commodity_quote=_handler,
+        commodity_option_chain=_handler,
+    )
     config = ServerConfig(
         host="127.0.0.1",
         port=8765,
@@ -36,6 +40,8 @@ def test_create_app_registers_routes_without_runtime_launcher(tmp_path: Path):
         "/api/backtest",
         "/api/lot-sizes",
         "/api/symbols",
+        "/api/commodities/quote",
+        "/api/commodities/option-chain",
         "",
     } <= paths
 

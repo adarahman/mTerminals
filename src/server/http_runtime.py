@@ -50,6 +50,8 @@ def build_http_runtime(
     symbol: Callable[[], str],
     middleware,
     mobile_websocket=None,
+    commodity_quote=None,
+    commodity_option_chain=None,
     starter=start_http_server,
 ) -> HttpRuntime:
     """Assemble HTTP routes and bind configuration from app-level handlers."""
@@ -66,6 +68,8 @@ def build_http_runtime(
             lot_sizes=lot_sizes,
             symbols=symbols,
             mobile_websocket=mobile_websocket,
+            commodity_quote=commodity_quote,
+            commodity_option_chain=commodity_option_chain,
         ),
         host=host,
         port=port,
