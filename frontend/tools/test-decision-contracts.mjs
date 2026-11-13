@@ -8,7 +8,9 @@ const strategyView = fs.readFileSync(new URL('../Dashboard/strategy-view.js', im
 assert.match(source, /Evidence Confidence/, 'confidence must be labelled as evidence confidence');
 assert.match(source, /dec\.evidenceCoverage/, 'decision view must consume backend evidence coverage');
 assert.match(source, /dec\.contributors/, 'decision view must expose backend contributors');
-assert.match(source, /\['futures', 'Futures positioning', 20\]/,
+assert.match(source, /\$\{Number\(c\.weight\)\|\|0\}% weight/,
+  'decision summary must show contributor weightage beside each visible evidence item');
+assert.match(source, /\['futures', 'Futures positioning', 18\]/,
   'decision detail must retain a visible futures-positioning row when evidence is missing');
 assert.match(source, /dec\.degraded/, 'decision view must expose degraded state');
 assert.match(source, /dec\.missingInputs/, 'decision view must expose missing inputs');

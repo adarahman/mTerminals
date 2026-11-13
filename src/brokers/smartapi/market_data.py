@@ -12,6 +12,13 @@ def _safe_float(value) -> Optional[float]:
         return None
 
 
+def _safe_positive_int(value) -> Optional[int]:
+    number = _safe_float(value)
+    if number is None or number <= 0 or not number.is_integer():
+        return None
+    return int(number)
+
+
 class SmartApiMarketData:
     """Delegate the common market-data contract to the SmartAPI client."""
 
@@ -123,6 +130,7 @@ class SmartApiMarketData:
             "Contract": future.get("symbol"),
             "Underlying": underlying,
             "Exchange": "MCX",
+            "LotSize": _safe_positive_int(future.get("lotsize")),
             "Expiry": datetime.strptime(
                 future["expiry"], "%d%b%Y"
             ).strftime("%d-%b-%Y"),
@@ -181,6 +189,7 @@ class SmartApiMarketData:
         return {
             "underlying": underlying.upper(),
             "spot": future["LTP"],
+            "lot_size": future.get("LotSize"),
             "future_change_pct": future.get("PctChange"),
             "atm_strike": min(
                 (row["strike"] for row in contracts),

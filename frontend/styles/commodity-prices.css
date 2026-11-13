@@ -163,6 +163,62 @@
   font-size:var(--fs-sm);
 }
 
+.commodity-analysis-weightage{
+  display:grid;
+  gap:7px;
+  margin:12px 0;
+  padding:10px 12px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:8px;
+}
+
+.commodity-analysis-weightage > strong{
+  color:var(--text-secondary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-analysis-weightage > span{
+  color:var(--text-tertiary);
+  font-family:var(--font-mono);
+  font-size:var(--fs-xs);
+  font-variant-numeric:tabular-nums;
+}
+
+.commodity-analysis-weightage-rows{
+  display:grid;
+  gap:6px;
+}
+
+.commodity-analysis-weightage-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto auto;
+  align-items:center;
+  gap:12px;
+  color:var(--text-tertiary);
+  font-size:var(--fs-xs);
+}
+
+.commodity-analysis-weightage-row strong{
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums;
+}
+
+.commodity-analysis-weightage-direction{
+  font-weight:700;
+}
+
+.commodity-analysis-weightage-direction.bullish{color:var(--pos);}
+.commodity-analysis-weightage-direction.bearish{color:var(--neg);}
+.commodity-analysis-weightage-direction.neutral{color:var(--warn);}
+.commodity-analysis-weightage-direction.unavailable{color:var(--text-tertiary);}
+
+.commodity-analysis-weightage > small{
+  color:var(--text-tertiary);
+  font-size:var(--fs-2xs);
+}
+
 .commodity-analysis-metrics{
   display:grid;
   grid-template-columns:repeat(5,minmax(0,1fr));

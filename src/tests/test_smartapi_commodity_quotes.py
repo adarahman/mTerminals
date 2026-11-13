@@ -6,6 +6,7 @@ def test_commodity_quote_resolves_mcx_future_and_calculates_change(monkeypatch):
         "symbol": "CRUDEOILFUT",
         "token": "123",
         "expiry": "31DEC2099",
+        "lotsize": "100",
     }
     adapter = SmartApiMarketData()
     seen = []
@@ -38,6 +39,7 @@ def test_commodity_quote_resolves_mcx_future_and_calculates_change(monkeypatch):
     assert result["Change"] is None
     assert result["PctChange"] == 10.0
     assert result["Exchange"] == "MCX"
+    assert result["LotSize"] == 100.0
     assert result["Expiry"] == "31-Dec-2099"
 
 
@@ -46,7 +48,7 @@ def test_commodity_option_chain_quotes_only_nearby_calls_and_puts(monkeypatch):
     monkeypatch.setattr(
         adapter,
         "get_commodity_futures_quote",
-        lambda underlying: {"LTP": 6000.0},
+        lambda underlying: {"LTP": 6000.0, "LotSize": 100},
     )
     monkeypatch.setattr(
         "brokers.smartapi.instruments.get_commodity_option_contracts",
@@ -72,4 +74,5 @@ def test_commodity_option_chain_quotes_only_nearby_calls_and_puts(monkeypatch):
         ("MCX", [("CALL", "10"), ("PUT", "11")], "FULL")
     ]
     assert result["atm_strike"] == 6000.0
+    assert result["lot_size"] == 100
     assert [row["type"] for row in result["rows"]] == ["CE", "PE"]

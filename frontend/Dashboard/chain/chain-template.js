@@ -668,11 +668,12 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     // diagnostic (for example, missing futures OI) disappears from the very
     // panel intended to explain incomplete evidence.
     const requiredEvidence = [
-      ['pcr', 'PCR positioning', 30],
-      ['engine_bias', 'Combined market bias', 30],
-      ['futures', 'Futures positioning', 20],
+      ['pcr', 'PCR positioning', 25],
+      ['engine_bias', 'Combined market bias', 25],
+      ['futures', 'Futures positioning', 18],
       ['max_pain', 'Max-pain gravity', 5],
-      ['oi_velocity', 'OI velocity', 15],
+      ['oi_velocity', 'OI velocity', 17],
+      ['capital_flow', 'Capital flow', 10],
     ];
     const visibleContributors = [...contributors];
     const contributorKeys = new Set(visibleContributors.map(c => c && c.key));
@@ -799,7 +800,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           const title = escapeHtml(`${c.weight || 0}% weight · ${contribution >= 0 ? '+' : ''}${contribution.toFixed(3)} contribution`);
           return `<div class="decision-flow-line">
             <span class="decision-flow-dot" style="color:${color};">${marker}</span>
-            <span title="${title}">${label} · ${direction}</span>
+            <span title="${title}">${label} · ${direction} · ${Number(c.weight)||0}% weight</span>
           </div>`;
         }).join('')
       : `<div class="decision-flow-line"><span class="decision-flow-dot">·</span><span>${explainVal(vrd.pcr) || explainVal(vrd.vix) || 'No strong confirming signal yet.'}</span></div>`;

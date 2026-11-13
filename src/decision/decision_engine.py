@@ -41,6 +41,11 @@ from decision.signal_builder import (
 )
 from oi.capital_metrics import compute_chain_metrics
 from decision.confidence import derive_bias, compute_confidence
+from decision.evidence import (
+    DECISION_EVIDENCE_LABELS,
+    DECISION_EVIDENCE_WEIGHTS,
+    aggregate_evidence,
+)
 from decision.short_horizon import detect_short_horizon
 from decision.strategy_selection import derive_action, suggest_strategy
 from analytics.oversold_oi_support import (
@@ -149,10 +154,7 @@ class DecisionEngine:
 
         # ── Conflict detection ────────────────────────────────────────────────
         # A conflict exists when directional sub-scores point opposite ways strongly
-        weights = {
-            "pcr": 0.25, "engine_bias": 0.25, "futures": 0.18,
-            "max_pain": 0.05, "oi_velocity": 0.17, "capital_flow": 0.10,
-        }
+        weights = DECISION_EVIDENCE_WEIGHTS
         availability = {
             "pcr": total_pcr > 0,
             "engine_bias": bool(bias_str.strip()),
@@ -169,27 +171,19 @@ class DecisionEngine:
             "max_pain": mp_score, "oi_velocity": oi_score, "smart_money": sm_score,
             "capital_flow": capital_flow_score,
         }
-        labels = {
-            "pcr": "PCR positioning", "engine_bias": "Combined market bias",
-            "futures": "Futures positioning", "max_pain": "Max-pain gravity",
-            "oi_velocity": "OI velocity", "smart_money": "Volume / OI confirmation",
-            "capital_flow": "Capital flow",
-        }
+        labels = DECISION_EVIDENCE_LABELS
         required = {"pcr", "engine_bias", "futures", "max_pain"}
-        out.missing_inputs = [key for key in weights if not availability[key]]
+        evidence = aggregate_evidence(
+            weights=weights,
+            scores=score_map,
+            availability=availability,
+            labels=labels,
+        )
+        out.missing_inputs = evidence["missingInputs"]
         critical_missing = any(key in required for key in out.missing_inputs)
         out.degraded = critical_missing
-        out.evidence_coverage = round(sum(
-            weight for key, weight in weights.items() if availability[key]
-        ) * 100)
-        out.contributors = [{
-            "key": key,
-            "label": labels[key],
-            "available": availability[key],
-            "weight": round(weight * 100),
-            "score": round(score_map[key], 3) if availability[key] else None,
-            "weightedContribution": round(score_map[key] * weight, 3) if availability[key] else None,
-        } for key, weight in weights.items()]
+        out.evidence_coverage = evidence["evidenceCoverage"]
+        out.contributors = evidence["contributors"]
         out.contributors.append({
             "key": "oversold_oi_support",
             "label": "Oversold + OI Support",
@@ -204,12 +198,9 @@ class DecisionEngine:
             "evidence": oversold_support.get("evidence", []),
         })
 
-        directional_scores = [score_map[key] for key in weights if availability[key]]
-        pos = sum(1 for s in directional_scores if s > 0.15)
-        neg = sum(1 for s in directional_scores if s < -0.15)
-        pos_weight = sum(weights[k] for k in weights if availability[k] and score_map[k] > 0.15)
-        neg_weight = sum(weights[k] for k in weights if availability[k] and score_map[k] < -0.15)
-        conflict = pos_weight >= 0.20 and neg_weight >= 0.20
+        pos = evidence["positiveContributors"]
+        neg = evidence["negativeContributors"]
+        conflict = evidence["conflict"]
         if conflict:
             out.conflict_flag = True
             out.active_signals.append(ActiveSignal(
@@ -220,10 +211,7 @@ class DecisionEngine:
         # Weights must sum to 1.0.
         # PCR and combined bias remain the anchors; capital flow starts at 10%
         # and is normalized against premium locked to avoid raw-value scaling.
-        composite = (
-            sum(score_map[key] * weight for key, weight in weights.items()
-                if availability[key])
-        )
+        composite = evidence["composite"]
         composite += oversold_support["score"] * 0.08
         composite = max(-1.0, min(1.0, composite))
 

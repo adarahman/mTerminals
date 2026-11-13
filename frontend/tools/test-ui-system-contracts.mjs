@@ -14,6 +14,9 @@ const algo = read('Dashboard/algo-status.js');
 const depth = read('Dashboard/chain/chain-depth.js');
 const formatters = read('shared/utils/formatters.js');
 const chainTemplate = read('Dashboard/chain/chain-template.js');
+const commodityHtml = read('Dashboard/DashboardPro.html');
+const commodityView = read('Dashboard/commodity-prices.js');
+const commodityCss = read('styles/commodity-prices.css');
 const paperTrading = read('Dashboard/paper-trading-shared.js');
 const strikeReport = read('Dashboard/strike-detail-report-view.js');
 const formatterContext = {};
@@ -33,6 +36,8 @@ const checks = [
   ['compact layout starts below 1280px without hiding cards', responsive.includes('@media (max-width:1279px)') && responsive.includes('grid-template-columns:1fr')],
   ['dense tables own overflow and sticky headers', tables.includes('overflow-x:auto') && tables.includes('position:sticky')],
   ['reduced motion is global', responsive.includes('@media (prefers-reduced-motion:reduce)') && responsive.includes('scroll-behavior:auto!important')],
+  ['brand logo yields the header to full-screen modal controls', /body\.focus-workspace-open\s+\.brand-logo\s*\{\s*display:\s*none;/.test(chartSources)],
+  ['commodity verdict shows weighted evidence factors', commodityHtml.includes('commodity-analysis-weightage-rows') && commodityView.includes('_renderEvidenceWeights(analysis.evidence_weights)') && commodityCss.includes('.commodity-analysis-weightage-row')],
   ['modal focus is trapped and restored', modal.includes('trapFocus') || (modal.includes('focusableSelector') && modal.includes('requestAnimationFrame(() => invoker.focus())'))],
   ['live popover actions are native labeled buttons', algo.includes('<button type="button" class="algo-close"') && depth.includes('<button type="button" class="depth-reset"')],
   ['all shipped canvases expose an accessible chart question', canvases.length > 0 && canvases.every((tag) => /role="img"/.test(tag) && /aria-label="[^"]+"/.test(tag))],

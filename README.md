@@ -6,6 +6,9 @@ analytics with a provenance-aware decision engine, scenario analysis, guarded
 paper/live execution, and dedicated Option Chain, Price Chart, and read-only
 MCX futures, option-chain, and rule-based analysis surfaces. MCX quotes
 currently require Angel One SmartAPI as the active market-data provider.
+Decision evidence weightage is shown alongside equity-derivatives signals
+and commodity analysis reuses the same scoring weights and confidence
+calculation; unavailable commodity signals are reported in evidence coverage.
 
 Current repository release: **v1.6.0**.
 

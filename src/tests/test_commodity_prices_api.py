@@ -92,30 +92,28 @@ def test_commodity_option_chain_defaults_to_nearest_expiry():
     response = asyncio.run(api.option_chain(_request()))
 
     assert response.status == 200
-    assert json.loads(response.text) == {
-        "provider": "SMARTAPI",
-        "symbol": "CRUDEOIL",
-        "expiry": "31DEC2099",
-        "expiries": ["31DEC2099"],
-        "chain": chain,
-        "analysis": {
-            "verdict": "BULLISH",
-            "reason": "Put OI is higher than call OI and the underlying futures are up on the day.",
-            "put_call_oi_ratio": 2.0,
-            "call_oi": 100.0,
-            "put_oi": 200.0,
-            "call_volume": 20.0,
-            "put_volume": 40.0,
-            "call_oi_wall": 6000,
-            "put_oi_wall": 6000,
-            "futures_change_pct": 0.5,
-            "scope": "Visible ATM ±10 strikes; OI is current positioning, not OI change.",
-            "method": (
-                "Bullish: PCR > 1 and futures up; bearish: PCR < 1 and futures down; "
-                "conflicting or flat: neutral; missing inputs: wait."
-            ),
-        },
-    }
+    payload = json.loads(response.text)
+    assert payload["provider"] == "SMARTAPI"
+    assert payload["symbol"] == "CRUDEOIL"
+    assert payload["expiry"] == "31DEC2099"
+    assert payload["expiries"] == ["31DEC2099"]
+    assert payload["chain"] == chain
+    analysis = payload["analysis"]
+    assert analysis["verdict"] == "BULLISH"
+    assert analysis["confidence"] > 0
+    assert analysis["evidence_coverage"] == 43
+    assert analysis["put_call_oi_ratio"] == 2.0
+    assert analysis["call_oi"] == 100.0
+    assert analysis["put_oi"] == 200.0
+    assert analysis["call_oi_wall"] == 6000
+    assert analysis["put_oi_wall"] == 6000
+    contributors = {item["key"]: item for item in analysis["evidence_weights"]}
+    assert contributors["pcr"]["weight"] == 25
+    assert contributors["pcr"]["direction"] == "BULLISH"
+    assert contributors["futures"]["weight"] == 18
+    assert contributors["futures"]["direction"] == "BULLISH"
+    assert contributors["oi_velocity"]["available"] is False
+    assert "oi_velocity" in analysis["missing_inputs"]
     assert provider.requested == [
         ("expiries", "CRUDEOIL"),
         ("chain", "CRUDEOIL", "31DEC2099", 10),

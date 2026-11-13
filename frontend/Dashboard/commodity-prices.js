@@ -95,6 +95,12 @@ class CommodityPricesView {
         changeElement.classList.toggle('down', percent < 0);
       }
       this._setText('commodity-price-expiry', quote.Expiry || '—');
+      this._setText(
+        'commodity-price-lot-size',
+        Number.isFinite(Number(quote.LotSize)) && Number(quote.LotSize) > 0
+          ? Number(quote.LotSize).toLocaleString('en-IN')
+          : 'Unavailable'
+      );
       this._setText('commodity-price-open', this._format(quote.Open));
       this._setText('commodity-price-high', this._format(quote.High));
       this._setText('commodity-price-low', this._format(quote.Low));
@@ -209,6 +215,11 @@ class CommodityPricesView {
       analysis.reason || 'Insufficient option-chain data for a market view.'
     );
     this._setText(
+      'commodity-analysis-confidence',
+      `Confidence ${Number.isFinite(Number(analysis.confidence)) ? `${analysis.confidence}%` : '—'} · Coverage ${Number.isFinite(Number(analysis.evidence_coverage)) ? `${analysis.evidence_coverage}%` : '—'}`
+    );
+    this._renderEvidenceWeights(analysis.evidence_weights);
+    this._setText(
       'commodity-analysis-pcr',
       this._format(analysis.put_call_oi_ratio, 2)
     );
@@ -235,6 +246,43 @@ class CommodityPricesView {
       'commodity-analysis-scope',
       `${analysis.scope || 'Visible strike window only.'} ${analysis.method || ''} Not a trade recommendation.`
     );
+  }
+
+  _renderEvidenceWeights(weights) {
+    const container = document.getElementById('commodity-analysis-weightage-rows');
+    if (!container) return;
+
+    const rows = Array.isArray(weights) ? weights : [];
+    const fragment = document.createDocumentFragment();
+    rows.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'commodity-analysis-weightage-row';
+
+      const label = document.createElement('span');
+      label.textContent = item.label || item.key || 'Evidence';
+
+      const direction = document.createElement('span');
+      const directionValue = item.available === false
+        ? 'UNAVAILABLE'
+        : String(item.direction || 'UNAVAILABLE').toUpperCase();
+      const directionClass = ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(directionValue)
+        ? directionValue.toLowerCase()
+        : 'unavailable';
+      direction.className = `commodity-analysis-weightage-direction ${directionClass}`;
+      direction.textContent = directionValue === 'UNAVAILABLE'
+        ? 'Unavailable'
+        : directionValue;
+
+      const weight = document.createElement('strong');
+      const numericWeight = Number(item.weight);
+      weight.textContent = Number.isFinite(numericWeight)
+        ? `${numericWeight}%`
+        : '—';
+
+      row.append(label, direction, weight);
+      fragment.appendChild(row);
+    });
+    container.replaceChildren(fragment);
   }
 }
 

@@ -88,6 +88,9 @@
     object-fit: contain;
     object-position: left center;
   }
+  body.focus-workspace-open .brand-logo {
+    display: none;
+  }
 </style>
 </head>
 <body><div class="db">
@@ -117,6 +120,7 @@
         <span id="commodity-price-change" class="commodity-price-change">—</span>
         <div class="commodity-price-details">
           <span>Expiry <b id="commodity-price-expiry">—</b></span>
+          <span>Lot size <b id="commodity-price-lot-size">—</b></span>
           <span>Open <b id="commodity-price-open">—</b></span>
           <span>High <b id="commodity-price-high">—</b></span>
           <span>Low <b id="commodity-price-low">—</b></span>
@@ -130,6 +134,12 @@
           <span id="commodity-analysis-verdict" class="commodity-analysis-verdict">WAIT</span>
         </div>
         <p id="commodity-analysis-reason">Waiting for option-chain data.</p>
+        <div class="commodity-analysis-weightage">
+          <strong>Verdict evidence weightage</strong>
+          <span id="commodity-analysis-confidence">Confidence — · Coverage —</span>
+          <div id="commodity-analysis-weightage-rows" class="commodity-analysis-weightage-rows" aria-label="Verdict evidence weights"></div>
+          <small>Weights and confidence use the shared equity decision scoring; confidence is not a probability.</small>
+        </div>
         <div class="commodity-analysis-metrics">
           <span>Put / call OI <b id="commodity-analysis-pcr">—</b></span>
           <span>Call / put OI <b id="commodity-analysis-total-oi">—</b></span>

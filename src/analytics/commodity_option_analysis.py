@@ -4,6 +4,17 @@ from __future__ import annotations
 
 import math
 
+from decision.confidence import compute_confidence, derive_bias
+from decision.evidence import (
+    DECISION_EVIDENCE_LABELS,
+    DECISION_EVIDENCE_WEIGHTS,
+    aggregate_evidence,
+)
+from decision.basic_scores import score_engine_bias, score_pcr
+
+
+_COMMODITY_REQUIRED_EVIDENCE = {"pcr", "futures"}
+
 
 def _finite_number(value) -> float | None:
     if value is None:
@@ -51,22 +62,95 @@ def analyze_commodity_option_chain(chain: dict) -> dict:
     if futures_change is not None and not math.isfinite(futures_change):
         futures_change = None
 
-    verdict = "WAIT"
-    if raw_pcr is None or futures_change is None:
+    pcr_score = score_pcr(raw_pcr) if raw_pcr is not None else 0.0
+    futures_score = score_engine_bias(
+        "Bullish" if futures_change is not None and futures_change > 0
+        else "Bearish" if futures_change is not None and futures_change < 0
+        else "Neutral"
+    )
+    scores = {
+        "pcr": pcr_score,
+        "engine_bias": 0.0,
+        "futures": futures_score,
+        "max_pain": 0.0,
+        "oi_velocity": 0.0,
+        "capital_flow": 0.0,
+    }
+    availability = {
+        "pcr": raw_pcr is not None,
+        "engine_bias": False,
+        "futures": futures_change is not None,
+        "max_pain": False,
+        "oi_velocity": False,
+        "capital_flow": False,
+    }
+    evidence = aggregate_evidence(
+        weights=DECISION_EVIDENCE_WEIGHTS,
+        scores=scores,
+        availability=availability,
+        labels={
+            **DECISION_EVIDENCE_LABELS,
+            "futures": "Futures day direction",
+        },
+    )
+    positive = evidence["positiveContributors"]
+    negative = evidence["negativeContributors"]
+    conflicting_directions = positive > 0 and negative > 0
+    conflict = evidence["conflict"] or conflicting_directions
+    bias, strength = derive_bias(evidence["composite"], conflict)
+    required_missing = any(
+        key in _COMMODITY_REQUIRED_EVIDENCE for key in evidence["missingInputs"]
+    )
+    confidence = compute_confidence(
+        evidence["composite"],
+        conflict,
+        "",
+        positive,
+        negative,
+        3,
+        pcr_score,
+        0.0,
+        evidence_coverage=evidence["evidenceCoverage"] / 100.0,
+        critical_inputs_missing=required_missing,
+    )
+
+    evidence_weights = [
+        {
+            **contributor,
+            "direction": (
+                "UNAVAILABLE"
+                if not contributor["available"]
+                else "BULLISH"
+                if contributor["score"] > 0.15
+                else "BEARISH"
+                if contributor["score"] < -0.15
+                else "NEUTRAL"
+            ),
+        }
+        for contributor in evidence["contributors"]
+    ]
+
+    verdict = "WAIT" if required_missing else "NEUTRAL" if conflict else bias
+    if required_missing:
         reason = "Insufficient option OI or futures-change data to form a directional view."
-    elif raw_pcr > 1 and futures_change > 0:
-        verdict = "BULLISH"
+    elif conflict:
+        reason = "Put/call positioning and futures direction conflict; wait for confirmation."
+    elif verdict == "BULLISH":
         reason = "Put OI is higher than call OI and the underlying futures are up on the day."
-    elif raw_pcr < 1 and futures_change < 0:
-        verdict = "BEARISH"
+    elif verdict == "BEARISH":
         reason = "Call OI is higher than put OI and the underlying futures are down on the day."
     else:
-        verdict = "NEUTRAL"
         reason = "Option positioning and the underlying futures move do not confirm the same direction."
 
     return {
         "verdict": verdict,
         "reason": reason,
+        "bias_strength": strength,
+        "confidence": confidence,
+        "evidence_coverage": evidence["evidenceCoverage"],
+        "missing_inputs": evidence["missingInputs"],
+        "contributors": evidence["contributors"],
+        "evidence_weights": evidence_weights,
         "put_call_oi_ratio": pcr,
         "call_oi": call_oi,
         "put_oi": put_oi,
@@ -77,7 +161,8 @@ def analyze_commodity_option_chain(chain: dict) -> dict:
         "futures_change_pct": futures_change,
         "scope": "Visible ATM ±10 strikes; OI is current positioning, not OI change.",
         "method": (
-            "Bullish: PCR > 1 and futures up; bearish: PCR < 1 and futures down; "
-            "conflicting or flat: neutral; missing inputs: wait."
+            "Uses the shared equity Decision Engine scoring and evidence weights. "
+            "Unavailable signals reduce evidence coverage; confidence is not a "
+            "probability. Commodity orders are not recommended by this view."
         ),
     }
