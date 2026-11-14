@@ -100,25 +100,43 @@ def get_atm_chain(underlying, expiry_ddmmmyyyy, strikes_around_atm=10, exchange=
     ltp/oi/volume per token via quotes(). Returns the chain dict shape
     from the MarketData Protocol ('underlying', 'spot', 'atm_strike',
     'expiry', 'rows') or None."""
-    del exchange
-    quote = _spot_quote(underlying)
+    is_commodity = str(exchange or "").upper() == "MCX"
+    quote = get_futures_quote(underlying) if is_commodity else _spot_quote(underlying)
     if not quote:
         logger.warning("[kotak_market_data] could not fetch spot for %s", underlying)
         return None
     spot = quote["ltp"]
     atm = _round_to_strike(spot, underlying)
-    interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
-    strikes = {atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)}
-
     segment = _fo_segment(underlying)
     rows = _contracts_for(underlying)
     if not rows:
         return None
     target_exp = _parse_expiry_date(expiry_ddmmmyyyy)
+    expiry_rows = [
+        row for row in rows
+        if row["name"] == underlying.upper()
+        and _parse_expiry_date(row["expiry"]) == target_exp
+        and row["option_type"] in {"CE", "PE"}
+    ]
+    if is_commodity:
+        available_strikes = sorted({row["strike"] for row in expiry_rows})
+        if not available_strikes:
+            return None
+        atm_index = min(
+            range(len(available_strikes)),
+            key=lambda index: abs(available_strikes[index] - spot),
+        )
+        atm = available_strikes[atm_index]
+        strikes = set(available_strikes[
+            max(0, atm_index - strikes_around_atm):
+            atm_index + strikes_around_atm + 1
+        ])
+    else:
+        interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
+        strikes = {atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)}
     matches = [
-        r for r in rows
+        r for r in expiry_rows
         if r["name"] == underlying.upper()
-        and _parse_expiry_date(r["expiry"]) == target_exp
         and r["strike"] in strikes
     ]
     if not matches:

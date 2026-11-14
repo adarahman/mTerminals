@@ -299,6 +299,60 @@ def get_spot_quote(underlying: str):
     }
 
 
+def get_commodity_futures_quote(underlying: str, which: str = "NEAR"):
+    """Fetch a native MCX futures quote using Breeze's quote endpoint."""
+    from brokers.smartapi.instruments import get_commodity_futures_contract
+
+    contract = get_commodity_futures_contract(underlying, which=which)
+    stock_code = resolve_stock_code(underlying, "MCX")
+    if not contract or not stock_code:
+        return None
+    try:
+        expiry = datetime.strptime(contract["expiry"], "%d%b%Y").strftime("%Y-%m-%dT06:00:00.000Z")
+        result = _session.api.get_quotes(
+            stock_code=stock_code,
+            exchange_code="MCX",
+            expiry_date=expiry,
+            product_type="futures",
+            right="",
+            strike_price="",
+        )
+        rows = _unwrap(result, "get_quotes")
+    except Exception as exc:
+        logger.warning("[breeze_market_data] MCX futures quote failed for %s: %s", underlying, exc)
+        return None
+    row = rows[0] if isinstance(rows, list) and rows else (rows if isinstance(rows, dict) else None)
+    if not row:
+        return None
+    ltp = _number(row.get("ltp"))
+    if ltp is None or ltp <= 0:
+        return None
+    close = _number(row.get("previous_close"))
+    change = _number(row.get("change"))
+    pct = _number(row.get("ltp_percent_change"))
+    if change is None and close is not None:
+        change = ltp - close
+    if pct is None and close:
+        pct = (ltp / close - 1) * 100
+    return {
+        "Contract": contract.get("symbol"),
+        "Underlying": underlying.upper(),
+        "Exchange": "MCX",
+        "LotSize": contract.get("lotsize"),
+        "Expiry": datetime.strptime(contract["expiry"], "%d%b%Y").strftime("%d-%b-%Y"),
+        "LTP": ltp,
+        "Change": change,
+        "PctChange": pct,
+        "Open": _number(row.get("open")),
+        "High": _number(row.get("high")),
+        "Low": _number(row.get("low")),
+        "PrevClose": close,
+        "Volume": _number(row.get("total_quantity_traded")),
+        "OI": _number(row.get("open_interest")),
+        "FutSource": "BREEZE",
+    }
+
+
 def _round_to_strike(price, underlying):
     interval = _STRIKE_INTERVALS.get(underlying.upper(), 50)
     return int(round(price / interval) * interval)

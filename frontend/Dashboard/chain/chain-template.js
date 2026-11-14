@@ -26,7 +26,12 @@
   // with something the ScripMaster doesn't recognize), it's prepended to
   // "Indices" so the dropdown always shows the true current value instead
   // of silently falling back to the first option.
-ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
+ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols, mode) {
+    if (mode === 'commodity') {
+      return `<optgroup label="Commodities">${COMMODITY_SYMBOLS.map(s =>
+        `<option value="${s}"${s === active ? ' selected' : ''}>${s}</option>`
+      ).join('')}</optgroup>`;
+    }
     if (fnoSymbols && (fnoSymbols.indices || fnoSymbols.stocks)) {
       this._fnoSymbolsCache = fnoSymbols;
     }
@@ -46,7 +51,8 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
 
     const opt = s => `<option value="${s}"${s===active?' selected':''}>${s}</option>`;
     return `<optgroup label="Indices">${indices.map(opt).join('')}</optgroup>`
-      + `<optgroup label="Stocks">${stocks.map(opt).join('')}</optgroup>`;
+      + `<optgroup label="Stocks">${stocks.map(opt).join('')}</optgroup>`
+      + `<option value="__other__">Other…</option>`;
 };
 
 // DATA SOURCE options — the seven runtime market-data providers
@@ -56,7 +62,7 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols) {
 // status are visible in the option text and tooltip; the active provider's
 // status is also shown live by the separate status pill.
 // The active one is pre-selected via the backend's `active` flag.
-ChainView.prototype.renderDataSourceOptions = function(sources, active) {
+ChainView.prototype.renderDataSourceOptions = function(sources, active, showIndicativePrice = true) {
   if (!Array.isArray(sources) || !sources.length) {
     const a = active || 'NSE_BSE';
     return `<option value="${a}">${escapeHtml(a)}</option>`;
@@ -77,9 +83,9 @@ const hasPrice = s.indicativePrice != null && Number.isFinite(rawPrice) && rawPr
 const price = hasPrice
   ? rawPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})
   : '—';
-const display = `${icon} ${label} · ₹${price}`;
+const display = showIndicativePrice ? `${icon} ${label} · ₹${price}` : `${icon} ${label}`;
 const reason = s.error ? ` — ${s.error}` : '';
-const quoteDetail = hasPrice
+const quoteDetail = !showIndicativePrice ? '' : hasPrice
   ? ` · Indicative spot ₹${price}${s.indicativeAsOf ? ` · As of ${s.indicativeAsOf}` : ''}`
   : ' · Indicative spot unavailable';
 return `<option value="${escapeHtml(id)}"${s.active ? ' selected' : ''} title="Status: ${escapeHtml(status)}${escapeHtml(reason)}${escapeHtml(quoteDetail)}">${escapeHtml(display)}</option>`;
@@ -102,20 +108,31 @@ ChainView.prototype.patchProviderIndicativeQuotes = function(update) {
   const active = sources.find(source => source.id === selected)
     || sources.find(source => source.active)
     || {};
-  const rawPrice = Number(active.indicativePrice);
-  const hasPrice = active.indicativePrice != null && Number.isFinite(rawPrice) && rawPrice > 0;
+  const providerPrice = Number(active.indicativePrice);
+  const hasProviderPrice = active.indicativePrice != null
+    && Number.isFinite(providerPrice) && providerPrice > 0;
+  const cas = state.casIndicative || {};
+  const casLive = cas.status === 'live' && cas.value != null
+    && Number.isFinite(Number(cas.value));
+  const useKotakCasPrice = ['KOTAK', 'KOTAK_NEO'].includes(String(active.id || selected || '').toUpperCase())
+    && casLive;
+  const rawPrice = useKotakCasPrice ? Number(cas.value) : providerPrice;
+  const hasPrice = hasProviderPrice || useKotakCasPrice;
+  const priceLabel = useKotakCasPrice ? 'CAS IEP' : 'Indicative';
   const price = hasPrice
     ? `₹${rawPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`
     : '₹—';
   const priceElement = document.getElementById('data-source-indicative-price');
+  const labelElement = document.getElementById('data-source-indicative-label');
+  if(labelElement) labelElement.textContent = priceLabel;
   if(priceElement){
     priceElement.textContent = price;
     priceElement.title = hasPrice
-      ? `Indicative spot price from ${active.label || active.id}${active.indicativeAsOf ? ` · As of ${active.indicativeAsOf}` : ''}`
+      ? `${priceLabel} price from ${active.label || active.id}${useKotakCasPrice ? ` · As of ${cas.asOf || ''}` : active.indicativeAsOf ? ` · As of ${active.indicativeAsOf}` : ''}`
       : `Indicative spot price unavailable from ${active.label || active.id || 'active provider'}`;
   }
   if(select){
-    select.innerHTML = this.renderDataSourceOptions(sources, state.dataSource);
+    select.innerHTML = this.renderDataSourceOptions(sources, state.dataSource, false);
     if(Array.from(select.options).some(option => option.value === selected)){
       select.value = selected;
     }
@@ -123,35 +140,33 @@ ChainView.prototype.patchProviderIndicativeQuotes = function(update) {
 };
 
 ChainView.prototype.renderTopBarHtml = function(d, isBear) {
-  const activeSymbol = d.symbol || 'NIFTY';
+  const mode = window.dashboardInstrumentMode || 'equity';
+  const activeSymbol = mode === 'commodity'
+    ? (window.commodityActiveSymbol || 'CRUDEOIL')
+    : (d.symbol || 'NIFTY');
   // `symbolName` is resolved from the instrument master by the payload
   // builder. Do not maintain a partial browser-side company-name table.
-  const symbolName = d.symbolName || d.companyName || d.displayName
-    || activeSymbol;
+  const symbolName = mode === 'commodity' ? activeSymbol : (d.symbolName || d.companyName || d.displayName || activeSymbol);
   const cas = d.casIndicative;
   const casLive = cas?.status === 'live' && cas.value !== null
     && cas.value !== undefined && Number.isFinite(Number(cas.value));
-  const casVisible = activeSymbol === 'NIFTY' && Boolean(cas?.status);
-  const casCoverage = cas?.coverage || {};
-  const casCoverageLabel = `${Number(casCoverage.available) || 0}/${Number(casCoverage.total) || 0}`;
-  const casReason = ({
-    outside_cas_window: 'available only 15:20-15:30 IST',
-    constituent_data_unavailable: 'constituent data unavailable',
-    insufficient_iep_coverage: 'IEP coverage below threshold',
-    invalid_calculation: 'invalid calculation',
-  })[cas?.reason] || 'no live constituent IEPs';
   const dataSources = Array.isArray(d.dataSources) ? d.dataSources : [];
   const activeDataSource = dataSources.find(source => source.id === d.dataSource)
     || dataSources.find(source => source.active)
     || {};
-  const activeSourcePrice = Number(activeDataSource.indicativePrice);
-  const activeSourceHasPrice = activeDataSource.indicativePrice != null
-    && Number.isFinite(activeSourcePrice) && activeSourcePrice > 0;
+  const providerSourcePrice = Number(activeDataSource.indicativePrice);
+  const providerSourceHasPrice = activeDataSource.indicativePrice != null
+    && Number.isFinite(providerSourcePrice) && providerSourcePrice > 0;
+  const useKotakCasPrice = ['KOTAK', 'KOTAK_NEO'].includes(String(activeDataSource.id || d.dataSource || '').toUpperCase())
+    && casLive;
+  const activeSourcePrice = useKotakCasPrice ? Number(cas.value) : providerSourcePrice;
+  const activeSourceHasPrice = providerSourceHasPrice || useKotakCasPrice;
+  const activeSourcePriceLabel = useKotakCasPrice ? 'CAS IEP' : 'Indicative';
   const activeSourcePriceText = activeSourceHasPrice
     ? `₹${activeSourcePrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`
     : '₹—';
   const activeSourceQuoteTitle = activeSourceHasPrice
-    ? `Indicative spot price from ${activeDataSource.label || activeDataSource.id}${activeDataSource.indicativeAsOf ? ` · As of ${activeDataSource.indicativeAsOf}` : ''}`
+    ? `${activeSourcePriceLabel} price from ${activeDataSource.label || activeDataSource.id}${useKotakCasPrice ? ` · As of ${cas.asOf || ''}` : activeDataSource.indicativeAsOf ? ` · As of ${activeDataSource.indicativeAsOf}` : ''}`
     : `Indicative spot price unavailable from ${activeDataSource.label || d.dataSource || 'active provider'}`;
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
@@ -174,6 +189,44 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   }
   if (isBear === undefined) {
     isBear = isBearBias(d);
+  }
+  const modeSwitch = `<div class="instrument-mode-switch" role="group" aria-label="Instrument category">
+    <button type="button" data-mode="equity" class="${mode === 'equity' ? 'active' : ''}" aria-pressed="${mode === 'equity'}" onclick="setDashboardInstrumentMode('equity')">Equity</button>
+    <button type="button" data-mode="commodity" class="${mode === 'commodity' ? 'active' : ''}" aria-pressed="${mode === 'commodity'}" onclick="setDashboardInstrumentMode('commodity')">Commodities</button>
+  </div>`;
+  if (mode === 'commodity') {
+    const commodityFeedState = d.quoteAvailable ? 'LIVE' : d.quoteError ? 'UNAVAILABLE' : 'CONNECTING';
+    const sourceStatus = d.quoteAvailable ? 'AVAILABLE' : d.quoteError ? 'UNAVAILABLE' : 'CHECKING';
+    const sourceStatusTitle = d.quoteError || `MCX quote source: ${activeDataSource.label || activeDataSource.id || d.dataSource || 'Unknown'}`;
+    return `<div id="sec-topbar" class="top-bar commodity-topbar">
+      <div class="top-bar-left">
+        <div class="instrument-picker-stack">${modeSwitch}
+          <div class="active-symbol-pill"><select id="symbolSelect" class="symbol symbol-select" title="Select commodity" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols, mode)}</select></div>
+        </div>
+        <div class="commodity-topbar-quote">
+          <div class="commodity-topbar-price-row">
+            <strong id="commodity-price-ltp" class="commodity-topbar-ltp">—</strong>
+            <span id="commodity-price-change" class="commodity-price-change commodity-topbar-change">—</span>
+          </div>
+          <div class="commodity-topbar-contract-row">
+            <span id="commodity-price-contract" class="commodity-topbar-contract">MCX Futures</span>
+            <span class="commodity-topbar-lot">Lot size <b id="commodity-price-lot-size">—</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="expiry-strip commodity-expiry-strip">
+        <div class="expiry-pill feed-health-pill">
+          <span class="feed-row"><span class="expiry-pill-label">Feed</span><span id="commodity-price-status" class="feed-status-pill commodity-feed-status" data-status="${commodityFeedState.toLowerCase()}" role="status" title="MCX quote refresh status">${commodityFeedState}</span></span>
+          <span class="feed-row data-source-selector-row"><select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource, false)}</select></span>
+          <span class="data-source-meta"><span id="data-source-indicative-label" class="data-source-indicative-label">MCX FUTURES</span><span id="data-source-indicative-price" class="data-source-indicative-price">₹—</span><span class="feed-status-pill data-source-status-pill" data-status="${sourceStatus.toLowerCase().replaceAll('_','-')}" title="${escapeHtml(sourceStatusTitle)}">${escapeHtml(sourceStatus)}</span></span>
+        </div>
+        <div class="expiry-pill topbar-expiry-pill commodity-option-expiry-pill">
+          <span class="expiry-row"><span class="expiry-pill-label">Expiry</span></span>
+          <span class="expiry-row"><span id="commodity-expiry-slot"></span></span>
+        </div>
+        <div class="expiry-pill"><span class="expiry-pill-label">Updated</span><span class="expiry-pill-val time-val" id="commodity-updated-time">—</span></div>
+      </div>
+    </div>`;
   }
   // Flash direction vs the last tick actually rendered — see the
   // .tick-flash-up/-down keyframes in styles.css for why `animation`
@@ -208,9 +261,13 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
            F&O universe (d.fnoSymbols — every NSE/BSE underlying with live
            F&O contracts, grouped Indices/Stocks) plus whatever custom
            symbol is currently active if it isn't already in that list. -->
-      <div class="active-symbol-pill" title="${escapeHtml(symbolName)}">
-        <select id="symbolSelect" class="symbol symbol-select" title="Switch active symbol" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols)}</select>
+      <div class="instrument-picker-stack">
+        ${modeSwitch}
+        <div class="active-symbol-pill" title="${escapeHtml(symbolName)}">
+          <select id="symbolSelect" class="symbol symbol-select" title="Switch equity or index" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols, mode)}</select>
         <span class="symbol-name">${escapeHtml(symbolName)}</span>
+
+        </div>
       </div>
       <span class="spot-block">
         <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
@@ -219,13 +276,6 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
           <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
           <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
         </span>`:''}
-        ${casVisible ? `
-        <span class="cas-indicative${casLive ? '' : ' cas-unavailable'}" title="${casLive
-          ? `Kotak Neo CAS IEP · ${escapeHtml(String(cas.coveragePct ?? 0))}% constituent coverage · As of ${escapeHtml(String(cas.asOf || ''))}`
-          : `Kotak Neo CAS IEP unavailable · ${escapeHtml(casReason)}${cas.reason === 'outside_cas_window' ? '' : ` · ${escapeHtml(casCoverageLabel)} constituents`}`}">
-          CAS <strong>${casLive ? Number(cas.value).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</strong>
-          <small>${casLive ? escapeHtml(String(cas.asOf || '').slice(11, 16)) : cas.reason === 'outside_cas_window' ? 'inactive' : escapeHtml(casCoverageLabel)}</small>
-        </span>` : ''}
       </span>
       <div class="expiry-pill topbar-expiry-pill">
        <span class="expiry-row">
@@ -253,9 +303,11 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
              lives in each option's tooltip; the active provider's live
              state (LIVE/POLLING/UNAVAILABLE/SESSION_REQUIRED) is the small
              pill to its right. -->
-        <span class="feed-row">
-          <select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource)}</select>
-          <span class="data-source-meta">
+        <span class="feed-row data-source-selector-row">
+          <select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource, false)}</select>
+        </span>
+        <span class="data-source-meta">
+            <span id="data-source-indicative-label" class="data-source-indicative-label">${activeSourcePriceLabel}</span>
             <span id="data-source-indicative-price" class="data-source-indicative-price" title="${escapeHtml(activeSourceQuoteTitle)}">${activeSourcePriceText}</span>
           ${(() => {
             const list = Array.isArray(d.dataSources) ? d.dataSources : [];
@@ -265,7 +317,6 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
             // navigation.css) — the dropdown itself is the primary signal.
             return st ? `<span class="feed-status-pill data-source-status-pill" data-status="${String(st).toLowerCase()}" title="Active market-data source status">${escapeHtml(st)}</span>` : '';
           })()}
-          </span>
         </span>
       </div>
 
@@ -692,7 +743,9 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const signalObservedLabel = signalObservedAt
       ? new Date(signalObservedAt).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'})
       : 'time unavailable';
-    const signalFreshness = String(feedState.status || 'UNKNOWN').toUpperCase();
+    const signalFreshness = window.dashboardInstrumentMode === 'commodity'
+      ? (document.getElementById('commodity-price-status')?.dataset.tone === 'live' ? 'MCX' : 'MCX DATA')
+      : String(feedState.status || 'UNKNOWN').toUpperCase();
 
     const biasIsBull = bias === 'BULLISH';
     const biasIsBear = bias === 'BEARISH';
@@ -851,6 +904,9 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 
     const shDirection = String(sh.direction || 'NEUTRAL').toUpperCase();
     const shState = String(sh.state || 'NEUTRAL').toUpperCase();
+    const shStateLabel = shDirection === 'NEUTRAL' && shState === 'NEUTRAL'
+      ? 'No strong pressure'
+      : shState.replaceAll('_', ' ');
 
     const shProbability = Number.isFinite(Number(sh.probability))
       ? Number(sh.probability)
@@ -927,42 +983,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
   <div class="verdict ${biasCardCls}">
     <div class="verdict-top">
       <div>
-        <div class="decision-engine-hover">
-          <div class="verdict-label">Decision Engine</div>
-          <div class="decision-engine-evidence" role="tooltip">
-            <div class="decision-engine-evidence-title">Decision Evidence</div>
-            <div class="decision-engine-evidence-summary">
-              <span>Confidence <strong>${conf}%</strong></span>
-              <span>Coverage <strong>${evidenceCoverage}%</strong></span>
-            </div>
-            <div class="decision-engine-evidence-list">
-              ${visibleContributors.map(c => {
-                const available = c.available !== false;
-                const contribution = available && c.weightedContribution != null
-                  ? `${Number(c.weightedContribution) >= 0 ? '+' : ''}${Number(c.weightedContribution).toFixed(3)}`
-                  : 'unavailable';
-                const contributionColor = !available
-                  ? 'var(--neg)'
-                  : Number(c.weightedContribution) > 0
-                    ? 'var(--pos)'
-                    : Number(c.weightedContribution) < 0
-                      ? 'var(--neg)'
-                      : 'var(--text-tertiary)';
-                return `<div class="decision-engine-evidence-row">
-                  <span>${escapeHtml(c.label || c.key || 'Signal')}</span>
-                  <strong style="color:${contributionColor};">${available ? `${c.weight || 0}% · ${contribution}` : 'Missing'}</strong>
-                </div>`;
-              }).join('')}
-            </div>
-            <div class="decision-engine-evidence-footer">
-              <span>Signals ${sigs.length} · Bullish ${bullishSignalCount} · Bearish ${bearishSignalCount}</span>
-              <span>${escapeHtml(signalFreshness)} · Observed ${escapeHtml(signalObservedLabel)}</span>
-            </div>
-            ${decisionMissing.length
-              ? `<div class="decision-engine-evidence-missing">Missing: ${escapeHtml(decisionMissing.join(', '))}</div>`
-              : ''}
-          </div>
-        </div>
+        <div class="verdict-label">Decision Engine</div>
         <div class="verdict-tradeability ${tradeabilityCls}">
           ${tradeabilityLabel}
         </div>
@@ -972,7 +993,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-call verdict-bias">${bias}${str?` · <span class="verdict-bias-strength">${str}</span>`:''}${conflict?' ⚡':''}</div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}
       </div>
-      ${this._buildMiniChartHtml(d)}
+      ${window.dashboardInstrumentMode === 'commodity' ? '' : this._buildMiniChartHtml(d)}
       <div class="verdict-conf">
         <div class="verdict-conf-label">Evidence Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
@@ -983,13 +1004,36 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     </div>
     <div class="decision-flow" aria-label="Decision summary">
       <section class="decision-flow-block decision-flow-why">
-        <div class="decision-flow-label">${
-          tradeability === 'NO_TRADE'
-            ? 'Why — Blockers'
-            : tradeability === 'CONDITIONAL'
-              ? 'Why — Conditions'
-              : 'Why — Evidence'
-        }</div>
+        <div class="decision-evidence-hover" tabindex="0" aria-describedby="decision-engine-evidence">
+          <div class="decision-flow-label">
+            ${tradeability === 'NO_TRADE'
+              ? 'Why — Blockers'
+              : tradeability === 'CONDITIONAL'
+                ? 'Why — Conditions'
+                : 'Why — Evidence'}
+          </div>
+          <div id="decision-engine-evidence" class="decision-engine-evidence" role="tooltip">
+            <div class="decision-engine-evidence-title">Decision Evidence</div>
+            <div class="decision-engine-evidence-summary">
+              <span>Confidence <strong>${conf}%</strong></span>
+              <span>Coverage <strong>${evidenceCoverage}%</strong></span>
+            </div>
+            <div class="decision-engine-evidence-list">
+              ${visibleContributors.map(c => {
+                const contribution = Number(c.weightedContribution);
+                const available = c.available !== false && Number.isFinite(contribution);
+                const color = !available ? 'var(--text-tertiary)' : contribution > 0 ? 'var(--pos)' : contribution < 0 ? 'var(--neg)' : 'var(--text-tertiary)';
+                const value = available ? `${contribution > 0 ? '+' : ''}${contribution.toFixed(3)}` : 'Unavailable';
+                return `<div class="decision-engine-evidence-row"><span>${escapeHtml(c.label || c.key || 'Evidence')} · ${Number(c.weight)||0}% weight</span><strong style="color:${color};">${value}</strong></div>`;
+              }).join('')}
+            </div>
+            <div class="decision-engine-evidence-footer">
+              <span>${sigs.length} signals · ${bullishSignalCount} bullish · ${bearishSignalCount} bearish</span>
+              <span>Feed ${escapeHtml(signalFreshness)} · observed ${escapeHtml(signalObservedLabel)}</span>
+            </div>
+            ${decisionMissing.length ? `<div class="decision-engine-evidence-missing">Missing inputs: ${decisionMissing.map(escapeHtml).join(', ')}</div>` : ''}
+          </div>
+        </div>
         <div class="decision-flow-content">
           ${heroWhyHtml}
         </div>
@@ -1049,7 +1093,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           <div class="short-horizon-call">
             <span style="color:${shDirectionColor};">${escapeHtml(shDirection)}</span>
             <span class="short-horizon-state" style="color:${shStateColor};">
-              ${escapeHtml(shState.replaceAll('_', ' '))}
+              ${escapeHtml(shStateLabel)}
             </span>
           </div>
         </div>
@@ -1202,6 +1246,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
   // CE and green for PE; strike links open the dashboard-native detail view.
 ChainView.prototype.buildChainSummaryHtml = function(d) {
   const chain = getFilteredChain(d);
+  const isCommodity = window.dashboardInstrumentMode === 'commodity';
   const tableOpen = this.chainTableOpen === true;
   const ledgerView = this.chainLedgerView || 'positioning';
   const greeksByStrike = new Map((d.greeks || []).map(g => [Number(g.strike), g]));
@@ -1250,7 +1295,9 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   // PCR movement is a ratio delta, not an OI quantity. Formatting it with
   // fmtCrLK rounded almost every meaningful move to 0, since that formatter
   // intentionally has no decimal precision below one thousand contracts.
-  const signedPcrDelta = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtN(Math.abs(v), 3)}`;
+  const signedPcrDelta = (v) => v == null || !Number.isFinite(Number(v))
+    ? '—'
+    : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtN(Math.abs(v), 3)}`;
 
   // ── Positioning summary ─────────────────────────────────────────
   // D-04 owns aggregate positioning only. Intraday OI/capital FLOW has
@@ -1258,13 +1305,14 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   // concentrated across the currently visible strike range?
   const {totalCe, totalPe, pcr} = computeRangeChainTotals(chain);
 
-  const totalCeChg = chain.reduce((s,r)=>s+(r.ceChgOI||0),0);
-  const totalPeChg = chain.reduce((s,r)=>s+(r.peChgOI||0),0);
+  const hasOiChangeData = !isCommodity || chain.some(r=>r.ceChgOI!=null||r.peChgOI!=null);
+  const totalCeChg = hasOiChangeData ? chain.reduce((s,r)=>s+(r.ceChgOI||0),0) : null;
+  const totalPeChg = hasOiChangeData ? chain.reduce((s,r)=>s+(r.peChgOI||0),0) : null;
   const netOi = totalPe-totalCe;
-  const netChgOi = totalPeChg-totalCeChg;
-  const prevCe = totalCe-totalCeChg, prevPe = totalPe-totalPeChg;
-  const prevPcr = prevPe/(prevCe||1);
-  const pcrShift = pcr-prevPcr;
+  const netChgOi = hasOiChangeData ? totalPeChg-totalCeChg : null;
+  const prevCe = totalCe-(totalCeChg||0), prevPe = totalPe-(totalPeChg||0);
+  const prevPcr = hasOiChangeData ? prevPe/(prevCe||1) : null;
+  const pcrShift = hasOiChangeData ? pcr-prevPcr : null;
 
   const totalCeVol = chain.reduce((sum,r)=>sum+(r.ceVol||0),0);
   const totalPeVol = chain.reduce((sum,r)=>sum+(r.peVol||0),0);
@@ -1273,7 +1321,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   const oiTotal = totalCe + totalPe;
   const ceOiPct = oiTotal > 0 ? (totalCe / oiTotal) * 100 : 50;
   const peOiPct = 100 - ceOiPct;
-  const chgMagnitude = Math.abs(totalCeChg) + Math.abs(totalPeChg);
+  const chgMagnitude = Math.abs(totalCeChg||0) + Math.abs(totalPeChg||0);
   const ceChgPct = chgMagnitude > 0 ? (Math.abs(totalCeChg) / chgMagnitude) * 100 : 50;
   const peChgPct = 100 - ceChgPct;
   const positioningLabel = pcr > 1.05 ? 'Put-heavy' : pcr < 0.95 ? 'Call-heavy' : 'Balanced';
@@ -1358,18 +1406,18 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
           </div>
           <div class="oi-snap-title">Chg OI Summary</div>
-          <button type="button" class="oi-snap-chart-link" onclick="event.stopPropagation();openOIDashboardModal()" aria-label="Open OI Flow chart" title="Open OI Flow chart">
+          ${isCommodity?'':`<button type="button" class="oi-snap-chart-link" onclick="event.stopPropagation();openOIDashboardModal()" aria-label="Open OI Flow chart" title="Open OI Flow chart">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
-          </button>
-          <span class="oi-snap-head-net"><small>Net ΔOI · PE−CE</small><strong style="color:${signColor(netChgOi)}">${signedFmt(netChgOi)}</strong></span>
+          </button>`}
+          <span class="oi-snap-head-net"><small>Net ΔOI · PE−CE</small><strong style="color:${hasOiChangeData?signColor(netChgOi):'var(--text-tertiary)'}">${hasOiChangeData?signedFmt(netChgOi):'Unavailable'}</strong></span>
         </div>
         <div class="oi-snap-sides" aria-label="Call and put change in open interest totals">
-          <span class="ce"><small>CE ΔOI</small><strong>${signedFmt(totalCeChg)}</strong></span>
-          <span class="pe"><small>PE ΔOI</small><strong>${signedFmt(totalPeChg)}</strong></span>
+          <span class="ce"><small>CE ΔOI</small><strong>${hasOiChangeData?signedFmt(totalCeChg):'Unavailable'}</strong></span>
+          <span class="pe"><small>PE ΔOI</small><strong>${hasOiChangeData?signedFmt(totalPeChg):'Unavailable'}</strong></span>
         </div>
-        <div class="oi-snap-balance" aria-label="Absolute change split: CE ${fmtN(ceChgPct,0)} percent, PE ${fmtN(peChgPct,0)} percent">
-          <div class="oi-snap-balance-labels"><span class="ce">CE share ${fmtN(ceChgPct,0)}%</span><span class="pe">PE share ${fmtN(peChgPct,0)}%</span></div>
-          <div class="oi-snap-balance-track"><i class="ce" style="width:${ceChgPct}%"></i><i class="pe" style="width:${peChgPct}%"></i></div>
+        <div class="oi-snap-balance" aria-label="${hasOiChangeData?`Absolute change split: CE ${fmtN(ceChgPct,0)} percent, PE ${fmtN(peChgPct,0)} percent`:'Open-interest change data unavailable'}">
+          <div class="oi-snap-balance-labels">${hasOiChangeData?`<span class="ce">CE share ${fmtN(ceChgPct,0)}%</span><span class="pe">PE share ${fmtN(peChgPct,0)}%</span>`:'<span>Change split unavailable</span>'}</div>
+          <div class="oi-snap-balance-track"><i class="ce" style="width:${hasOiChangeData?ceChgPct:0}%"></i><i class="pe" style="width:${hasOiChangeData?peChgPct:0}%"></i></div>
         </div>
         <div class="oi-snap-inline-metrics" aria-label="Net OI flow and velocity">
           <div class="oi-snap-inline-heading"><strong>OI Flow / Velocity</strong><small>PE−CE ΔOI</small></div>
@@ -1409,13 +1457,13 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
             </tr>
           </thead>
           <tbody>
-            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; const oiWinner=(Number(r.peOI)||0)===(Number(r.ceOI)||0)?'':((Number(r.peOI)||0)>(Number(r.ceOI)||0)?'pe':'ce'); const chgWinner=Math.abs(Number(r.peChgOI)||0)===Math.abs(Number(r.ceChgOI)||0)?'':(Math.abs(Number(r.peChgOI)||0)>Math.abs(Number(r.ceChgOI)||0)?'pe':'ce'); return `<tr class="oc-ledger-row ${isAtm?'atm':''}">
+            ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; const oiWinner=(Number(r.peOI)||0)===(Number(r.ceOI)||0)?'':((Number(r.peOI)||0)>(Number(r.ceOI)||0)?'pe':'ce'); const chgWinner=Math.abs(Number(r.peChgOI)||0)===Math.abs(Number(r.ceChgOI)||0)?'':(Math.abs(Number(r.peChgOI)||0)>Math.abs(Number(r.ceChgOI)||0)?'pe':'ce'); return `<tr class="oc-ledger-row ${isAtm?'atm':''}" data-strike="${Number(r.strike)}">
               <td class="oc-metric positioning signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
-              <td class="ltp ce"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button></td>
-              <td class="ltp pe"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button></td>
+              <td class="ltp ce">${isCommodity?`<span><strong>${fmtN(r.ceLTP,2)}</strong><small>—</small></span>`:`<button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button>`}</td>
+              <td class="ltp pe">${isCommodity?`<span><strong>${fmtN(r.peLTP,2)}</strong><small>—</small></span>`:`<button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button>`}</td>
               <td class="strike"><button type="button" onclick="event.stopPropagation();openOptionChainAtStrike(${Number(r.strike)})" aria-label="Open Strike Detail for ${fmtI(r.strike)}"><strong>${fmtI(r.strike)}</strong><small>PCR ${r.ceOI?fmtN((r.peOI||0)/r.ceOI,2):'—'}</small></button></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${oiWinner==='pe'?'dominant':''}">${fmtCrLK(r.peOI)}</span><span class="side-value ce ${oiWinner==='ce'?'dominant':''}">${fmtCrLK(r.ceOI)}</span></div></td>
-              <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${chgWinner==='pe'?'dominant':''}">${signedFmt(r.peChgOI)}</span><span class="side-value ce ${chgWinner==='ce'?'dominant':''}">${signedFmt(r.ceChgOI)}</span></div></td>
+              <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${chgWinner==='pe'?'dominant':''}">${hasOiChangeData?signedFmt(r.peChgOI):'—'}</span><span class="side-value ce ${chgWinner==='ce'?'dominant':''}">${hasOiChangeData?signedFmt(r.ceChgOI):'—'}</span></div></td>
              <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe">${fmtCapital(r.peCapitalFlow)}</span><span class="side-value ce">${fmtCapital(r.ceCapitalFlow)}</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
               <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>

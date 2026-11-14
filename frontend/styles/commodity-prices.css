@@ -1,15 +1,46 @@
 .commodity-prices-panel{
   width:100%;
   max-width:none;
-  height:100vh;
-  height:100dvh;
-  min-height:0;
+  min-height:auto;
   max-height:none;
-  margin:0;
-  align-self:stretch;
-  border:0;
-  border-radius:0;
-  overflow:hidden;
+  margin:0 auto 20px;
+  align-self:auto;
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:visible;
+}
+
+.commodity-dashboard-slot{display:none;width:100%;}
+body.commodity-mode .commodity-dashboard-slot{display:block;}
+body.commodity-mode #dashboard{display:block!important;}
+body.commodity-mode #dashboard>*:not(#sec-topbar):not(#sec-decision):not(#commodity-dashboard-slot){display:none!important;}
+body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
+.commodity-topbar-status{flex:0 0 auto;min-height:0;margin:0 0 0 auto;text-align:right;white-space:nowrap;font-size:var(--fs-xs);}
+.instrument-mode-switch{display:flex;gap:2px;padding:3px;background:var(--bg-0);border:1px solid var(--border);border-radius:999px;}
+.instrument-mode-switch button{padding:4px 8px;border:0;border-radius:999px;background:transparent;color:var(--text-secondary);font:inherit;font-size:var(--fs-xs);cursor:pointer;white-space:nowrap;}
+.instrument-mode-switch button.active{background:var(--bg-2);color:var(--text-primary);}
+.instrument-picker-stack{display:flex;flex-direction:column;align-items:flex-start;gap:3px;flex:0 0 auto;}
+.instrument-picker-stack .instrument-mode-switch{align-self:flex-start;}
+.instrument-picker-stack .active-symbol-pill{height:42px;min-height:42px;grid-template-rows:auto auto;gap:1px;padding:4px 8px;}
+.instrument-picker-stack .symbol-select{font-size:var(--fs-sm);}
+.instrument-picker-stack .symbol-name{font-size:8px;}
+.commodity-topbar .top-bar-left{gap:12px;}
+.commodity-topbar-quote{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;white-space:nowrap;}
+.commodity-topbar-price-row,.commodity-topbar-contract-row{display:flex;align-items:baseline;gap:9px;}
+.commodity-topbar-contract{color:var(--text-secondary);font-family:var(--font-mono);font-size:var(--fs-xs);}
+.commodity-topbar-lot{color:var(--text-tertiary);font-size:var(--fs-xs);}
+.commodity-topbar-lot b{color:var(--text-secondary);font-family:var(--font-mono);}
+.commodity-topbar-ltp{font-family:var(--font-mono);font-size:clamp(28px,5vw,38px);font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums;}
+.commodity-topbar-ltp.up{color:var(--pos);}
+.commodity-topbar-ltp.down{color:var(--neg);}
+.commodity-topbar-change{font-family:var(--font-mono);font-size:var(--fs-xs);font-variant-numeric:tabular-nums;}
+.commodity-option-expiry-pill{min-width:118px;}
+.commodity-option-expiry-pill #commodity-expiry-slot{display:inline-flex;min-width:0;max-width:150px;overflow:hidden;}
+.commodity-option-expiry-pill #commodity-expiry{max-width:150px;font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);background:transparent;border:0;padding:0 14px 0 0;}
+.commodity-option-expiry-pill #commodity-expiry:focus{color:var(--info);}
+@media(max-width:680px){
+  .commodity-topbar .top-bar-left{align-items:flex-start;flex-wrap:wrap;}
+  .commodity-topbar-quote{flex:1 1 auto;}
 }
 
 .commodity-prices-panel .oc-modal-bar{
@@ -33,17 +64,17 @@
 }
 
 .commodity-prices-content{
-  flex:1;
-  min-height:0;
+  flex:initial;
+  min-height:auto;
   width:100%;
   box-sizing:border-box;
-  padding:20px;
-  overflow:auto;
+  padding:12px 16px;
+  overflow:visible;
 }
 
 .commodity-price-status{
-  min-height:22px;
-  margin-bottom:12px;
+  min-height:18px;
+  margin-bottom:6px;
   color:var(--text-secondary);
   font-size:var(--fs-sm);
 }
@@ -54,18 +85,11 @@
 .commodity-price-card{
   display:grid;
   grid-template-columns:1fr auto;
-  gap:10px 20px;
-  padding:22px;
+  gap:6px 14px;
+  padding:12px 14px;
   background:var(--bg-1);
   border:1px solid var(--border);
   border-radius:var(--radius);
-}
-
-.commodity-price-symbol{
-  display:block;
-  font-family:var(--font-display);
-  font-size:var(--fs-lg);
-  font-weight:700;
 }
 
 .commodity-price-contract{
@@ -73,20 +97,31 @@
   font-size:var(--fs-xs);
 }
 
-.commodity-price-ltp{
+.commodity-price-contract b{
+  color:var(--text-secondary);
+  font-family:var(--font-mono);
+  font-weight:600;
+}
+
+.commodity-price-value{
   grid-column:2;
   grid-row:1;
-  align-self:center;
+  display:flex;
+  align-items:baseline;
+  justify-content:flex-end;
+  gap:10px;
+  white-space:nowrap;
+}
+
+.commodity-price-ltp{
   font-family:var(--font-mono);
   font-size:clamp(24px,5vw,38px);
   font-variant-numeric:tabular-nums;
 }
 
 .commodity-price-change{
-  grid-column:2;
-  grid-row:2;
-  justify-self:end;
   font-family:var(--font-mono);
+  font-size:var(--fs-xs);
   font-variant-numeric:tabular-nums;
 }
 
@@ -96,17 +131,17 @@
 .commodity-price-details{
   grid-column:1/-1;
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:12px;
-  margin-top:12px;
-  padding-top:16px;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:6px 12px;
+  margin-top:4px;
+  padding-top:8px;
   border-top:1px solid var(--border);
 }
 
 .commodity-price-details span{
   display:flex;
   flex-direction:column;
-  gap:4px;
+  gap:1px;
   color:var(--text-tertiary);
   font-size:var(--fs-xs);
 }
@@ -114,75 +149,150 @@
 .commodity-price-details b{
   color:var(--text-primary);
   font-family:var(--font-mono);
-  font-size:var(--fs-sm);
+  font-size:var(--fs-xs);
   font-variant-numeric:tabular-nums;
 }
 
+.commodity-price-details i{font-style:normal;}
+
 .commodity-analysis-card{
-  margin-top:14px;
-  padding:16px;
-  background:var(--bg-1);
+  margin:12px 16px 0;
+  padding:0;
+  background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
   border:1px solid var(--border);
+  border-left-width:5px;
   border-radius:var(--radius);
+  overflow:hidden;
+}
+.commodity-analysis-card[data-verdict="BULLISH"]{border-left-color:var(--pos);}
+.commodity-analysis-card[data-verdict="BEARISH"]{border-left-color:var(--neg);}
+.commodity-analysis-card[data-verdict="WAIT"],
+.commodity-analysis-card[data-verdict="NEUTRAL"]{border-left-color:var(--warn);}
+
+.commodity-decision-top{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 190px;
+  gap:18px;
+  padding:18px;
+  background:var(--bg-2);
+  border-bottom:1px solid var(--border);
 }
 
-.commodity-analysis-heading{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
+.commodity-decision-main{
+  display:grid;
+  justify-items:start;
+  align-content:start;
+  gap:8px;
+}
+
+.commodity-decision-label,
+.commodity-decision-confidence > span,
+.commodity-decision-block-label{
+  color:var(--text-tertiary);
+  font-size:var(--fs-2xs);
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
 }
 
 .commodity-analysis-verdict{
-  padding:4px 9px;
-  border:1px solid var(--border);
-  border-radius:999px;
-  color:var(--text-secondary);
-  font-size:var(--fs-xs);
+  color:var(--text-primary);
+  font-size:clamp(22px,4vw,30px);
   font-weight:800;
+  line-height:1;
 }
 
 .commodity-analysis-verdict[data-verdict="BULLISH"]{
   color:var(--pos);
-  border-color:var(--pos);
 }
 
 .commodity-analysis-verdict[data-verdict="BEARISH"]{
   color:var(--neg);
-  border-color:var(--neg);
 }
 
 .commodity-analysis-verdict[data-verdict="WAIT"]{
   color:var(--warn);
-  border-color:var(--warn);
 }
 
-.commodity-analysis-card p{
-  margin:10px 0;
+.commodity-decision-main p{
+  max-width:760px;
+  margin:0;
   color:var(--text-secondary);
   font-size:var(--fs-sm);
 }
 
-.commodity-analysis-weightage{
+.commodity-decision-confidence{
   display:grid;
-  gap:7px;
-  margin:12px 0;
-  padding:10px 12px;
+  align-content:center;
+  gap:5px;
+  padding-left:16px;
+  border-left:1px solid var(--border);
+}
+
+.commodity-decision-confidence > strong{
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:30px;
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+}
+
+.commodity-short-horizon{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:8px 16px;align-items:center;padding:12px 18px;background:var(--bg-1);border-bottom:1px solid var(--border);}
+.commodity-short-horizon-heading{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.commodity-short-horizon-heading>span,.commodity-short-horizon-score>span{color:var(--text-tertiary);font-size:var(--fs-2xs);font-weight:700;letter-spacing:.05em;text-transform:uppercase;}
+.commodity-short-horizon-heading>strong{font-family:var(--font-display);font-size:var(--fs-base);}
+.commodity-short-horizon-heading>strong[data-direction="UP"]{color:var(--pos);}
+.commodity-short-horizon-heading>strong[data-direction="DOWN"]{color:var(--neg);}
+.commodity-short-horizon-heading>strong[data-direction="NEUTRAL"]{color:var(--text-secondary);}
+.commodity-short-horizon-heading>small,.commodity-short-horizon-score>small{color:var(--text-tertiary);font-size:var(--fs-2xs);}
+.commodity-short-horizon-score{display:grid;grid-template-columns:auto auto;gap:2px 8px;align-items:baseline;text-align:right;}
+.commodity-short-horizon-score>strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--fs-sm);}
+.commodity-short-horizon-score>small{grid-column:1/-1;}
+.commodity-short-horizon>p{grid-column:1/-1;margin:0;color:var(--text-secondary);font-size:var(--fs-xs);}
+
+.commodity-decision-confidence > small,
+.commodity-decision-block > small,
+.commodity-analysis-scope{
+  color:var(--text-tertiary);
+  font-size:var(--fs-2xs);
+  line-height:1.5;
+}
+
+.commodity-confidence-track{
+  height:4px;
+  margin-top:3px;
+  overflow:hidden;
+  background:var(--bg-0);
+  border-radius:999px;
+}
+
+.commodity-confidence-track i{
+  display:block;
+  width:0;
+  height:100%;
+  background:var(--info);
+  border-radius:inherit;
+  transition:width .2s ease;
+}
+
+.commodity-decision-flow{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr);
+  gap:14px;
+  padding:16px 18px 10px;
+}
+
+.commodity-decision-block{
+  min-width:0;
+  padding:12px;
   background:var(--bg-2);
   border:1px solid var(--border);
   border-radius:8px;
 }
 
-.commodity-analysis-weightage > strong{
-  color:var(--text-secondary);
-  font-size:var(--fs-xs);
-}
-
-.commodity-analysis-weightage > span{
-  color:var(--text-tertiary);
-  font-family:var(--font-mono);
-  font-size:var(--fs-xs);
-  font-variant-numeric:tabular-nums;
+.commodity-decision-block-label{
+  display:block;
+  margin-bottom:10px;
 }
 
 .commodity-analysis-weightage-rows{
@@ -194,10 +304,14 @@
   display:grid;
   grid-template-columns:minmax(0,1fr) auto auto;
   align-items:center;
-  gap:12px;
+  gap:9px;
+  padding:5px 0;
+  border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);
   color:var(--text-tertiary);
   font-size:var(--fs-xs);
 }
+
+.commodity-analysis-weightage-row:last-child{border-bottom:0;}
 
 .commodity-analysis-weightage-row strong{
   color:var(--text-primary);
@@ -214,36 +328,96 @@
 .commodity-analysis-weightage-direction.neutral{color:var(--warn);}
 .commodity-analysis-weightage-direction.unavailable{color:var(--text-tertiary);}
 
-.commodity-analysis-weightage > small{
-  color:var(--text-tertiary);
-  font-size:var(--fs-2xs);
-}
-
-.commodity-analysis-metrics{
+.commodity-decision-levels{
   display:grid;
-  grid-template-columns:repeat(5,minmax(0,1fr));
-  gap:10px;
-  margin:12px 0;
+  align-content:start;
+  gap:0;
 }
 
-.commodity-analysis-metrics span{
+.commodity-decision-levels > div{
   display:flex;
-  flex-direction:column;
-  gap:4px;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:7px 0;
+  border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);
   color:var(--text-tertiary);
   font-size:var(--fs-xs);
 }
 
-.commodity-analysis-metrics b{
+.commodity-decision-levels > div:last-child{border-bottom:0;}
+
+.commodity-decision-levels b{
   color:var(--text-primary);
   font-family:var(--font-mono);
   font-size:var(--fs-sm);
   font-variant-numeric:tabular-nums;
+  text-align:right;
 }
 
-.commodity-analysis-card > small{
+.commodity-analysis-scope{
+  display:block;
+  padding:0 18px 16px;
+}
+
+.commodity-news{
+  margin-top:12px;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+}
+
+.commodity-news summary{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 14px;
+  color:var(--text-primary);
+  cursor:pointer;
+  font-size:var(--fs-sm);
+  font-weight:700;
+  list-style-position:inside;
+}
+
+.commodity-news summary small{
+  overflow:hidden;
   color:var(--text-tertiary);
-  font-size:var(--fs-xs);
+  font-size:var(--fs-2xs);
+  font-weight:400;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.commodity-news-list{
+  display:grid;
+  gap:0;
+  max-height:280px;
+  margin:0;
+  padding:0 14px 8px;
+  overflow:auto;
+  list-style:none;
+}
+
+.commodity-news-list li{
+  display:grid;
+  gap:3px;
+  padding:9px 0;
+  border-top:1px solid var(--border);
+}
+
+.commodity-news-list a{
+  color:var(--text-primary);
+  font-size:var(--fs-sm);
+  line-height:1.35;
+  text-decoration:none;
+}
+
+.commodity-news-list a:hover{text-decoration:underline;}
+
+.commodity-news-list small{
+  color:var(--text-tertiary);
+  font-size:var(--fs-2xs);
 }
 
 .commodity-price-note{
@@ -328,10 +502,18 @@
 }
 
 .commodity-chain-table tbody tr.atm{background:color-mix(in srgb,var(--info) 12%,transparent);}
+.commodity-chain-table tbody tr.focused{outline:2px solid var(--accent);outline-offset:-2px;}
 .commodity-chain-table td.call-ltp{color:var(--pos);}
 .commodity-chain-table td.put-ltp{color:var(--neg);}
 
 @media(max-width:520px){
+  .commodity-news summary{align-items:flex-start;flex-direction:column;gap:4px;}
+  .commodity-price-value{gap:7px;}
+  .commodity-price-ltp{font-size:24px;}
   .commodity-price-details{grid-template-columns:repeat(2,minmax(0,1fr));}
-  .commodity-analysis-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .commodity-decision-top{grid-template-columns:1fr;gap:14px;}
+  .commodity-decision-confidence{padding:12px 0 0;border-top:1px solid var(--border);border-left:0;}
+  .commodity-short-horizon{grid-template-columns:1fr auto;padding:12px;}
+  .commodity-decision-flow{grid-template-columns:1fr;padding:12px;}
+  .commodity-analysis-scope{padding:0 12px 14px;}
 }

@@ -138,18 +138,38 @@ ChainView.prototype._rerenderChainPanels = function() {
   if(app.modal && typeof app.modal._updateOptionChainContext === 'function') app.modal._updateOptionChainContext();
 
   const chain          = getFilteredChain(_data);
-  const chainStrikeSet = new Set(chain.map(r=>r.strike)); // still needed below (vol/OI velocity totals)
   const atm            = activeAtm(_data);
-  const greeksAll      = _data.greeks || [];
   // getVisibleRangeGreeks (metrics.js, IA redesign step 6) — same
   // visible-range filter as renderDashboard's `greeks`.
   const greeks         = getVisibleRangeGreeks(_data, chain);
+  const greeksByStrike = new Map();
+  greeks.forEach(row=>{ if(!greeksByStrike.has(row.strike)) greeksByStrike.set(row.strike,row); });
   const velBlock       = (_data.oiVelocity||[]).find(b=>b.window===_velWin)||(_data.oiVelocity||[])[0];
   const velByStrike    = {};
-  if(velBlock&&velBlock.rows) velBlock.rows.forEach(vr=>{velByStrike[vr.strike]=vr;});
-  const velMax         = Math.max(...chain.map(r=>{const vr=velByStrike[r.strike]||{};return Math.max(Math.abs(vr.ceDOI||0),Math.abs(vr.peDOI||0));}),1);
+  let totCeVel=0, totPeVel=0, velMax=1, maxOI=1;
+  if(velBlock&&velBlock.rows) velBlock.rows.forEach(vr=>{
+    velByStrike[vr.strike]=vr;
+  });
   const oiAnnot        = (_data.decision&&_data.decision.oiAnnotations)||{};
-  const maxOI          = Math.max(...chain.map(r=>Math.max(r.ceOI||0,r.peOI||0)),1);
+  let totCeOI=0, totPeOI=0, totCeDOI=0, totPeDOI=0;
+  let totCeVolChg=0, totPeVolChg=0, totCeVol=0, totPeVol=0;
+  let bullStrikes=0, bearStrikes=0;
+  for(const r of chain){
+    const ceVel=velByStrike[r.strike]||{};
+    const ceVelocity=Math.abs(ceVel.ceDOI||0), peVelocity=Math.abs(ceVel.peDOI||0);
+    totCeVel+=ceVel.ceDOI||0; totPeVel+=ceVel.peDOI||0;
+    if(ceVelocity>velMax) velMax=ceVelocity;
+    if(peVelocity>velMax) velMax=peVelocity;
+    const rowOI=Math.max(r.ceOI||0,r.peOI||0);
+    if(rowOI>maxOI) maxOI=rowOI;
+    totCeOI+=r.ceOI||0; totPeOI+=r.peOI||0;
+    totCeDOI+=r.ceChgOI||0; totPeDOI+=r.peChgOI||0;
+    totCeVolChg+=r.ceVolChg||0; totPeVolChg+=r.peVolChg||0;
+    totCeVol+=r.ceVol||0; totPeVol+=r.peVol||0;
+    const signalClass=combinedSignal(r.ceSignal,r.peSignal).cls;
+    if(signalClass==='sp-strongbull'||signalClass==='sp-bull') bullStrikes++;
+    else if(signalClass==='sp-strongbear'||signalClass==='sp-bear') bearStrikes++;
+  }
 
   // ── 1. Chain table body ───────────────────────────────────────────────────
   const chainEl = document.getElementById('chain-body');
@@ -163,7 +183,7 @@ ChainView.prototype._rerenderChainPanels = function() {
     let rows='';
     chain.forEach(r=>{
       const ia=r.atm||r.strike===atm; const ac=ia?' atm':''; const acs=ia?' atm-sc':'sc';
-      const g=greeks.find(x=>x.strike===r.strike)||{};
+      const g=greeksByStrike.get(r.strike)||{};
       const sk=r.strike;
       const vr=velByStrike[sk]||{};
       const ceVelDOI=vr.ceDOI!=null?vr.ceDOI:null;
@@ -217,26 +237,15 @@ ChainView.prototype._rerenderChainPanels = function() {
   // ── 3. Right analytics panel ──────────────────────────────────────────────
   const rpEl = document.querySelector('.chain-right-panel');
   if(rpEl){
-    const totCeOI  = chain.reduce((s,r)=>s+(r.ceOI||0),0);
-    const totPeOI  = chain.reduce((s,r)=>s+(r.peOI||0),0);
-    const totCeDOI = chain.reduce((s,r)=>s+(r.ceChgOI||0),0);
-    const totPeDOI = chain.reduce((s,r)=>s+(r.peChgOI||0),0);
-    const velBlockRP=((_data.oiVelocity||[]).find(b=>b.window===_velWin)||(_data.oiVelocity||[])[0]);
-    const totCeVel=(velBlockRP&&velBlockRP.rows||[]).filter(r=>chainStrikeSet.has(r.strike)).reduce((s,r)=>s+(r.ceDOI||0),0);
-    const totPeVel=(velBlockRP&&velBlockRP.rows||[]).filter(r=>chainStrikeSet.has(r.strike)).reduce((s,r)=>s+(r.peDOI||0),0);
     const maxDOIrp=Math.max(Math.abs(totCeDOI),Math.abs(totPeDOI),1);
     const maxVelrp=Math.max(Math.abs(totCeVel),Math.abs(totPeVel),1);
     function rpBar(v,max,clr){const w=Math.max(Math.round(Math.abs(v)/max*72),2);return `<div class="crp-spark-wrap"><div class="crp-spark" style="width:${w}px;background:${clr};"></div><span style="font-size:9px;font-family:var(--mono);color:${clr};">${fmtK(v)}</span></div>`;}
-    const bullStrikes=chain.filter(r=>{const cs=combinedSignal(r.ceSignal,r.peSignal);return cs.cls==='sp-strongbull'||cs.cls==='sp-bull';}).length;
-    const bearStrikes=chain.filter(r=>{const cs=combinedSignal(r.ceSignal,r.peSignal);return cs.cls==='sp-strongbear'||cs.cls==='sp-bear';}).length;
     const aggBias=bullStrikes>bearStrikes?{label:'Bullish',cls:'sp-bull'}:bearStrikes>bullStrikes?{label:'Bearish',cls:'sp-bear'}:{label:'Mixed',cls:'sp-mixed'};
     const panelPCR=totCeOI>0?(totPeOI/totCeOI).toFixed(2):'—';
     const pcrColor=parseFloat(panelPCR)>1?'var(--green)':parseFloat(panelPCR)<0.8?'var(--red)':'var(--amber)';
     const netOI=totPeOI-totCeOI; const netDOI=totPeDOI-totCeDOI; const netVel=totPeVel-totCeVel;
     const netAbsMax=Math.max(Math.abs(netOI),Math.abs(netDOI),Math.abs(netVel),1);
     const arpBarW=(v,max)=>Math.max(Math.round(Math.abs(v)/max*72),3);
-    const totCeVolChg=chain.reduce((s,r)=>s+(r.ceVolChg||0),0);
-    const totPeVolChg=chain.reduce((s,r)=>s+(r.peVolChg||0),0);
     const maxVolChg=Math.max(Math.abs(totCeVolChg),Math.abs(totPeVolChg),1);
     // ── VOL VEL FIX (v2) ──
     // v1 diffed against the *previous render*, which fires almost every WS
@@ -314,7 +323,7 @@ ChainView.prototype._rerenderChainPanels = function() {
       <div style="display:grid;grid-template-columns:64px 1fr 1fr;gap:2px;margin-bottom:4px;">
         <div></div><div class="crp-head-ce">CE</div><div class="crp-head-pe">PE</div>
       </div>
-      <div class="crp-row"><span class="crp-label">Vol</span><div class="crp-ce">${fmtK(chain.reduce((s,r)=>s+(r.ceVol||0),0))}</div><div class="crp-pe">${fmtK(chain.reduce((s,r)=>s+(r.peVol||0),0))}</div></div>
+      <div class="crp-row"><span class="crp-label">Vol</span><div class="crp-ce">${fmtK(totCeVol)}</div><div class="crp-pe">${fmtK(totPeVol)}</div></div>
       <div class="crp-row"><span class="crp-label">Vol Chg</span>${rpBar(totCeVolChg,maxVolChg,totCeVolChg>=0?'var(--red)':'var(--green)')}${rpBar(totPeVolChg,maxVolChg,totPeVolChg>=0?'var(--green)':'var(--red)')}</div>
       <div class="crp-row"><span class="crp-label">Vol Vel</span>${rpBar(totCeVelVol,maxVelVol,totCeVelVol>=0?'var(--red)':'var(--green)')}${rpBar(totPeVelVol,maxVelVol,totPeVelVol>=0?'var(--green)':'var(--red)')}</div>
     </div>`;

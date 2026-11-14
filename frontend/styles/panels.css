@@ -165,33 +165,19 @@
 .verdict-top{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px 32px;}
 .verdict-label{font-family:var(--font-display);font-size:var(--fs-sm);font-weight:600;letter-spacing:.1em;color:var(--text-secondary);text-transform:uppercase;}
 
-.decision-engine-hover{
+.decision-evidence-hover{
   position:relative;
   display:inline-block;
   cursor:help;
-  padding-bottom:8px;
-  margin-bottom:-8px;
-}
-.decision-engine-hover::after{
-  content:'';
-  position:absolute;
-  left:0;
-  right:-370px;
-  top:100%;
-  height:10px;
-}
-.decision-engine-hover .verdict-label{
-  transition:color .15s ease;
-}
-.decision-engine-hover:hover .verdict-label{
-  color:var(--text-primary);
 }
 .decision-engine-evidence{
   position:absolute;
   z-index:20;
-  top:100%;
+  top:calc(100% + 2px);
   left:0;
-  width:360px;
+  width:min(360px, calc(100vw - 32px));
+  max-height:min(420px, calc(100vh - 32px));
+  overflow:auto;
   padding:12px 14px;
   background:var(--bg-1);
   border:1px solid var(--border);
@@ -199,12 +185,12 @@
   box-shadow:0 12px 30px rgba(0,0,0,.28);
   opacity:0;
   visibility:hidden;
-  pointer-events:none;
+  pointer-events:auto;
   transform:translateY(-4px);
   transition:opacity .12s ease, transform .12s ease, visibility .12s ease;
 }
-.decision-engine-hover:hover .decision-engine-evidence,
-.decision-engine-hover:focus-within .decision-engine-evidence{
+.decision-evidence-hover:hover .decision-engine-evidence,
+.decision-evidence-hover:focus-within .decision-engine-evidence{
   opacity:1;
   visibility:visible;
   transform:translateY(0);
@@ -408,6 +394,8 @@
 .decision-flow-block{min-width:0;padding:0 18px;border-left:1px solid var(--border-2);}
 .decision-flow-block:first-child{padding-left:0;border-left:0;}
 .decision-flow-label{margin-bottom:8px;color:var(--text-tertiary);font-size:var(--fs-xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
+.decision-evidence-hover .decision-flow-label{margin-bottom:0;transition:color .15s ease;}
+.decision-evidence-hover:hover .decision-flow-label,.decision-evidence-hover:focus-visible .decision-flow-label{color:var(--text-primary);}
 .decision-flow-content{display:grid;gap:5px;}
 .decision-flow-line{display:flex;gap:8px;min-width:0;color:var(--text-secondary);font-size:var(--fs-sm);}
 .decision-flow-reason{color:var(--text-primary);font-weight:700;}

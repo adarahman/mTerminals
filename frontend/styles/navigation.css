@@ -231,18 +231,7 @@
   min-width:0;
 }
 
-.cas-indicative{
-  display:inline-flex;align-items:baseline;gap:4px;margin-top:2px;
-  color:var(--text-tertiary);font-family:var(--font-display);
-  font-size:9px;font-weight:700;letter-spacing:.04em;white-space:nowrap;
-}
-.cas-indicative strong{color:var(--warning,var(--accent));font-size:11px;}
-.cas-indicative small{color:var(--text-tertiary);font-size:8px;font-weight:500;}
-.cas-indicative.cas-unavailable strong{color:var(--text-tertiary);}
-
-/* Active underlying mirrors the bordered, two-line FUT reference pill:
-   the editable symbol remains first, while its instrument reference is a
-   deliberately quiet micro-label underneath. */
+/* Active underlying mirrors the bordered FUT reference pill. */
 .active-symbol-pill{
   display:inline-grid;grid-template-rows:auto auto;align-content:center;justify-items:start;gap:2px;width:fit-content;height:58px;box-sizing:border-box;
   padding:5px 10px;border:2px solid rgba(255,212,59,0.35);border-radius:14px;
@@ -319,9 +308,11 @@
 .feed-health-pill{min-width:150px;}
 .feed-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;width:100%;white-space:nowrap;}
 .feed-row .expiry-pill-label{text-align:left;}
-.feed-row .data-source-select{text-align:left;width:16ch;max-width:16ch;min-width:16ch;padding:2px 12px 2px 2px;background-position:right center;}
-.feed-row .data-source-status-pill{text-align:right;}
-.data-source-meta{display:flex;align-items:center;gap:6px;}
+.feed-row .data-source-select{text-align:left;width:100%;max-width:100%;min-width:0;padding:2px 12px 2px 2px;background-position:right center;}
+.data-source-meta .data-source-status-pill{text-align:right;}
+.data-source-selector-row{display:block;}
+.data-source-meta{display:flex;align-items:center;justify-content:space-between;gap:5px;width:100%;}
+.data-source-indicative-label{color:var(--text-tertiary);font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;}
 .data-source-indicative-price{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
 
 /* Data-source status readout (POLLING/LIVE/UNAVAILABLE/SESSION_REQUIRED)
@@ -330,7 +321,7 @@
    (8px font-display, .06em letterspacing): a micro hint only, not a
    fenced pill. Status accent color still follows the [data-status] rules
    below; this override strips the fence and re-sizes the type. */
-.feed-row .data-source-status-pill[data-status]{border:0;background:transparent;padding:0;font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.06em;line-height:1;text-transform:uppercase;white-space:nowrap;}
+.data-source-meta .data-source-status-pill[data-status]{border:0;background:transparent;padding:0;font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.06em;line-height:1;text-transform:uppercase;white-space:nowrap;}
 
 /* Spot price block — the big price with its change + %chg rendered as
    small plain text tokens directly below it (reorganized per the top-bar

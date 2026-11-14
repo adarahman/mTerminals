@@ -206,6 +206,8 @@ def get_futures_quote(underlying: str, which: str = "NEAR") -> dict | None:
         "Contract": contract["tradingsymbol"],
         "Underlying": underlying.upper(),
         "Expiry": expiry.strftime("%d-%b-%Y"),
+        "Exchange": "MCX" if segment == "mcx_fo" else segment,
+        "LotSize": contract.get("lot_size"),
         "LTP": ltp,
         "Change": quote.get("net_change", quote.get("change")),
         "PctChange": quote.get("per_change", quote.get("net_change_percentage")),

@@ -59,6 +59,9 @@ class FallbackMarketData:
         "find_option_token",
         "get_spot_quote",
         "get_futures_quote",
+        "get_commodity_futures_quote",
+        "get_commodity_option_expiries",
+        "get_commodity_option_chain",
         "get_fno_underlyings",
     )
 
@@ -154,6 +157,20 @@ class FallbackMarketData:
 
     def get_futures_quote(self, underlying, which="NEAR"):
         return self._call("get_futures_quote", underlying, which=which)
+
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        return self._call("get_commodity_futures_quote", underlying, which=which)
+
+    def get_commodity_option_expiries(self, underlying):
+        return self._call("get_commodity_option_expiries", underlying)
+
+    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+        return self._call(
+            "get_commodity_option_chain",
+            underlying,
+            expiry,
+            strikes_around_atm=strikes_around_atm,
+        )
 
     def get_fno_underlyings(self, force_refresh=False):
         return self._call("get_fno_underlyings", force_refresh=force_refresh)

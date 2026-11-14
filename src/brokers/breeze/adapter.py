@@ -99,6 +99,11 @@ class BreezeMarketData:
         # flagged via FutSource so this is never a silent EQ/FUT split.
         return _public_futures_quote(underlying, which=which)
 
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        from brokers.breeze.market_data import get_commodity_futures_quote
+
+        return get_commodity_futures_quote(underlying, which=which)
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.breeze.market_data import (
             get_fno_underlyings as _bz_get_fno_underlyings,

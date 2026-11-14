@@ -326,6 +326,147 @@ class UpstoxMarketData:
             "FutSource": "UPSTOX",
         }
 
+    @staticmethod
+    def _commodity_rows(underlying, option_types=None):
+        from brokers.upstox.client import _load_instrument_dump
+
+        rows = _load_instrument_dump("MCX")
+        symbol = str(underlying or "").strip().upper()
+        accepted = set(option_types) if option_types else None
+        return [
+            row for row in rows
+            if str(row.get("name") or "").strip().upper() == symbol
+            and (accepted is None or str(row.get("instrument_type") or "").upper() in accepted)
+        ]
+
+    @staticmethod
+    def _commodity_expiry(row):
+        from brokers.upstox.client import _row_expiry_date
+
+        raw = _row_expiry_date(row)
+        if not raw:
+            return None
+        for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d%b%Y"):
+            try:
+                return datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        rows = [
+            row for row in self._commodity_rows(underlying, {"FUT", "FUTCOM"})
+            if row.get("instrument_key") and self._commodity_expiry(row)
+        ]
+        today = datetime.now().date()
+        contracts = sorted(
+            ((self._commodity_expiry(row), row) for row in rows),
+            key=lambda pair: pair[0],
+        )
+        live = [(expiry, row) for expiry, row in contracts if expiry.date() >= today]
+        contracts = live or contracts
+        if not contracts:
+            return None
+        slot = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(str(which or "NEAR").upper(), 0)
+        expiry, contract = contracts[min(slot, len(contracts) - 1)]
+        symbol = contract.get("trading_symbol") or contract.get("tradingsymbol") or ""
+        quotes = self.get_batch_quotes(
+            "MCX", [(symbol, contract["instrument_key"])], mode="FULL"
+        )
+        quote = quotes.get(symbol) if quotes else None
+        if not quote:
+            return None
+        ohlc = quote.get("ohlc") or {}
+        ltp = _safe_float(quote.get("last_price"))
+        close = _safe_float(ohlc.get("close", quote.get("close")))
+        if ltp is None or ltp <= 0:
+            return None
+        change = _safe_float(quote.get("net_change", quote.get("change")))
+        pct = _safe_float(quote.get("percent_change", quote.get("net_change_percentage")))
+        if change is None and close is not None:
+            change = round(ltp - close, 2)
+        if pct is None and close:
+            pct = round((ltp / close - 1) * 100, 2)
+        return {
+            "Contract": symbol,
+            "Underlying": underlying.upper(),
+            "Exchange": "MCX",
+            "LotSize": _safe_float(contract.get("lot_size")),
+            "Expiry": expiry.strftime("%d-%b-%Y"),
+            "LTP": ltp,
+            "Change": change,
+            "PctChange": pct,
+            "Open": _safe_float(ohlc.get("open", quote.get("open"))),
+            "High": _safe_float(ohlc.get("high", quote.get("high"))),
+            "Low": _safe_float(ohlc.get("low", quote.get("low"))),
+            "PrevClose": close,
+            "Volume": _safe_float(quote.get("volume", quote.get("volume_trade_for_the_day"))),
+            "OI": _safe_float(quote.get("oi", quote.get("open_interest"))),
+            "FutSource": "UPSTOX",
+        }
+
+    def get_commodity_option_expiries(self, underlying):
+        expiries = {
+            expiry.strftime("%Y-%m-%d")
+            for row in self._commodity_rows(underlying, {"CE", "PE"})
+            if (expiry := self._commodity_expiry(row)) is not None
+        }
+        today = datetime.now().date()
+        return sorted(expiry for expiry in expiries if datetime.strptime(expiry, "%Y-%m-%d").date() >= today)
+
+    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+        future = self.get_commodity_futures_quote(underlying)
+        if not future:
+            return None
+        rows = [
+            row for row in self._commodity_rows(underlying, {"CE", "PE"})
+            if self._commodity_expiry(row)
+            and self._commodity_expiry(row).strftime("%Y-%m-%d") == expiry
+            and row.get("instrument_key")
+        ]
+        strikes = sorted({float(row.get("strike_price") or 0) for row in rows if row.get("strike_price") is not None})
+        if not strikes:
+            return None
+        atm = min(strikes, key=lambda strike: abs(strike - future["LTP"]))
+        atm_index = strikes.index(atm)
+        visible = set(strikes[max(0, atm_index - strikes_around_atm): atm_index + strikes_around_atm + 1])
+        rows = [row for row in rows if float(row.get("strike_price") or 0) in visible]
+        pairs = [
+            (row.get("trading_symbol") or row.get("tradingsymbol") or "", row["instrument_key"])
+            for row in rows
+        ]
+        quotes = self.get_batch_quotes("MCX", pairs, mode="FULL")
+        out = []
+        for row, (symbol, _key) in zip(rows, pairs):
+            quote = quotes.get(symbol) or {}
+            ohlc = quote.get("ohlc") or {}
+            ltp = _safe_float(quote.get("last_price"))
+            close = _safe_float(ohlc.get("close", quote.get("close")))
+            change = _safe_float(quote.get("net_change", quote.get("change")))
+            pct = _safe_float(quote.get("percent_change", quote.get("net_change_percentage")))
+            if change is None and ltp is not None and close is not None:
+                change = ltp - close
+            if pct is None and ltp is not None and close:
+                pct = (ltp / close - 1) * 100
+            out.append({
+                "strike": float(row.get("strike_price")),
+                "type": row.get("instrument_type"),
+                "ltp": ltp,
+                "oi": _safe_float(quote.get("oi", quote.get("open_interest"))),
+                "volume": _safe_float(quote.get("volume", quote.get("volume_trade_for_the_day"))),
+                "net_change": change,
+                "pct_change": pct,
+            })
+        return {
+            "underlying": underlying.upper(),
+            "spot": future["LTP"],
+            "lot_size": future.get("LotSize"),
+            "future_change_pct": future.get("PctChange"),
+            "atm_strike": atm,
+            "expiry": expiry,
+            "rows": sorted(out, key=lambda row: (row["strike"], row["type"])),
+        }
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.upstox.client import INDEX_KEYS, _load_instrument_dump
 

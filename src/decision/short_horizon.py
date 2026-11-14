@@ -44,6 +44,7 @@ def detect_short_horizon(
     fut_score: float = 0.0,
     fut_ltp: float = 0.0,
     fut_vwap: float = 0.0,
+    price_closes: list[tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
     """
     Detect short-horizon directional pressure from existing temporal data.
@@ -52,7 +53,11 @@ def detect_short_horizon(
     calibrated probability. Calibration should only be introduced after
     backtest validation.
     """
-    closes = recent_spot_closes(symbol, max_points=8)
+    closes = (
+        price_closes
+        if price_closes is not None
+        else recent_spot_closes(symbol, max_points=8)
+    )
 
     base: dict[str, Any] = {
         "horizon": "2-3m",

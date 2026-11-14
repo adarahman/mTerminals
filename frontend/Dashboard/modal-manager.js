@@ -196,10 +196,11 @@ class ModalManager {
     ? Number(v).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
   const bias=String(dec.bias||'WAIT').toUpperCase();
   const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';
+  const commodity=window.dashboardInstrumentMode==='commodity';
   host.innerHTML=`
     <section class="focus-context-card focus-context-primary">
       <span class="focus-context-label">Underlying</span>
-      <strong>${esc(d.symbol)} <em>SPOT</em></strong>
+      <strong>${esc(d.symbol)} <em>${commodity?'MCX FUTURES':'SPOT'}</em></strong>
       <div class="focus-context-price">₹${num(d.spot,2)}</div>
       <small>${esc(d.expiry)} · ${num(d.dte,0)}d · ${Number(_chainRange)===9999?'All strikes':'ATM ±'+Number(_chainRange)}</small>
     </section>
@@ -313,11 +314,11 @@ class ModalManager {
     </section>`;
 }
 
-  openCommodityPricesModal(){
+  openCommodityPricesModal(symbol){
   var modal=document.getElementById('commodity-prices-modal');
   if(!modal)return;
   this._openModal(modal,()=>this.closeCommodityPricesModal());
-  if(window.commodityPrices) window.commodityPrices.open();
+  if(window.commodityPrices) window.commodityPrices.open(symbol);
   }
 
   closeCommodityPricesModal(){

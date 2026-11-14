@@ -66,6 +66,8 @@ def create_app(routes: ServerRoutes, config: ServerConfig) -> web.Application:
         app.router.add_get(
             "/api/commodities/option-chain", routes.commodity_option_chain
         )
+    if routes.commodity_news is not None:
+        app.router.add_get("/api/commodities/news", routes.commodity_news)
     app.router.add_get("/api/broker-health", routes.broker_health)
     app.router.add_static("/", path=config.frontend_dir, name="static")
     return app

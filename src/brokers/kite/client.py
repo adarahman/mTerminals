@@ -234,19 +234,23 @@ def safe_float(val, default=0.0):
 # format/fields differ from SmartAPI's ScripMaster. Cache it the same
 # way (once/day) rather than hitting kite.instruments() per lookup —
 # it's a large CSV-shaped response.
-_instrument_cache = {"date": None, "by_symbol": {}, "rows": []}
+_instrument_cache: dict[str, dict] = {}
 
 
 def _load_instruments(exchange: str = "NFO", force_refresh: bool = False) -> list:
+    exchange = str(exchange or "NFO").upper()
     today = datetime.now().date()
-    if not force_refresh and _instrument_cache["date"] == today and _instrument_cache["rows"]:
-        return _instrument_cache["rows"]
+    cached = _instrument_cache.get(exchange) or {}
+    if not force_refresh and cached.get("date") == today and cached.get("rows"):
+        return cached["rows"]
 
     kite = _session.ensure_session()
     rows = _kite_call_with_retry("instruments", kite.instruments, exchange)
-    _instrument_cache["date"] = today
-    _instrument_cache["rows"] = rows
-    _instrument_cache["by_symbol"] = {r["tradingsymbol"]: r for r in rows}
+    _instrument_cache[exchange] = {
+        "date": today,
+        "rows": rows,
+        "by_symbol": {r["tradingsymbol"]: r for r in rows},
+    }
     return rows
 
 
@@ -335,6 +339,125 @@ def get_quotes(exchange_tradingsymbol_pairs: list) -> dict:
         return {}
     kite = _session.ensure_session()
     return _kite_call_with_retry("quote", kite.quote, exchange_tradingsymbol_pairs)
+
+
+def get_commodity_futures_quote(underlying: str, which: str = "NEAR") -> Optional[dict]:
+    """Resolve and normalize a native Kite MCX futures quote."""
+    rows = _load_instruments("MCX")
+    symbol = str(underlying or "").strip().upper()
+    contracts = [
+        row for row in rows
+        if str(row.get("name") or "").strip().upper() == symbol
+        and row.get("instrument_type") in ("FUT", "FUTCOM")
+        and row.get("expiry")
+    ]
+    contracts.sort(key=lambda row: row["expiry"])
+    today = datetime.now().date()
+    live = [row for row in contracts if row["expiry"] >= today]
+    contracts = live or contracts
+    if not contracts:
+        return None
+    slot = {"NEAR": 0, "NEXT": 1, "FAR": 2}.get(str(which or "NEAR").upper(), 0)
+    contract = contracts[min(slot, len(contracts) - 1)]
+    key = f"MCX:{contract['tradingsymbol']}"
+    quote = get_quotes([key]).get(key)
+    if not quote:
+        return None
+    ohlc = quote.get("ohlc") or {}
+    try:
+        ltp = float(quote.get("last_price"))
+    except (TypeError, ValueError):
+        return None
+    if ltp <= 0:
+        return None
+    close = ohlc.get("close")
+    try:
+        close = float(close) if close is not None else None
+    except (TypeError, ValueError):
+        close = None
+    change = quote.get("net_change")
+    pct = quote.get("percent_change")
+    if change is None and close:
+        change = round(ltp - close, 2)
+    if pct is None and close:
+        pct = round((ltp / close - 1) * 100, 2)
+    return {
+        "Contract": contract.get("tradingsymbol"),
+        "Underlying": symbol,
+        "Exchange": "MCX",
+        "LotSize": contract.get("lot_size"),
+        "Expiry": contract["expiry"].strftime("%d-%b-%Y"),
+        "LTP": ltp,
+        "Change": change,
+        "PctChange": pct,
+        "Open": ohlc.get("open"),
+        "High": ohlc.get("high"),
+        "Low": ohlc.get("low"),
+        "PrevClose": close,
+        "Volume": quote.get("volume"),
+        "OI": quote.get("oi"),
+        "FutSource": "KITE",
+    }
+
+
+def get_commodity_option_expiries(underlying: str) -> list[str]:
+    rows = _load_instruments("MCX")
+    symbol = str(underlying or "").strip().upper()
+    dates = sorted({
+        row["expiry"] for row in rows
+        if str(row.get("name") or "").strip().upper() == symbol
+        and row.get("instrument_type") in ("CE", "PE")
+        and row.get("expiry")
+    })
+    return [expiry.strftime("%d%b%Y").upper() for expiry in dates if expiry >= datetime.now().date()]
+
+
+def get_commodity_option_chain(underlying, expiry, strikes_around_atm=10):
+    future = get_commodity_futures_quote(underlying)
+    if not future:
+        return None
+    try:
+        expiry_date = datetime.strptime(expiry, "%d%b%Y").date()
+    except (TypeError, ValueError):
+        return None
+    symbol = str(underlying or "").strip().upper()
+    rows = [
+        row for row in _load_instruments("MCX")
+        if str(row.get("name") or "").strip().upper() == symbol
+        and row.get("instrument_type") in ("CE", "PE")
+        and row.get("expiry") == expiry_date
+    ]
+    strikes = sorted({float(row.get("strike") or 0) for row in rows})
+    if not strikes:
+        return None
+    atm = min(strikes, key=lambda value: abs(value - future["LTP"]))
+    atm_idx = strikes.index(atm)
+    visible = set(strikes[max(0, atm_idx-strikes_around_atm):atm_idx+strikes_around_atm+1])
+    rows = [row for row in rows if float(row.get("strike") or 0) in visible]
+    keys = [f"MCX:{row['tradingsymbol']}" for row in rows]
+    quotes = get_quotes(keys)
+    result_rows = []
+    for row, key in zip(rows, keys):
+        quote = quotes.get(key) or {}
+        ohlc = quote.get("ohlc") or {}
+        result_rows.append({
+            "strike": float(row["strike"]),
+            "type": row["instrument_type"],
+            "ltp": quote.get("last_price"),
+            "oi": quote.get("oi"),
+            "volume": quote.get("volume"),
+            "net_change": quote.get("net_change"),
+            "pct_change": quote.get("percent_change"),
+        })
+    return {
+        "underlying": symbol,
+        "spot": future["LTP"],
+        "lot_size": future.get("LotSize"),
+        "future_change_pct": future.get("PctChange"),
+        "atm_strike": atm,
+        "expiry": expiry,
+        "rows": sorted(result_rows, key=lambda row: (row["strike"], row["type"])),
+    }
 
 
 def get_spot_quote(underlying: str) -> Optional[dict]:

@@ -7,6 +7,25 @@
 function openOptionChainAtStrike(strike) {
   const n = Number(strike);
   const hasStrike = strike !== null && strike !== '' && Number.isFinite(n);
+  if (window.dashboardInstrumentMode === 'commodity') {
+    const modal = document.getElementById('option-chain-modal');
+    if (modal && !modal.classList.contains('open') && typeof openOptionChainModal === 'function') {
+      openOptionChainModal();
+    }
+    const row = hasStrike
+      ? Array.from(document.querySelectorAll('#option-chain-table [data-strike]'))
+        .find((item) => Number(item.dataset.strike) === n)
+      : null;
+    if (row) {
+      document.querySelectorAll('#option-chain-table [data-strike].focused')
+        .forEach((item) => item.classList.remove('focused'));
+      row.classList.add('focused');
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      document.getElementById('commodity-option-chain')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    return false;
+  }
   if (hasStrike && window.openStrikeDetailReportModal) {
     window.openStrikeDetailReportModal(n);
     return false;

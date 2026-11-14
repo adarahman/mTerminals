@@ -120,6 +120,21 @@ class ShoonyaMarketData:
         # flagged via FutSource so this is never a silent EQ/FUT split.
         return _public_futures_quote(underlying, which=which)
 
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        from brokers.shoonya.market_data import get_commodity_futures_quote
+
+        return get_commodity_futures_quote(underlying, which=which)
+
+    def get_commodity_option_expiries(self, underlying):
+        from brokers.shoonya.market_data import get_commodity_option_expiries
+
+        return get_commodity_option_expiries(underlying)
+
+    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+        from brokers.shoonya.market_data import get_commodity_option_chain
+
+        return get_commodity_option_chain(underlying, expiry, strikes_around_atm)
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.shoonya.market_data import (
             get_fno_underlyings as _sh_get_fno_underlyings,

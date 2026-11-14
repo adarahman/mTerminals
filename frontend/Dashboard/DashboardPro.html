@@ -95,81 +95,33 @@
 </head>
 <body><div class="db">
 
-<div id="commodity-prices-modal" class="oc-modal">
+<div id="commodity-dashboard-slot" class="commodity-dashboard-slot" hidden>
   <div class="oc-modal-panel commodity-prices-panel">
-    <div class="oc-modal-bar">
-      <div class="oc-modal-id">
-        <button class="oc-modal-back" onclick="closeCommodityPricesModal()" aria-label="Close commodity prices">←</button>
-        <span class="oc-modal-title">MCX Futures &amp; Options</span>
-      </div>
-      <label class="commodity-picker-label" for="commodity-symbol">Contract</label>
-      <select id="commodity-symbol" class="commodity-picker" onchange="commodityPrices.select(this.value)">
-        <option>CRUDEOIL</option><option>NATURALGAS</option><option>GOLD</option>
-        <option>GOLDM</option><option>SILVER</option><option>SILVERM</option>
-        <option>COPPER</option><option>ZINC</option><option>LEAD</option><option>ALUMINIUM</option>
-      </select>
-    </div>
     <div class="commodity-prices-content">
-      <div id="commodity-price-status" class="commodity-price-status" role="status">Choose a commodity to load its live quote.</div>
       <div class="commodity-price-card">
-        <div>
-          <span id="commodity-price-symbol" class="commodity-price-symbol">CRUDEOIL</span>
-          <span id="commodity-price-contract" class="commodity-price-contract">MCX · FUTURES</span>
-        </div>
-        <strong id="commodity-price-ltp" class="commodity-price-ltp">—</strong>
-        <span id="commodity-price-change" class="commodity-price-change">—</span>
         <div class="commodity-price-details">
-          <span>Expiry <b id="commodity-price-expiry">—</b></span>
-          <span>Lot size <b id="commodity-price-lot-size">—</b></span>
-          <span>Open <b id="commodity-price-open">—</b></span>
-          <span>High <b id="commodity-price-high">—</b></span>
-          <span>Low <b id="commodity-price-low">—</b></span>
+          <span>Day range <b>O <i id="commodity-price-open">—</i> · H <i id="commodity-price-high">—</i> · L <i id="commodity-price-low">—</i></b></span>
           <span>Volume <b id="commodity-price-volume">—</b></span>
           <span>Open interest <b id="commodity-price-oi">—</b></span>
+          <span>5m price move <b id="commodity-price-change-5m">Building history</b></span>
+          <span>5m OI change <b id="commodity-price-oi-change-5m">Building history</b></span>
+          <span>5m volume <b id="commodity-price-volume-change-5m">Building history</b></span>
         </div>
       </div>
-      <section class="commodity-analysis-card" aria-label="Commodity option analysis">
-        <div class="commodity-analysis-heading">
-          <strong>Option Chain Analysis</strong>
-          <span id="commodity-analysis-verdict" class="commodity-analysis-verdict">WAIT</span>
-        </div>
-        <p id="commodity-analysis-reason">Waiting for option-chain data.</p>
-        <div class="commodity-analysis-weightage">
-          <strong>Verdict evidence weightage</strong>
-          <span id="commodity-analysis-confidence">Confidence — · Coverage —</span>
-          <div id="commodity-analysis-weightage-rows" class="commodity-analysis-weightage-rows" aria-label="Verdict evidence weights"></div>
-          <small>Weights and confidence use the shared equity decision scoring; confidence is not a probability.</small>
-        </div>
-        <div class="commodity-analysis-metrics">
-          <span>Put / call OI <b id="commodity-analysis-pcr">—</b></span>
-          <span>Call / put OI <b id="commodity-analysis-total-oi">—</b></span>
-          <span>Call OI wall <b id="commodity-analysis-call-wall">—</b></span>
-          <span>Put OI wall <b id="commodity-analysis-put-wall">—</b></span>
-          <span>Futures day change <b id="commodity-analysis-futures-change">—</b></span>
-        </div>
-        <small id="commodity-analysis-scope">Analysis uses visible strikes only.</small>
+      <div id="commodity-expiry-holder" hidden>
+        <select id="commodity-expiry" class="commodity-picker" onchange="commodityPrices.selectExpiry(this.value)"></select>
+      </div>
+      <section id="commodity-option-chain" class="commodity-option-chain" aria-label="Commodity option chain" tabindex="-1">
+        <div id="commodity-chain-shared"></div>
       </section>
-      <section class="commodity-option-chain" aria-label="Commodity option chain">
-        <div class="commodity-chain-heading">
-          <div>
-            <strong>Option Chain</strong>
-            <small>ATM ±10 strikes · on the futures price</small>
-          </div>
-          <label for="commodity-expiry">Expiry</label>
-          <select id="commodity-expiry" class="commodity-picker" onchange="commodityPrices.selectExpiry(this.value)"></select>
-        </div>
-        <div id="commodity-chain-status" class="commodity-chain-status" role="status">Loading option chain…</div>
-        <div class="commodity-chain-scroll">
-          <table class="commodity-chain-table" aria-label="MCX call and put option chain">
-            <thead>
-              <tr><th colspan="3">CALL</th><th rowspan="2">Strike</th><th colspan="3">PUT</th></tr>
-              <tr><th>OI</th><th>Volume</th><th>LTP</th><th>LTP</th><th>Volume</th><th>OI</th></tr>
-            </thead>
-            <tbody id="commodity-chain-rows"></tbody>
-          </table>
-        </div>
-      </section>
-      <small class="commodity-price-note">Read-only MCX quotes. Futures and option chain update every 10 seconds while this panel is open.</small>
+      <details class="commodity-news">
+        <summary>
+          <span>Latest commodity news</span>
+          <small id="commodity-news-status" role="status">Recent headlines for the selected contract</small>
+        </summary>
+        <ul id="commodity-news-list" class="commodity-news-list" aria-label="Latest commodity news"></ul>
+      </details>
+      <small class="commodity-price-note">Read-only MCX quotes. Futures refresh every 3 seconds; option chain refreshes every 10 seconds while this screen is open.</small>
     </div>
   </div>
 </div>
@@ -706,14 +658,6 @@
             onclick="desktopPrimaryNav('trade', this)"
             title="Trade — portfolio, positions, orders and P&amp;L">
       <span>↗</span><strong>Trade</strong>
-    </button>
-
-    <button type="button"
-            class="sec-btn primary-nav-btn"
-            data-primary-nav="commodities"
-            onclick="openCommodityPricesModal()"
-            title="Live MCX commodity futures prices">
-      <span>◈</span><strong>Commodities</strong>
     </button>
 
   </nav>

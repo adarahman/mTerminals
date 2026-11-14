@@ -2,6 +2,9 @@
 
 ChainView.prototype.patchTopBarAndDecision = function(d) {
   if (!d) return;
+  // MCX quotes and chain data arrive through the commodity instrument adapter.
+  // Do not let the equity websocket repaint their shared dashboard components.
+  if (window.dashboardInstrumentMode === 'commodity') return;
   const topBarEl = document.getElementById('sec-topbar');
   const symbolChanged = !topBarEl || d.symbol !== this._lastTopBarSymbol;
   this._lastTopBarSymbol = d.symbol;
@@ -101,7 +104,7 @@ ChainView.prototype.refreshDecisionBoxGuarded = function(d) {
     // meant to fix in the first place. _decisionDetailPending (set/cleared
     // by _bindDecisionDetailGuard) covers exactly that gap.
     const clickInFlight = !!this._decisionDetailPending;
-    const decisionHoverActive = !!decEl.querySelector('.decision-engine-hover:hover');
+    const decisionHoverActive = !!decEl.querySelector('.decision-evidence-hover:hover, .decision-evidence-hover:focus-within');
     if (!decisionDetailWasOpen && !clickInFlight && !decisionHoverActive) {
       decEl.outerHTML = this.renderDecisionBoxHtml(d, { open: decisionDetailWasOpen });
       this._bindDecisionDetailGuard();
@@ -174,6 +177,12 @@ ChainView.prototype.buildGreeksMoneynessHtml = function(d) {
 };
 
 ChainView.prototype.renderDashboard = function(d) {
+  if (window.dashboardInstrumentMode === 'commodity') {
+    // The selected MCX instrument owns the dashboard payload while this mode
+    // is active. The commodity adapter normalizes it into the shared decision
+    // and top-bar renderers; equity websocket snapshots are not a fallback.
+    return;
+  }
   _data=d;
   const atm=activeAtm(d);
   const greeksAll=d.greeks||[];

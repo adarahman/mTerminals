@@ -109,6 +109,26 @@ class KotakMarketData:
             return quote
         return _public_futures_quote(underlying, which=which)
 
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        from brokers.kotak._md.quotes import get_futures_quote as _get_futures_quote
+
+        quote = _get_futures_quote(underlying, which=which)
+        if quote:
+            quote = dict(quote)
+            quote["Exchange"] = "MCX"
+            quote["FutSource"] = "KOTAK"
+        return quote
+
+    def get_commodity_option_expiries(self, underlying):
+        from brokers.kotak._md.contracts import list_expiries
+
+        return list_expiries(underlying, exchange="MCX")
+
+    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+        from brokers.kotak.market_data import get_atm_chain
+
+        return get_atm_chain(underlying, expiry, strikes_around_atm, exchange="MCX")
+
     def get_fno_underlyings(self, force_refresh=False):
         from brokers.kotak.market_data import (
             get_fno_underlyings as _kk_get_fno_underlyings,

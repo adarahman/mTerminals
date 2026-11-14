@@ -33,7 +33,10 @@ _fo_cache_lock = threading.Lock()
 
 
 def _fo_segment(underlying: str) -> str:
-    return "bse_fo" if underlying.upper() in _BSE_INDEX_NAMES else "nse_fo"
+    symbol = str(underlying or "").upper()
+    if symbol in {"ALUMINIUM", "COPPER", "CRUDEOIL", "GOLD", "GOLDM", "LEAD", "NATURALGAS", "SILVER", "SILVERM", "ZINC"}:
+        return "mcx_fo"
+    return "bse_fo" if symbol in _BSE_INDEX_NAMES else "nse_fo"
 
 
 def _fo_cache_path(segment: str) -> str:
@@ -247,7 +250,7 @@ def _parse_fo_csv_text(text: str) -> list[dict]:
             continue
         raw_count += 1
         inst_type = str(field(raw, "pInstType", "instrument_type") or "").strip().upper()
-        if inst_type not in ("OPTIDX", "OPTSTK", "FUTIDX", "FUTSTK"):
+        if inst_type not in ("OPTIDX", "OPTSTK", "FUTIDX", "FUTSTK", "OPTFUT", "FUTCOM"):
             # Kotak's BFO master leaves pInstType blank for many otherwise
             # valid derivative rows. Its trading symbol remains authoritative
             # (e.g. SENSEX26AUG76800CE / SENSEX26AUGFUT).
@@ -266,7 +269,9 @@ def _parse_fo_csv_text(text: str) -> list[dict]:
             elif symbol_hint.endswith("FUT"):
                 opt_type = "FUT"
         option_type_counts[opt_type] = option_type_counts.get(opt_type, 0) + 1
-        is_future = inst_type in ("FUTIDX", "FUTSTK")
+        is_future = inst_type in ("FUTIDX", "FUTSTK", "FUTCOM")
+        if is_future:
+            opt_type = "FUT"
         if not is_future and opt_type not in ("CE", "PE"):
             continue
         try:

@@ -82,6 +82,21 @@ class KiteMarketData:
         # flagged via FutSource so this is never a silent EQ/FUT split.
         return _public_futures_quote(underlying, which=which)
 
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        from brokers.kite.client import get_commodity_futures_quote
+
+        return get_commodity_futures_quote(underlying, which=which)
+
+    def get_commodity_option_expiries(self, underlying):
+        from brokers.kite.client import get_commodity_option_expiries
+
+        return get_commodity_option_expiries(underlying)
+
+    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+        from brokers.kite.client import get_commodity_option_chain
+
+        return get_commodity_option_chain(underlying, expiry, strikes_around_atm)
+
     def get_fno_underlyings(self, force_refresh=False):
         # Public ScripMaster universe (same source kite_client's instrument
         # dump comes from, minus the broker session requirement).

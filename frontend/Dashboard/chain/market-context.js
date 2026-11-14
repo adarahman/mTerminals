@@ -1,6 +1,13 @@
 // Market context: index ticker, symbol/source selection and expiry state.
 // Loaded after chain-helpers.js and before the chain view/controller files.
 
+const COMMODITY_SYMBOLS = [
+  'ALUMINIUM', 'COPPER', 'CRUDEOIL', 'GOLD', 'GOLDM',
+  'LEAD', 'NATURALGAS', 'SILVER', 'SILVERM', 'ZINC',
+];
+window.dashboardInstrumentMode = 'equity';
+window.commodityActiveSymbol = 'CRUDEOIL';
+
 function isFuturesReferenceVisible(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata',
@@ -223,6 +230,13 @@ window.fetchSymbolList = fetchSymbolList;
 // away — picking it directly as a value would just try to load a symbol
 // literally named "__other__".
 function onSymbolPicked(val){
+  if(window.dashboardInstrumentMode === 'commodity'){
+    if(COMMODITY_SYMBOLS.includes(String(val || '').toUpperCase())){
+      window.commodityActiveSymbol = String(val).toUpperCase();
+      if(window.commodityPrices) window.commodityPrices.select(window.commodityActiveSymbol);
+    }
+    return;
+  }
   if(val === '__other__'){
     const sym = prompt('Symbol to switch to (e.g. RELIANCE):');
     if(sym) switchActiveIndex(sym.trim().toUpperCase());
@@ -231,6 +245,26 @@ function onSymbolPicked(val){
   switchActiveIndex(val);
 }
 window.onSymbolPicked = onSymbolPicked;
+
+function setDashboardInstrumentMode(mode){
+  const nextMode = mode === 'commodity' ? 'commodity' : 'equity';
+  if(window.dashboardInstrumentMode === nextMode) return;
+  window.dashboardInstrumentMode = nextMode;
+  document.body.classList.toggle('commodity-mode', nextMode === 'commodity');
+  const slot = document.getElementById('commodity-dashboard-slot');
+  if(nextMode === 'commodity'){
+    if(window.commodityPrices) window.commodityPrices.open(window.commodityActiveSymbol);
+  } else {
+    if(window.commodityPrices) window.commodityPrices.close();
+    if(slot){ slot.hidden = true; document.body.append(slot); }
+    const current = window.AppState && AppState.wsState;
+    if(current && typeof app !== 'undefined' && app.chain){
+      app.chain._lastTopBarSymbol = null;
+      app.chain.renderDashboard(current);
+    }
+  }
+}
+window.setDashboardInstrumentMode = setDashboardInstrumentMode;
 
 // Inside dashboard.js, within the DataService or global scope:
 function switchActiveIndex(sym) {
@@ -280,6 +314,13 @@ function switchDataSource(ds) {
   const params = new URLSearchParams(query || '');
   params.set('dataSource', source);
   connectWebSocket(`${base}?${params.toString()}`);
+  const commoditySourceSelect = document.getElementById('dataSourceSelect');
+  if (commoditySourceSelect && Array.from(commoditySourceSelect.options).some(option => option.value === source)) {
+    commoditySourceSelect.value = source;
+  }
+  if (window.dashboardInstrumentMode === 'commodity' && window.commodityPrices) {
+    window.setTimeout(() => window.commodityPrices.refresh(), 1000);
+  }
   if (window.eventBus) window.eventBus.emit('dataSource:change', { dataSource: source });
 }
 window.switchDataSource = switchDataSource;
@@ -290,6 +331,9 @@ window.switchDataSource = switchDataSource;
 // and patch only this display; it does not rebuild the dashboard or trigger a
 // market-data request.
 async function refreshDataSourceStatus(){
+  // Commodity status is based on the MCX quote adapter response, not the
+  // NSE/BSE broker-health probe used for equity feed diagnostics.
+  if (window.dashboardInstrumentMode === 'commodity') return;
   try {
     const response = await fetch('/api/broker-health', { cache: 'no-store' });
     if (!response.ok) return;

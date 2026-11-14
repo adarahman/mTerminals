@@ -394,6 +394,98 @@ def get_spot_quote(underlying: str):
     return _mapped_quote(exchange, index["token"])
 
 
+def get_commodity_futures_quote(underlying: str, which: str = "NEAR"):
+    """Resolve an MCX expiry from the shared master and quote it via Noren."""
+    from brokers.smartapi.instruments import get_commodity_futures_contract
+
+    contract = get_commodity_futures_contract(underlying, which=which)
+    if not contract:
+        return None
+    try:
+        result = _session.api.searchscrip(exchange="MCX", searchtext=underlying.upper())
+    except Exception as exc:
+        logger.warning("[shoonya_market_data] MCX searchscrip(%s) failed: %s", underlying, exc)
+        return None
+    expiry_dt = datetime.strptime(contract["expiry"], "%d%b%Y")
+    expiry_short = expiry_dt.strftime("%d%b%y").upper()
+    values = (result or {}).get("values") or []
+    candidates = [
+        row for row in values
+        if str(row.get("tsym") or "").upper().startswith(underlying.upper() + expiry_short)
+        and str(row.get("tsym") or "").upper().endswith(("F", "FUT"))
+        and row.get("token")
+    ]
+    if not candidates:
+        return None
+    row = candidates[0]
+    quote = _mapped_quote("MCX", str(row["token"]))
+    if not quote or not quote.get("ltp"):
+        return None
+    return {
+        "Contract": row.get("tsym"), "Underlying": underlying.upper(),
+        "Exchange": "MCX", "LotSize": quote.get("lot_size") or contract.get("lotsize"),
+        "Expiry": expiry_dt.strftime("%d-%b-%Y"), "LTP": quote.get("ltp"),
+        "Change": quote.get("net_change"), "PctChange": quote.get("pct_change"),
+        "Open": quote.get("open"), "High": quote.get("high"), "Low": quote.get("low"),
+        "PrevClose": quote.get("close"), "Volume": quote.get("volume"),
+        "OI": quote.get("oi"), "FutSource": "SHOONYA",
+    }
+
+
+def get_commodity_option_expiries(underlying):
+    from brokers.smartapi.instruments import get_commodity_option_expiries
+
+    return get_commodity_option_expiries(underlying)
+
+
+def get_commodity_option_chain(underlying, expiry, strikes_around_atm=10):
+    from brokers.smartapi.instruments import get_commodity_option_contracts
+
+    future = get_commodity_futures_quote(underlying)
+    if not future:
+        return None
+    try:
+        expiry_dt = datetime.strptime(expiry, "%d%b%Y")
+    except (TypeError, ValueError):
+        return None
+    expiry_compact = expiry_dt.strftime("%d%b%y").upper()
+    reference_contracts = get_commodity_option_contracts(
+        underlying, expiry, future["LTP"], strikes_around_atm=0
+    )
+    if not reference_contracts:
+        return None
+    atm = reference_contracts[0]["strike"]
+    contracts = {}
+    for opt_type, marker in (("CE", "C"), ("PE", "P")):
+        search_tsym = f"{underlying.upper()}{expiry_compact}{marker}{atm}"
+        try:
+            response = _session.api.get_option_chain("MCX", search_tsym, str(atm), strikes_around_atm)
+        except Exception as exc:
+            logger.warning("[shoonya_market_data] MCX option chain failed for %s: %s", underlying, exc)
+            continue
+        if not isinstance(response, dict) or response.get("stat") == "Not_Ok":
+            continue
+        for row in response.get("values") or []:
+            tsym, token = row.get("tsym"), row.get("token")
+            strike = _strike_from_tsym(tsym, underlying, expiry_compact)
+            if token and strike is not None:
+                contracts[(strike, opt_type)] = (tsym, str(token))
+    rows = []
+    for (strike, opt_type), (tsym, token) in contracts.items():
+        quote = _mapped_quote("MCX", token)
+        if quote:
+            rows.append({"strike": strike, "type": opt_type, "ltp": quote.get("ltp"),
+                         "oi": quote.get("oi"), "volume": quote.get("volume"),
+                         "net_change": quote.get("net_change"), "pct_change": quote.get("pct_change"),
+                         "tradingsymbol": tsym, "token": token})
+    if not rows:
+        return None
+    return {"underlying": underlying.upper(), "spot": future["LTP"],
+            "lot_size": future.get("LotSize"), "future_change_pct": future.get("PctChange"),
+            "atm_strike": atm, "expiry": expiry,
+            "rows": sorted(rows, key=lambda row: (row["strike"], row["type"]))}
+
+
 def get_fno_underlyings(force_refresh=False):
     """Index list only — see module docstring caveat 3. `stocks` is
     deliberately empty rather than guessed; wire in a parsed NFO master
@@ -436,6 +528,15 @@ class ShoonyaMarketData:
 
     def get_spot_quote(self, underlying):
         return get_spot_quote(underlying)
+
+    def get_commodity_futures_quote(self, underlying, which="NEAR"):
+        return get_commodity_futures_quote(underlying, which=which)
+
+    def get_commodity_option_expiries(self, underlying):
+        return get_commodity_option_expiries(underlying)
+
+    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+        return get_commodity_option_chain(underlying, expiry, strikes_around_atm)
 
     def get_fno_underlyings(self, force_refresh=False):
         return get_fno_underlyings(force_refresh=force_refresh)

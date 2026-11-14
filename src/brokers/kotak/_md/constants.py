@@ -35,4 +35,5 @@ _INDEX_EXCHANGE = {
     "BSE": "bse_cm",
     "NFO": "nse_fo",
     "BFO": "bse_fo",
+    "MCX": "mcx_fo",
 }

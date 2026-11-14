@@ -124,6 +124,7 @@ def build_server_application(
         symbols=handlers.symbols,
         commodity_quote=handlers.commodity_quote,
         commodity_option_chain=handlers.commodity_option_chain,
+        commodity_news=handlers.commodity_news,
         host=host,
         port=http_port,
         symbol=lambda: runtime_state.MARKET_SELECTION.symbol,

@@ -33,15 +33,15 @@ def _normalize_scrip_row(raw: dict) -> dict | None:
     symbol_hint = str(field("pTrdSymbol", "trading_symbol") or "").upper()
     if not inst_type:
         if symbol_hint.endswith(("CE", "PE")):
-            inst_type = "OPTIDX"
+            inst_type = "OPTFUT" if "MCX" in symbol_hint else "OPTIDX"
         elif symbol_hint.endswith("FUT"):
-            inst_type = "FUTIDX"
+            inst_type = "FUTCOM" if "MCX" in symbol_hint else "FUTIDX"
     if not option_type:
         if symbol_hint.endswith(("CE", "PE")):
             option_type = symbol_hint[-2:]
         elif symbol_hint.endswith("FUT"):
             option_type = "FUT"
-    is_future = inst_type in {"FUTIDX", "FUTSTK"}
+    is_future = inst_type in {"FUTIDX", "FUTSTK", "FUTCOM"}
     if not is_future and option_type not in {"CE", "PE"}:
         return None
     try:
