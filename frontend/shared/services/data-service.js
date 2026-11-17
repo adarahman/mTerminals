@@ -423,6 +423,16 @@ class DataService {
   const timeoutId = setTimeout(runOnce, 250);
   const doRender = () => {
     if(!AppState.wsState) return;
+    // Commodity quotes and option-chain data come from CommodityPricesView's
+    // MCX endpoints. Equity WebSocket ticks must not replace its shared
+    // `_data` payload or repaint the chain modal's underlying price.
+    if (window.dashboardInstrumentMode === 'commodity') {
+      this.lastRenderedSymbol = AppState.wsState.symbol || this.lastRenderedSymbol;
+      if (window.renderPaperTradingPanel) window.renderPaperTradingPanel(AppState.wsState);
+      if (window.renderAlgoStatusPanel) window.renderAlgoStatusPanel(AppState.wsState);
+      if (window.renderReconciliationAlerts) renderReconciliationAlerts(AppState.wsState);
+      return;
+    }
     // ── FLICKER FIX ──
     // Every live tick used to go through parseAndRender() -> renderDashboard(),
     // which nukes and rebuilds the ENTIRE #dashboard subtree from a fresh

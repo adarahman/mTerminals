@@ -248,7 +248,11 @@ window.onSymbolPicked = onSymbolPicked;
 
 function setDashboardInstrumentMode(mode){
   const nextMode = mode === 'commodity' ? 'commodity' : 'equity';
-  if(window.dashboardInstrumentMode === nextMode) return;
+  const topBar = document.getElementById('sec-topbar');
+  const topBarMatchesMode = nextMode === 'commodity'
+    ? !!topBar?.classList.contains('commodity-topbar')
+    : !!topBar && !topBar.classList.contains('commodity-topbar');
+  if(window.dashboardInstrumentMode === nextMode && topBarMatchesMode) return;
   window.dashboardInstrumentMode = nextMode;
   document.body.classList.toggle('commodity-mode', nextMode === 'commodity');
   const slot = document.getElementById('commodity-dashboard-slot');

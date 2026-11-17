@@ -8,6 +8,7 @@ class CommodityPricesView {
     this.quoteLoading = false;
     this.quoteRefreshPendingSymbol = '';
     this.chainLoading = false;
+    this.chainRefreshPendingSymbol = '';
     this.newsLoading = false;
     this.newsRefreshPending = false;
     this.latestQuote = null;
@@ -239,7 +240,8 @@ class CommodityPricesView {
       this.latestQuote = quote;
       this.latestQuoteError = '';
       this.latestProvider = payload.provider || '';
-      if (!document.getElementById('sec-topbar')) this.renderDashboard();
+      const topBar = document.getElementById('sec-topbar');
+      if (!topBar || !topBar.classList.contains('commodity-topbar')) this.renderDashboard();
       const sourceSelect = document.getElementById('dataSourceSelect');
       if (sourceSelect && Array.from(sourceSelect.options).some(option => option.value === this.latestProvider)) {
         sourceSelect.value = this.latestProvider;
@@ -331,14 +333,18 @@ class CommodityPricesView {
       this.quoteLoading = false;
       const pendingSymbol = this.quoteRefreshPendingSymbol;
       this.quoteRefreshPendingSymbol = '';
-      if (pendingSymbol && pendingSymbol === this.symbol) {
-        this._refreshQuote(pendingSymbol);
+      const nextSymbol = pendingSymbol || (symbol !== this.symbol ? this.symbol : '');
+      if (nextSymbol && nextSymbol === this.symbol) {
+        this._refreshQuote(nextSymbol);
       }
     }
   }
 
   async _refreshOptionChain(symbol) {
-    if (this.chainLoading) return;
+    if (this.chainLoading) {
+      this.chainRefreshPendingSymbol = symbol;
+      return;
+    }
     this.chainLoading = true;
     const status = document.getElementById('commodity-chain-status');
     if (status && !document.querySelector('#commodity-chain-shared .oc-ledger-row')) {
@@ -385,6 +391,12 @@ class CommodityPricesView {
     }
     finally {
       this.chainLoading = false;
+      const pendingSymbol = this.chainRefreshPendingSymbol;
+      this.chainRefreshPendingSymbol = '';
+      const nextSymbol = pendingSymbol || (symbol !== this.symbol ? this.symbol : '');
+      if (nextSymbol && nextSymbol === this.symbol) {
+        this._refreshOptionChain(nextSymbol);
+      }
     }
   }
 
@@ -567,13 +579,27 @@ class CommodityPricesView {
     const chainView = typeof app !== 'undefined' && app.chain;
     if (!dashboard || !slot || !chainView) return;
     const data = this._toSharedDashboardData();
+    const existingTopBar = dashboard.querySelector('#sec-topbar');
+    const hasCommodityTopBar = existingTopBar?.classList.contains('commodity-topbar');
+    const existingDecision = dashboard.querySelector('#sec-decision');
     const expiryPicker = document.getElementById('commodity-expiry');
     const expiryHolder = document.getElementById('commodity-expiry-holder');
     if (expiryPicker && expiryHolder && expiryPicker.parentNode !== expiryHolder) {
       expiryHolder.appendChild(expiryPicker);
     }
     dashboard.style.display = 'block';
-    dashboard.innerHTML = `${chainView.renderTopBarHtml(data, data.compositeBias === 'BEARISH')}${chainView.renderDecisionBoxHtml(data)}`;
+    // Quote polling runs independently from option-chain polling. Keep the
+    // live quote DOM while rebuilding the decision view so a chain update
+    // cannot reset the displayed price to the template's placeholder.
+    if (hasCommodityTopBar) {
+      if (existingDecision) {
+        existingDecision.outerHTML = chainView.renderDecisionBoxHtml(data);
+      } else {
+        dashboard.insertAdjacentHTML('beforeend', chainView.renderDecisionBoxHtml(data));
+      }
+    } else {
+      dashboard.innerHTML = `${chainView.renderTopBarHtml(data, data.compositeBias === 'BEARISH')}${chainView.renderDecisionBoxHtml(data)}`;
+    }
     slot.hidden = false;
     dashboard.append(slot);
     const expirySlot = document.getElementById('commodity-expiry-slot');
