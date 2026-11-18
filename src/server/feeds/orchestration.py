@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 
-from server import runtime_state
+from server import feed_manager, runtime_state
 from server.feeds import live_updates, provider_lifecycle, resolution
 
 from server.feeds.smartapi import (  # noqa: E402
@@ -29,10 +29,13 @@ from market.quotes.tick_aggregator import TickAggregator
 from server.broker_services import SmartTickStream, EXCHANGE_TYPE
 
 _LOGGER = logging.getLogger("mterminals.server.feeds.orchestration")
+_COMMODITY_BROADCAST = None
 
 
 def configure_feed_orchestration(*, broadcast, portfolio_broadcaster):
     """Bind the app-level dependencies this module calls at runtime."""
+    global _COMMODITY_BROADCAST
+    _COMMODITY_BROADCAST = broadcast
     live_updates.configure(
         broadcast=broadcast, portfolio_broadcaster=portfolio_broadcaster
     )
@@ -74,6 +77,80 @@ def _smartapi_feed_start(state, loop, symbol, strikes_around_atm, expiry):
         wait=time.sleep,
         report=_print_log,
     )
+    _subscribe_commodity_futures(state, loop)
+
+
+def _subscribe_commodity_futures(state, loop):
+    """Stream Angel MCX futures alongside its active equity option feed."""
+    if state.stream is None or getattr(state, "commodity_tokens", None):
+        return
+    try:
+        from brokers.smartapi.instruments import get_commodity_futures_contract
+
+        contracts = {}
+        for symbol in (
+            "ALUMINIUM", "COPPER", "CRUDEOIL", "GOLD", "GOLDM",
+            "LEAD", "NATURALGAS", "SILVER", "SILVERM", "ZINC",
+        ):
+            contract = get_commodity_futures_contract(symbol, which="NEAR")
+            if not contract or not contract.get("token"):
+                continue
+            token = str(contract["token"])
+            contracts[token] = {"symbol": symbol, "contract": contract}
+        if not contracts:
+            return
+
+        state.commodity_tokens = contracts
+        if state.commodity_listener is None:
+            state.commodity_listener = lambda tick: _handle_commodity_tick(state, tick)
+            state.stream.add_tick_listener(state.commodity_listener)
+        state.stream.subscribe(EXCHANGE_TYPE["MCX_FO"], list(contracts))
+        _print_log(f"[smartapi] Subscribed to {len(contracts)} MCX futures contracts")
+    except Exception as exc:  # noqa: BLE001 - REST quote remains the fallback
+        _LOGGER.warning("[smartapi] MCX subscription setup failed: %s", exc)
+
+
+def _handle_commodity_tick(state, tick):
+    if _COMMODITY_BROADCAST is None:
+        return
+    if not feed_manager._feed_allowed("SMARTAPI"):
+        return
+    meta = getattr(state, "commodity_tokens", {}).get(str(tick.get("token")))
+    if not meta:
+        return
+    ltp = tick.get("last_traded_price")
+    if ltp is None:
+        return
+    contract = meta["contract"]
+    close = tick.get("closed_price")
+    change = round(float(ltp) - float(close), 2) if close not in (None, 0) else None
+    pct_change = round(change / float(close) * 100.0, 2) if change is not None else None
+    quote = {
+        "Contract": contract.get("symbol"),
+        "Underlying": meta["symbol"],
+        "Exchange": "MCX",
+        "LotSize": contract.get("lotsize"),
+        "Expiry": contract.get("expiry"),
+        "LTP": ltp,
+        "Change": change,
+        "PctChange": pct_change,
+        "Open": tick.get("open_price_of_the_day"),
+        "High": tick.get("high_price_of_the_day"),
+        "Low": tick.get("low_price_of_the_day"),
+        "PrevClose": close,
+        "Volume": tick.get("volume_trade_for_the_day"),
+        "OI": tick.get("open_interest"),
+        "FutSource": "SMARTAPI_WS",
+    }
+    import asyncio
+
+    asyncio.run_coroutine_threadsafe(
+        _COMMODITY_BROADCAST({
+            "type": "commodityQuote",
+            "payload": {"symbol": meta["symbol"], "provider": "SMARTAPI", "quote": quote},
+        }),
+        state.loop,
+    )
 
 
 def _smartapi_feed_switch(state, symbol, strikes_around_atm, expiry):
@@ -86,6 +163,7 @@ def _smartapi_feed_switch(state, symbol, strikes_around_atm, expiry):
         exchange_types=EXCHANGE_TYPE,
         report=_print_log,
     )
+    _subscribe_commodity_futures(state, state.loop)
 
 
 def _smartapi_feed_stop(state):

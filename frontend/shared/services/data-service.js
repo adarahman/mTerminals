@@ -370,6 +370,12 @@ class DataService {
     }
     return;
   }
+  if(messageType === 'commodityQuote'){
+    if(window.commodityPrices && typeof window.commodityPrices.applyLiveQuote === 'function'){
+      window.commodityPrices.applyLiveQuote(AppState.wsState.commodityQuote);
+    }
+    return;
+  }
   this._updateDataQuality(AppState.wsState);
 
   // Keep the native Price Chart buffer current even while its modal is

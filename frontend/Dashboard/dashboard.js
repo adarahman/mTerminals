@@ -373,7 +373,11 @@ window.closeOIDashboardModal = (...args) => app.modal.closeOIDashboardModal(...a
 window.openPriceChartModal = (...args) => app.modal.openPriceChartModal(...args);
 window.closePriceChartModal = (...args) => app.modal.closePriceChartModal(...args);
 window.openCommodityPricesModal = (symbol) => {
-  if (symbol) window.commodityActiveSymbol = String(symbol).toUpperCase();
+  if (symbol) {
+    const normalized = String(symbol).toUpperCase();
+    if (typeof persistCommoditySymbol === 'function') persistCommoditySymbol(normalized);
+    else window.commodityActiveSymbol = normalized;
+  }
   window.setDashboardInstrumentMode('commodity');
 };
 window.closeCommodityPricesModal = () => window.setDashboardInstrumentMode('equity');

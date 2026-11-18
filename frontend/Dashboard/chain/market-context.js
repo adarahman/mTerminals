@@ -5,8 +5,26 @@ const COMMODITY_SYMBOLS = [
   'ALUMINIUM', 'COPPER', 'CRUDEOIL', 'GOLD', 'GOLDM',
   'LEAD', 'NATURALGAS', 'SILVER', 'SILVERM', 'ZINC',
 ];
-window.dashboardInstrumentMode = 'equity';
-window.commodityActiveSymbol = 'CRUDEOIL';
+const DASHBOARD_MODE_STORAGE_KEY = 'dashboard.instrumentMode';
+const COMMODITY_SYMBOL_STORAGE_KEY = 'dashboard.commoditySymbol';
+let savedInstrumentMode = 'equity';
+let savedCommoditySymbol = 'CRUDEOIL';
+try {
+  if (localStorage.getItem(DASHBOARD_MODE_STORAGE_KEY) === 'commodity') {
+    savedInstrumentMode = 'commodity';
+  }
+  const savedSymbol = String(localStorage.getItem(COMMODITY_SYMBOL_STORAGE_KEY) || '').toUpperCase();
+  if (COMMODITY_SYMBOLS.includes(savedSymbol)) savedCommoditySymbol = savedSymbol;
+} catch (_) {}
+window.dashboardInstrumentMode = savedInstrumentMode;
+window.commodityActiveSymbol = savedCommoditySymbol;
+
+function persistCommoditySymbol(symbol) {
+  const normalized = String(symbol || '').toUpperCase();
+  if (!COMMODITY_SYMBOLS.includes(normalized)) return;
+  window.commodityActiveSymbol = normalized;
+  try { localStorage.setItem(COMMODITY_SYMBOL_STORAGE_KEY, normalized); } catch (_) {}
+}
 
 function isFuturesReferenceVisible(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -232,7 +250,7 @@ window.fetchSymbolList = fetchSymbolList;
 function onSymbolPicked(val){
   if(window.dashboardInstrumentMode === 'commodity'){
     if(COMMODITY_SYMBOLS.includes(String(val || '').toUpperCase())){
-      window.commodityActiveSymbol = String(val).toUpperCase();
+      persistCommoditySymbol(val);
       if(window.commodityPrices) window.commodityPrices.select(window.commodityActiveSymbol);
     }
     return;
@@ -254,7 +272,14 @@ function setDashboardInstrumentMode(mode){
     : !!topBar && !topBar.classList.contains('commodity-topbar');
   if(window.dashboardInstrumentMode === nextMode && topBarMatchesMode) return;
   window.dashboardInstrumentMode = nextMode;
+  try { localStorage.setItem(DASHBOARD_MODE_STORAGE_KEY, nextMode); } catch (_) {}
   document.body.classList.toggle('commodity-mode', nextMode === 'commodity');
+  const dashboard = document.getElementById('dashboard');
+  const loader = document.getElementById('loader');
+  if (loader && (nextMode === 'commodity'
+      || (window.AppState?.wsState && dashboard?.style.display === 'block'))) {
+    loader.style.display = 'none';
+  }
   const slot = document.getElementById('commodity-dashboard-slot');
   if(nextMode === 'commodity'){
     if(window.commodityPrices) window.commodityPrices.open(window.commodityActiveSymbol);
@@ -269,6 +294,12 @@ function setDashboardInstrumentMode(mode){
   }
 }
 window.setDashboardInstrumentMode = setDashboardInstrumentMode;
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (window.dashboardInstrumentMode === 'commodity') {
+    setDashboardInstrumentMode('commodity');
+  }
+});
 
 // Inside dashboard.js, within the DataService or global scope:
 function switchActiveIndex(sym) {

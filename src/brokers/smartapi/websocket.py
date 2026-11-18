@@ -60,6 +60,7 @@ class SmartTickStream:
         self._on_tick_cb = on_tick
         self._on_error_cb = on_error
         self._on_close_cb = on_close
+        self._tick_listeners = []
         self._ws = None
         self._connected = threading.Event()
         self._closing = False
@@ -145,6 +146,16 @@ class SmartTickStream:
                 self._on_tick_cb(message)
             except Exception as e:
                 logger.error(f"[smartapi_ws] on_tick callback error: {e}")
+        for listener in tuple(self._tick_listeners):
+            try:
+                listener(message)
+            except Exception as e:
+                logger.error(f"[smartapi_ws] tick listener error: {e}")
+
+    def add_tick_listener(self, listener):
+        """Register a side-channel consumer without replacing feed aggregation."""
+        if listener not in self._tick_listeners:
+            self._tick_listeners.append(listener)
 
     def _handle_error(self, _wsapp, error):
         if self._closing:

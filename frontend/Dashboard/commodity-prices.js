@@ -5,13 +5,13 @@ class CommodityPricesView {
     this.timer = null;
     this.chainTimer = null;
     this.newsTimer = null;
-    this.quoteLoading = false;
-    this.quoteRefreshPendingSymbol = '';
+    this.quoteLoadingSymbols = new Set();
     this.chainLoading = false;
     this.chainRefreshPendingSymbol = '';
     this.newsLoading = false;
     this.newsRefreshPending = false;
     this.latestQuote = null;
+    this.lastLiveQuoteAt = 0;
     this.latestQuoteError = '';
     this.latestProvider = '';
     this.latestChainPayload = null;
@@ -31,7 +31,7 @@ class CommodityPricesView {
     if (this.chainTimer !== null) window.clearInterval(this.chainTimer);
     if (this.newsTimer !== null) window.clearInterval(this.newsTimer);
     this.refresh();
-    this.timer = window.setInterval(() => this._refreshQuote(this.symbol), 3000);
+    this.timer = window.setInterval(() => this._refreshQuote(this.symbol), 1000);
     this.chainTimer = window.setInterval(() => this._refreshOptionChain(this.symbol), 10000);
     this.refreshNews();
     this.newsTimer = window.setInterval(() => this.refreshNews(), 300000);
@@ -74,6 +74,7 @@ class CommodityPricesView {
 
   _resetForSymbol(symbol) {
     this.latestQuote = null;
+    this.lastLiveQuoteAt = 0;
     this.latestQuoteError = '';
     this.latestProvider = '';
     this.latestChainPayload = null;
@@ -129,6 +130,61 @@ class CommodityPricesView {
     return Number.isFinite(number)
       ? number.toLocaleString('en-IN', { maximumFractionDigits: digits })
       : '—';
+  }
+
+  applyLiveQuote(payload) {
+    if (!payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
+    const quote = payload.quote || {};
+    if (quote.LTP == null) return;
+    this.lastLiveQuoteAt = Date.now();
+    this.latestQuote = quote;
+    this.latestQuoteError = '';
+    this.latestProvider = payload.provider || 'SMARTAPI';
+    this._setText('commodity-price-contract', quote.Contract || 'MCX Futures');
+    this._setText('commodity-price-ltp', this._format(quote.LTP));
+    const change = quote.Change == null ? NaN : Number(quote.Change);
+    const percent = quote.PctChange == null ? NaN : Number(quote.PctChange);
+    const ltp = document.getElementById('commodity-price-ltp');
+    if (ltp) {
+      ltp.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
+      ltp.classList.toggle('down', Number.isFinite(percent) && percent < 0);
+    }
+    const changeElement = document.getElementById('commodity-price-change');
+    if (changeElement) {
+      changeElement.textContent = Number.isFinite(change) && Number.isFinite(percent)
+        ? `${change >= 0 ? '+' : ''}${this._format(change)} (${percent >= 0 ? '+' : ''}${this._format(percent)}%)`
+        : '—';
+      changeElement.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
+      changeElement.classList.toggle('down', Number.isFinite(percent) && percent < 0);
+    }
+    this._setText('commodity-price-lot-size', this._format(quote.LotSize, 0));
+    this._setText('commodity-price-open', this._format(quote.Open));
+    this._setText('commodity-price-high', this._format(quote.High));
+    this._setText('commodity-price-low', this._format(quote.Low));
+    this._setText('commodity-price-volume', fmtCrLK(quote.Volume));
+    this._setText('commodity-price-oi', fmtCrLK(quote.OI));
+    const status = document.getElementById('commodity-price-status');
+    if (status) {
+      status.dataset.tone = 'live';
+      status.dataset.status = 'live';
+      status.textContent = 'LIVE';
+      status.title = `Live MCX quote via ${this.latestProvider}`;
+    }
+    const sourcePrice = document.getElementById('data-source-indicative-price');
+    if (sourcePrice) sourcePrice.textContent = `₹${this._format(quote.LTP)}`;
+    this._setText('commodity-updated-time', new Date().toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }));
+    this._syncSharedQuoteContext();
+  }
+
+  _syncSharedQuoteContext() {
+    const sharedData = this._toSharedDashboardData();
+    if (typeof _data !== 'undefined') _data = sharedData;
+    const modal = document.getElementById('option-chain-modal');
+    if (modal?.classList.contains('open') && typeof app !== 'undefined' && app.modal) {
+      app.modal.renderOptionChainContext(sharedData);
+    }
   }
 
   async refresh() {
@@ -213,14 +269,9 @@ class CommodityPricesView {
   }
 
   async _refreshQuote(symbol) {
-    if (this.quoteLoading) {
-      // Keep the newest requested instrument. A slow response for the prior
-      // symbol must not make the newly selected quote wait for another timer
-      // tick (or overwrite it when it eventually completes).
-      this.quoteRefreshPendingSymbol = symbol;
-      return;
-    }
-    this.quoteLoading = true;
+    if (this.quoteLoadingSymbols.has(symbol)) return;
+    this.quoteLoadingSymbols.add(symbol);
+    const requestedAt = Date.now();
     const status = document.getElementById('commodity-price-status');
     if (status && document.getElementById('commodity-price-ltp')?.textContent === '—') {
       status.dataset.tone = '';
@@ -236,6 +287,9 @@ class CommodityPricesView {
         throw new Error(payload.error || `Quote request failed (${response.status}).`);
       }
       if (symbol !== this.symbol) return;
+      const liveQuoteIsFresh = this.lastLiveQuoteAt
+        && Date.now() - this.lastLiveQuoteAt < 10000;
+      if (this.lastLiveQuoteAt > requestedAt || liveQuoteIsFresh) return;
       const quote = payload.quote || {};
       this.latestQuote = quote;
       this.latestQuoteError = '';
@@ -295,6 +349,7 @@ class CommodityPricesView {
       this._setText('commodity-updated-time', new Date().toLocaleTimeString('en-IN', {
         timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit',
       }));
+      this._syncSharedQuoteContext();
     } catch (error) {
       if (symbol === this.symbol && status) {
         this.latestQuoteError = error.message || 'MCX quote unavailable.';
@@ -330,13 +385,7 @@ class CommodityPricesView {
       }
     }
     finally {
-      this.quoteLoading = false;
-      const pendingSymbol = this.quoteRefreshPendingSymbol;
-      this.quoteRefreshPendingSymbol = '';
-      const nextSymbol = pendingSymbol || (symbol !== this.symbol ? this.symbol : '');
-      if (nextSymbol && nextSymbol === this.symbol) {
-        this._refreshQuote(nextSymbol);
-      }
+      this.quoteLoadingSymbols.delete(symbol);
     }
   }
 
@@ -578,6 +627,8 @@ class CommodityPricesView {
     const slot = document.getElementById('commodity-dashboard-slot');
     const chainView = typeof app !== 'undefined' && app.chain;
     if (!dashboard || !slot || !chainView) return;
+    const legacyLoader = document.getElementById('loader');
+    if (legacyLoader) legacyLoader.style.display = 'none';
     const data = this._toSharedDashboardData();
     const existingTopBar = dashboard.querySelector('#sec-topbar');
     const hasCommodityTopBar = existingTopBar?.classList.contains('commodity-topbar');

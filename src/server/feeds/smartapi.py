@@ -19,6 +19,8 @@ class FeedState:
     index_exchange: str | None = None
     futures_token: str | None = None
     futures_exchange: str | None = None
+    commodity_tokens: dict | None = None
+    commodity_listener: Any = None
 
 
 def resolve_chain_tokens(
@@ -258,5 +260,15 @@ def stop_feed(
             )
         except Exception as exc:  # noqa: BLE001 - SDK cleanup must not block switching
             report(f"[smartapi] Index unsubscribe failed during shutdown: {exc}")
+    commodity_tokens = getattr(state, "commodity_tokens", None) or {}
+    if commodity_tokens:
+        attempted = True
+        try:
+            state.stream.unsubscribe(
+                exchange_types["MCX_FO"], list(commodity_tokens)
+            )
+        except Exception as exc:  # noqa: BLE001 - SDK cleanup must not block shutdown
+            report(f"[smartapi] MCX unsubscribe failed during shutdown: {exc}")
+    state.commodity_tokens = None
     state.tokens = None
     return attempted
