@@ -111,6 +111,11 @@
       <div id="commodity-expiry-holder" hidden>
         <select id="commodity-expiry" class="commodity-picker" onchange="commodityPrices.selectExpiry(this.value)"></select>
       </div>
+      <div id="commodity-futures-expiry-holder" hidden>
+        <select id="commodity-futures-expiry" class="commodity-picker" aria-label="Commodity futures expiry" title="Select futures expiry" onchange="commodityPrices.selectFutureExpiry(this.value)" disabled>
+          <option value="">Loading futures…</option>
+        </select>
+      </div>
       <section id="commodity-option-chain" class="commodity-option-chain" aria-label="Commodity option chain" tabindex="-1">
         <div id="commodity-chain-shared"></div>
       </section>

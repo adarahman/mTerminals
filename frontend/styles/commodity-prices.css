@@ -38,6 +38,9 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-option-expiry-pill #commodity-expiry-slot{display:inline-flex;min-width:0;max-width:150px;overflow:hidden;}
 .commodity-option-expiry-pill #commodity-expiry{max-width:150px;font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);background:transparent;border:0;padding:0 14px 0 0;}
 .commodity-option-expiry-pill #commodity-expiry:focus{color:var(--info);}
+.commodity-futures-expiry-pill #commodity-futures-expiry-slot{display:inline-flex;min-width:0;max-width:150px;overflow:hidden;}
+.commodity-futures-expiry-pill #commodity-futures-expiry{max-width:150px;font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);background:transparent;border:0;padding:0 14px 0 0;}
+.commodity-futures-expiry-pill #commodity-futures-expiry:focus{color:var(--info);}
 @media(max-width:680px){
   .commodity-topbar .top-bar-left{align-items:flex-start;flex-wrap:wrap;}
   .commodity-topbar-quote{flex:1 1 auto;}

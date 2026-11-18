@@ -10,6 +10,7 @@
     "test:decision": "node tools/test-decision-contracts.mjs",
     "test:scenario": "node tools/test-scenario-contracts.mjs",
     "test:paper-trading": "node tools/test-paper-trading-contracts.mjs",
+    "test:commodity-futures": "node tools/test-commodity-futures-expiry.mjs",
     "test:price-chart": "node tools/test-price-chart-contracts.mjs",
     "test:design-system": "node tools/test-design-system-contracts.mjs",
     "test:health-status": "node tools/test-health-status-contracts.mjs",

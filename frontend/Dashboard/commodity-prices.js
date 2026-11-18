@@ -2,6 +2,10 @@ class CommodityPricesView {
   constructor() {
     this.symbol = 'CRUDEOIL';
     this.expiry = '';
+    this.futureExpiry = '';
+    this.futureExpiries = [];
+    this.futureExpiryCache = new Map();
+    this.futureExpiryLoads = new Map();
     this.timer = null;
     this.chainTimer = null;
     this.newsTimer = null;
@@ -58,6 +62,7 @@ class CommodityPricesView {
     this.symbol = nextSymbol;
     window.commodityActiveSymbol = nextSymbol;
     this.expiry = '';
+    this.renderDashboard();
     this.refresh();
     this.refreshNews();
   }
@@ -65,6 +70,13 @@ class CommodityPricesView {
   selectExpiry(expiry) {
     this.expiry = String(expiry || '').toUpperCase();
     this._refreshOptionChain(this.symbol);
+  }
+
+  selectFutureExpiry(expiry) {
+    const selected = String(expiry || '');
+    if (!selected || selected === this.futureExpiry) return;
+    this.futureExpiry = selected;
+    this._refreshQuote(this.symbol);
   }
 
   _setText(id, value) {
@@ -79,6 +91,8 @@ class CommodityPricesView {
     this.latestProvider = '';
     this.latestChainPayload = null;
     this.latestAnalysis = {};
+    this.futureExpiry = '';
+    this.futureExpiries = [];
     this._setText('commodity-price-contract', 'Loading contract…');
     this._setText('commodity-price-ltp', '—');
     const ltp = document.getElementById('commodity-price-ltp');
@@ -106,6 +120,11 @@ class CommodityPricesView {
     this._setText('commodity-updated-time', '—');
     const expiryPicker = document.getElementById('commodity-expiry');
     if (expiryPicker) expiryPicker.replaceChildren();
+    const futureExpiryPicker = document.getElementById('commodity-futures-expiry');
+    if (futureExpiryPicker) {
+      futureExpiryPicker.replaceChildren(new Option('Loading futures…', ''));
+      futureExpiryPicker.disabled = true;
+    }
     const chainStatus = document.getElementById('commodity-chain-status');
     if (chainStatus) {
       chainStatus.dataset.tone = '';
@@ -136,6 +155,8 @@ class CommodityPricesView {
     if (!payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
     const quote = payload.quote || {};
     if (quote.LTP == null) return;
+    if (this.futureExpiry
+        && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
     this.lastLiveQuoteAt = Date.now();
     this.latestQuote = quote;
     this.latestQuoteError = '';
@@ -190,7 +211,98 @@ class CommodityPricesView {
   async refresh() {
     const requestedSymbol = this.symbol;
     this._refreshQuote(requestedSymbol);
+    this._refreshFutureExpiries(requestedSymbol);
     this._refreshOptionChain(requestedSymbol);
+  }
+
+  _normalizeExpiry(expiry) {
+    const value = String(expiry || '').trim().toUpperCase();
+    const match = /^(\d{1,2})-?([A-Z]{3})-?(\d{4})$/.exec(value);
+    return match ? `${match[1].padStart(2, '0')}${match[2]}${match[3]}` : value;
+  }
+
+  _expiryTime(expiry) {
+    const normalized = this._normalizeExpiry(expiry);
+    const match = /^(\d{2})([A-Z]{3})(\d{4})$/.exec(normalized);
+    if (!match) return Number.POSITIVE_INFINITY;
+    const month = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+      .indexOf(match[2]);
+    return month < 0
+      ? Number.POSITIVE_INFINITY
+      : Date.UTC(Number(match[3]), month, Number(match[1]));
+  }
+
+  _futureSlot(expiry = this.futureExpiry) {
+    const contract = this.futureExpiries.find((item) =>
+      this._normalizeExpiry(item.expiry) === this._normalizeExpiry(expiry)
+    );
+    return contract ? contract.which : 'NEAR';
+  }
+
+  async _refreshFutureExpiries(symbol) {
+    const cached = this.futureExpiryCache.get(symbol);
+    if (cached && Date.now() - cached.loadedAt < 300000) {
+      this._applyFutureExpiries(symbol, cached.contracts);
+      return;
+    }
+    if (this.futureExpiryLoads.has(symbol)) return this.futureExpiryLoads.get(symbol);
+
+    const load = Promise.all(['NEAR', 'NEXT', 'FAR'].map(async (which) => {
+      const query = new URLSearchParams({ symbol, which });
+      const response = await fetch(`/api/commodities/quote?${query}`, { cache: 'no-store' });
+      if (response.status === 404) return null;
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || `Futures expiry request failed (${response.status}).`);
+      }
+      const expiry = payload.quote && payload.quote.Expiry;
+      return expiry ? { expiry, which } : null;
+    })).then((results) => {
+      const unique = new Map();
+      results.filter(Boolean).forEach((contract) => {
+        const key = this._normalizeExpiry(contract.expiry);
+        if (!unique.has(key)) unique.set(key, contract);
+      });
+      const contracts = Array.from(unique.values())
+        .sort((a, b) => this._expiryTime(a.expiry) - this._expiryTime(b.expiry));
+      if (!contracts.length) throw new Error(`No live MCX futures expiries found for ${symbol}.`);
+      this.futureExpiryCache.set(symbol, { loadedAt: Date.now(), contracts });
+      this._applyFutureExpiries(symbol, contracts);
+      return contracts;
+    }).catch((error) => {
+      if (symbol === this.symbol) {
+        const picker = document.getElementById('commodity-futures-expiry');
+        if (picker) {
+          picker.replaceChildren(new Option('Futures unavailable', ''));
+          picker.disabled = true;
+          picker.title = error.message || 'Unable to load MCX futures expiries.';
+        }
+      }
+      return [];
+    }).finally(() => this.futureExpiryLoads.delete(symbol));
+    this.futureExpiryLoads.set(symbol, load);
+    return load;
+  }
+
+  _applyFutureExpiries(symbol, contracts) {
+    if (symbol !== this.symbol) return;
+    const picker = document.getElementById('commodity-futures-expiry');
+    if (!picker) return;
+    const previous = this.futureExpiry;
+    this.futureExpiries = contracts;
+    const selected = contracts.find((item) =>
+      this._normalizeExpiry(item.expiry) === this._normalizeExpiry(previous)
+    ) || contracts[0];
+    this.futureExpiry = selected.expiry;
+    picker.replaceChildren(...contracts.map((item) => {
+      const option = new Option(this._formatExpiry(item.expiry), item.expiry);
+      option.selected = item === selected;
+      return option;
+    }));
+    picker.disabled = false;
+    if (this._normalizeExpiry(previous) !== this._normalizeExpiry(this.futureExpiry)) {
+      this._refreshQuote(symbol);
+    }
   }
 
   async refreshNews() {
@@ -272,6 +384,8 @@ class CommodityPricesView {
     if (this.quoteLoadingSymbols.has(symbol)) return;
     this.quoteLoadingSymbols.add(symbol);
     const requestedAt = Date.now();
+    const requestedExpiry = this.futureExpiry;
+    const which = this._futureSlot(requestedExpiry);
     const status = document.getElementById('commodity-price-status');
     if (status && document.getElementById('commodity-price-ltp')?.textContent === '—') {
       status.dataset.tone = '';
@@ -279,18 +393,23 @@ class CommodityPricesView {
     }
     try {
       const response = await fetch(
-        `/api/commodities/quote?symbol=${encodeURIComponent(symbol)}`,
+        `/api/commodities/quote?symbol=${encodeURIComponent(symbol)}&which=${which}`,
         { cache: 'no-store' }
       );
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error || `Quote request failed (${response.status}).`);
       }
-      if (symbol !== this.symbol) return;
+      if (symbol !== this.symbol || requestedExpiry !== this.futureExpiry) return;
+      const quote = payload.quote || {};
+      if (this.futureExpiry
+          && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
       const liveQuoteIsFresh = this.lastLiveQuoteAt
         && Date.now() - this.lastLiveQuoteAt < 10000;
-      if (this.lastLiveQuoteAt > requestedAt || liveQuoteIsFresh) return;
-      const quote = payload.quote || {};
+      const liveQuoteMatchesExpiry = !this.futureExpiry
+        || this._normalizeExpiry(this.latestQuote && this.latestQuote.Expiry)
+          === this._normalizeExpiry(this.futureExpiry);
+      if (liveQuoteMatchesExpiry && (this.lastLiveQuoteAt > requestedAt || liveQuoteIsFresh)) return;
       this.latestQuote = quote;
       this.latestQuoteError = '';
       this.latestProvider = payload.provider || '';
@@ -638,6 +757,12 @@ class CommodityPricesView {
     if (expiryPicker && expiryHolder && expiryPicker.parentNode !== expiryHolder) {
       expiryHolder.appendChild(expiryPicker);
     }
+    const futureExpiryPicker = document.getElementById('commodity-futures-expiry');
+    const futureExpiryHolder = document.getElementById('commodity-futures-expiry-holder');
+    if (futureExpiryPicker && futureExpiryHolder
+        && futureExpiryPicker.parentNode !== futureExpiryHolder) {
+      futureExpiryHolder.appendChild(futureExpiryPicker);
+    }
     dashboard.style.display = 'block';
     // Quote polling runs independently from option-chain polling. Keep the
     // live quote DOM while rebuilding the decision view so a chain update
@@ -655,6 +780,8 @@ class CommodityPricesView {
     dashboard.append(slot);
     const expirySlot = document.getElementById('commodity-expiry-slot');
     if (expiryPicker && expirySlot) expirySlot.appendChild(expiryPicker);
+    const futuresExpirySlot = document.getElementById('commodity-futures-expiry-slot');
+    if (futureExpiryPicker && futuresExpirySlot) futuresExpirySlot.appendChild(futureExpiryPicker);
     this._renderSharedOptionChain(this.latestChainPayload);
     chainView._bindDecisionDetailGuard();
   }

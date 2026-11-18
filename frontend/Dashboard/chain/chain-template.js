@@ -221,8 +221,12 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
           <span class="data-source-meta"><span id="data-source-indicative-label" class="data-source-indicative-label">MCX FUTURES</span><span id="data-source-indicative-price" class="data-source-indicative-price">₹—</span><span class="feed-status-pill data-source-status-pill" data-status="${sourceStatus.toLowerCase().replaceAll('_','-')}" title="${escapeHtml(sourceStatusTitle)}">${escapeHtml(sourceStatus)}</span></span>
         </div>
         <div class="expiry-pill topbar-expiry-pill commodity-option-expiry-pill">
-          <span class="expiry-row"><span class="expiry-pill-label">Expiry</span></span>
+          <span class="expiry-row"><span class="expiry-pill-label">Options</span></span>
           <span class="expiry-row"><span id="commodity-expiry-slot"></span></span>
+        </div>
+        <div class="expiry-pill topbar-expiry-pill commodity-futures-expiry-pill">
+          <span class="expiry-row"><span class="expiry-pill-label">Futures</span></span>
+          <span class="expiry-row"><span id="commodity-futures-expiry-slot"></span></span>
         </div>
         <div class="expiry-pill"><span class="expiry-pill-label">Updated</span><span class="expiry-pill-val time-val" id="commodity-updated-time">—</span></div>
       </div>

@@ -12,8 +12,8 @@ class _Provider:
         self.chain = chain
         self.requested = []
 
-    def get_commodity_futures_quote(self, symbol):
-        self.requested.append(symbol)
+    def get_commodity_futures_quote(self, symbol, which="NEAR"):
+        self.requested.append((symbol, which))
         return self.quote
 
     def get_commodity_option_expiries(self, symbol):
@@ -45,7 +45,36 @@ def test_commodity_quote_returns_provider_and_market_quote():
         "symbol": "CRUDEOIL",
         "quote": quote,
     }
-    assert provider.requested == ["CRUDEOIL"]
+    assert provider.requested == [("CRUDEOIL", "NEAR")]
+
+
+def test_commodity_quote_selects_requested_future_slot():
+    quote = {"Contract": "CRUDEOILJULFUT", "Expiry": "31-Jul-2026", "LTP": 7123.5}
+    provider = _Provider(quote)
+    api = CommodityPricesApi(
+        market_data=lambda: provider,
+        active_provider=lambda: "SMARTAPI",
+    )
+    request = SimpleNamespace(query={"symbol": "CRUDEOIL", "which": "NEXT"})
+
+    response = asyncio.run(api.quote(request))
+
+    assert response.status == 200
+    assert json.loads(response.text)["quote"]["Expiry"] == "31-Jul-2026"
+    assert provider.requested == [("CRUDEOIL", "NEXT")]
+
+
+def test_commodity_quote_rejects_invalid_future_slot():
+    provider = _Provider({"LTP": 1})
+    api = CommodityPricesApi(market_data=lambda: provider)
+    request = SimpleNamespace(query={"symbol": "CRUDEOIL", "which": "MONTHLY"})
+
+    response = asyncio.run(api.quote(request))
+
+    assert response.status == 400
+    assert json.loads(response.text) == {
+        "error": "Futures slot must be NEAR, NEXT, or FAR."
+    }
 
 
 def test_commodity_quote_rejects_unknown_symbol_without_provider_call():

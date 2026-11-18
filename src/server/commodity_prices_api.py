@@ -175,6 +175,11 @@ class CommodityPricesApi:
             return web.json_response(
                 {"error": "Unsupported commodity symbol."}, status=400
             )
+        which = request.query.get("which", "NEAR").strip().upper()
+        if which not in {"NEAR", "NEXT", "FAR"}:
+            return web.json_response(
+                {"error": "Futures slot must be NEAR, NEXT, or FAR."}, status=400
+            )
 
         provider = self._market_data()
         get_quote = getattr(provider, "get_commodity_futures_quote", None)
@@ -191,7 +196,10 @@ class CommodityPricesApi:
                 status=501,
             )
 
-        quote = await asyncio.to_thread(get_quote, symbol)
+        if which == "NEAR":
+            quote = await asyncio.to_thread(get_quote, symbol)
+        else:
+            quote = await asyncio.to_thread(get_quote, symbol, which=which)
         if not quote:
             return web.json_response(
                 {
