@@ -66,7 +66,7 @@ class ChartRenderer {
   // Main render method
   render(canvas, series, values, settings, rangeConfig, zoomState, dataBounds) {
     const W0 = canvas.parentElement.clientWidth - 24;
-    const H0 = Math.max(160, canvas.parentElement.clientHeight);
+    const H0 = Math.max(320, canvas.parentElement.clientHeight);
     const ctx = sizeCanvasIfChanged(canvas, W0, H0);
     const W = W0, H = H0;
     // Price axis sits on the RIGHT: the chart advances left→right, so new
@@ -96,8 +96,17 @@ class ChartRenderer {
     // Y-axis is fit to the ENTIRE visible window, so a full session's
     // move fits on screen instead of clipping against a scale fitted to
     // only the most recent candles.
-    const yMin = Math.min(...(settings.type === 'candle' ? series.map(c => c.l) : values));
-    const yMax = Math.max(...(settings.type === 'candle' ? series.map(c => c.h) : values));
+    const livePrice = Number(dataBounds && dataBounds.livePrice);
+    const priceValues = settings.type === 'candle'
+      ? series.map(c => c.l) : values.slice();
+    const highValues = settings.type === 'candle'
+      ? series.map(c => c.h) : values.slice();
+    if(Number.isFinite(livePrice) && livePrice > 0){
+      priceValues.push(livePrice);
+      highValues.push(livePrice);
+    }
+    const yMin = Math.min(...priceValues);
+    const yMax = Math.max(...highValues);
     const padY = (yMax - yMin) * 0.1 || 1;
     const y0 = yMin - padY, y1 = yMax + padY;
 
@@ -156,6 +165,38 @@ class ChartRenderer {
     }
 
     return { ctx, PAD, PW, PH, W, H, xScale, yScale, tmap, y0, y1, C };
+  }
+
+  drawLastPriceMarker(renderResult, price) {
+    const value = Number(price);
+    if (!renderResult || !Number.isFinite(value) || value <= 0
+        || value < renderResult.y0 || value > renderResult.y1) return false;
+    const {ctx, PAD, PW, yScale} = renderResult;
+    const y = yScale(value);
+    const axisX = PAD.l + PW;
+    ctx.save();
+    ctx.strokeStyle = '#339AF0';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, y);
+    ctx.lineTo(axisX, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#339AF0';
+    ctx.fillRect(axisX + 1, y - 8, PAD.r - 3, 16);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '10px Inter,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      value.toLocaleString('en-IN', {maximumFractionDigits:2}),
+      axisX + PAD.r / 2,
+      y,
+      PAD.r - 5
+    );
+    ctx.restore();
+    return true;
   }
 
   _drawGrid(ctx, PAD, PW, PH, W, y0, y1, C) {

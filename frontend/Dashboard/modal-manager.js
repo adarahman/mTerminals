@@ -261,10 +261,35 @@ class ModalManager {
   openPriceChartModal(){
   var modal=document.getElementById('price-chart-modal');
   if(!modal)return;
+  const isCommodity=window.dashboardInstrumentMode==='commodity';
+  const commodityView=window.commodityPrices;
+  const currentData=typeof _data!=='undefined'?_data:null;
+  const context=isCommodity
+    ? {
+      symbol:commodityView?.symbol||currentData?.symbol,
+      instrument:'MCX_FUT',
+      expiry:commodityView?.futureExpiry||'',
+    }
+    : {
+      symbol:(AppState.wsState&&AppState.wsState.symbol)||currentData?.symbol,
+      instrument:'EQ',
+      expiry:'',
+    };
+  priceChart.setContext(context);
   this._openModal(modal,()=>this.closePriceChartModal());
   priceChart.ensureMounted();
+  const orderPanel=document.getElementById('pc-order-panel');
+  if(orderPanel) orderPanel.hidden=isCommodity;
+  const title=modal.querySelector('.oc-modal-title');
+  if(title) title.textContent=isCommodity?'📈 Commodity Price Chart':'📈 Price Chart';
+  if(isCommodity&&commodityView?.latestQuote?.LTP!=null){
+    priceChart.addTick(commodityView.latestQuote.LTP,Date.now(),null,context);
+  }
   priceChart.hydrateRange(priceChart.settings.range);
-  this.renderPriceChartContext(typeof _data !== 'undefined' ? _data : null);
+  if(priceChart._windowHistoryRange&&priceChart._windowHistoryRange!==priceChart.settings.range){
+    priceChart.hydrateRange(priceChart._windowHistoryRange);
+  }
+  this.renderPriceChartContext(currentData);
   requestAnimationFrame(()=>priceChart.render(true));
 }
 
@@ -281,18 +306,19 @@ class ModalManager {
     ? `${Number(v)>=0?'+':''}${num(v,2)}` : '—';
   const bias=String(dec.bias||'WAIT').toUpperCase();
   const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';
+  const isCommodity=d.instrument==='MCX_FUT';
   host.innerHTML=`
     <section class="focus-context-card focus-context-primary">
       <span class="focus-context-label">Instrument</span>
-      <strong>${esc(d.symbol)} <em>EQ</em></strong>
+      <strong>${esc(d.symbol)} <em>${isCommodity?'MCX FUT':'EQ'}</em></strong>
       <div class="focus-context-price">₹${num(d.spot,2)}</div>
       <small class="${Number(d.spotChgPct)>=0?'positive':'negative'}">${signed(d.spotChange)} · ${signed(d.spotChgPct)}%</small>
     </section>
     <section class="focus-context-card">
-      <span class="focus-context-label">Futures reference</span>
-      <strong>${esc(d.futuresExpiry||'NEAR')} · ₹${num(d.future,2)}</strong>
-      <div class="focus-context-row"><span>Basis</span><b>${signed(d.basis)}</b></div>
-      <small>${esc(d.futSignal||'Awaiting positioning')}</small>
+      <span class="focus-context-label">${isCommodity?'Futures contract':'Futures reference'}</span>
+      <strong>${esc(isCommodity?d.futureExpiry:(d.futuresExpiry||'NEAR'))} · ₹${num(isCommodity?d.spot:d.future,2)}</strong>
+      <div class="focus-context-row"><span>${isCommodity?'Contract':'Basis'}</span><b>${isCommodity?esc(d.futureContract||'—'):signed(d.basis)}</b></div>
+      <small>${esc(isCommodity?d.quoteProvider:(d.futSignal||'Awaiting positioning'))}</small>
     </section>
     <section class="focus-context-card">
       <span class="focus-context-label">Option positioning</span>
@@ -312,6 +338,38 @@ class ModalManager {
       <div>${esc(dec.action||'No directional action')}</div>
       <small>${esc(dec.suggestedStrategy||dec.strategyCaution||'Awaiting confirmation')}</small>
     </section>`;
+}
+
+    updatePriceChartLiveContext(d){
+    const host=document.getElementById('price-chart-context-grid');
+    if(!host||!d)return;
+    const num=(v,digits=2)=>Number.isFinite(Number(v))
+      ? Number(v).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
+    const signed=v=>Number.isFinite(Number(v))
+      ? `${Number(v)>=0?'+':''}${num(v,2)}` : '—';
+    const isCommodity=d.instrument==='MCX_FUT';
+    const cards=host.querySelectorAll('.focus-context-card');
+    const primary=cards[0];
+    if(!primary)return;
+    const price=primary.querySelector('.focus-context-price');
+    if(price) price.textContent=`₹${num(d.spot,2)}`;
+    const change=primary.querySelector('small');
+    if(change){
+      change.className=Number(d.spotChgPct)>=0?'positive':'negative';
+      change.textContent=`${signed(d.spotChange)} · ${signed(d.spotChgPct)}%`;
+    }
+    const reference=cards[1]?.querySelector('strong');
+    if(reference){
+      const expiry=isCommodity?d.futureExpiry:(d.futuresExpiry||'NEAR');
+      const referencePrice=isCommodity?d.spot:d.future;
+      reference.textContent=`${expiry||'—'} · ₹${num(referencePrice,2)}`;
+    }
+    const positioningRows=cards[2]?.querySelectorAll('.focus-context-row b');
+    if(positioningRows?.length>=3){
+      positioningRows[0].textContent=num(d.totalPCR,2);
+      positioningRows[1].textContent=num(d.oiChgPCR,2);
+      positioningRows[2].textContent=`₹${num(d.maxPain,0)}`;
+    }
 }
 
   openCommodityPricesModal(symbol){

@@ -152,7 +152,8 @@ class CommodityPricesView {
   }
 
   applyLiveQuote(payload) {
-    if (!payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
+    if (window.dashboardInstrumentMode !== 'commodity'
+        || !payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
     const quote = payload.quote || {};
     if (quote.LTP == null) return;
     if (this.futureExpiry
@@ -200,8 +201,26 @@ class CommodityPricesView {
   }
 
   _syncSharedQuoteContext() {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
     const sharedData = this._toSharedDashboardData();
     if (typeof _data !== 'undefined') _data = sharedData;
+    const chainView = typeof app !== 'undefined' && app.chain;
+    if (chainView && typeof chainView.patchCommodityMiniChart === 'function') {
+      chainView.patchCommodityMiniChart(sharedData);
+    }
+    if (window.priceChart && Number.isFinite(sharedData.spot) && sharedData.spot > 0) {
+      window.priceChart.addTick(sharedData.spot, Date.now(), null, {
+        symbol: this.symbol,
+        instrument: 'MCX_FUT',
+        expiry: this.futureExpiry,
+      });
+    }
+    const priceChartModal = document.getElementById('price-chart-modal');
+    const modalManager = typeof app !== 'undefined' && app.modal;
+    if (priceChartModal?.classList.contains('open')
+        && modalManager && typeof modalManager.updatePriceChartLiveContext === 'function') {
+      modalManager.updatePriceChartLiveContext(sharedData);
+    }
     const modal = document.getElementById('option-chain-modal');
     if (modal?.classList.contains('open') && typeof app !== 'undefined' && app.modal) {
       app.modal.renderOptionChainContext(sharedData);
@@ -209,6 +228,7 @@ class CommodityPricesView {
   }
 
   async refresh() {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
     const requestedSymbol = this.symbol;
     this._refreshQuote(requestedSymbol);
     this._refreshFutureExpiries(requestedSymbol);
@@ -285,7 +305,7 @@ class CommodityPricesView {
   }
 
   _applyFutureExpiries(symbol, contracts) {
-    if (symbol !== this.symbol) return;
+    if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
     const picker = document.getElementById('commodity-futures-expiry');
     if (!picker) return;
     const previous = this.futureExpiry;
@@ -306,6 +326,7 @@ class CommodityPricesView {
   }
 
   async refreshNews() {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
     if (this.newsLoading) {
       this.newsRefreshPending = true;
       return;
@@ -319,21 +340,23 @@ class CommodityPricesView {
         `/api/commodities/news?symbol=${encodeURIComponent(symbol)}`
       );
       const payload = await response.json();
-      if (symbol !== this.symbol) return;
+      if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
       if (!response.ok) {
         throw new Error(payload.error || `News request failed (${response.status}).`);
       }
       this._renderNews(payload);
     } catch (error) {
-      if (symbol !== this.symbol) return;
+      if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
       const list = document.getElementById('commodity-news-list');
       if (list) list.replaceChildren();
       if (status) status.textContent = 'Headlines are unavailable right now. Try again later.';
     } finally {
       this.newsLoading = false;
-      if (this.newsRefreshPending) {
+      if (this.newsRefreshPending && window.dashboardInstrumentMode === 'commodity') {
         this.newsRefreshPending = false;
         this.refreshNews();
+      } else if (window.dashboardInstrumentMode !== 'commodity') {
+        this.newsRefreshPending = false;
       }
     }
   }
@@ -381,6 +404,7 @@ class CommodityPricesView {
   }
 
   async _refreshQuote(symbol) {
+    if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
     if (this.quoteLoadingSymbols.has(symbol)) return;
     this.quoteLoadingSymbols.add(symbol);
     const requestedAt = Date.now();
@@ -400,7 +424,8 @@ class CommodityPricesView {
       if (!response.ok) {
         throw new Error(payload.error || `Quote request failed (${response.status}).`);
       }
-      if (symbol !== this.symbol || requestedExpiry !== this.futureExpiry) return;
+      if (window.dashboardInstrumentMode !== 'commodity'
+          || symbol !== this.symbol || requestedExpiry !== this.futureExpiry) return;
       const quote = payload.quote || {};
       if (this.futureExpiry
           && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
@@ -470,7 +495,7 @@ class CommodityPricesView {
       }));
       this._syncSharedQuoteContext();
     } catch (error) {
-      if (symbol === this.symbol && status) {
+      if (window.dashboardInstrumentMode === 'commodity' && symbol === this.symbol && status) {
         this.latestQuoteError = error.message || 'MCX quote unavailable.';
         const hasLastGoodQuote = !!this.latestQuote;
         status.dataset.tone = hasLastGoodQuote ? 'stale' : 'error';
@@ -509,6 +534,7 @@ class CommodityPricesView {
   }
 
   async _refreshOptionChain(symbol) {
+    if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
     if (this.chainLoading) {
       this.chainRefreshPendingSymbol = symbol;
       return;
@@ -528,7 +554,9 @@ class CommodityPricesView {
       if (!response.ok) {
         throw new Error(payload.error || `Option-chain request failed (${response.status}).`);
       }
-      if (symbol !== this.symbol || (requestedExpiry && requestedExpiry !== this.expiry)) return;
+      if (window.dashboardInstrumentMode !== 'commodity'
+          || symbol !== this.symbol
+          || (requestedExpiry && requestedExpiry !== this.expiry)) return;
       this.latestChainPayload = payload;
       this.latestAnalysis = payload.analysis || {};
       if (!requestedExpiry) this.expiry = payload.expiry;
@@ -544,6 +572,7 @@ class CommodityPricesView {
       }
       this._renderSharedOptionChain(payload);
       this._renderAnalysis(payload.analysis || {});
+      this._syncSharedQuoteContext();
       if (status) {
         status.dataset.tone = '';
         status.textContent = payload.chain.rows && payload.chain.rows.length
@@ -551,7 +580,8 @@ class CommodityPricesView {
           : 'No option quotes available for this expiry.';
       }
     } catch (error) {
-      if (symbol === this.symbol && requestedExpiry === this.expiry && status) {
+      if (window.dashboardInstrumentMode === 'commodity'
+          && symbol === this.symbol && requestedExpiry === this.expiry && status) {
         status.dataset.tone = 'error';
         status.textContent = error.message || 'Unable to load commodity option chain.';
         this._clearOptionChain();
@@ -562,7 +592,8 @@ class CommodityPricesView {
       const pendingSymbol = this.chainRefreshPendingSymbol;
       this.chainRefreshPendingSymbol = '';
       const nextSymbol = pendingSymbol || (symbol !== this.symbol ? this.symbol : '');
-      if (nextSymbol && nextSymbol === this.symbol) {
+      if (window.dashboardInstrumentMode === 'commodity'
+          && nextSymbol && nextSymbol === this.symbol) {
         this._refreshOptionChain(nextSymbol);
       }
     }
@@ -605,6 +636,7 @@ class CommodityPricesView {
   }
 
   _renderSharedOptionChain(payload = this.latestChainPayload) {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
     const host = document.getElementById('commodity-chain-shared');
     const chainView = typeof app !== 'undefined' && app.chain;
     if (!host || !chainView || typeof chainView.buildChainSummaryHtml !== 'function') return;
@@ -622,6 +654,22 @@ class CommodityPricesView {
       freshTable.remove();
     }
     host.replaceChildren(template.content);
+
+    const flowHost = document.getElementById('commodity-capital-flow');
+    if (flowHost) {
+      const buildFlowHtml = () => buildOiFlowSummaryHtml(
+        data.chain, data.atm, {}, data.oiVelocity, data,
+      );
+      const currentFlowCard = flowHost.querySelector('#oi-flow-summary-card');
+      if (currentFlowCard) {
+        patchOuterHtmlIfChanged('oi-flow-summary-card', buildFlowHtml);
+      } else {
+        const flowHtml = buildFlowHtml();
+        flowHost.innerHTML = flowHtml;
+        const flowCard = flowHost.querySelector('#oi-flow-summary-card');
+        if (flowCard) flowCard.dataset.lastHtml = flowHtml;
+      }
+    }
   }
 
   _renderAnalysis(analysis) {
@@ -654,9 +702,32 @@ class CommodityPricesView {
       row[`${side}LTP`] = contract.ltp == null ? null : Number(contract.ltp);
       row[`${side}Vol`] = Number(contract.volume) || 0;
       row[`${side}IV`] = contract.iv == null ? null : Number(contract.iv);
+      const oiChange = contract.oi_change == null ? null : Number(contract.oi_change);
+      const ltp = contract.ltp == null ? null : Number(contract.ltp);
+      row[`${side}ChgOI`] = Number.isFinite(oiChange) ? oiChange : null;
+      row[`${side}CapitalFlow`] = Number.isFinite(oiChange) && Number.isFinite(ltp)
+        ? oiChange * ltp
+        : null;
+      row[`${side}PremiumLocked`] = Number.isFinite(Number(contract.oi))
+        && Number.isFinite(ltp)
+        ? Number(contract.oi) * ltp
+        : null;
       rowsByStrike.set(row.strike, row);
     });
     const chain = Array.from(rowsByStrike.values()).sort((a, b) => a.strike - b.strike);
+    const hasCeOiChangeData = chain.some(row => row.ceChgOI != null);
+    const hasPeOiChangeData = chain.some(row => row.peChgOI != null);
+    const totalCeOiChange = chain.reduce(
+      (sum, row) => sum + (Number(row.ceChgOI) || 0), 0
+    );
+    const totalPeOiChange = chain.reduce(
+      (sum, row) => sum + (Number(row.peChgOI) || 0), 0
+    );
+    const oiChgPCR = hasCeOiChangeData && hasPeOiChangeData
+        && Number.isFinite(totalCeOiChange) && Number.isFinite(totalPeOiChange)
+        && totalCeOiChange > 0
+      ? totalPeOiChange / totalCeOiChange
+      : undefined;
     const steps = chain.slice(1).map((row, index) => row.strike - chain[index].strike)
       .filter((step) => Number.isFinite(step) && step > 0);
     const bias = ['BULLISH', 'BEARISH', 'NEUTRAL', 'WAIT'].includes(analysis.verdict)
@@ -682,6 +753,11 @@ class CommodityPricesView {
     const data = {
       symbol: this.symbol,
       symbolName: this.symbol,
+      instrument: 'MCX_FUT',
+      futureExpiry: this.futureExpiry,
+      futureContract: quote.Contract || '',
+      capitalFlowBaseline: rawChain.flow_baseline || '',
+      capitalFlowBaselineStatus: rawChain.flow_baseline_status || 'pending',
       spot: Number(quote.LTP) || Number(rawChain.spot) || 0,
       spotChange: Number(quote.Change) || 0,
       spotChgPct: Number(quote.PctChange) || 0,
@@ -697,7 +773,7 @@ class CommodityPricesView {
       strikeStep: Number(rawChain.strike_step) || Math.min(...steps, 200),
       chain,
       totalPCR: undefined,
-      oiChgPCR: undefined,
+      oiChgPCR,
       greeks: [],
       oiVelocity: [],
       compositeBias: bias,
@@ -737,11 +813,11 @@ class CommodityPricesView {
     if (typeof computeRangeChainTotals === 'function') {
       data.totalPCR = computeRangeChainTotals(getFilteredChain(data)).pcr;
     }
-    if (typeof _data !== 'undefined') _data = data;
     return data;
   }
 
   renderDashboard() {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
     const dashboard = document.getElementById('dashboard');
     const slot = document.getElementById('commodity-dashboard-slot');
     const chainView = typeof app !== 'undefined' && app.chain;
@@ -749,6 +825,7 @@ class CommodityPricesView {
     const legacyLoader = document.getElementById('loader');
     if (legacyLoader) legacyLoader.style.display = 'none';
     const data = this._toSharedDashboardData();
+    if (typeof _data !== 'undefined') _data = data;
     const existingTopBar = dashboard.querySelector('#sec-topbar');
     const hasCommodityTopBar = existingTopBar?.classList.contains('commodity-topbar');
     const existingDecision = dashboard.querySelector('#sec-decision');
@@ -784,6 +861,10 @@ class CommodityPricesView {
     if (futureExpiryPicker && futuresExpirySlot) futuresExpirySlot.appendChild(futureExpiryPicker);
     this._renderSharedOptionChain(this.latestChainPayload);
     chainView._bindDecisionDetailGuard();
+    const ui = typeof app !== 'undefined' && app.ui;
+    if (ui && typeof ui.switchDashboardDestination === 'function') {
+      ui.switchDashboardDestination(document.body.dataset.dashboardDestination || 'home');
+    }
   }
 
   _renderShortHorizon(shortHorizon) {

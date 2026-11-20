@@ -98,7 +98,9 @@ window.desktopPrimaryNav = function(name, button) {
     case 'market':
       app.ui.switchDashboardDestination('market', button);
       requestAnimationFrame(() => {
-        const target = document.getElementById('zone-structure');
+        const target = window.dashboardInstrumentMode === 'commodity'
+          ? document.getElementById('commodity-option-chain')
+          : document.getElementById('zone-structure');
         if (target) {
           const offset =
             parseFloat(

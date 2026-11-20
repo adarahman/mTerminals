@@ -437,6 +437,8 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
   background:var(--bg-1);
 }
 
+.commodity-capital-flow{margin-top:22px;}
+
 .commodity-chain-heading{
   display:flex;
   align-items:center;

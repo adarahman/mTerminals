@@ -6,19 +6,14 @@
 // ============================================================
 
 // ══════════════════════════════════════════════════════
-//  LIVE PRICE CHART — underlying/index price over time
+//  LIVE PRICE CHART — Equity and MCX futures price history
 // ══════════════════════════════════════════════════════
-// Ticks come off d.spot on every WS message (see DataService.updateDashboard,
-// where priceChart.addTick(...) is called). No historical bar feed exists —
-// candles are built client-side by bucketing ticks, so the smallest usable
-// candle width is bounded by how often the backend actually pushes spot.
-// VWAP is sourced from d.allIndices' Volume/Value fields (cumulative
-// session totals from NSE's allIndices endpoint) — Value/Volume on any
-// given tick IS the exact running session VWAP already, so it's read
-// directly per tick rather than reconstructed from per-tick deltas.
-// BSE symbols (SENSEX/BANKEX) don't carry these fields yet — see
-// fetch_bse_index_quote() in market_api.py — so VWAP is simply absent
-// for those until that endpoint is extended.
+// Equity ticks come from DataService; MCX futures ticks come from the
+// commodity quote adapter. Historical bars are hydrated through HistoryLoader
+// and kept separate by symbol, instrument, and exact contract expiry.
+// NSE index ticks may provide an exact running VWAP. MCX history provides
+// OHLCV candles instead, so its session VWAP is estimated from typical price
+// and candle volume. BSE indices without either source remain unavailable.
 
 const PRICE_CHART_SETTINGS_KEY = 'priceChartSettings.v2';
 const INDIA_UTC_OFFSET_MS = 330 * 60 * 1000;
@@ -41,8 +36,8 @@ function indianSessionBounds(epochMs){
 
 // Fallback symbol used ONLY until AppState.wsState.symbol is populated by a
 // live WS message. Must be a single, consistent value used by BOTH
-// hydrateRange() (which caches bars under `${symbol}::${range}`) and
-// render() (which looks bars up under that same key) — previously these
+// hydrateRange() and render() must resolve the same fallback symbol —
+// previously these
 // used two different fallbacks ('default' vs ''), so a history fetch made
 // before the first WS message landed (e.g. market closed, no ticks ever
 // arrive) got cached under a key render() could never find, leaving the
@@ -115,7 +110,10 @@ class PriceChartEngine {
     this._zoomStart = null;
     this._zoomEnd = null;
     this._defaultWindowApplied = false;
-    this._lastHydratedSymbol = null;
+    this._chartContext = null;
+    this._lastHydratedContext = null;
+    this._lastRenderedSeries = null;
+    this._lastRenderedXScale = null;
     
     // Render cache to avoid recalculating expensive operations
     this._renderCache = {
@@ -158,28 +156,155 @@ class PriceChartEngine {
     catch(e){ /* storage unavailable — settings just won't persist */ }
   }
 
-  addTick(price, t, vwap){
+  addTick(price, t, vwap, sourceContext = null){
+    const activeContext = this._getContext();
+    const incomingContext = sourceContext
+      ? {
+        symbol: String(sourceContext.symbol || '').trim().toUpperCase(),
+        instrument: sourceContext.instrument === 'MCX_FUT' ? 'MCX_FUT' : 'EQ',
+        expiry: sourceContext.instrument === 'MCX_FUT'
+          ? String(sourceContext.expiry || '').trim().toUpperCase()
+          : '',
+      }
+      : {
+        symbol: (AppState.wsState && AppState.wsState.symbol) || PRICE_CHART_DEFAULT_SYMBOL,
+        instrument: 'EQ',
+        expiry: '',
+      };
+    if(this._contextKey(incomingContext) !== this._contextKey(activeContext)) return;
+    const previousTick = this.chartData.getLastTick();
     this.chartData.addTick(price, t, vwap);
-    // A live WS tick is not one of the discrete UI events (resize, zoom,
-    // toolbar change, hover) the render() call sites elsewhere in this
-    // file already trigger on — without this, the canvas only repainted
-    // when the user happened to move the mouse over it, so a candle
-    // could sit stale indefinitely while the cursor was still. Throttled
-    // via the same one-render-per-frame guard as the hover handler below
-    // so a burst of ticks doesn't queue a redraw backlog.
-    this._scheduleRender();
+    if(this.chartData.getLastTick() !== previousTick) this._scheduleRender();
   }
 
-  // Shared by addTick() and the hover handlers below — coalesces any
-  // number of calls within one animation frame into a single render().
+  // Coalesce multiple live updates within one animation frame.
   _scheduleRender(){
     if(this._renderRaf) return;
     this._renderRaf = requestAnimationFrame(() => { this._renderRaf = null; this.render(); });
   }
 
+  _getContext(){
+    const stateSymbol = AppState.wsState && AppState.wsState.symbol;
+    if(this._chartContext && this._chartContext.instrument === 'MCX_FUT'){
+      return this._chartContext;
+    }
+    return {
+      symbol: stateSymbol || (this._chartContext && this._chartContext.symbol) || PRICE_CHART_DEFAULT_SYMBOL,
+      instrument: 'EQ',
+      expiry: '',
+    };
+  }
+
+  _contextKey(context){
+    return [context.symbol, context.instrument, context.expiry].join('|');
+  }
+
+  setContext(context){
+    const previousKey = this._contextKey(this._getContext());
+    const instrument = context && context.instrument === 'MCX_FUT' ? 'MCX_FUT' : 'EQ';
+    const next = {
+      symbol: String(context && context.symbol || PRICE_CHART_DEFAULT_SYMBOL).trim().toUpperCase(),
+      instrument,
+      expiry: instrument === 'MCX_FUT'
+        ? String(context && context.expiry || '').trim().toUpperCase()
+        : '',
+    };
+    this._chartContext = next;
+    if(previousKey !== this._contextKey(this._getContext())){
+      this.chartData.clear();
+      this._lastRenderedSeries = null;
+      this._lastRenderedXScale = null;
+      this._renderCache = {
+        tmap: null, seriesHash: null, windowStart: null, windowEnd: null, range: null,
+      };
+      this._zoomStart = null;
+      this._zoomEnd = null;
+      this._defaultWindowApplied = false;
+    }
+    this._lastHydratedContext = this._contextKey(this._getContext());
+  }
+
+  _commodityLivePrice(context){
+    if(context.instrument !== 'MCX_FUT') return null;
+    const view = window.commodityPrices;
+    const normalizeExpiry = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if(!view || String(view.symbol || '').toUpperCase() !== context.symbol
+        || normalizeExpiry(view.futureExpiry) !== normalizeExpiry(context.expiry)) return null;
+    const price = Number(view.latestQuote && view.latestQuote.LTP);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  }
+
+  _normalizeCommodityHistoryBars(bars, context, livePrice){
+    if(context.instrument !== 'MCX_FUT' || !bars || !bars.length) return bars;
+    const historyPrice = Number(bars[bars.length - 1].c);
+    const currentPrice = Number(livePrice);
+    if(!Number.isFinite(historyPrice) || historyPrice <= 0
+        || !Number.isFinite(currentPrice) || currentPrice <= 0) return bars;
+
+    // A cached/older MCX response may still be paise-scaled while live ticks
+    // are rupees. Correct only the clear 100x unit mismatch.
+    const ratio = historyPrice / currentPrice;
+    const scale = ratio >= 50 && ratio <= 150
+      ? 0.01
+      : ratio >= 1 / 150 && ratio <= 1 / 50 ? 100 : 1;
+    if(scale === 1) return bars;
+    return bars.map(bar => ({
+      ...bar,
+      o: bar.o * scale,
+      h: bar.h * scale,
+      l: bar.l * scale,
+      c: bar.c * scale,
+    }));
+  }
+
+  _isCommodityPointNearLivePrice(point, livePrice, isCandle){
+    const currentPrice = Number(livePrice);
+    if(!Number.isFinite(currentPrice) || currentPrice <= 0) return true;
+    const minimumPrice = currentPrice / 10;
+    const maximumPrice = currentPrice * 10;
+    const prices = isCandle
+      ? [point.o, point.h, point.l, point.c]
+      : [point.p];
+    return prices.every(price => Number.isFinite(price)
+      && price >= minimumPrice && price <= maximumPrice);
+  }
+
+  _applyCommoditySessionVwap(series){
+    let sessionDate = null;
+    let tradedVolume = 0;
+    let weightedPrice = 0;
+    let lastVwap = null;
+    return series.map(point => {
+      const localDate = new Date(Number(point.t) + INDIA_UTC_OFFSET_MS)
+        .toISOString().slice(0, 10);
+      if(localDate !== sessionDate){
+        sessionDate = localDate;
+        tradedVolume = 0;
+        weightedPrice = 0;
+        lastVwap = null;
+      }
+
+      const volume = Number(point.v);
+      const high = Number(point.h);
+      const low = Number(point.l);
+      const close = Number(point.c);
+      if(Number.isFinite(volume) && volume > 0
+          && Number.isFinite(high) && Number.isFinite(low) && Number.isFinite(close)){
+        weightedPrice += ((high + low + close) / 3) * volume;
+        tradedVolume += volume;
+        lastVwap = weightedPrice / tradedVolume;
+      } else if(point.vw != null && Number.isFinite(Number(point.vw))){
+        lastVwap = Number(point.vw);
+      }
+      return {...point, vw: lastVwap};
+    });
+  }
+
   async hydrateRange(range, force){
-    const symbol = (AppState.wsState && AppState.wsState.symbol) || PRICE_CHART_DEFAULT_SYMBOL;
-    await this.historyLoader.hydrateRange(range, force, symbol);
+    const context = this._getContext();
+    await this.historyLoader.hydrateRange(
+      range, force, context.symbol, context.instrument, context.expiry
+    );
   }
 
   async hydrate(url){
@@ -195,10 +320,14 @@ class PriceChartEngine {
   // made "1D" read as "no movement, just a flat line" instead of showing
   // the last real trading day.
   _lastDataAnchor(){
-    const symbol = (AppState.wsState && AppState.wsState.symbol) || PRICE_CHART_DEFAULT_SYMBOL;
+    const context = this._getContext();
     const lastTick = this.chartData.getLastTick();
-    const bars = this.chartData.getHistoryBars(this._windowHistoryRange || this.settings.range, symbol)
-      || this.chartData.getHistoryBars(this.settings.range, symbol);
+    const bars = this.chartData.getHistoryBars(
+      this._windowHistoryRange || this.settings.range,
+      context.symbol, context.instrument, context.expiry
+    ) || this.chartData.getHistoryBars(
+      this.settings.range, context.symbol, context.instrument, context.expiry
+    );
     const lastTickT = lastTick ? lastTick.t : null;
     const lastBarT = (bars && bars.length) ? bars[bars.length - 1].t : null;
     return Math.max(lastTickT || 0, lastBarT || 0) || Date.now();
@@ -300,6 +429,7 @@ class PriceChartEngine {
           <span class="pc-ohlc-item">C<b id="pc-ohlc-c">—</b></span>
           <span class="pc-ohlc-chg" id="pc-ohlc-chg">—</span>
         </div>
+        <div class="pc-history-warning" id="pc-history-warning" role="status" aria-live="polite" hidden></div>
 
         <div class="pc-chart-wrap">
           <div class="pc-watermark" id="pc-watermark">—</div>
@@ -310,7 +440,7 @@ class PriceChartEngine {
           ${PRICE_CHART_WINDOWS.map(winBtn).join('')}
           <button class="pc-btn pc-reset-btn" id="pc-reset-zoom" title="Reset zoom/pan to the default view">Reset</button>
           <span class="pc-spacer"></span>
-          <span class="pc-footnote" id="pc-vwap-footnote">VWAP unavailable — this symbol's feed doesn't carry a volume field yet.</span>
+          <span class="pc-footnote" id="pc-vwap-footnote" title="Estimated from OHLCV candle typical prices and volume when an exact feed VWAP is unavailable.">VWAP unavailable — volume data is missing from the loaded candles.</span>
         </div>
       </div>`;
   }
@@ -411,14 +541,14 @@ class PriceChartEngine {
           this._saveSettings();
           if(w.ms === Infinity){
             this._zoomStart = null; this._zoomEnd = null;
-          } else if(w.session){
+          } else if(w.session && this._getContext().instrument !== 'MCX_FUT'){
             const now = this._lastDataAnchor();
             const session = indianSessionBounds(now);
             this._zoomStart = session.start;
             this._zoomEnd = Math.min(now, session.end);
           } else {
             const now = this._lastDataAnchor();
-            this._zoomStart = now - w.ms;
+            this._zoomStart = now - (w.session ? 24 * 60 * 60 * 1000 : w.ms);
             this._zoomEnd = now;
           }
           // Wide windows need real history beyond the tick buffer — make
@@ -514,24 +644,20 @@ class PriceChartEngine {
         });
       }
 
-      // ── Crosshair ── separate from the drag/pan handler above: drag only
-      // starts once the mouse is actually held down (mousedown), so a plain
-      // hover here is unambiguous. Throttled to one render per animation
-      // frame so fast mouse movement doesn't queue up a redraw backlog.
+      // Hover updates the readout without repainting the full chart.
       canvas.onmousemove = (e) => {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        // Only trigger render if position actually changed
         if(!this._hover || this._hover.x !== x || this._hover.y !== y){
           this._hover = { x, y };
-          this._scheduleRender();
+          this._updateHoverReadout();
         }
       };
       canvas.onmouseleave = () => {
         if(!this._hover) return; // Already cleared
         this._hover = null;
-        this._scheduleRender();
+        this._updateHoverReadout();
       };
     }
 
@@ -759,6 +885,23 @@ class PriceChartEngine {
     }
   }
 
+  _updateHoverReadout(){
+    const series = this._lastRenderedSeries;
+    const xScale = this._lastRenderedXScale;
+    if(!series || !series.length || !xScale) return;
+    if(!this._hover){
+      this._renderOhlcReadout(series[series.length - 1], series.length - 1);
+      return;
+    }
+
+    let bestIdx = 0, bestDist = Infinity;
+    for(let i = 0; i < series.length; i++){
+      const distance = Math.abs(xScale(series[i].t) - this._hover.x);
+      if(distance < bestDist){ bestDist = distance; bestIdx = i; }
+    }
+    this._renderOhlcReadout(series[bestIdx], bestIdx);
+  }
+
   // ── RENDER ───────────────────────────────────────────
   render(forceResize){
     this.ensureMounted();
@@ -772,21 +915,47 @@ class PriceChartEngine {
     // needed to fetch/use that symbol's actual historical bars instead of
     // sitting on whatever hydrateRange() resolved to at boot time (when
     // AppState.wsState wasn't populated yet, this defaulted to 'default').
-    const symText = (AppState.wsState && AppState.wsState.symbol) || PRICE_CHART_DEFAULT_SYMBOL;
-    if(symText && symText !== this._lastHydratedSymbol){
-      this._lastHydratedSymbol = symText;
-      this._renderCache.tmap = null; // Invalidate cache on symbol change
-      this.chartData.clearForSymbolChange(symText); // Free memory for old symbol
+    const chartContext = this._getContext();
+    const symText = chartContext.symbol;
+    const contextKey = this._contextKey(chartContext);
+    if(symText && contextKey !== this._lastHydratedContext){
+      this._lastHydratedContext = contextKey;
+      this._renderCache = {
+        tmap: null, seriesHash: null, windowStart: null, windowEnd: null, range: null,
+      };
+      this.chartData.clear();
       this.hydrateRange(this.settings.range);
       if(this._windowHistoryRange) this.hydrateRange(this._windowHistoryRange);
     }
 
     const lastTick = this.chartData.getLastTick();
-    const rawBars = this.chartData.getHistoryBars(this._windowHistoryRange || this.settings.range, symText)
-      || this.chartData.getHistoryBars(this.settings.range, symText);
+    const historyBars = this.chartData.getHistoryBars(
+      this._windowHistoryRange || this.settings.range,
+      symText, chartContext.instrument, chartContext.expiry
+    ) || this.chartData.getHistoryBars(
+      this.settings.range, symText, chartContext.instrument, chartContext.expiry
+    );
+    const commodityLivePrice = this._commodityLivePrice(chartContext);
+    const livePriceReference = chartContext.instrument === 'MCX_FUT'
+      ? commodityLivePrice
+      : (lastTick && lastTick.p);
+    const rawBars = this._normalizeCommodityHistoryBars(
+      historyBars, chartContext, livePriceReference
+    );
     const historyRange = this._windowHistoryRange || this.settings.range;
-    const bars0 = rawBars && historyRange !== '1d' && historyRange !== 'all'
+    const bars0 = rawBars && chartContext.instrument !== 'MCX_FUT'
+      && historyRange !== '1d' && historyRange !== 'all'
       ? rawBars.filter(b=>isIndianTradingTimestamp(b.t)) : rawBars;
+    const latestHistoryPrice = bars0 && bars0.length
+      ? Number(bars0[bars0.length - 1].c)
+      : null;
+    const livePriceRatio = livePriceReference > 0 && latestHistoryPrice > 0
+      ? livePriceReference / latestHistoryPrice
+      : null;
+    const invalidCommodityLivePrice = chartContext.instrument === 'MCX_FUT'
+      && livePriceRatio != null
+      && (livePriceRatio < 0.5 || livePriceRatio > 2);
+    const chartLivePrice = invalidCommodityLivePrice ? null : livePriceReference;
 
     // TradingView-style: a closed/non-trading market is never blank — it
     // keeps showing the last session's real candles, just without live
@@ -795,6 +964,9 @@ class PriceChartEngine {
     // symbol/range (e.g. first paint before either has loaded yet).
     if(!lastTick && !(bars0 && bars0.length)){
       this._syncOrderPanel(null);
+      ctx.clearRect(0,0,W,H);
+      this._lastRenderedSeries = null;
+      this._lastRenderedXScale = null;
       return;
     }
 
@@ -804,11 +976,19 @@ class PriceChartEngine {
     if(watermarkEl) watermarkEl.textContent = symText || '—';
     if(symEl) symEl.textContent = symText || '—';
 
-    const visible = this._visibleTicks().filter(t=>isIndianTradingTimestamp(t.t));
+    let visible = this._visibleTicks().filter(t =>
+      chartContext.instrument === 'MCX_FUT' || isIndianTradingTimestamp(t.t)
+    );
+    if(invalidCommodityLivePrice){
+      visible = visible.filter(t => t.p >= latestHistoryPrice * 0.5
+        && t.p <= latestHistoryPrice * 2);
+    }
     if(!visible.length && !(bars0 && bars0.length)){
       const W0 = canvas.parentElement.clientWidth - 24, H0 = Math.max(320, canvas.parentElement.clientHeight);
       const ctx = sizeCanvasIfChanged(canvas, W0, H0);
       ctx.clearRect(0,0,W0,H0);
+      this._lastRenderedSeries = null;
+      this._lastRenderedXScale = null;
       this._renderOhlcReadout(null, null);
       return;
     }
@@ -836,8 +1016,6 @@ class PriceChartEngine {
     // silently point at the wrong candle.
     const PAD = { l: 12, r: 54, t: 12, b: 22 };
     const PW = W - PAD.l - PAD.r, PH = H - PAD.t - PAD.b;
-
-    ctx.clearRect(0,0,W,H);
 
     let series, values;
     const bars = bars0;
@@ -871,10 +1049,13 @@ class PriceChartEngine {
         if(savedWin.ms===Infinity){
           this._zoomStart=null;
           this._zoomEnd=null;
-        }else if(savedWin.session){
+        }else if(savedWin.session && chartContext.instrument !== 'MCX_FUT'){
           const session=indianSessionBounds(dataMaxT);
           this._zoomStart=session.start;
           this._zoomEnd=Math.min(dataMaxT,session.end);
+        }else if(savedWin.session){
+          this._zoomStart=dataMaxT-24*60*60*1000;
+          this._zoomEnd=dataMaxT;
         }else{
           this._zoomStart=dataMaxT-savedWin.ms;
           this._zoomEnd=dataMaxT;
@@ -920,7 +1101,10 @@ class PriceChartEngine {
           // Line mode reads t.p per point — alias the selected OHLC field
           // (open/high/low/close) onto .p rather than rewriting the
           // line-draw path below.
-          series = merged.map(c => ({ t: c.t, p: c[_fieldKey], vw: null }));
+          series = merged.map(c => ({
+            t: c.t, p: c[_fieldKey], vw: c.vw ?? null, v: c.v,
+            o: c.o, h: c.h, l: c.l, c: c.c,
+          }));
         }
         values = merged.map(c=>c[_fieldKey]);
       }
@@ -934,6 +1118,43 @@ class PriceChartEngine {
     } else {
       series = visible.filter(tk => tk.t >= windowStart && tk.t <= windowEnd);
       values = series.map(t=>t.p);
+    }
+    let rejectedCommodityPoints = 0;
+    const commodityPointReference = invalidCommodityLivePrice
+      ? latestHistoryPrice
+      : livePriceReference;
+    if(chartContext.instrument === 'MCX_FUT' && commodityPointReference > 0){
+      const keptSeries = [];
+      const keptValues = [];
+      series.forEach((point, index) => {
+        if(this._isCommodityPointNearLivePrice(
+          point, commodityPointReference, this.settings.type === 'candle'
+        )){
+          keptSeries.push(point);
+          keptValues.push(values[index]);
+        } else {
+          rejectedCommodityPoints += 1;
+        }
+      });
+      series = keptSeries;
+      values = keptValues;
+    }
+    const historyWarning = $i('pc-history-warning');
+    if(historyWarning){
+      historyWarning.hidden = rejectedCommodityPoints === 0 && !invalidCommodityLivePrice;
+      const pointType = this.settings.type === 'candle' ? 'candle' : 'point';
+      const warnings = [];
+      if(rejectedCommodityPoints){
+        const referenceLabel = invalidCommodityLivePrice ? 'latest history close' : 'live price';
+        warnings.push(`Ignored ${rejectedCommodityPoints} MCX ${pointType}${rejectedCommodityPoints === 1 ? '' : 's'} outside 0.1×–10× of the ${referenceLabel}. Verify the history data.`);
+      }
+      if(invalidCommodityLivePrice){
+        warnings.push(`Ignored live MCX quote ${livePriceReference.toLocaleString('en-IN')} because it differs sharply from the latest history close ${latestHistoryPrice.toLocaleString('en-IN')}.`);
+      }
+      historyWarning.textContent = warnings.join(' ');
+    }
+    if(chartContext.instrument === 'MCX_FUT'){
+      series = this._applyCommoditySessionVwap(series);
     }
     if(!series.length) return;
 
@@ -1007,8 +1228,14 @@ class PriceChartEngine {
 
     // Use ChartRenderer for main rendering
     const zoomState = { windowStart, windowEnd };
-    const dataBounds = { minT: dataMinT, maxT: dataMaxT };
+    const dataBounds = {
+      minT: dataMinT,
+      maxT: dataMaxT,
+      livePrice: chartLivePrice,
+    };
     const renderResult = this.chartRenderer.render(canvas, series, values, this.settings, cfg, zoomState, dataBounds);
+    this._lastRenderedSeries = series;
+    this._lastRenderedXScale = renderResult && renderResult.xScale;
     
     // Draw indicator overlays
     if(renderResult && this.settings.smaPeriods.length){
@@ -1020,16 +1247,24 @@ class PriceChartEngine {
 
     // VWAP overlay
     let lastVwap = null;
+    for(let i = series.length - 1; i >= 0; i--){
+      if(series[i].vw != null){
+        lastVwap = series[i].vw;
+        break;
+      }
+    }
     if(renderResult && this.settings.showVwap){
       this.chartRenderer.drawVwap(renderResult.ctx, series, renderResult.xScale, renderResult.yScale, C.vwap);
-      lastVwap = series.find(pt => pt.vw != null)?.vw;
+    }
+    if(renderResult){
+      this.chartRenderer.drawLastPriceMarker(renderResult, chartLivePrice);
     }
     
     const footnote = document.getElementById('pc-vwap-footnote');
     if(footnote){
       footnote.textContent = lastVwap != null
-        ? `VWAP ${lastVwap.toLocaleString('en-IN', {maximumFractionDigits:2})}`
-        : "VWAP unavailable — this symbol's feed doesn't carry a volume field yet.";
+        ? `${chartContext.instrument === 'MCX_FUT' ? 'VWAP (OHLCV est.)' : 'VWAP'} ${lastVwap.toLocaleString('en-IN', {maximumFractionDigits:2})}`
+        : 'VWAP unavailable — volume data is missing from the loaded candles.';
     }
   }
 }

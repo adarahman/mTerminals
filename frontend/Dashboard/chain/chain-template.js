@@ -359,23 +359,47 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
 ChainView.prototype._buildMiniChartHtml = function(d) {
     const MINI_CHART_DRAW_POINTS = 150;
     const MINI_CHART_BUFFER_POINTS = 2500;
+    const isCommodity = window.dashboardInstrumentMode === 'commodity';
+    const historyInstrument = isCommodity ? 'MCX_FUT' : 'EQ';
+    const historyExpiry = isCommodity ? String(d.futureExpiry || '').toUpperCase() : '';
+    const miniChartContextKey = `${d.symbol || ''}|${historyInstrument}|${historyExpiry}`;
     let chartPrefs = { range: '1m', windowKey: '1D' };
     try {
       chartPrefs = Object.assign(chartPrefs, JSON.parse(localStorage.getItem('priceChartSettings.v2') || '{}'));
     } catch (_) { /* retain the first-use chart defaults */ }
     const prefsSignature = `${chartPrefs.range}|${chartPrefs.windowKey || 'custom'}|${chartPrefs.type || 'line'}`;
-    if (!this._miniChartHistory || (d.symbol && d.symbol !== this._miniChartSymbol) || this._miniChartPrefsSignature !== prefsSignature) {
+    if (!this._miniChartHistory || miniChartContextKey !== this._miniChartContextKey
+        || this._miniChartPrefsSignature !== prefsSignature) {
       this._miniChartHistory = [];
       this._miniChartSymbol = d.symbol;
+      this._miniChartContextKey = miniChartContextKey;
       this._miniChartPrefsSignature = prefsSignature;
       // New symbol means the old hydration (if any) belongs to a
       // different history entirely — clear the guard so the fetch below
       // runs again for the newly-active symbol instead of staying
       // permanently skipped because *some* symbol was hydrated once.
       this._miniChartHydratedSymbol = null;
+      this._miniChartHistoryNeedsNormalization = false;
+      this._miniChartHistoryRetryAt = 0;
+      this._miniChartHydrating = false;
     }
     const spotNum = Number(d.spot);
-    if (!isNaN(spotNum)) {
+    const priceChartEngine = window.priceChart;
+    const hasCommodityReference = isCommodity && Number.isFinite(spotNum) && spotNum > 0;
+    if (hasCommodityReference && this._miniChartHistoryNeedsNormalization
+        && typeof priceChartEngine?._normalizeCommodityHistoryBars === 'function'
+        && typeof priceChartEngine?._isCommodityPointNearLivePrice === 'function') {
+      const normalized = priceChartEngine._normalizeCommodityHistoryBars(
+        this._miniChartHistory, {instrument: historyInstrument}, spotNum
+      );
+      this._miniChartHistory = normalized.filter(point =>
+        priceChartEngine._isCommodityPointNearLivePrice(
+          point, spotNum, chartPrefs.type === 'candle'
+        )
+      );
+      this._miniChartHistoryNeedsNormalization = false;
+    }
+    if (Number.isFinite(spotNum) && spotNum > 0) {
       const hist = this._miniChartHistory;
       const last = hist[hist.length - 1];
       // Respect the interval selected in the full Price Chart. Previously
@@ -412,50 +436,107 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
         if (hist.length > MINI_CHART_BUFFER_POINTS) hist.shift();
       }
     }
+    if (hasCommodityReference
+        && typeof priceChartEngine?._isCommodityPointNearLivePrice === 'function') {
+      this._miniChartHistory = this._miniChartHistory.filter(point =>
+        priceChartEngine._isCommodityPointNearLivePrice(
+          point, spotNum, chartPrefs.type === 'candle'
+        )
+      );
+    }
 
     // ── BACKFILL FROM REAL HISTORY ──
-    // This buffer is pure in-memory tick accumulation — it starts empty on
-    // every page load/refresh and only grows as live spot ticks arrive. On
-    // a non-trading session (after close, weekend, holiday) no tick ever
-    // changes, so a fresh load shows nothing but the flat dashed
-    // placeholder forever, even though the backend's own /api/history
-    // (the same endpoint price-chart-engine.js's history-loader.js already uses)
-    // has the last real session's candles sitting right there. Same
-    // principle as that chart's render(): show the last real session's
-    // shape frozen rather than an empty/placeholder trace. Guarded by
-    // _miniChartHydratedSymbol/_miniChartHydrating so this fires once per
-    // symbol, not on every render call.
-    if (this._miniChartHistory.length < 2 && !this._miniChartHydrating && this._miniChartHydratedSymbol !== d.symbol) {
+    // Load the selected contract's candles even when live ticks have
+    // already arrived; a couple of ticks are not a useful chart history.
+    // Empty/error responses are retried after a cooldown.
+    if (!this._miniChartHydrating
+        && this._miniChartHydratedSymbol !== miniChartContextKey
+        && Date.now() >= (this._miniChartHistoryRetryAt || 0)) {
       this._miniChartHydrating = true;
       const symForFetch = d.symbol || 'NIFTY';
       const prefsForFetch = prefsSignature;
+      const contextForFetch = miniChartContextKey;
+      let historyLoaded = false;
       (window.fetchMarketHistory
-        ? window.fetchMarketHistory(symForFetch, chartPrefs.range)
-        : fetch(`${Config.api.history}?symbol=${encodeURIComponent(symForFetch)}&range=${encodeURIComponent(chartPrefs.range)}`).then(res => res.ok ? res.json() : []))
+        ? window.fetchMarketHistory(
+          symForFetch, chartPrefs.range, false, historyInstrument, historyExpiry
+        )
+        : fetch(`${Config.api.history}?${new URLSearchParams({
+          symbol: symForFetch,
+          range: chartPrefs.range,
+          instrument: historyInstrument,
+          expiry: historyExpiry,
+        })}`).then(res => res.ok ? res.json() : []))
         .then(rows => {
-          // Bail if the symbol moved on again while this was in flight, or
-          // a live tick already beat the fetch back and started filling
-          // the real buffer — don't clobber newer data with a stale fetch.
-          if (this._miniChartSymbol !== symForFetch || this._miniChartPrefsSignature !== prefsForFetch || this._miniChartHistory.length >= 2) return;
+          // Ignore a response for a symbol, contract, or chart preference
+          // that changed while the request was in flight.
+          if (this._miniChartContextKey !== contextForFetch
+              || this._miniChartPrefsSignature !== prefsForFetch) return;
           if (Array.isArray(rows) && rows.length) {
-            const bars = rows
+            let bars = rows
               .map(r => ({
                 t: Number(r.t), o: parseFloat(r.o), h: parseFloat(r.h),
-                l: parseFloat(r.l), c: parseFloat(r.c), p: parseFloat(r.c)
+                l: parseFloat(r.l), c: parseFloat(r.c), p: parseFloat(r.c),
+                v: r.v != null && Number.isFinite(Number(r.v)) ? Number(r.v) : null,
               }))
-              .filter(r => Number.isFinite(r.t) && Number.isFinite(r.p));
-            if (bars.length) this._miniChartHistory = bars.slice(-MINI_CHART_BUFFER_POINTS);
+              .filter(r => Number.isFinite(r.t) && Number.isFinite(r.o)
+                && Number.isFinite(r.h) && Number.isFinite(r.l) && Number.isFinite(r.p))
+              .sort((a, b) => a.t - b.t);
+            const latestData = (typeof _data !== 'undefined' && _data) ? _data : d;
+            const livePrice = Number(latestData.spot);
+            if (isCommodity && Number.isFinite(livePrice) && livePrice > 0
+                && typeof priceChartEngine?._normalizeCommodityHistoryBars === 'function'
+                && typeof priceChartEngine?._isCommodityPointNearLivePrice === 'function') {
+              bars = priceChartEngine._normalizeCommodityHistoryBars(
+                bars, {instrument: historyInstrument}, livePrice
+              ).filter(point => priceChartEngine._isCommodityPointNearLivePrice(
+                point, livePrice, chartPrefs.type === 'candle'
+              ));
+              this._miniChartHistoryNeedsNormalization = false;
+            } else if (isCommodity) {
+              this._miniChartHistoryNeedsNormalization = true;
+            }
+            if (bars.length) {
+              const pointsByTime = new Map(bars.map(point => [point.t, point]));
+              this._miniChartHistory.forEach(livePoint => {
+                const historicalPoint = pointsByTime.get(livePoint.t);
+                if (!historicalPoint) {
+                  pointsByTime.set(livePoint.t, livePoint);
+                  return;
+                }
+                historicalPoint.h = Math.max(historicalPoint.h, livePoint.h);
+                historicalPoint.l = Math.min(historicalPoint.l, livePoint.l);
+                historicalPoint.c = livePoint.c;
+                historicalPoint.p = livePoint.p;
+              });
+              this._miniChartHistory = Array.from(pointsByTime.values())
+                .sort((a, b) => a.t - b.t)
+                .slice(-MINI_CHART_BUFFER_POINTS);
+              this._miniChartHydratedSymbol = contextForFetch;
+              this._miniChartHistoryRetryAt = 0;
+              historyLoaded = true;
+            }
+          }
+          if (!historyLoaded) this._miniChartHistoryRetryAt = Date.now() + 60000;
+        })
+        .catch(error => {
+          if (this._miniChartContextKey === contextForFetch
+              && this._miniChartPrefsSignature === prefsForFetch) {
+            Logger.warn('miniChart', 'history fetch failed; retrying after cooldown', error);
+            this._miniChartHistoryRetryAt = Date.now() + 60000;
           }
         })
-        .catch(() => { /* leave the placeholder up — nothing else to show */ })
         .finally(() => {
+          if (this._miniChartContextKey !== contextForFetch
+              || this._miniChartPrefsSignature !== prefsForFetch) return;
           this._miniChartHydrating = false;
-          this._miniChartHydratedSymbol = symForFetch;
           // Swap the placeholder for the real trace in place, without
           // waiting on the next live tick — on a closed market there may
           // never be one this session.
-          if (typeof this.patchTopBarAndDecision === 'function') {
-            const payload = (typeof _data !== 'undefined' && _data) ? _data : d;
+          const payload = (typeof _data !== 'undefined' && _data) ? _data : d;
+          if (isCommodity && typeof this.patchCommodityMiniChart === 'function') {
+            this.patchCommodityMiniChart(payload);
+          } else if (typeof this.patchTopBarAndDecision === 'function') {
             this.patchTopBarAndDecision(payload);
           }
         });
@@ -556,15 +637,34 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       svgInner = `<polyline points="${coords}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     }
 
+    const chartTrigger = isCommodity
+      ? 'role="button" tabindex="0" aria-label="Open Commodity Price Chart" title="Open Commodity Price Chart" onclick="openPriceChartModal()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openPriceChartModal();}"'
+      : 'role="button" tabindex="0" aria-label="Open Price Chart" title="Open Price Chart" onclick="openPriceChartModal()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openPriceChartModal();}"';
     return `
-      <div id="verdict-mini-chart" class="verdict-mini-chart" role="button" tabindex="0" aria-label="Open Price Chart" title="Open Price Chart"
-           onclick="openPriceChartModal()"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPriceChartModal();}">
+      <div id="verdict-mini-chart" class="verdict-mini-chart" ${chartTrigger}>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
       </div>`;
 };
 
+ChainView.prototype.patchCommodityMiniChart = function(d) {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
+    const current = document.getElementById('verdict-mini-chart');
+    if (!current) return;
+    const template = document.createElement('template');
+    template.innerHTML = this._buildMiniChartHtml(d).trim();
+    const chart = template.content.firstElementChild;
+    if (chart) current.replaceWith(chart);
+};
+
 ChainView.prototype._loadDecisionSessionContext = function(symbol) {
+    if (window.dashboardInstrumentMode === 'commodity') {
+      this._decisionSessionSymbol = symbol;
+      this._decisionSessionLoading = false;
+      this._decisionSessionLoaded = true;
+      this._decisionSessionLoadedAt = Date.now();
+      this._decisionSessionContext = null;
+      return;
+    }
     const now = Date.now();
     const sameSymbol = this._decisionSessionSymbol === symbol;
     if (!symbol || (sameSymbol && this._decisionSessionLoading) ||
@@ -997,7 +1097,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         <div class="verdict-call verdict-bias">${bias}${str?` · <span class="verdict-bias-strength">${str}</span>`:''}${conflict?' ⚡':''}</div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}
       </div>
-      ${window.dashboardInstrumentMode === 'commodity' ? '' : this._buildMiniChartHtml(d)}
+      ${this._buildMiniChartHtml(d)}
       <div class="verdict-conf">
         <div class="verdict-conf-label">Evidence Confidence</div>
         <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
@@ -1448,7 +1548,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
               <th class="strike">Strike <small>PCR</small></th>
               <th class="oc-metric positioning">Open Int <small>PE / CE</small></th>
               <th class="oc-metric positioning">Chg OI <small>PE / CE</small></th>
-             <th class="oc-metric positioning">Capital Flow <small>PE / CE</small></th>
+             <th class="oc-metric positioning">Capital Flow <small>${isCommodity?'Day ΔOI × LTP':'PE / CE'}</small></th>
               <th class="oc-metric activity">IV <small>PE / CE</small></th>
               <th class="oc-metric activity">Volume <small>PE / CE</small></th>
               <th class="oc-metric activity">Premium ₹ <small>PE / CE</small></th>

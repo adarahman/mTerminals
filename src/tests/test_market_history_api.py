@@ -57,3 +57,46 @@ def test_contract_history_keeps_authorized_broker_path():
 
     assert broker_calls == ["history"]
     assert _response_json(response) == []
+
+
+def test_mcx_futures_history_uses_exact_expiry_and_isolated_cache():
+    history_calls = []
+
+    def get_commodity_candles(symbol, expiry, interval, fromdate, todate):
+        history_calls.append((symbol, expiry, interval, fromdate, todate))
+        return [{
+            "timestamp": "2026-11-20T09:00:00",
+            "open": 100, "high": 105, "low": 99, "close": 104, "volume": 10,
+        }]
+
+    api = MarketHistoryApi(
+        state=lambda: {
+            "symbol": "NIFTY",
+            "broker_services_enabled": True,
+            "index_tokens": {},
+        },
+        get_candle_data=lambda *_args: [],
+        get_index_candles=lambda *_args: [],
+        get_commodity_candles=get_commodity_candles,
+    )
+    request = SimpleNamespace(query={
+        "symbol": "CRUDEOIL",
+        "range": "1m",
+        "instrument": "MCX_FUT",
+        "expiry": "31-DEC-2026",
+    })
+
+    response = asyncio.run(api.history(request))
+    next_expiry_response = asyncio.run(api.history(SimpleNamespace(query={
+        **request.query,
+        "expiry": "29-JAN-2027",
+    })))
+
+    assert response.status == 200
+    assert response.headers["X-MTerminals-Instrument"] == "MCX_FUT"
+    assert _response_json(response)[0]["c"] == 104
+    assert _response_json(next_expiry_response)[0]["c"] == 104
+    assert [call[:3] for call in history_calls] == [
+        ("CRUDEOIL", "31-DEC-2026", "ONE_MINUTE"),
+        ("CRUDEOIL", "29-JAN-2027", "ONE_MINUTE"),
+    ]

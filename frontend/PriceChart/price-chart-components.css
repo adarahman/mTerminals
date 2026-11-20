@@ -32,6 +32,12 @@
   background:transparent; cursor:pointer;
 }
 .pc-footnote { font-size:11px; color:var(--text-muted); margin-top: var(--space-2); }
+.pc-history-warning{
+  flex:0 0 auto;margin:0 0 var(--space-2);padding:6px 9px;
+  border-left:3px solid var(--warn);border-radius:4px;
+  background:var(--warn-dim);color:var(--warn);font-size:11px;
+}
+.pc-history-warning[hidden]{display:none;}
 /* ── Layout fix: panel is now a fixed-height flex column so the chart
    canvas actually fills the card instead of sitting at a hardcoded 220px
    inside a tall, unstyled container. .pc-chart-wrap/.pc-order-panel/

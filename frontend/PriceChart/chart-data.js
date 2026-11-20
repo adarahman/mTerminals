@@ -9,7 +9,7 @@ class ChartData {
     this.ticks = []; // {t: epoch ms, p: price, vw: vwap}
     this.MAX_TICKS = maxTicks;
     this.MAX_TICK_AGE_MS = 7 * 24 * 60 * 60 * 1000; // Keep max 7 days of ticks
-    this.historyBars = {}; // Cached OHLCV bars by symbol::range key
+    this.historyBars = {}; // Cached OHLCV bars by contract identity and range
     this._hydratingRanges = new Set();
     this._currentSymbol = null;
   }
@@ -61,27 +61,27 @@ class ChartData {
     }
   }
 
-  // Cache key for historyBars - includes symbol to avoid cross-symbol contamination
-  _histKey(range, symbol) {
+  // Keep symbol, instrument, and exact contract expiry in the history key.
+  _histKey(range, symbol, instrument = 'EQ', expiry = '') {
     if (!symbol) throw new Error('ChartData: symbol is required (caller must supply it explicitly)');
-    return `${symbol}::${range}`;
+    return `${symbol}::${instrument}::${expiry}::${range}`;
   }
 
-  setHistoryBars(range, bars, symbol) {
-    const key = this._histKey(range, symbol);
+  setHistoryBars(range, bars, symbol, instrument = 'EQ', expiry = '') {
+    const key = this._histKey(range, symbol, instrument, expiry);
     this.historyBars[key] = bars;
   }
 
-  getHistoryBars(range, symbol) {
-    return this.historyBars[this._histKey(range, symbol)];
+  getHistoryBars(range, symbol, instrument = 'EQ', expiry = '') {
+    return this.historyBars[this._histKey(range, symbol, instrument, expiry)];
   }
 
-  isHydrating(range, symbol) {
-    return this._hydratingRanges.has(this._histKey(range, symbol));
+  isHydrating(range, symbol, instrument = 'EQ', expiry = '') {
+    return this._hydratingRanges.has(this._histKey(range, symbol, instrument, expiry));
   }
 
-  setHydrating(range, symbol, isHydrating) {
-    const key = this._histKey(range, symbol);
+  setHydrating(range, symbol, isHydrating, instrument = 'EQ', expiry = '') {
+    const key = this._histKey(range, symbol, instrument, expiry);
     if (isHydrating) {
       this._hydratingRanges.add(key);
     } else {

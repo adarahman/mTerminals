@@ -4,7 +4,7 @@
 // Handles fetching and caching OHLCV history from backend
 // ============================================================
 
-// All chart surfaces share one browser-side request per symbol/range.
+// All chart surfaces share one browser-side request per contract and range.
 // Empty/error results are also cooled down so an upstream SmartAPI timeout
 // cannot make every live render retry the same rate-limited endpoint.
 const _marketHistoryRequests = new Map();
@@ -30,24 +30,21 @@ class HistoryLoader {
   }
 
   // Fetch real OHLCV history for a specific range from backend
-  async hydrateRange(range, force = false, symbol) {
+  async hydrateRange(range, force = false, symbol, instrument = 'EQ', expiry = '') {
     if (!symbol) throw new Error('HistoryLoader.hydrateRange: symbol is required');
     const sym = symbol;
     
-    if (!force && this.chartData.getHistoryBars(range, sym)) {
+    if (!force && this.chartData.getHistoryBars(range, sym, instrument, expiry)) {
       this.onRenderRequest();
       return;
     }
     
-    if (this.chartData.isHydrating(range, sym)) return;
+    if (this.chartData.isHydrating(range, sym, instrument, expiry)) return;
     
-    this.chartData.setHydrating(range, sym, true);
+    this.chartData.setHydrating(range, sym, true, instrument, expiry);
     
     try {
-      // The main chart is the cash/index analytical reference. Including
-      // identity explicitly prevents future FUT views from sharing these
-      // bars unless they also provide their exact contract expiry.
-      const rows = await window.fetchMarketHistory(sym, range, force, 'EQ', '');
+      const rows = await window.fetchMarketHistory(sym, range, force, instrument, expiry);
       if (!Array.isArray(rows)) return;
       
       const bars = rows
@@ -63,12 +60,12 @@ class HistoryLoader {
                   && Number.isFinite(r.l) && Number.isFinite(r.c))
         .sort((a, b) => a.t - b.t);
       
-      this.chartData.setHistoryBars(range, bars, sym);
+      this.chartData.setHistoryBars(range, bars, sym, instrument, expiry);
       this.onRenderRequest();
     } catch (e) {
       Logger.warn('historyLoader', 'hydrateRange error:', e);
     } finally {
-      this.chartData.setHydrating(range, sym, false);
+      this.chartData.setHydrating(range, sym, false, instrument, expiry);
     }
   }
 

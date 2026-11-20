@@ -29,5 +29,12 @@ Live Greeks and scenario-adjusted Greeks are separate namespaces and labels.
 Scenario values SHALL NOT overwrite the live baseline or feed decisions back
 into canonical market state.
 
+The dashboard's ATM straddle theta metric is a modeled daily decay rate:
+`max(0, -(call theta + put theta)) / ATM straddle premium × 100`. It uses
+two-sided quote mid-prices when available and labels an LTP fallback. The
+5%/day high-decay threshold is a UI heuristic, not a trade signal. A rising
+rate label requires three distinct fresh snapshots; stale, partial, or
+delayed feed/analytics data SHALL be shown as unavailable.
+
 **Owner:** canonical analytics engine. **Approved consumers:** exporter,
 Dashboard Greek views, strike detail, strategies and scenario engine.

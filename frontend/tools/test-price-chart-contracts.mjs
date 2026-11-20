@@ -23,8 +23,8 @@ assert.match(dataService, /window\.priceChart\.addTick/,
   'the dashboard feed must keep the native chart buffer current');
 assert.match(chart, /this\._zoomStart[\s\S]*this\._zoomEnd/,
   'zoom/pan state must be stored independently of live ticks');
-assert.match(chart, /addTick\(price, t, vwap\)\{[\s\S]*?this\.chartData\.addTick\(price, t, vwap\);[\s\S]*?this\._scheduleRender\(\);/,
-  'a live tick must schedule a repaint on its own — the canvas must not depend on cursor movement to show new candles');
+assert.match(chart, /addTick\(price, t, vwap, sourceContext = null\)\{[\s\S]*?this\.chartData\.addTick\(price, t, vwap\);[\s\S]*?if\(this\.chartData\.getLastTick\(\) !== previousTick\) this\._scheduleRender\(\);/,
+  'a changed live tick must schedule a repaint without redrawing for unchanged heartbeats');
 assert.match(history, /catch \(e\)[\s\S]*Logger\.warn\('historyLoader'/,
   'history failures must be contained without breaking live quote handling');
 assert.match(build, /Dashboard\/DashboardPro\.html[\s\S]*PriceChart\/price-chart-engine\.js/,

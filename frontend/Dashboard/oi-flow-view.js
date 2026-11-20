@@ -228,8 +228,10 @@ class OiFlowView {
   // zero remains zero when ChgOI itself is zero.
   const capitalFlowFor = (row, side) => {
     const prefix = side === 'ce' ? 'ce' : 'pe';
-    const supplied = Number(row[`${prefix}CapitalFlow`]);
-    const chgOi = Number(row[`${prefix}ChgOI`]);
+    const rawSupplied = row[`${prefix}CapitalFlow`];
+    const rawChgOi = row[`${prefix}ChgOI`];
+    const supplied = rawSupplied == null || rawSupplied === '' ? NaN : Number(rawSupplied);
+    const chgOi = rawChgOi == null || rawChgOi === '' ? NaN : Number(rawChgOi);
     const ltp = Number(row[`${prefix}LTP`]);
     if(Number.isFinite(chgOi) && chgOi !== 0 && Number.isFinite(ltp)){
       const derived = chgOi * ltp;
@@ -256,6 +258,22 @@ class OiFlowView {
   const totalPremiumLocked = nullablePair('cePremiumLocked', 'pePremiumLocked');
   const totalPremiumTurnover = nullablePair('cePremiumTurnover', 'pePremiumTurnover');
   const totalNotionalExposure = nullablePair('ceNotionalExposure', 'peNotionalExposure');
+  const isCommodity = dashboardData?.instrument === 'MCX_FUT';
+  const flowScope = 'Day-session ΔOI × LTP · visible range';
+  const verdictLabel = isCommodity
+    ? 'Day-session capital-weighted flow verdict'
+    : 'Capital-weighted session verdict';
+  const baselineStatus = dashboardData?.capitalFlowBaselineStatus;
+  const baselineMessage = {
+    loading: 'loading previous-close baseline',
+    pending: 'previous-close baseline pending',
+    partial: 'partial previous-close baseline',
+    unsupported: 'historical OI unavailable',
+    unavailable: 'previous-close baseline unavailable',
+  }[baselineStatus];
+  const baselineQualifier = isCommodity && baselineMessage
+    ? ` · ${baselineMessage}`
+    : '';
   const capitalByStrike = chain.map((r) => ({
     strike:r.strike,
     value:(Number(r.cePremiumLocked)||0)+(Number(r.pePremiumLocked)||0)
@@ -336,12 +354,12 @@ class OiFlowView {
           <span class="oi-flow-eyebrow">Capital Flow</span>
           <h3>Where is options capital moving?</h3>
         </div>
-        <span class="oi-flow-scope">Day-session ΔOI × LTP · visible range</span>
+        <span class="oi-flow-scope">${flowScope}${baselineQualifier}</span>
       </div>
 
       <section class="oi-flow-verdict ${sessionTone}" aria-label="Session flow verdict">
         <div>
-          <span class="oi-flow-step">Capital-weighted session verdict</span>
+          <span class="oi-flow-step">${verdictLabel}</span>
           <strong>${sessionTitle}</strong>
           <p>${netFlowRead}</p>
         </div>
@@ -391,7 +409,9 @@ class OiFlowView {
 
       <details class="oi-flow-method">
         <summary>How to read these values</summary>
-        <div class="capital-unit-note">Units: ₹ underlying quantity terms. OI is already lot-scaled; turnover alone converts raw volume contracts using lot size. Capital Flow is day-session ΔOI × LTP; 5m/15m/30m below is separate intraday velocity.</div>
+        <div class="capital-unit-note">${isCommodity
+          ? 'MCX flow uses current option OI minus OI at the previous trading session close, multiplied by option LTP. It is unavailable when historical OI for the previous close cannot be loaded.'
+          : 'Units: ₹ underlying quantity terms. OI is already lot-scaled; turnover alone converts raw volume contracts using lot size. Capital Flow is day-session ΔOI × LTP; 5m/15m/30m below is separate intraday velocity.'}</div>
       </details>
     </div>
   </div>`;

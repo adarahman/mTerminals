@@ -10,6 +10,96 @@
 // chain-views.js.
 // ============================================================
 
+const THETA_DECAY_ALERT_THRESHOLD_PCT = 5;
+const THETA_DECAY_HISTORY_WINDOW_MS = 30000;
+const THETA_DECAY_TREND_MIN_SPAN_MS = 5000;
+const THETA_DECAY_TREND_MIN_CHANGE_PCT = 0.1;
+const THETA_DECAY_HISTORY = new Map();
+
+function getThetaDecayMetric(greeks, atm, d) {
+  const feedState = (window.AppState && window.AppState.feedState) || {};
+  const snapshotAt = Number(feedState.lastMessageAt);
+  const now = Date.now();
+  const staleAfterMs = (typeof Config !== 'undefined' && Config.ws && Config.ws.staleAfterMs) || 30000;
+  if (feedState.status !== 'LIVE' || feedState.quality !== 'FULL'
+      || feedState.pipelineDelayed || !Number.isFinite(snapshotAt)
+      || now < snapshotAt || now - snapshotAt > staleAfterMs) {
+    const reason = feedState.pipelineDelayed
+      ? 'Analytics delayed.'
+      : feedState.quality === 'PARTIAL'
+        ? 'Feed is partial.'
+        : 'Live market snapshot is unavailable or stale.';
+    return { available: false, reason };
+  }
+
+  const strike = Number(atm);
+  const greek = (greeks || []).find((row) => Number(row.strike) === strike);
+  const chainRow = ((d && d.chain) || []).find((row) => Number(row.strike) === strike);
+  if (!greek || !chainRow) {
+    return { available: false, reason: 'ATM option prices or Greeks are missing.' };
+  }
+
+  const hasFiniteValue = (value) => value !== null && value !== undefined
+    && value !== '' && Number.isFinite(Number(value));
+  if (!hasFiniteValue(greek.cTheta) || !hasFiniteValue(greek.pTheta)) {
+    return { available: false, reason: 'ATM call/put theta is unavailable.' };
+  }
+  const callTheta = Number(greek.cTheta);
+  const putTheta = Number(greek.pTheta);
+
+  const callBid = Number(chainRow.ceBid);
+  const callAsk = Number(chainRow.ceAsk);
+  const putBid = Number(chainRow.peBid);
+  const putAsk = Number(chainRow.peAsk);
+  const hasMidQuotes = callBid > 0 && callAsk >= callBid
+    && putBid > 0 && putAsk >= putBid;
+  let straddlePremium;
+  let premiumBasis;
+  if (hasMidQuotes) {
+    straddlePremium = (callBid + callAsk + putBid + putAsk) / 2;
+    premiumBasis = 'mid-price';
+  } else {
+    const callLtp = Number(chainRow.ceLTP);
+    const putLtp = Number(chainRow.peLTP);
+    if (!(callLtp > 0 && putLtp > 0)) {
+      return { available: false, reason: 'ATM two-sided quotes and LTP are missing.' };
+    }
+    straddlePremium = callLtp + putLtp;
+    premiumBasis = 'LTP proxy (mid-price unavailable)';
+  }
+  if (!(straddlePremium > 0)) {
+    return { available: false, reason: 'ATM straddle premium is invalid.' };
+  }
+
+  const thetaBurn = Math.max(0, -(callTheta + putTheta));
+  const thetaPct = thetaBurn / straddlePremium * 100;
+  const historyKey = `${d.symbol || ''}|${d.expiry || ''}`;
+  let history = THETA_DECAY_HISTORY.get(historyKey) || [];
+  const latest = history[history.length - 1];
+  if (latest && snapshotAt < latest.at) {
+    return { available: true, thetaPct, premiumBasis, rising: false };
+  }
+  if (!latest || snapshotAt > latest.at) {
+    if (latest && snapshotAt - latest.at > THETA_DECAY_HISTORY_WINDOW_MS) {
+      history = [];
+    }
+    history.push({ at: snapshotAt, rate: thetaPct });
+    history = history.slice(-3);
+    THETA_DECAY_HISTORY.delete(historyKey);
+    THETA_DECAY_HISTORY.set(historyKey, history);
+    if (THETA_DECAY_HISTORY.size > 64) {
+      THETA_DECAY_HISTORY.delete(THETA_DECAY_HISTORY.keys().next().value);
+    }
+  }
+
+  const rising = history.length === 3
+    && history[2].at - history[0].at >= THETA_DECAY_TREND_MIN_SPAN_MS
+    && history[1].rate > history[0].rate
+    && history[2].rate > history[1].rate
+    && history[2].rate - history[0].rate >= THETA_DECAY_TREND_MIN_CHANGE_PCT;
+  return { available: true, thetaPct, premiumBasis, rising };
+}
+
   // ── GREEKS ALERTS (main-dashboard summary card) ──
   // IA redesign step 2: scope tag added to the title so this card's raw,
   // un-adjusted totalGEX (summed off the live greeks array) reads as
@@ -46,15 +136,13 @@
   // backend doesn't send an explicit "this is high" flag — not a value
   // pulled from the payload.
 ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
-  const GREEKS_ALERT_THETA_PCT = 5; // ATM theta/day as % of ATM straddle premium
-  const straddle = (d.callPremium||0) + (d.putPremium||0);
   // computeNetGEX/computeGammaFlip (metrics.js, IA redesign step 6) —
   // `greeks` is whatever scope the caller passed in (currently always
   // visible-range, see the callers' own comments); this function doesn't
   // decide the scope, it just computes off whatever array it's given.
   const totalGEX = computeNetGEX(greeks);
   const flipRow  = computeGammaFlip(greeks, atm);
-  const thetaPct = straddle>0 ? Math.abs(d.atmTheta||0)/straddle*100 : 0;
+  const thetaMetric = getThetaDecayMetric(greeks, atm, d || {});
 
   const alerts=[];
   if(flipRow){
@@ -97,18 +185,25 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
     text:'GEX-implied vol-move sensitivity multiplier',
     num: fmtN(vannaMultiplier,2)+'x'
   });
-  // THETA — was previously hidden entirely whenever thetaPct fell at or
-  // below GREEKS_ALERT_THETA_PCT, which made the row flicker in and out
-  // right around the 5% boundary instead of just updating in place (same
-  // failure mode the LONG/SHORT Γ row above already had, and was fixed
-  // for). Now always shown; only the color/wording changes based on
-  // whether burn is currently elevated.
-  const thetaElevated = thetaPct > GREEKS_ALERT_THETA_PCT;
-  alerts.push({
-    icon:'θ', clr: thetaElevated ? 'var(--red)' : 'var(--txt3)',
-    title:'THETA',
-    text: thetaElevated ? 'ATM straddle losing premium/day' : 'Theta burn within normal range',
-    num: fmtN(thetaPct,1)+'%'
+  // The trend label requires three distinct fresh snapshots, not a single
+  // quote move. Theta remains an informational metric, never an order signal.
+  const thetaElevated = thetaMetric.available
+    && thetaMetric.thetaPct > THETA_DECAY_ALERT_THRESHOLD_PCT;
+  const thetaColor = !thetaMetric.available
+    ? 'var(--txt3)'
+    : thetaElevated
+      ? 'var(--red)'
+      : thetaMetric.rising ? 'var(--amber)' : 'var(--blue)';
+  const thetaText = !thetaMetric.available
+    ? `Unavailable — ${thetaMetric.reason}`
+    : `${thetaElevated ? 'High modeled decay' : 'Below the 5%/day high-decay heuristic'}; ${thetaMetric.premiumBasis}.`
+      + `${thetaMetric.rising ? ' Rate rising across 3 fresh snapshots.' : ''} Not a trade signal.`;
+  alerts.unshift({
+    kind:'theta',
+    icon:'θ', clr: thetaColor,
+    title:'THETA WATCH · ATM STRADDLE',
+    text: thetaText,
+    num: thetaMetric.available ? fmtN(thetaMetric.thetaPct,1)+'%/day' : '—'
   });
 
   // Icon-badge row layout — circular colour-coded icon, title + description
@@ -119,23 +214,32 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
   // Self-contained inline styles (same approach as buildChainSummaryHtml)
   // rather than new CSS classes, since panels.css isn't in scope here.
   const rows = alerts.length
-    ? alerts.map((a,i)=>`
-      <div style="display:flex;align-items:center;gap:12px;padding:10px 2px;${i<alerts.length-1?'border-bottom:1px solid var(--border);':''}">
-        <div style="width:38px;height:38px;flex:0 0 38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, ${a.clr} 16%, transparent);border:1px solid color-mix(in srgb, ${a.clr} 45%, transparent);">
-          <span style="font-size:17px;color:${a.clr};line-height:1;">${a.icon}</span>
+    ? alerts.map((a,i)=>{
+      const thetaWatch = a.kind === 'theta';
+      const rowStyle = thetaWatch
+        ? `display:flex;align-items:center;gap:14px;padding:14px 12px;background:color-mix(in srgb, ${a.clr} 8%, var(--bg-0));border-left:3px solid ${a.clr};border-radius:8px;margin:6px 0 10px;`
+        : `display:flex;align-items:center;gap:12px;padding:10px 2px;${i<alerts.length-1?'border-bottom:1px solid var(--border);':''}`;
+      const iconSize = thetaWatch ? 46 : 38;
+      const titleSize = thetaWatch ? 13 : 11.5;
+      const valueSize = thetaWatch ? 22 : 15;
+      return `
+      <div data-alert-kind="${thetaWatch ? 'theta-watch' : 'market-context'}" ${thetaWatch ? 'role="status" aria-live="polite"' : ''} style="${rowStyle}">
+        <div style="width:${iconSize}px;height:${iconSize}px;flex:0 0 ${iconSize}px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, ${a.clr} 16%, transparent);${thetaWatch ? '' : `border:1px solid color-mix(in srgb, ${a.clr} 45%, transparent);`}">
+          <span style="font-size:${thetaWatch ? 21 : 17}px;color:${a.clr};line-height:1;">${a.icon}</span>
         </div>
         <div style="flex:1;min-width:0;">
-          <div style="font-size:11.5px;font-weight:700;color:${a.clr};letter-spacing:.03em;">${a.title}</div>
-          <div style="font-size:11px;color:var(--txt3);line-height:1.4;margin-top:2px;">${a.text}</div>
+          <div style="font-size:${titleSize}px;font-weight:800;color:${a.clr};letter-spacing:.03em;">${a.title}</div>
+          <div style="font-size:${thetaWatch ? 12 : 11}px;color:var(--txt3);line-height:1.45;margin-top:3px;">${a.text}</div>
         </div>
-        <div style="font-size:15px;font-weight:700;color:var(--txt);white-space:nowrap;flex:0 0 auto;">${a.num}</div>
-      </div>`).join('')
+        <div style="font-size:${valueSize}px;font-weight:800;color:var(--txt);white-space:nowrap;flex:0 0 auto;">${a.num}</div>
+      </div>`;
+    }).join('')
     : `<div class="dd-empty">No Greek alerts right now — γ regime stable, theta normal.</div>`;
 
   return `<div class="section-card sc-violet" id="greeks-alerts-card" style="min-width:0;">
     <button class="section-header nav-card-header" onclick="openGreeksModal()"
        aria-label="Open Greeks &amp; GEX — view full table" title="Open full Greeks &amp; GEX table">
-      <span class="section-title nav-card-header-label"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Live, Visible Range</span></span>
+      <span class="section-title nav-card-header-label"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Θ WATCH · Live, Visible Range</span></span>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
     </button>
     <div style="display:flex;flex-direction:column;padding:2px 0;">

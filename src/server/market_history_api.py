@@ -31,15 +31,29 @@ class MarketHistoryApi:
         state: Callable[[], dict[str, Any]],
         get_candle_data: Callable[..., Any],
         get_index_candles: Callable[..., Any],
+        get_commodity_candles: Callable[..., Any] | None = None,
         public_history: Callable[..., Any] | None = None,
     ) -> None:
         self._state = state
         self._get_candle_data = get_candle_data
         self._get_index_candles = get_index_candles
+        self._get_commodity_candles = (
+            get_commodity_candles or self._get_smartapi_commodity_candles
+        )
         self._public_history = public_history
-        self._cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
-        self._inflight: dict[tuple[str, str], asyncio.Future] = {}
-        self._failures: dict[tuple[str, str], float] = {}
+        self._cache: dict[tuple[str, str, str, str], tuple[float, list[dict]]] = {}
+        self._inflight: dict[tuple[str, str, str, str], asyncio.Future] = {}
+        self._failures: dict[tuple[str, str, str, str], float] = {}
+
+    @staticmethod
+    def _get_smartapi_commodity_candles(
+        symbol, expiry, interval, fromdate, todate
+    ):
+        from brokers.smartapi.history import get_commodity_futures_candles
+
+        return get_commodity_futures_candles(
+            symbol, expiry, interval, fromdate, todate
+        )
 
     async def spot_history(self, request):
         try:
@@ -72,8 +86,8 @@ class MarketHistoryApi:
                 continue
         return web.json_response(rows)
 
-    async def _cached(self, symbol, range_key, config):
-        key, now = (symbol, range_key), time.monotonic()
+    async def _cached(self, symbol, range_key, config, instrument="INDEX", expiry=""):
+        key, now = (symbol, instrument, expiry, range_key), time.monotonic()
         cached = self._cache.get(key)
         if cached is not None and now - cached[0] < 20:
             return cached[1]
@@ -85,11 +99,17 @@ class MarketHistoryApi:
         self._inflight[key] = future
         try:
             now_dt = datetime.now()
-            candles = await asyncio.to_thread(
-                self._get_index_candles, symbol, config["interval"],
-                (now_dt - timedelta(days=config["days"])).strftime("%Y-%m-%d %H:%M"),
-                now_dt.strftime("%Y-%m-%d %H:%M"),
-            )
+            fromdate = (now_dt - timedelta(days=config["days"])).strftime("%Y-%m-%d %H:%M")
+            todate = now_dt.strftime("%Y-%m-%d %H:%M")
+            if instrument == "MCX_FUT":
+                candles = await asyncio.to_thread(
+                    self._get_commodity_candles, symbol, expiry, config["interval"],
+                    fromdate, todate,
+                )
+            else:
+                candles = await asyncio.to_thread(
+                    self._get_index_candles, symbol, config["interval"], fromdate, todate,
+                )
             rows = []
             for candle in candles or []:
                 try:
@@ -119,6 +139,23 @@ class MarketHistoryApi:
         symbol = (request.query.get("symbol") or state["symbol"]).strip().upper()
         instrument = (request.query.get("instrument") or "EQ").strip().upper()
         expiry = (request.query.get("expiry") or "").strip().upper()
+        if instrument == "MCX_FUT":
+            if not state["broker_services_enabled"]:
+                return web.json_response([])
+            try:
+                rows = await self._cached(
+                    symbol, range_key, config, instrument=instrument, expiry=expiry
+                )
+            except Exception as exc:
+                logger.error(
+                    f"/api/history failed for MCX {symbol} expiry={expiry} "
+                    f"range={range_key}: {exc}"
+                )
+                return web.json_response([])
+            response = web.json_response(rows)
+            response.headers["X-MTerminals-History-Source"] = "smartapi"
+            response.headers["X-MTerminals-Instrument"] = instrument
+            return response
         if instrument in {"EQ", "INDEX"} or not state["broker_services_enabled"]:
             if self._public_history is None:
                 from brokers.public_history import fetch_public_history

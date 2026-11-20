@@ -16,6 +16,363 @@ test('dashboard loads and exposes primary tools without page errors', async ({ p
   expect(pageErrors).toEqual([]);
 });
 
+test('Market workspace keeps Theta Watch visible without opening Greeks modal', async ({ page }) => {
+  await openDashboard(page);
+  await page.evaluate(() => {
+    window.parseAndRender(JSON.stringify({
+      symbol:'NIFTY', expiry:'31-DEC-2099', spot:24800, atm:24800,
+      chain:[{
+        strike:24800, ceBid:9, ceAsk:11, peBid:19, peAsk:21,
+        ceLTP:10, peLTP:20,
+      }],
+      greeks:[{ strike:24800, cTheta:-1, pTheta:-1, netGEX:0 }],
+      lastUpdated:new Date().toISOString(),
+    }));
+    window.AppState.feedState = {
+      status:'LIVE', quality:'FULL', pipelineDelayed:false,
+      lastMessageAt:Date.now(),
+    };
+  });
+  await page.locator('button[data-primary-nav="market"]').click();
+
+  const thetaWatch = page.locator('#greeks-alerts-card [data-alert-kind="theta-watch"]');
+  await expect(thetaWatch).toBeVisible();
+  await expect(thetaWatch).toContainText('THETA WATCH · ATM STRADDLE');
+});
+
+test('late commodity quotes cannot replace the selected equity chain price', async ({ page }) => {
+  await page.routeWebSocket('**/ws', () => {});
+  await openDashboard(page);
+  await page.evaluate(() => {
+    window.setDashboardInstrumentMode('equity');
+    window.parseAndRender(JSON.stringify({
+      symbol:'NIFTY', expiry:'31-DEC-2099', spot:24800, atm:24800,
+      chain:[{ strike:24800, ceLTP:10, peLTP:20 }],
+      greeks:[], lastUpdated:new Date().toISOString(),
+    }));
+    window.commodityPrices.symbol = 'CRUDEOIL';
+    window.commodityPrices.futureExpiry = '';
+    window.commodityPrices.applyLiveQuote({
+      symbol:'CRUDEOIL',
+      quote:{ LTP:6200, Expiry:'30-Jun-2026', Volume:100, OI:100 },
+    });
+  });
+  await page.locator('button[data-primary-nav="market"]').click();
+
+  await expect(page.locator('#topbar-spot')).toContainText('24,800');
+  expect(await page.evaluate(() => ({
+    symbol:window._data.symbol,
+    spot:window._data.spot,
+  }))).toEqual({symbol:'NIFTY', spot:24800});
+});
+
+test('Commodities workspace shows a live compact price chart', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('priceChartSettings.v2', JSON.stringify({
+      range:'1m', windowKey:'1D', type:'candle',
+    }));
+  });
+  await page.routeWebSocket('**/ws', () => {});
+  const historyRequests = [];
+  await page.route('**/api/history**', route => {
+    historyRequests.push(route.request().url());
+    const now = Date.now();
+    return route.fulfill({
+      status:200,
+      contentType:'application/json',
+      body:JSON.stringify([
+        {t:now-60000, o:294, h:296, l:293, c:295, v:10},
+        {t:now-30000, o:295, h:165739.6, l:294, c:295, v:12},
+        {t:now, o:295, h:297, l:294, c:296, v:15},
+      ]),
+    });
+  });
+  await page.route('**/api/commodities/quote**', route => route.fulfill({
+    status:200,
+    contentType:'application/json',
+    body:JSON.stringify({
+      provider:'TEST',
+      symbol:'NATURALGAS',
+      quote:{
+        Contract:'NATURALGAS FUT', Expiry:'31-Dec-2099',
+        LTP:295, Open:294, High:297, Low:293,
+        Change:1, PctChange:0.34, Volume:100, OI:100, LotSize:1250,
+      },
+    }),
+  }));
+  let optionChainCeChange = 10;
+  let optionChainPeChange = -20;
+  await page.route('**/api/commodities/option-chain**', route => route.fulfill({
+    status:200,
+    contentType:'application/json',
+    body:JSON.stringify({
+      provider:'TEST',
+      symbol:'NATURALGAS',
+      expiry:'31DEC2099',
+      expiries:['31DEC2099'],
+      chain:{
+        rows:[
+          {strike:295, type:'CE', oi:110, ltp:5, volume:20, oi_change:optionChainCeChange, capital_flow:optionChainCeChange * 5},
+          {strike:295, type:'PE', oi:180, ltp:8, volume:40, oi_change:optionChainPeChange, capital_flow:optionChainPeChange == null ? null : optionChainPeChange * 8},
+        ],
+        spot:295, atm_strike:295, strike_step:5,
+        flow_baseline:'previous_close', flow_baseline_status:'ready',
+      },
+      analysis:{verdict:'WAIT', confidence:0, evidence_coverage:0},
+    }),
+  }));
+  await page.route('**/api/commodities/news**', route => route.fulfill({
+    status:200,
+    contentType:'application/json',
+    body:JSON.stringify({items:[]}),
+  }));
+  await openDashboard(page);
+  await page.evaluate(() => {
+    window.parseAndRender(JSON.stringify({
+      symbol:'NIFTY', expiry:'31-DEC-2099', spot:24800, atm:24800,
+      chain:[], greeks:[], lastUpdated:new Date().toISOString(),
+    }));
+    window.commodityActiveSymbol = 'NATURALGAS';
+    window.setDashboardInstrumentMode('commodity');
+  });
+  await expect(page.locator('#commodity-option-chain')).toBeHidden();
+  await expect(page.locator('#commodity-capital-flow')).toBeHidden();
+  await page.locator('button[data-primary-nav="market"]').click();
+  await expect(page.locator('#commodity-option-chain')).toBeVisible();
+  await expect(page.locator('#commodity-capital-flow')).toBeVisible();
+  await expect(page.locator('#commodity-option-chain')).toBeInViewport();
+
+  const preview = page.locator('#verdict-mini-chart');
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute('role', 'button');
+  await expect.poll(() => page.evaluate(() =>
+    window.commodityPrices.futureExpiry.toUpperCase()
+  )).toBe('31-DEC-2099');
+  expect(await preview.evaluate(element => getComputedStyle(element).cursor)).toBe('pointer');
+  await page.evaluate(() => {
+    const view = window.commodityPrices;
+    const renderer = window.priceChart.chartRenderer;
+    const drawGrid = renderer._drawGrid;
+    renderer._drawGrid = function(...args) {
+      window.__priceAxisBounds = {min:args[5], max:args[6]};
+      return drawGrid.apply(this, args);
+    };
+    const drawLastPriceMarker = renderer.drawLastPriceMarker;
+    renderer.drawLastPriceMarker = function(...args) {
+      window.__priceAxisLivePrice = args[1];
+      const drawn = drawLastPriceMarker.apply(this, args);
+      window.__priceAxisLivePriceDrawn = drawn;
+      return drawn;
+    };
+    const realNow = Date.now;
+    let time = Math.floor(realNow() / 60000) * 60000;
+    Date.now = () => time;
+    view.applyLiveQuote({
+      symbol:'NATURALGAS',
+      provider:'TEST',
+      quote:{LTP:295, Expiry:'31-Dec-2099'},
+    });
+    time += 60000;
+    view.applyLiveQuote({
+      symbol:'NATURALGAS',
+      provider:'TEST',
+      quote:{LTP:296, Expiry:'31-Dec-2099'},
+    });
+    Date.now = realNow;
+  });
+  await expect.poll(() => preview.locator('svg line').count()).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => {
+    const chain = app.chain;
+    if (!String(chain._miniChartHydratedSymbol || '').includes('NATURALGAS|MCX_FUT|31-DEC-2099')) {
+      return null;
+    }
+    const points = chain._miniChartHistory || [];
+    return points.length ? Math.max(...points.map(point => point.h)) : null;
+  })).toBeLessThan(1000);
+  await expect.poll(() => page.evaluate(() => {
+    const chain = app.chain;
+    return (chain._miniChartHistory || []).filter(point => Number(point.v) > 0).length;
+  })).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => preview.locator('svg circle').count()).toBe(0);
+  await preview.click();
+  await expect(page.locator('#price-chart-modal')).toHaveClass(/open/);
+  await expect(page.locator('#price-chart-context-grid .focus-context-primary em')).toHaveText('MCX FUT');
+  const commodityFlowMarkup = await page.evaluate(() => {
+    const data = window.commodityPrices._toSharedDashboardData();
+    return window.buildOiFlowSummaryHtml(
+      data.chain, data.atm, {}, data.oiVelocity, data,
+    );
+  });
+  expect(commodityFlowMarkup).toContain('Day-session ΔOI × LTP · visible range');
+  expect(commodityFlowMarkup).toContain('-₹210');
+  expect(await page.evaluate(() => {
+    const data = window.commodityPrices._toSharedDashboardData();
+    return {
+      ceChgOI:data.chain[0].ceChgOI,
+      ceCapitalFlow:data.chain[0].ceCapitalFlow,
+      peChgOI:data.chain[0].peChgOI,
+      peCapitalFlow:data.chain[0].peCapitalFlow,
+      oiChgPCR:data.oiChgPCR,
+    };
+  })).toEqual({
+    ceChgOI:10, ceCapitalFlow:50, peChgOI:-20, peCapitalFlow:-160,
+    oiChgPCR:-2,
+  });
+  const commodityChainRow = page.locator(
+    '#commodity-chain-shared .oc-ledger-row[data-strike="295"]'
+  );
+  await expect(commodityChainRow).toHaveCount(1);
+  await expect(page.locator('#commodity-option-chain'))
+    .toContainText('Option Chain Snapshot');
+  await expect(page.locator('#commodity-option-chain'))
+    .toContainText('OI Flow / Velocity');
+  const commodityCapitalFlow = page.locator('#commodity-capital-flow #oi-flow-summary-card');
+  await expect(commodityCapitalFlow).toContainText('Capital Flow');
+  await expect(commodityCapitalFlow).toContainText('Day-session ΔOI × LTP');
+  await expect(commodityCapitalFlow).toContainText('-₹210');
+  await expect(commodityCapitalFlow).toContainText('Premium turnover');
+  const commodityChainCells = await commodityChainRow.locator('td').allTextContents();
+  expect(commodityChainCells[5]).toContain('-20');
+  expect(commodityChainCells[5]).toContain('+10');
+  expect(commodityChainCells[6]).toContain('-₹160');
+  expect(commodityChainCells[6]).toContain('+₹50');
+  const chartOiChangePcr = page.locator('#price-chart-context-grid .focus-context-card')
+    .nth(2).locator('.focus-context-row').nth(1).locator('b');
+  await expect(chartOiChangePcr).toHaveText('-2');
+  optionChainCeChange = 0;
+  await expect.poll(() => page.evaluate(() => window.commodityPrices.chainLoading)).toBe(false);
+  await page.evaluate(async () => window.commodityPrices._refreshOptionChain('NATURALGAS'));
+  await expect(chartOiChangePcr).toHaveText('—');
+  optionChainCeChange = 10;
+  optionChainPeChange = null;
+  await expect.poll(() => page.evaluate(() => window.commodityPrices.chainLoading)).toBe(false);
+  await page.evaluate(async () => window.commodityPrices._refreshOptionChain('NATURALGAS'));
+  await expect(chartOiChangePcr).toHaveText('—');
+  optionChainPeChange = -10;
+  await expect.poll(() => page.evaluate(() => window.commodityPrices.chainLoading)).toBe(false);
+  await page.evaluate(async () => window.commodityPrices._refreshOptionChain('NATURALGAS'));
+  await expect(chartOiChangePcr).toHaveText('-1');
+  await page.evaluate(() => app.modal.openOptionChainModal());
+  const chainOiChangePcr = page.locator('#option-chain-context-grid .focus-context-card')
+    .nth(1).locator('.focus-context-row').nth(1).locator('b');
+  await expect(chainOiChangePcr).toHaveText('-1');
+  optionChainPeChange = -20;
+  await expect.poll(() => page.evaluate(() => window.commodityPrices.chainLoading)).toBe(false);
+  await page.evaluate(async () => window.commodityPrices._refreshOptionChain('NATURALGAS'));
+  await expect(chainOiChangePcr).toHaveText('-2');
+  await page.evaluate(() => app.modal.closeOptionChainModal());
+  await preview.click();
+  await expect(page.locator('#price-chart-modal')).toHaveClass(/open/);
+  await page.locator('.pc-type-btn[data-type="candle"]').click();
+  await expect.poll(() => page.evaluate(() => window.priceChart._getContext())).toEqual({
+    symbol:'NATURALGAS', instrument:'MCX_FUT', expiry:'31-DEC-2099',
+  });
+  await expect.poll(() => historyRequests.some(url =>
+    /symbol=NATURALGAS/i.test(url) && /instrument=MCX_FUT/.test(url)
+    && /expiry=31-DEC-2099/i.test(url)
+  )).toBe(true);
+  await expect(page.locator('#price-chart-canvas')).toBeVisible();
+  await expect(page.locator('#pc-ohlc-sym')).toHaveText('NATURALGAS');
+  await expect.poll(() => page.evaluate(() => window.__priceAxisLivePrice)).toBe(296);
+  await page.evaluate(() => {
+    window.__priceChartContextPriceNode =
+      document.querySelector('#price-chart-context-grid .focus-context-price');
+  });
+  await page.evaluate(() => window.commodityPrices.applyLiveQuote({
+    symbol:'NATURALGAS',
+    provider:'TEST',
+    quote:{LTP:297, Expiry:'31-Dec-2099'},
+  }));
+  await expect.poll(() => page.evaluate(() => window.__priceAxisLivePrice)).toBe(297);
+  await expect(page.locator('#price-chart-context-grid .focus-context-price'))
+    .toHaveText('₹297');
+  expect(await page.evaluate(() =>
+    window.__priceChartContextPriceNode
+      === document.querySelector('#price-chart-context-grid .focus-context-price')
+  )).toBe(true);
+  await page.evaluate(() => window.priceChart.addTick(
+    298,
+    Date.now() - 1,
+    null,
+    window.priceChart._getContext(),
+  ));
+  await expect.poll(() => page.evaluate(() => window.__priceAxisLivePrice)).toBe(297);
+  await page.evaluate(() => window.commodityPrices.applyLiveQuote({
+    symbol:'NATURALGAS',
+    provider:'TEST',
+    quote:{LTP:299, Expiry:'31-Dec-2099'},
+  }));
+  await expect.poll(() => page.evaluate(() => window.__priceAxisLivePrice)).toBe(299);
+  await expect(page.locator('#price-chart-context-grid .focus-context-price'))
+    .toHaveText('₹299');
+  await expect.poll(() => page.evaluate(() => window.__priceAxisLivePriceDrawn)).toBe(true);
+  await expect(page.locator('#pc-history-warning'))
+    .toContainText('Ignored 1 MCX candle');
+  await page.evaluate(() => window.commodityPrices.applyLiveQuote({
+    symbol:'NATURALGAS',
+    provider:'TEST',
+    quote:{LTP:1160.4, Expiry:'31-Dec-2099'},
+  }));
+  await expect(page.locator('#pc-history-warning'))
+    .toContainText('Ignored live MCX quote 1,160.4');
+  await expect.poll(() => page.evaluate(() => window.__priceAxisLivePriceDrawn)).toBe(false);
+  const stableAxisBounds = await page.evaluate(() => window.__priceAxisBounds);
+  expect(stableAxisBounds.max).toBeLessThan(400);
+  await expect(page.locator('#pc-vwap-footnote'))
+    .toContainText('VWAP (OHLCV est.)');
+  await expect(page.locator('#pc-vwap-footnote'))
+    .toContainText(/VWAP \(OHLCV est\.\)\s+29[0-9]/);
+  await expect.poll(() => page.evaluate(() => {
+    const context = window.priceChart._getContext();
+    return window.priceChart.chartData.getHistoryBars(
+      window.priceChart.settings.range,
+      context.symbol,
+      context.instrument,
+      context.expiry,
+    )?.length || 0;
+  })).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__priceAxisBounds)).toEqual({
+    min:expect.any(Number),
+    max:expect.any(Number),
+  });
+  const axisBounds = await page.evaluate(() => window.__priceAxisBounds);
+  expect(axisBounds.min).toBeGreaterThan(290);
+  expect(axisBounds.min).toBeLessThan(295);
+  expect(axisBounds.max).toBeGreaterThan(295);
+  expect(axisBounds.max).toBeLessThan(300);
+  expect(await page.evaluate(() => {
+    const chart = window.priceChart;
+    return chart._normalizeCommodityHistoryBars([{
+      t:Date.now(), o:29400, h:29600, l:29300, c:29500,
+    }], chart._getContext(), 295)[0];
+  })).toMatchObject({o:294, h:296, l:293, c:295});
+  const chartCanvas = page.locator('#price-chart-canvas');
+  await chartCanvas.hover({position:{x:20, y:20}});
+  await page.evaluate(() => {
+    const renderer = window.priceChart.chartRenderer;
+    const render = renderer.render;
+    window.__chartRenderCalls = 0;
+    renderer.render = function(...args) {
+      window.__chartRenderCalls += 1;
+      return render.apply(this, args);
+    };
+  });
+  const canvasBox = await chartCanvas.boundingBox();
+  await page.mouse.move(canvasBox.x + 45, canvasBox.y + 35);
+  await page.mouse.move(canvasBox.x + 90, canvasBox.y + 60);
+  expect(await page.evaluate(() => window.__chartRenderCalls)).toBe(0);
+  await page.evaluate(() => {
+    const canvas = document.getElementById('price-chart-canvas');
+    Object.defineProperty(canvas.parentElement, 'clientHeight', {
+      configurable:true,
+      value:240,
+    });
+    window.priceChart.render();
+  });
+  await expect(chartCanvas).toHaveJSProperty('height', 320);
+  await expect(page.locator('#pc-order-panel')).toBeHidden();
+});
+
 test('Trade panel places a compact Order action in its header', async ({ page }) => {
   await openDashboard(page);
   await page.locator('button[data-primary-nav="trade"]').evaluate(button => button.click());

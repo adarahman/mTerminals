@@ -20,7 +20,7 @@ const quoteBySlot = {
   FAR: '31-Aug-2026',
 };
 const context = {
-  window: {},
+  window: {dashboardInstrumentMode: 'commodity'},
   document: {
     getElementById(id) {
       return id === 'commodity-futures-expiry' ? expirySelect : null;
@@ -70,5 +70,55 @@ assert.deepEqual(refreshes.at(-1), {
   expiry: '31-Jul-2026',
   which: 'NEXT',
 });
+view._refreshQuote = context.CommodityPricesView.prototype._refreshQuote.bind(view);
+
+const equityData = {symbol: 'NIFTY', spot: 24800};
+context._data = equityData;
+context.window.dashboardInstrumentMode = 'equity';
+view.applyLiveQuote({
+  symbol: 'CRUDEOIL',
+  quote: {LTP: 6000, Expiry: '31-Jul-2026'},
+});
+view._syncSharedQuoteContext();
+view._renderSharedOptionChain({chain: {rows: []}});
+view._toSharedDashboardData();
+assert.equal(context._data, equityData);
+assert.equal(view.latestQuote, null);
+
+let resolveQuoteResponse;
+context.fetch = () => new Promise((resolve) => {
+  resolveQuoteResponse = resolve;
+});
+context.window.dashboardInstrumentMode = 'commodity';
+const quoteRequest = view._refreshQuote('CRUDEOIL');
+context.window.dashboardInstrumentMode = 'equity';
+resolveQuoteResponse({
+  status: 200,
+  ok: true,
+  json: async () => ({quote: {LTP: 6000, Expiry: '31-Jul-2026'}}),
+});
+await quoteRequest;
+assert.equal(context._data, equityData);
+assert.equal(view.latestQuote, null);
+
+let resolveChainResponse;
+context.fetch = () => new Promise((resolve) => {
+  resolveChainResponse = resolve;
+});
+context.window.dashboardInstrumentMode = 'commodity';
+const chainRequest = view._refreshOptionChain('CRUDEOIL');
+context.window.dashboardInstrumentMode = 'equity';
+resolveChainResponse({
+  status: 200,
+  ok: true,
+  json: async () => ({
+    expiry: '31-Jul-2026',
+    chain: {rows: []},
+    analysis: {},
+  }),
+});
+await chainRequest;
+assert.equal(context._data, equityData);
+assert.equal(view.latestChainPayload, null);
 
 console.log('Commodity futures expiry selection: passed');

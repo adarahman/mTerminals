@@ -25,6 +25,8 @@ the range into <=30-day windows and stitching results together.
 
 import time
 from datetime import datetime, timedelta
+from math import isfinite
+from zoneinfo import ZoneInfo
 
 from logzero import logger
 
@@ -123,6 +125,29 @@ def get_oi_data(exchange, symboltoken, interval, fromdate, todate):
     return rows
 
 
+def get_previous_close_oi(exchange, symboltoken):
+    """Return the latest historical OI value from before today's session."""
+    timezone = ZoneInfo("Asia/Kolkata")
+    today = datetime.now(timezone).date()
+    fromdate = (today - timedelta(days=14)).strftime("%Y-%m-%d 00:00")
+    todate = today.strftime("%Y-%m-%d 00:00")
+    rows = get_oi_data(exchange, symboltoken, "ONE_DAY", fromdate, todate)
+    previous = []
+    for row in rows:
+        try:
+            timestamp = datetime.fromisoformat(
+                str(row["timestamp"]).replace("Z", "+00:00")
+            )
+            if timestamp.tzinfo is not None:
+                timestamp = timestamp.astimezone(timezone)
+            oi = float(row["oi"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if timestamp.date() < today and isfinite(oi) and oi >= 0:
+            previous.append((timestamp, oi))
+    return max(previous, key=lambda item: item[0])[1] if previous else None
+
+
 def _daterange_chunks(fromdate, todate, max_days):
     """Split a date range into <= max_days windows, since Angel One's
     intraday endpoints reject overly long single requests."""
@@ -178,6 +203,32 @@ def get_index_candles(underlying, interval, fromdate, todate):
         logger.warning(f"[smartapi_history] Unknown index: {underlying}")
         return []
     return fetch_candles_chunked(info["exchange"], info["token"], interval, fromdate, todate)
+
+
+def get_commodity_futures_candles(underlying, expiry, interval, fromdate, todate):
+    """Fetch MCX candles for the selected FUTCOM contract."""
+    from brokers.smartapi.instruments import get_commodity_futures_contract
+
+    def normalize_expiry(value):
+        return "".join(
+            character for character in str(value or "").upper() if character.isalnum()
+        )
+
+    requested_expiry = normalize_expiry(expiry)
+    contract = None
+    for which in ("NEAR", "NEXT", "FAR"):
+        candidate = get_commodity_futures_contract(underlying, which=which)
+        if not candidate:
+            continue
+        if not requested_expiry or normalize_expiry(candidate.get("expiry")) == requested_expiry:
+            contract = candidate
+            break
+    if not contract or not contract.get("token"):
+        return []
+    candles = fetch_candles_chunked(
+        "MCX", str(contract["token"]), interval, fromdate, todate
+    )
+    return candles
 
 
 def get_option_candles(underlying, expiry_ddmmmyyyy, strike, opt_type, interval,

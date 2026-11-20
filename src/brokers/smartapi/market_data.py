@@ -151,6 +151,11 @@ class SmartApiMarketData:
 
         return get_commodity_option_expiries(underlying)
 
+    def get_commodity_option_previous_close_oi(self, token):
+        from brokers.smartapi.history import get_previous_close_oi
+
+        return get_previous_close_oi("MCX", str(token))
+
     def get_commodity_option_chain(
         self, underlying, expiry, strikes_around_atm=10
     ):
@@ -178,6 +183,7 @@ class SmartApiMarketData:
                 {
                     "strike": contract["strike"],
                     "type": contract["type"],
+                    "token": str(contract["token"]),
                     "ltp": _safe_float(quote.get("ltp")),
                     "oi": _safe_float(quote.get("opnInterest")),
                     "volume": _safe_float(quote.get("tradeVolume")),

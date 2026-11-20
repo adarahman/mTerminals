@@ -799,10 +799,9 @@ body.rail-collapsed .desktop-primary-nav .primary-nav-btn > span{
    These rules prevent detail surfaces from appearing under the wrong
    primary product destination. */
 
-/* Market is for market state / positioning / flow.
-   Full chain and deeper analytical cards belong elsewhere. */
+/* Market is for market state / positioning / flow. Keep the compact live
+   Greeks/GEX summary visible here; its full strike table remains in the modal. */
 body[data-dashboard-destination="market"] #sec-greeks-moneyness,
-body[data-dashboard-destination="market"] #greeks-alerts-card,
 body[data-dashboard-destination="market"] #volatility-card,
 body[data-dashboard-destination="market"] #voloi-detail-card,
 body[data-dashboard-destination="market"] #advanced-analytics-card,

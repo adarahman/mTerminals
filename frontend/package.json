@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node build.mjs && node gen_html.mjs",
     "test:option-chain": "node tools/test-option-chain-contracts.mjs",
+    "test:theta-decay": "node tools/test-theta-decay-contracts.mjs",
     "test:strike-detail": "node tools/test-strike-detail-contracts.mjs",
     "test:capital-flow": "node tools/test-capital-flow-contracts.mjs",
     "test:decision": "node tools/test-decision-contracts.mjs",

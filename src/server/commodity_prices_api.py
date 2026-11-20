@@ -2,8 +2,11 @@
 
 from collections import deque
 import asyncio
+from datetime import datetime
+import logging
 import math
 import time
+from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
 
 import aiohttp
@@ -11,6 +14,7 @@ from aiohttp import web
 
 from analytics.commodity_option_analysis import analyze_commodity_option_chain
 
+logger = logging.getLogger(__name__)
 
 COMMODITY_SYMBOLS = (
     "ALUMINIUM",
@@ -53,6 +57,9 @@ class CommodityPricesApi:
         self._chain_history = {}
         self._quote_history = {}
         self._quote_metrics_history = {}
+        self._previous_close_oi = {}
+        self._previous_close_oi_retry_at = {}
+        self._previous_close_oi_jobs = {}
         self._news_cache = {}
 
     def _observe_quote(self, symbol, quote):
@@ -156,6 +163,103 @@ class CommodityPricesApi:
         if elapsed > self._HISTORY_MAX_AGE_SECONDS / 2:
             return None, None
         return baseline[1], elapsed
+
+    def _schedule_previous_close_oi(self, provider, symbol, expiry, rows):
+        fetch_oi = getattr(provider, "get_commodity_option_previous_close_oi", None)
+        if not callable(fetch_oi):
+            return "unsupported"
+
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        job_key = (symbol, expiry, today)
+        if job_key in self._previous_close_oi_jobs:
+            return "loading"
+
+        self._previous_close_oi = {
+            key: value for key, value in self._previous_close_oi.items()
+            if key[3] == today
+        }
+        self._previous_close_oi_retry_at = {
+            key: value for key, value in self._previous_close_oi_retry_at.items()
+            if key[3] == today
+        }
+        tokens = {
+            str(row.get("token"))
+            for row in rows
+            if row.get("token") is not None
+        }
+        due = []
+        now = time.monotonic()
+        for token in tokens:
+            baseline_key = (symbol, expiry, token, today)
+            if self._previous_close_oi.get(baseline_key) is not None:
+                continue
+            if self._previous_close_oi_retry_at.get(baseline_key, 0) > now:
+                continue
+            due.append((token, baseline_key))
+        if not due:
+            return "ready" if any(
+                self._previous_close_oi.get((symbol, expiry, token, today)) is not None
+                for token in tokens
+            ) else "unavailable" if tokens else "pending"
+
+        async def load_baselines():
+            try:
+                for index, (token, baseline_key) in enumerate(due):
+                    try:
+                        value = await asyncio.to_thread(fetch_oi, token)
+                        if value is None:
+                            raise ValueError("historical OI is unavailable")
+                        value = float(value)
+                        if not math.isfinite(value) or value < 0:
+                            raise ValueError("historical OI is invalid")
+                        self._previous_close_oi[baseline_key] = value
+                        self._previous_close_oi_retry_at.pop(baseline_key, None)
+                    except Exception as error:
+                        self._previous_close_oi_retry_at[baseline_key] = (
+                            time.monotonic() + 300
+                        )
+                        logger.warning(
+                            "Previous-close OI unavailable for MCX %s %s token %s: %s",
+                            symbol, expiry, token, error,
+                        )
+                    if index < len(due) - 1:
+                        await asyncio.sleep(0.35)
+            finally:
+                self._previous_close_oi_jobs.pop(job_key, None)
+
+        self._previous_close_oi_jobs[job_key] = asyncio.create_task(load_baselines())
+        return "loading"
+
+    def _attach_previous_close_oi(self, chain, symbol, expiry):
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        rows = chain.get("rows") or []
+        current_count = 0
+        matched_count = 0
+        for row in rows:
+            token = row.pop("token", None)
+            try:
+                oi = float(row["oi"])
+                ltp = float(row["ltp"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not math.isfinite(oi) or oi < 0 or not math.isfinite(ltp) or ltp <= 0:
+                continue
+            current_count += 1
+            baseline_key = (symbol, expiry, str(token), today)
+            previous_oi = self._previous_close_oi.get(baseline_key)
+            if previous_oi is None:
+                continue
+            oi_change = oi - previous_oi
+            row["oi_change"] = oi_change
+            row["capital_flow"] = oi_change * ltp
+            matched_count += 1
+
+        chain["flow_baseline"] = "previous_close"
+        chain["flow_baseline_status"] = (
+            "ready" if matched_count == current_count and matched_count > 0
+            else "partial" if matched_count > 0
+            else "pending"
+        )
 
     @staticmethod
     def _active_market_data():
@@ -268,6 +372,10 @@ class CommodityPricesApi:
                 },
                 status=404,
             )
+        chain = {
+            **chain,
+            "rows": [dict(row) for row in (chain.get("rows") or [])],
+        }
         chain["expiry"] = expiry
         chain["symbol"] = symbol
         price_closes = [
@@ -275,6 +383,12 @@ class CommodityPricesApi:
             for minute, price in self._quote_history.get(symbol, ())
         ]
         previous_rows, elapsed = self._observe_chain(symbol, expiry, chain)
+        baseline_status = self._schedule_previous_close_oi(
+            provider, symbol, expiry, chain.get("rows") or []
+        )
+        self._attach_previous_close_oi(chain, symbol, expiry)
+        if chain["flow_baseline_status"] == "pending":
+            chain["flow_baseline_status"] = baseline_status
         return web.json_response(
             {
                 "provider": provider_name,

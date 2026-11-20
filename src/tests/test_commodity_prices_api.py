@@ -1,6 +1,8 @@
 import asyncio
 import json
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from server.commodity_prices_api import CommodityPricesApi
 
@@ -126,7 +128,9 @@ def test_commodity_option_chain_defaults_to_nearest_expiry():
     assert payload["symbol"] == "CRUDEOIL"
     assert payload["expiry"] == "31DEC2099"
     assert payload["expiries"] == ["31DEC2099"]
-    assert payload["chain"] == chain
+    assert payload["chain"]["rows"] == chain["rows"]
+    assert payload["chain"]["flow_baseline"] == "previous_close"
+    assert payload["chain"]["flow_baseline_status"] == "unsupported"
     analysis = payload["analysis"]
     assert analysis["verdict"] == "BULLISH"
     assert analysis["confidence"] > 0
@@ -147,6 +151,38 @@ def test_commodity_option_chain_defaults_to_nearest_expiry():
         ("expiries", "CRUDEOIL"),
         ("chain", "CRUDEOIL", "31DEC2099", 10),
     ]
+
+
+def test_commodity_option_chain_exposes_previous_close_capital_flow():
+    chain = {
+        "atm_strike": 6000,
+        "rows": [
+            {"strike": 6000, "type": "CE", "token": "101", "oi": 110, "ltp": 5},
+            {"strike": 6000, "type": "PE", "token": "102", "oi": 180, "ltp": 8},
+        ],
+    }
+    provider = _Provider(
+        expiries=["31DEC2099"],
+        chain=chain,
+    )
+    api = CommodityPricesApi(market_data=lambda: provider)
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    api._previous_close_oi = {
+        ("CRUDEOIL", "31DEC2099", "101", today): 100,
+        ("CRUDEOIL", "31DEC2099", "102", today): 200,
+    }
+
+    response = asyncio.run(api.option_chain(_request()))
+
+    response_chain = json.loads(response.text)["chain"]
+    rows = response_chain["rows"]
+    assert rows[0]["oi_change"] == 10
+    assert rows[0]["capital_flow"] == 50
+    assert rows[1]["oi_change"] == -20
+    assert rows[1]["capital_flow"] == -160
+    assert response_chain["flow_baseline"] == "previous_close"
+    assert response_chain["flow_baseline_status"] == "ready"
+    assert all("token" not in row for row in rows)
 
 
 def test_commodity_option_chain_rejects_unavailable_expiry():
