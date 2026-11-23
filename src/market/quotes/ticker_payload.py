@@ -24,6 +24,9 @@ def build_ticker_entry(symbol: str, quote: dict | None) -> dict | None:
         "% Change": change_percent,
         "Change": change,
         "Prev Close": previous_close,
+        "Open": quote.get("open"),
+        "High": quote.get("high"),
+        "Low": quote.get("low"),
     }
 
 
@@ -40,6 +43,15 @@ def build_ticker_payload(
             {
                 "ltp": safe_number(raw_quote.get("ltp")),
                 "close": safe_number(raw_quote.get("close")),
+                "open": safe_number(
+                    raw_quote.get("open", raw_quote.get("Open"))
+                ),
+                "high": safe_number(
+                    raw_quote.get("high", raw_quote.get("High"))
+                ),
+                "low": safe_number(
+                    raw_quote.get("low", raw_quote.get("Low"))
+                ),
             }
             if raw_quote
             else None

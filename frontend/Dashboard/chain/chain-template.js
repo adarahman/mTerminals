@@ -592,6 +592,33 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     }
 
     let pts = this._miniChartHistory;
+    // Day-session O/H/L overlay — derived from the same candle history
+    // (last IST day's points) so both equity and commodity get it without
+    // needing OHLC fields in the dashboard payload.
+    const istDayKey = t => new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(t));
+    const histAll = Array.isArray(this._miniChartHistory) ? this._miniChartHistory : [];
+    const lastDayKey = histAll.length ? istDayKey(histAll[histAll.length - 1].t) : null;
+    const dayPts = lastDayKey ? histAll.filter(p => istDayKey(p.t) === lastDayKey) : [];
+    let dayRange = null;
+    if (dayPts.length >= 2) {
+      const dVal = (p, k) => Number.isFinite(p[k]) ? p[k] : p.p;
+      const dHigh = Math.max(...dayPts.map(p => dVal(p, 'h')));
+      const dLow = Math.min(...dayPts.map(p => dVal(p, 'l')));
+      const dOpen = dVal(dayPts[0], 'o');
+      if (Number.isFinite(dHigh) && Number.isFinite(dLow) && dHigh > dLow) {
+        dayRange = { open: Number.isFinite(dOpen) ? dOpen : null, high: dHigh, low: dLow };
+      }
+    }
+    // Prefer the exchange's own session OHLC when the payload carries it
+    // (commodity futures quote) — exact values beat candle-derived ones.
+    const payloadO = Number(d.dayOpen), payloadH = Number(d.dayHigh), payloadL = Number(d.dayLow);
+    if (Number.isFinite(payloadH) && Number.isFinite(payloadL) && payloadH > payloadL) {
+      dayRange = {
+        open: payloadO > 0 ? payloadO : null,
+        high: payloadH,
+        low: payloadL,
+      };
+    }
     const windowMs = {
       '5D': 5 * 86400000, '1M': 30 * 86400000, '3M': 90 * 86400000,
       '6M': 182 * 86400000, '1Y': 365 * 86400000, '5Y': 5 * 365 * 86400000
@@ -645,9 +672,20 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       const value = (p, key) => Number.isFinite(p[key]) ? p[key] : p.p;
       const lows = pts.map(p => value(p, 'l'));
       const highs = pts.map(p => value(p, 'h'));
-      const min = Math.min(...lows), max = Math.max(...highs);
-      const span = Math.max(max - min, ((max + min) / 2) * 0.0015) || 1;
-      const yMin = (max + min) / 2 - span / 2;
+      const extent = robustPriceExtent([...lows, ...highs]);
+      const min = extent.min, max = extent.max;
+      // Symmetric range around the live/key price (not the data midpoint),
+      // widened ~10% so the trace doesn't hug the edges.
+      const keyC = value(pts[pts.length - 1], 'c');
+      const keyPrice = Number.isFinite(keyC) && keyC > 0 ? keyC : min;
+      const half = (Math.max(
+        (max - min) / 2,
+        Math.abs(keyPrice - min),
+        Math.abs(max - keyPrice),
+        Math.abs(keyPrice) * 0.0015
+      ) * 1.1) || 1;
+      const span = half * 2;
+      const yMin = keyPrice - half;
       const y = v => PAD + (H - PAD * 2) * (1 - (v - yMin) / span);
       const stepX = (W - PAD * 2) / pts.length;
       const bodyW = Math.max(1.5, Math.min(4, stepX * 0.65));
@@ -664,17 +702,21 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       }).join('');
     } else {
       const vals = pts.map(p => p.p);
-      const min = Math.min(...vals), max = Math.max(...vals);
-      const mid = (max + min) / 2;
-      const dataSpan = max - min;
-      // Floor the visible span at 0.15% of the price level so a genuine
-      // 1-2 point wiggle on a ~24,000 index doesn't get stretched to fill
-      // the entire chart height — it only "zooms in" once the real move
-      // exceeds this noise floor. Centered on the data's own midpoint so
-      // small ranges don't get pinned to one edge.
+      const extent = robustPriceExtent(vals);
+      const min = extent.min, max = extent.max;
+      // Symmetric range around the latest price (the key level), widened
+      // ~10% so the trace doesn't hug the edges. The half-range always
+      // covers the full data extent, so nothing clips.
       const MIN_SPAN_PCT = 0.0015;
-      const span = Math.max(dataSpan, mid * MIN_SPAN_PCT) || 1;
-      const yMin = mid - span / 2;
+      const keyPrice = vals[vals.length - 1];
+      const half = (Math.max(
+        (max - min) / 2,
+        Math.abs(keyPrice - min),
+        Math.abs(max - keyPrice),
+        Math.abs(keyPrice) * MIN_SPAN_PCT
+      ) * 1.1) || 1;
+      const span = half * 2;
+      const yMin = keyPrice - half;
       const stepX = (W - PAD * 2) / (pts.length - 1);
       const up = vals[vals.length - 1] >= vals[0];
       const color = up ? 'var(--pos)' : 'var(--neg)';
@@ -689,9 +731,27 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     const chartTrigger = isCommodity
       ? 'role="button" tabindex="0" aria-label="Open Commodity Price Chart" title="Open Commodity Price Chart" onclick="openPriceChartModal()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openPriceChartModal();}"'
       : 'role="button" tabindex="0" aria-label="Open Price Chart" title="Open Price Chart" onclick="openPriceChartModal()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openPriceChartModal();}"';
+    const rangeFmt = v => Number.isFinite(v)
+      ? Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—';
+    // Vol/OI totals across the visible chain — same aggregation the OI
+    // Flow card uses, surfaced as a compact legend at the chart's
+    // upper-right like a trading-terminal overlay.
+    const mcChain = Array.isArray(d.chain) ? d.chain : [];
+    const chainVol = mcChain.reduce((s, r) => s + (Number(r.ceVol) || 0) + (Number(r.peVol) || 0), 0);
+    const chainOi = mcChain.reduce((s, r) => s + (Number(r.ceOI) || 0) + (Number(r.peOI) || 0), 0);
+    // Commodity carries the futures contract's own Volume/OI — use it so
+    // the legend matches the stats card below the top bar exactly. Equity
+    // has no futures quote, so it falls back to the option-chain totals.
+    const quoteVolNum = Number(d.quoteVolume), quoteOiNum = Number(d.quoteOI);
+    const mcTotalVol = d.quoteVolume != null && Number.isFinite(quoteVolNum) ? quoteVolNum : chainVol;
+    const mcTotalOi = d.quoteOI != null && Number.isFinite(quoteOiNum) ? quoteOiNum : chainOi;
+    const mcVolOiText = (mcTotalVol > 0 || mcTotalOi > 0)
+      ? `Vol ${fmtK(mcTotalVol)} · OI ${fmtK(mcTotalOi)}` : '';
     return `
       <div id="verdict-mini-chart" class="verdict-mini-chart" ${chartTrigger}>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
+        ${mcVolOiText ? `<div class="verdict-mini-chart-voi">${mcVolOiText}</div>` : ''}
+        ${dayRange ? `<div class="verdict-mini-chart-range">O ${rangeFmt(dayRange.open)} · H ${rangeFmt(dayRange.high)} · L ${rangeFmt(dayRange.low)}</div>` : ''}
       </div>`;
 };
 
@@ -1136,12 +1196,14 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
   <div class="verdict ${biasCardCls}">
     <div class="verdict-top">
       <div>
-        <div class="verdict-label">Decision Engine</div>
-        <div class="verdict-tradeability ${tradeabilityCls}">
-          ${tradeabilityLabel}
-        </div>
-        <div class="verdict-tradeability-reason" title="${escapeHtml(tradeabilityReason)}">
-          ${escapeHtml(tradeabilityReason)}
+        <div class="verdict-heading-row">
+          <div class="verdict-label">Decision Engine</div>
+          <div class="verdict-reason-hover" tabindex="0">
+            <div class="verdict-tradeability ${tradeabilityCls}">
+              ${tradeabilityLabel}
+            </div>
+            <div class="verdict-reason-tip" role="tooltip">${escapeHtml(tradeabilityReason)}</div>
+          </div>
         </div>
         <div class="verdict-call verdict-bias">${bias}${str?` · <span class="verdict-bias-strength">${str}</span>`:''}${conflict?' ⚡':''}</div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}

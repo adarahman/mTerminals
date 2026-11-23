@@ -1,5 +1,7 @@
 import asyncio
+from collections import deque
 import json
+import time
 from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -231,3 +233,48 @@ def test_commodity_option_chain_reports_mcx_unsupported_provider():
     assert payload["provider"] == "BREEZE"
     assert "does not provide MCX market data" in payload["error"]
     assert provider.requested == []
+
+
+def test_commodity_oi_velocity_computes_window_deltas():
+    api = CommodityPricesApi(market_data=lambda: _Provider())
+
+    def rows(ce_oi, pe_oi):
+        return [
+            {"strike": 6000, "type": "CE", "oi": ce_oi, "ltp": 5},
+            {"strike": 6000, "type": "PE", "oi": pe_oi, "ltp": 8},
+        ]
+
+    now = time.monotonic()
+    api._chain_history[("CRUDEOIL", "31DEC2099")] = deque(
+        [
+            (now - 360, rows(100, 200)),
+            (now - 60, rows(110, 180)),
+            (now, rows(130, 150)),
+        ],
+        maxlen=400,
+    )
+
+    blocks = api._oi_velocity("CRUDEOIL", "31DEC2099")
+    by_window = {block["window"]: block for block in blocks}
+
+    five = by_window[5]["rows"]
+    assert len(five) == 1
+    row = five[0]
+    # Baseline is the 360s-old snapshot (only one >= 150s old); the delta
+    # is scaled to the nominal 300s window: (130-100) * 300/360 = 25.
+    assert row["ceDOI"] == 25
+    assert row["peDOI"] == -41.67
+    assert row["signal"] == "CE Build / PE Unwind"
+    assert row["ceNow"] == 130
+    assert row["peNow"] == 150
+
+    # No snapshot is old enough for the 15m/30m windows yet.
+    assert by_window[15]["rows"] == []
+    assert by_window[30]["rows"] == []
+
+
+def test_commodity_oi_velocity_empty_without_history():
+    api = CommodityPricesApi(market_data=lambda: _Provider())
+    blocks = api._oi_velocity("CRUDEOIL", "31DEC2099")
+    assert [block["window"] for block in blocks] == [5, 15, 30]
+    assert all(block["rows"] == [] for block in blocks)

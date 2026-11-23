@@ -145,6 +145,9 @@ class AnalyticsSnapshotService:
         self._patch_bse_spot_change(
             context, all_indices, runtime_config.symbol
         )
+        self._attach_spot_ohlc(
+            context, all_indices, runtime_config.symbol
+        )
         export_dashboard(
             df_clean=clean_frame,
             master=engine_result.master,
@@ -203,3 +206,30 @@ class AnalyticsSnapshotService:
             context["spot_change"] = quote["Change"]
         if quote.get("% Change") is not None:
             context["spot_chg_pct"] = quote["% Change"]
+
+    @staticmethod
+    def _attach_spot_ohlc(context, all_indices, symbol):
+        """Surface the underlying's session OHLC so the dashboard mini
+        chart can show day range immediately instead of waiting for candle
+        history to accumulate."""
+        quote = next(
+            (
+                item
+                for item in all_indices or []
+                if str(item.get("Symbol", "")).strip().upper() == symbol.upper()
+            ),
+            None,
+        )
+        if not quote:
+            return
+        for key, ctx_key in (
+            ("Open", "spot_open"),
+            ("High", "spot_high"),
+            ("Low", "spot_low"),
+        ):
+            try:
+                value = float(quote.get(key))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                context[ctx_key] = value

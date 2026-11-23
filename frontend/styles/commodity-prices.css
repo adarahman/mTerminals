@@ -13,7 +13,8 @@
 .commodity-dashboard-slot{display:none;width:100%;}
 body.commodity-mode .commodity-dashboard-slot{display:block;}
 body.commodity-mode #dashboard{display:block!important;}
-body.commodity-mode #dashboard>*:not(#sec-topbar):not(#sec-decision):not(#commodity-dashboard-slot){display:none!important;}
+body.commodity-mode #sec-topbar{margin-bottom:2px;}
+body.commodity-mode #dashboard>*:not(#sec-topbar):not(#sec-decision):not(#commodity-dashboard-slot):not(.commodity-price-card){display:none!important;}
 body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-topbar-status{flex:0 0 auto;min-height:0;margin:0 0 0 auto;text-align:right;white-space:nowrap;font-size:var(--fs-xs);}
 .instrument-mode-switch{display:flex;gap:2px;padding:3px;background:var(--bg-0);border:1px solid var(--border);border-radius:999px;}
@@ -87,8 +88,8 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-price-card{
   display:grid;
   grid-template-columns:1fr auto;
-  gap:6px 14px;
-  padding:12px 14px;
+  gap:4px 14px;
+  padding:7px 12px;
   background:var(--bg-1);
   border:1px solid var(--border);
   border-radius:var(--radius);
@@ -122,19 +123,21 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-price-details{
   grid-column:1/-1;
   display:grid;
-  grid-template-columns:repeat(7,minmax(0,1fr));
-  gap:6px 12px;
-  margin-top:4px;
-  padding-top:8px;
-  border-top:1px solid var(--border);
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:2px 14px;
+  margin-top:2px;
+  padding-top:0;
 }
 
 .commodity-price-details span{
   display:flex;
-  flex-direction:column;
-  gap:1px;
+  flex-direction:row;
+  align-items:baseline;
+  gap:6px;
+  min-width:0;
   color:var(--text-tertiary);
   font-size:var(--fs-xs);
+  white-space:nowrap;
 }
 
 .commodity-price-details b{
@@ -142,6 +145,9 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
   font-family:var(--font-mono);
   font-size:var(--fs-xs);
   font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .commodity-price-details i{font-style:normal;}
@@ -293,6 +299,10 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-chain-table tbody tr.focused{outline:2px solid var(--accent);outline-offset:-2px;}
 .commodity-chain-table td.call-ltp{color:var(--pos);}
 .commodity-chain-table td.put-ltp{color:var(--neg);}
+
+@media(max-width:720px){
+  .commodity-price-details{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
 
 @media(max-width:520px){
   .commodity-news summary{align-items:flex-start;flex-direction:column;gap:4px;}

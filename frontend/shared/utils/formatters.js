@@ -65,3 +65,20 @@ function signColor(v, neutralVar){
   if (v < 0) return 'var(--neg)';
   return neutralVar || 'var(--text-primary)';
 }
+
+// Robust price extent for chart auto-scaling. A single bad tick or spike
+// candle must not flatten the whole visible series, so once enough points
+// exist the scale fits the 5th/95th percentiles instead of the raw
+// min/max. Small series keep the plain extent — there's not enough data
+// to distinguish an outlier from a real move. Callers still apply their
+// own padding on top of the returned {min,max}.
+function robustPriceExtent(values){
+  const nums = (values || []).map(Number).filter(Number.isFinite);
+  if(!nums.length) return { min: 0, max: 1 };
+  if(nums.length < 20){
+    return { min: Math.min(...nums), max: Math.max(...nums) };
+  }
+  const sorted = nums.slice().sort((a, b) => a - b);
+  const q = p => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(p / 100 * (sorted.length - 1))))];
+  return { min: q(5), max: q(95) };
+}

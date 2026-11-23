@@ -337,6 +337,11 @@ def export_dashboard_json(
         "spot":          spot,
         "spotChange":    _r(ctx_dict.get("spot_change",  0), 2),
         "spotChgPct":    _r(ctx_dict.get("spot_chg_pct", 0), 2),
+        # Session OHLC for the underlying — lets the mini chart show day
+        # range on first paint instead of waiting for candle history.
+        "dayOpen":       _nullable_r(ctx_dict.get("spot_open"), 2),
+        "dayHigh":       _nullable_r(ctx_dict.get("spot_high"), 2),
+        "dayLow":        _nullable_r(ctx_dict.get("spot_low"), 2),
         "spotBias":      str(ctx_dict.get("bias",        "Neutral")),
         # EQ is always the analytical source. Futures remain a separate
         # quote and confirmation input.

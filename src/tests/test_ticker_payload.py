@@ -16,6 +16,9 @@ def test_build_ticker_entry_calculates_change_fields():
         "% Change": 1.0,
         "Change": 250.0,
         "Prev Close": 25000.0,
+        "Open": None,
+        "High": None,
+        "Low": None,
     }
 
 

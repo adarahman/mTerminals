@@ -66,6 +66,13 @@ class CommodityPricesView {
     const futurePicker = document.getElementById('commodity-futures-expiry');
     const futureHolder = document.getElementById('commodity-futures-expiry-holder');
     if (futurePicker && futureHolder) futureHolder.appendChild(futurePicker);
+    // Return the stats card to its home inside the dashboard slot so the
+    // equity render doesn't inherit a stray #dashboard child.
+    const priceCard = document.querySelector('.commodity-price-card');
+    const pricesContent = document.querySelector('.commodity-prices-content');
+    if (priceCard && pricesContent && !pricesContent.contains(priceCard)) {
+      pricesContent.prepend(priceCard);
+    }
   }
 
   select(symbol) {
@@ -114,8 +121,6 @@ class CommodityPricesView {
       change.classList.remove('up', 'down');
     }
     [
-      'commodity-price-open', 'commodity-price-high',
-      'commodity-price-low', 'commodity-price-volume', 'commodity-price-oi',
       'commodity-price-change-5m', 'commodity-price-oi-change-5m',
       'commodity-price-volume-change-5m',
     ].forEach((id) => this._setText(id, '—'));
@@ -189,11 +194,6 @@ class CommodityPricesView {
       changeElement.classList.toggle('down', Number.isFinite(percent) && percent < 0);
     }
     this._setText('commodity-price-lot-size', this._format(quote.LotSize, 0));
-    this._setText('commodity-price-open', this._format(quote.Open));
-    this._setText('commodity-price-high', this._format(quote.High));
-    this._setText('commodity-price-low', this._format(quote.Low));
-    this._setText('commodity-price-volume', fmtCrLK(quote.Volume));
-    this._setText('commodity-price-oi', fmtCrLK(quote.OI));
     const status = document.getElementById('commodity-price-status');
     if (status) {
       status.dataset.tone = 'live';
@@ -475,11 +475,6 @@ class CommodityPricesView {
           ? Number(quote.LotSize).toLocaleString('en-IN')
           : 'Unavailable'
       );
-      this._setText('commodity-price-open', this._format(quote.Open));
-      this._setText('commodity-price-high', this._format(quote.High));
-      this._setText('commodity-price-low', this._format(quote.Low));
-      this._setText('commodity-price-volume', fmtCrLK(quote.Volume));
-      this._setText('commodity-price-oi', fmtCrLK(quote.OI));
       this._renderFiveMinuteContext(quote.FiveMinute);
       if (status) {
         status.dataset.tone = 'live';
@@ -516,11 +511,6 @@ class CommodityPricesView {
           const ltp = document.getElementById('commodity-price-ltp');
           if (ltp) ltp.classList.remove('up', 'down');
           this._setText('commodity-price-lot-size', '—');
-          this._setText('commodity-price-open', '—');
-          this._setText('commodity-price-high', '—');
-          this._setText('commodity-price-low', '—');
-          this._setText('commodity-price-volume', '—');
-          this._setText('commodity-price-oi', '—');
           this._renderFiveMinuteContext(null);
           const change = document.getElementById('commodity-price-change');
           if (change) {
@@ -784,6 +774,13 @@ class CommodityPricesView {
       spot: Number(quote.LTP) || Number(rawChain.spot) || 0,
       spotChange: Number(quote.Change) || 0,
       spotChgPct: Number(quote.PctChange) || 0,
+      // Exact futures-session OHLC + volume/OI — lets the mini chart show
+      // the same values the stats card does instead of deriving approximations.
+      dayOpen: quote.Open ?? null,
+      dayHigh: quote.High ?? null,
+      dayLow: quote.Low ?? null,
+      quoteVolume: quote.Volume ?? null,
+      quoteOI: quote.OI ?? null,
       quoteAvailable: !!this.latestQuote,
       quoteError: this.latestQuoteError,
       quoteProvider: this.latestProvider,
@@ -798,7 +795,7 @@ class CommodityPricesView {
       totalPCR: undefined,
       oiChgPCR,
       greeks: [],
-      oiVelocity: [],
+      oiVelocity: Array.isArray(rawChain.oi_velocity) ? rawChain.oi_velocity : [],
       compositeBias: bias,
       maxPain: analysis.visible_window_max_pain,
       ceWall: analysis.call_oi_wall,
@@ -888,6 +885,15 @@ class CommodityPricesView {
     }
     slot.hidden = false;
     dashboard.append(slot);
+    // Pin the quote/stats card directly under the top bar (above the
+    // decision panel) — it ships inside the lower dashboard slot but is
+    // more useful at-a-glance up top. It's a #dashboard sibling, so the
+    // per-tick outerHTML swaps of #sec-topbar/#sec-decision don't touch it.
+    const priceCard = dashboard.querySelector('.commodity-price-card');
+    const decisionAnchor = dashboard.querySelector('#sec-decision');
+    if (priceCard && decisionAnchor && priceCard.nextElementSibling !== decisionAnchor) {
+      decisionAnchor.before(priceCard);
+    }
     const expirySlot = document.getElementById('commodity-expiry-slot');
     if (expiryPicker && expirySlot) expirySlot.appendChild(expiryPicker);
     const futuresExpirySlot = document.getElementById('commodity-futures-expiry-slot');

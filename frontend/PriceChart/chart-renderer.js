@@ -105,8 +105,9 @@ class ChartRenderer {
       priceValues.push(livePrice);
       highValues.push(livePrice);
     }
-    const yMin = Math.min(...priceValues);
-    const yMax = Math.max(...highValues);
+    const extent = robustPriceExtent([...priceValues, ...highValues]);
+    const yMin = extent.min;
+    const yMax = extent.max;
     const padY = (yMax - yMin) * 0.1 || 1;
     const y0 = yMin - padY, y1 = yMax + padY;
 

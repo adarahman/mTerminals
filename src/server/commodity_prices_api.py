@@ -164,7 +164,7 @@ class CommodityPricesApi:
     def _observe_chain(self, symbol, expiry, chain):
         now = time.monotonic()
         key = (symbol, expiry)
-        history = self._chain_history.setdefault(key, deque(maxlen=180))
+        history = self._chain_history.setdefault(key, deque(maxlen=400))
         cutoff = now - self._HISTORY_WINDOW_SECONDS
         baseline = next(
             ((timestamp, rows) for timestamp, rows in reversed(history)
@@ -187,6 +187,116 @@ class CommodityPricesApi:
         if elapsed > self._HISTORY_MAX_AGE_SECONDS / 2:
             return None, None
         return baseline[1], elapsed
+
+    _OI_VELOCITY_WINDOWS = (5, 15, 30)
+
+    @staticmethod
+    def _chain_rows_by_key(rows):
+        indexed = {}
+        for row in rows or []:
+            try:
+                strike = float(row.get("strike"))
+            except (TypeError, ValueError):
+                continue
+            side = str(row.get("type") or "").upper()
+            if side not in ("CE", "PE"):
+                continue
+
+            def _num(key):
+                try:
+                    value = float(row.get(key))
+                except (TypeError, ValueError):
+                    return 0.0
+                return value if math.isfinite(value) else 0.0
+
+            indexed[(strike, side)] = {"oi": _num("oi"), "ltp": _num("ltp")}
+        return indexed
+
+    def _oi_velocity(self, symbol, expiry):
+        """5/15/30-minute CE/PE OI deltas from the in-memory chain snapshots.
+
+        Same windowed-velocity concept the equity engine computes off its
+        parquet OI history (oi_analysis.get_oi_velocity), but sourced from
+        _chain_history since MCX chains arrive over REST polling rather
+        than the engine's snapshot recorder. Emits the identical payload
+        shape ({window, rows:[{strike, ceDOI, peDOI, ...}]}) so the shared
+        OI Flow / Velocity card consumes it unchanged.
+        """
+        blocks = [
+            {"window": window, "rows": []}
+            for window in self._OI_VELOCITY_WINDOWS
+        ]
+        history = self._chain_history.get((symbol, expiry))
+        if not history or len(history) < 2:
+            return blocks
+
+        now = time.monotonic()
+        current = self._chain_rows_by_key(history[-1][1])
+        current_strikes = sorted({strike for strike, _ in current})
+
+        for block in blocks:
+            window = block["window"]
+            target_age = window * 60
+            best_ts, best_diff = None, float("inf")
+            for timestamp, _rows in history:
+                age = now - timestamp
+                diff = abs(age - target_age)
+                if diff < best_diff and age >= target_age * 0.5:
+                    best_diff = diff
+                    best_ts = timestamp
+            if best_ts is None:
+                continue
+
+            baseline_rows = next(
+                rows for ts, rows in history if ts == best_ts
+            )
+            baseline = self._chain_rows_by_key(baseline_rows)
+            baseline_strikes = {strike for strike, _ in baseline}
+            actual_age = now - best_ts
+            scale = target_age / actual_age if actual_age > 0 else 1.0
+
+            for strike in current_strikes:
+                if strike not in baseline_strikes:
+                    continue
+                ce = current.get((strike, "CE"), {})
+                pe = current.get((strike, "PE"), {})
+                ce_now = ce.get("oi", 0.0)
+                pe_now = pe.get("oi", 0.0)
+                if ce_now == 0 and pe_now == 0:
+                    continue
+                ce_doi = (
+                    ce_now - baseline.get((strike, "CE"), {}).get("oi", 0.0)
+                ) * scale
+                pe_doi = (
+                    pe_now - baseline.get((strike, "PE"), {}).get("oi", 0.0)
+                ) * scale
+
+                if ce_doi > 0 and pe_doi > 0:
+                    signal = "Writing BuildUp"
+                elif ce_doi < 0 and pe_doi < 0:
+                    signal = "Unwinding"
+                elif ce_doi > 0 and pe_doi <= 0:
+                    signal = "CE Build / PE Unwind"
+                elif ce_doi <= 0 and pe_doi > 0:
+                    signal = "PE Build / CE Unwind"
+                else:
+                    signal = "Neutral"
+
+                block["rows"].append(
+                    {
+                        "strike": int(strike)
+                        if float(strike).is_integer()
+                        else strike,
+                        "ceNow": ce_now,
+                        "ceDOI": round(ce_doi, 2),
+                        "ceLTP": round(ce.get("ltp", 0.0), 1),
+                        "peNow": pe_now,
+                        "peDOI": round(pe_doi, 2),
+                        "peLTP": round(pe.get("ltp", 0.0), 1),
+                        "signal": signal,
+                    }
+                )
+        return blocks
 
     def _schedule_previous_close_oi(self, provider, symbol, expiry, rows):
         fetch_oi = getattr(provider, "get_commodity_option_previous_close_oi", None)
@@ -417,6 +527,7 @@ class CommodityPricesApi:
             provider, symbol, expiry, chain.get("rows") or []
         )
         self._attach_previous_close_oi(chain, symbol, expiry)
+        chain["oi_velocity"] = self._oi_velocity(symbol, expiry)
         if chain["flow_baseline_status"] == "pending":
             chain["flow_baseline_status"] = baseline_status
         return web.json_response(

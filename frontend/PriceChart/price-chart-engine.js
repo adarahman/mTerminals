@@ -1171,8 +1171,13 @@ class PriceChartEngine {
     // so a full day's price move (or whatever span the active window
     // covers) always fits on screen instead of the earlier part of the
     // move clipping off the top/bottom.
-    const yMin = Math.min(...(this.settings.type==='candle'?series.map(c=>c.l):values));
-    const yMax = Math.max(...(this.settings.type==='candle'?series.map(c=>c.h):values));
+    const engineExtent = robustPriceExtent(
+      this.settings.type==='candle'
+        ? series.flatMap(c => [c.l, c.h])
+        : values
+    );
+    const yMin = engineExtent.min;
+    const yMax = engineExtent.max;
     const padY = (yMax - yMin) * 0.1 || 1;
     const y0 = yMin - padY, y1 = yMax + padY;
 
