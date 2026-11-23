@@ -259,7 +259,7 @@ function toggleBacktestModal(open){
   const opening = open !== undefined ? open : !el.classList.contains('open');
   if(opening){
     btRenderForm(); // refresh symbol default each time it's opened
-    app.modal._openModal(el, () => toggleBacktestModal(false));
+    app.modal._openModal(el, () => toggleBacktestModal(false), { dialog: true });
   } else {
     app.modal._closeModal(el);
   }

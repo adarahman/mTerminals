@@ -558,7 +558,6 @@ document.addEventListener('DOMContentLoaded', function(){
   // both disclosure groups collapsed on compact screens while preserving
   // their one-click access and the user's state after that first paint.
   if(window.matchMedia('(max-width: 900px)').matches){
-    document.getElementById('rail-context-menu')?.removeAttribute('open');
     document.getElementById('rail-tools-menu')?.removeAttribute('open');
   }
   var oiModal = document.getElementById('oi-flow-modal');

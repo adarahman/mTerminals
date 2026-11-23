@@ -40,7 +40,7 @@ class ModalManager {
   // (which reads as "both panels expanded, one of them blank" — the
   // first modal isn't actually empty, it's just hidden behind the
   // second).
-  _openModal(modal, closeFn){
+  _openModal(modal, closeFn, options){
   if(!modal) return;
 
   let invoker = document.activeElement && document.activeElement !== document.body
@@ -64,8 +64,11 @@ class ModalManager {
   // These analytical surfaces are full-page focus workspaces, not popup
   // dialogs. Keep the existing ids/open functions for compatibility while
   // exposing the correct navigation semantics to assistive technology.
-  modal.setAttribute('role', 'region');
-  modal.setAttribute('aria-modal', 'false');
+  // True dialog overlays (e.g. .u-modal-overlay popups like Backtest)
+  // pass {dialog:true} to keep role=dialog/aria-modal=true instead.
+  const asDialog = !!(options && options.dialog);
+  modal.setAttribute('role', asDialog ? 'dialog' : 'region');
+  modal.setAttribute('aria-modal', asDialog ? 'true' : 'false');
   modal.classList.add('open');
   document.body.classList.add('focus-workspace-open');
   if(window.eventBus) window.eventBus.emit('modal:open', { id: modal.id || null });
@@ -167,10 +170,8 @@ class ModalManager {
   host.appendChild(table);
   var card = document.getElementById('chain-summary-card');
   if(card){
-    var header = card.querySelector('.nav-card-header');
-    if(header) header.setAttribute('aria-expanded', 'true');
-    var arrow = card.querySelector('.nav-card-header-arrow');
-    if(arrow) arrow.textContent = '▾';
+    var openLink = card.querySelector('.oi-snap-open-link');
+    if(openLink) openLink.setAttribute('aria-expanded', 'true');
   }
   if(typeof app !== 'undefined' && app.chain) app.chain.chainTableOpen = true;
   this._updateOptionChainContext();
@@ -238,10 +239,8 @@ class ModalManager {
   }
   if(typeof app !== 'undefined' && app.chain) app.chain.chainTableOpen = false;
   if(card){
-    var header = card.querySelector('.nav-card-header');
-    if(header) header.setAttribute('aria-expanded', 'false');
-    var arrow = card.querySelector('.nav-card-header-arrow');
-    if(arrow) arrow.textContent = '↗';
+    var openLink = card.querySelector('.oi-snap-open-link');
+    if(openLink) openLink.setAttribute('aria-expanded', 'false');
   }
   if(modal) this._closeModal(modal);
 }

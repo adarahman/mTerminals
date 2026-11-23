@@ -10,8 +10,8 @@ async function openDashboard(page) {
 
 test('dashboard loads and exposes primary tools without page errors', async ({ page }) => {
   const pageErrors = await openDashboard(page);
-  await expect(page.locator('#rail-context-toggle')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Decision/ })).toBeVisible();
+  await expect(page.locator('#sec-decision')).toBeVisible();
+  await expect(page.locator('button[data-primary-nav="market"]')).toBeVisible();
   await expect(page.locator('#rail-tools-toggle')).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
@@ -466,6 +466,7 @@ test('selected option-chain range survives a page refresh', async ({ page }) => 
 
 test('native OI Flow chart opens and switches measure', async ({ page }) => {
   await openDashboard(page);
+  await page.locator('button[data-primary-nav="market"]').click();
   await page.getByRole('button', { name:'Open OI Flow chart' }).first().click();
   const modal = page.locator('#oi-flow-modal');
   await expect(modal).toHaveClass(/open/);
@@ -518,27 +519,31 @@ test('Escape closes dashboard flyouts one at a time', async ({ page }) => {
   await openDashboard(page);
   const toolsMenu = page.locator('#rail-tools-menu');
   if(!(await toolsMenu.evaluate(el => el.open))) await page.locator('#rail-tools-toggle').click();
-  await page.locator('#pt-order-toggle-btn').click();
-  await expect(page.locator('#pt-order-panel')).toHaveClass(/open/);
-  await page.keyboard.press('Escape');
-  await expect(page.locator('#pt-order-panel')).not.toHaveClass(/open/);
-  await expect(page.locator('#pt-order-toggle-btn')).not.toHaveClass(/active/);
-
   await page.locator('#algo-toggle-btn').click();
   await expect(page.locator('#algo-panel')).toHaveClass(/open/);
   await page.keyboard.press('Escape');
   await expect(page.locator('#algo-panel')).not.toHaveClass(/open/);
 
-  await page.locator('#ctrl-sidebar-toggle-btn').click();
-  await expect(page.locator('#ctrl-sidebar')).toHaveClass(/open/);
+  // The Order launcher is relocated into the Trade destination's
+  // portfolio header by organizeDesktopDestinationOwnership(), so it is
+  // only reachable after entering Trade (which opens the portfolio panel).
+  await page.locator('button[data-primary-nav="trade"]').click();
+  await page.locator('#pt-order-toggle-btn').click();
+  await expect(page.locator('#pt-order-panel')).toHaveClass(/open/);
   await page.keyboard.press('Escape');
-  await expect(page.locator('#ctrl-sidebar')).not.toHaveClass(/open/);
+  await expect(page.locator('#pt-order-panel')).not.toHaveClass(/open/);
+  await expect(page.locator('#pt-order-toggle-btn')).not.toHaveClass(/active/);
 });
 
 test('Backtest modal uses the shared accessible modal contract', async ({ page }) => {
   await openDashboard(page);
-  await page.locator('#rail-tools-toggle').click();
-  const trigger = page.locator('#backtest-toggle-btn');
+  // The rail #backtest-toggle-btn is intentionally hidden by
+  // organizeDesktopDestinationOwnership(); Analytics surfaces the
+  // contextual #strategy-backtest-action launcher inside the collapsed
+  // Strategy & Risk disclosure, so expand it before clicking.
+  await page.locator('button[data-primary-nav="analytics"]').click();
+  await page.locator('#strategy-simulator-card > summary').click();
+  const trigger = page.locator('#strategy-backtest-action');
   await trigger.click();
 
   const modal = page.locator('#backtest-modal');
@@ -553,6 +558,10 @@ test('Backtest modal uses the shared accessible modal contract', async ({ page }
 });
 
 test('Option Chain strike opens dashboard-native Strike Detail', async ({ page }) => {
+  // Block live WS ticks: a tick landing between parseAndRender() and
+  // openOptionChainAtStrike() would replace _data and make the fixture
+  // strike unresolvable — a race that only shows against a live backend.
+  await page.routeWebSocket('**/ws', () => {});
   await openDashboard(page);
   const strike = 24_600;
   const chainRow = {
@@ -580,6 +589,7 @@ test('Option Chain strike opens dashboard-native Strike Detail', async ({ page }
 
 test('Institutional Activity Crux opens the full multi-strike report', async ({ page }) => {
   await openDashboard(page);
+  await page.locator('button[data-primary-nav="analytics"]').click();
   await page.getByRole('button', { name:'Open full multi-strike Institutional Activity report' }).click();
   const modal = page.locator('#strike-detail-report-modal');
   await expect(modal).toHaveClass(/open/);
@@ -592,12 +602,17 @@ test('Institutional Activity Crux opens the full multi-strike report', async ({ 
 
 test('Option Chain Snapshot header opens and closes the native chain table', async ({ page }) => {
   await openDashboard(page);
-  const header = page.locator('#chain-summary-card .section-header');
+  // The snapshot card lives in the Market destination's positioning
+  // workspace; its disclosure opens the table inside #option-chain-modal.
+  await page.locator('button[data-primary-nav="market"]').click();
+  const openLink = page.locator('#chain-summary-card .oi-snap-open-link');
   const table = page.locator('#option-chain-table');
-  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  const modal = page.locator('#option-chain-modal');
+  await expect(openLink).toHaveAttribute('aria-expanded', 'false');
   await expect(table).toBeHidden();
-  await header.click();
-  await expect(header).toHaveAttribute('aria-expanded', 'true');
+  await openLink.click();
+  await expect(modal).toHaveClass(/open/);
+  await expect(openLink).toHaveAttribute('aria-expanded', 'true');
   await expect(table).toBeVisible();
   await expect(table.getByRole('columnheader', { name: /CE LTP/ })).toBeVisible();
   await expect(table.getByRole('columnheader', { name: /PE LTP/ })).toBeVisible();
@@ -608,7 +623,12 @@ test('Option Chain Snapshot header opens and closes the native chain table', asy
   await table.locator('.oc-ledger-row td.ltp.ce button').first().click();
   await expect(page.locator('#pt-quick-popover')).toBeVisible();
   await page.locator('#pt-quick-popover .pt-qp-close').click();
+  // Modal Escape handling is a keydown listener on the modal element, so
+  // focus must be inside the workspace — the quick-order popover lives
+  // outside the modal DOM and leaves focus on <body> after closing.
+  await page.locator('#option-chain-modal .oc-modal-panel').focus();
   await page.keyboard.press('Escape');
+  await expect(modal).not.toHaveClass(/open/);
   await expect(table).toBeHidden();
 });
 
@@ -639,7 +659,6 @@ test('compact dashboard keeps primary navigation within the viewport', async ({ 
 test('narrow dashboard starts rail disclosures collapsed', async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 700 });
   await openDashboard(page);
-  await expect(page.locator('#rail-context-menu')).not.toHaveAttribute('open', '');
   await expect(page.locator('#rail-tools-menu')).not.toHaveAttribute('open', '');
   const navHeight = await page.locator('#sec-nav-bar').evaluate(el => el.getBoundingClientRect().height);
   expect(navHeight).toBeLessThan(150);

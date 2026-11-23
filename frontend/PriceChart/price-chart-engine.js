@@ -964,7 +964,8 @@ class PriceChartEngine {
     // symbol/range (e.g. first paint before either has loaded yet).
     if(!lastTick && !(bars0 && bars0.length)){
       this._syncOrderPanel(null);
-      ctx.clearRect(0,0,W,H);
+      const emptyCtx = canvas.getContext('2d');
+      emptyCtx.clearRect(0,0,canvas.width,canvas.height);
       this._lastRenderedSeries = null;
       this._lastRenderedXScale = null;
       return;

@@ -35,7 +35,7 @@ assert.doesNotMatch(source, /confidence\s*=\s*.*(?:pcr|oi_score|composite)/i,
   'frontend must not recompute decision confidence');
 assert.match(source, /escapeHtml\(s\.text\)/,
   'active signal text must be escaped before insertion into the dashboard');
-assert.match(source, /escapeHtml\(c\.label \|\| c\.key \|\| 'Signal'\)/,
+assert.match(source, /escapeHtml\(c\.label \|\| c\.key \|\| 'Evidence'\)/,
   'expanded contributor labels must be escaped before insertion');
 assert.match(source, /data-signal-id=/,
   'active signals must expose their stable backend identity');

@@ -108,6 +108,22 @@
   body.rail-collapsed .db{padding-left:var(--space-6);}
   .rail-context-menu,.rail-tools-menu{min-width:100%;}
   .rail-context-list,.rail-tools-list{grid-template-columns:repeat(3,minmax(0,1fr));}
+  /* The rail goes horizontal at this breakpoint, so the primary
+     destination switcher must flow as a row too — left as column it
+     stacks all five destinations vertically and eats ~300px of viewport. */
+  .desktop-primary-nav{
+    flex-direction:row;
+    flex-wrap:wrap;
+    gap:6px;
+    margin:0;
+    padding:0;
+    border-bottom:none;
+  }
+  .desktop-primary-nav .primary-nav-btn{
+    flex:1 1 auto;
+    justify-content:center;
+    min-height:44px;
+  }
 }
 
 /* was inline after: .sec-btn.active::after  —  @media (max-width:900px) */

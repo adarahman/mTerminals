@@ -45,7 +45,10 @@ def test_commodity_quote_returns_provider_and_market_quote():
     assert json.loads(response.text) == {
         "provider": "SMARTAPI",
         "symbol": "CRUDEOIL",
-        "quote": quote,
+        "quote": {
+            **quote,
+            "FiveMinute": {"available": False, "window_minutes": 5},
+        },
     }
     assert provider.requested == [("CRUDEOIL", "NEAR")]
 
@@ -102,7 +105,7 @@ def test_commodity_quote_explains_unsupported_active_provider():
     assert response.status == 501
     payload = json.loads(response.text)
     assert payload["provider"] == "NSE_BSE"
-    assert "Select Angel One SmartAPI" in payload["error"]
+    assert "no MCX futures quote adapter" in payload["error"]
 
 
 def test_commodity_option_chain_defaults_to_nearest_expiry():

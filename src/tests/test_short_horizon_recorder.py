@@ -42,8 +42,10 @@ def _engine(spot=24000):
 def test_records_one_observation_per_symbol_minute(tmp_path):
     reset_spot_rsi_history()
 
-    start = datetime(
-        2026, 9, 8, 9, 15, tzinfo=timezone.utc
+    start = (
+        datetime.now(timezone.utc)
+        .replace(second=0, microsecond=0)
+        - timedelta(minutes=10)
     )
 
     update_spot_rsi("NIFTY", 24000, start.isoformat())
@@ -76,8 +78,10 @@ def test_records_one_observation_per_symbol_minute(tmp_path):
 def test_resolves_exact_one_two_three_minute_outcomes(tmp_path):
     reset_spot_rsi_history()
 
-    start = datetime(
-        2026, 9, 8, 9, 15, tzinfo=timezone.utc
+    start = (
+        datetime.now(timezone.utc)
+        .replace(second=0, microsecond=0)
+        - timedelta(minutes=10)
     )
 
     prices = [24000, 24050, 23950, 24100]
@@ -122,8 +126,10 @@ def test_resolves_exact_one_two_three_minute_outcomes(tmp_path):
 def test_missing_exact_minute_remains_pending(tmp_path):
     reset_spot_rsi_history()
 
-    start = datetime(
-        2026, 9, 8, 9, 15, tzinfo=timezone.utc
+    start = (
+        datetime.now(timezone.utc)
+        .replace(second=0, microsecond=0)
+        - timedelta(minutes=10)
     )
 
     update_spot_rsi("NIFTY", 24000, start.isoformat())
@@ -162,8 +168,10 @@ def test_missing_exact_minute_remains_pending(tmp_path):
 def test_pending_observation_resolves_on_later_tick(tmp_path):
     reset_spot_rsi_history()
 
-    start = datetime(
-        2026, 9, 8, 9, 15, tzinfo=timezone.utc
+    start = (
+        datetime.now(timezone.utc)
+        .replace(second=0, microsecond=0)
+        - timedelta(minutes=10)
     )
 
     update_spot_rsi(

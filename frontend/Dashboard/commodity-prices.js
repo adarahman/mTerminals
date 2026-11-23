@@ -904,43 +904,6 @@ class CommodityPricesView {
     this._setText('commodity-short-evidence', evidence);
   }
 
-  _renderEvidenceWeights(weights) {
-    const container = document.getElementById('commodity-analysis-weightage-rows');
-    if (!container) return;
-
-    const rows = Array.isArray(weights) ? weights : [];
-    const fragment = document.createDocumentFragment();
-    rows.forEach((item) => {
-      const row = document.createElement('div');
-      row.className = 'commodity-analysis-weightage-row';
-
-      const label = document.createElement('span');
-      label.textContent = item.label || item.key || 'Evidence';
-
-      const direction = document.createElement('span');
-      const directionValue = item.available === false
-        ? 'UNAVAILABLE'
-        : String(item.direction || 'UNAVAILABLE').toUpperCase();
-      const directionClass = ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(directionValue)
-        ? directionValue.toLowerCase()
-        : 'unavailable';
-      direction.className = `commodity-analysis-weightage-direction ${directionClass}`;
-      direction.textContent = directionValue === 'UNAVAILABLE'
-        ? 'Unavailable'
-        : directionValue;
-
-      const weight = document.createElement('strong');
-      const numericWeight = Number(item.weight);
-      const contribution = Number(item.weightedContribution);
-      weight.textContent = Number.isFinite(numericWeight)
-        ? `${numericWeight}%${Number.isFinite(contribution) ? ` · ${contribution >= 0 ? '+' : ''}${contribution.toFixed(3)}` : ''}`
-        : '—';
-
-      row.append(label, direction, weight);
-      fragment.appendChild(row);
-    });
-    container.replaceChildren(fragment);
-  }
 }
 
 window.commodityPrices = new CommodityPricesView();
