@@ -19,10 +19,23 @@ const _wsOrigin = location.protocol === 'file:'
   ? 'ws://127.0.0.1:5500'
   : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
 
+// Restore the last-selected market-data provider into the initial WS URL so
+// a page refresh keeps the user's broker choice (matches how
+// dashboard.commoditySymbol/dashboard.instrumentMode persist in
+// chain/market-context.js). Invalid/stale values are ignored; the backend
+// validates the provider anyway.
+let _wsUrl = `${_wsOrigin}/ws`;
+try {
+  const _savedDs = String(localStorage.getItem('dashboard.dataSource') || '').toUpperCase();
+  if (/^[A-Z0-9_]+$/.test(_savedDs)) {
+    _wsUrl += `?dataSource=${encodeURIComponent(_savedDs)}`;
+  }
+} catch (_) {}
+
 const Config = {
   ws: {
     // Same-origin WS endpoint shared by the dashboard and Price Chart page.
-    url: `${_wsOrigin}/ws`,
+    url: _wsUrl,
     // Delay before a dropped dashboard connection is retried.
     reconnectDelayMs: 3000,
     // Dashboard feed-health threshold. The engine normally emits at least

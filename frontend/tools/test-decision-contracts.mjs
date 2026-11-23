@@ -28,9 +28,8 @@ assert.match(source, /openingHigh:openingBars/, 'session context must compute th
 assert.match(source, /weightedPrice \/ tradedVolume/, 'VWAP must use candle volume and become unavailable when volume is missing');
 assert.match(source, /cas-unavailable/, 'NIFTY CAS must remain visible when the indicative value is unavailable');
 assert.match(source, /casCoverageLabel/, 'unavailable CAS state must expose received constituent coverage');
-assert.match(source, /casVisible = activeSymbol === 'NIFTY' && Boolean\(cas\?\.status\)/,
-  'NIFTY CAS status must remain visible outside the auction window');
-assert.match(source, /available only 15:20/, 'outside-window CAS state must explain its availability window');
+assert.match(source, /cas\.reason !== 'outside_cas_window'/,
+  'NIFTY CAS badge must stay hidden outside the auction window');
 assert.doesNotMatch(source, /confidence\s*=\s*.*(?:pcr|oi_score|composite)/i,
   'frontend must not recompute decision confidence');
 assert.match(source, /escapeHtml\(s\.text\)/,

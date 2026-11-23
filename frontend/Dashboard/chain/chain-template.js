@@ -62,12 +62,26 @@ ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols, mode) {
 // status are visible in the option text and tooltip; the active provider's
 // status is also shown live by the separate status pill.
 // The active one is pre-selected via the backend's `active` flag.
+// Static mirror of PROVIDER_SPECS in src/brokers/provider_registry.py —
+// used only until the first snapshot delivers live d.dataSources (the
+// commodity view renders this picker before the equity WS snapshot
+// arrives). Labels match the backend display names; status stays empty so
+// options render with the neutral ⚪ marker rather than a fake state.
+const DATA_SOURCE_FALLBACK = [
+  { id: 'SMARTAPI', label: 'ANGEL ONE' },
+  { id: 'UPSTOX',   label: 'UPSTOX' },
+  { id: 'SHOONYA',  label: 'SHOONYA' },
+  { id: 'KITE',     label: 'ZERODHA' },
+  { id: 'BREEZE',   label: 'ICICI DIRECT' },
+  { id: 'KOTAK',    label: 'KOTAK NEO' },
+  { id: 'NSE_BSE',  label: 'NSE/BSE API' },
+];
+
 ChainView.prototype.renderDataSourceOptions = function(sources, active, showIndicativePrice = true) {
-  if (!Array.isArray(sources) || !sources.length) {
-    const a = active || 'NSE_BSE';
-    return `<option value="${a}">${escapeHtml(a)}</option>`;
-  }
-  return sources.map(s => {
+  const list = Array.isArray(sources) && sources.length
+    ? sources
+    : DATA_SOURCE_FALLBACK.map(s => ({ ...s, status: '', active: s.id === (active || 'NSE_BSE') }));
+  return list.map(s => {
     const id = s.id;
     const label = s.label || id;
     const status = String(s.status || "").toUpperCase();
@@ -105,37 +119,46 @@ ChainView.prototype.patchProviderIndicativeQuotes = function(update) {
   });
   const select = document.getElementById('dataSourceSelect');
   const selected = (select && select.value) || state.dataSource;
-  const active = sources.find(source => source.id === selected)
-    || sources.find(source => source.active)
-    || {};
-  const providerPrice = Number(active.indicativePrice);
-  const hasProviderPrice = active.indicativePrice != null
-    && Number.isFinite(providerPrice) && providerPrice > 0;
-  const cas = state.casIndicative || {};
-  const casLive = cas.status === 'live' && cas.value != null
-    && Number.isFinite(Number(cas.value));
-  const useKotakCasPrice = ['KOTAK', 'KOTAK_NEO'].includes(String(active.id || selected || '').toUpperCase())
-    && casLive;
-  const rawPrice = useKotakCasPrice ? Number(cas.value) : providerPrice;
-  const hasPrice = hasProviderPrice || useKotakCasPrice;
-  const priceLabel = useKotakCasPrice ? 'CAS IEP' : 'Indicative';
-  const price = hasPrice
-    ? `₹${rawPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`
-    : '₹—';
-  const priceElement = document.getElementById('data-source-indicative-price');
-  const labelElement = document.getElementById('data-source-indicative-label');
-  if(labelElement) labelElement.textContent = priceLabel;
-  if(priceElement){
-    priceElement.textContent = price;
-    priceElement.title = hasPrice
-      ? `${priceLabel} price from ${active.label || active.id}${useKotakCasPrice ? ` · As of ${cas.asOf || ''}` : active.indicativeAsOf ? ` · As of ${active.indicativeAsOf}` : ''}`
-      : `Indicative spot price unavailable from ${active.label || active.id || 'active provider'}`;
-  }
   if(select){
     select.innerHTML = this.renderDataSourceOptions(sources, state.dataSource, false);
     if(Array.from(select.options).some(option => option.value === selected)){
       select.value = selected;
     }
+  }
+};
+
+// Commodity mode keeps its top-bar mounted across polls — renderDashboard
+// only swaps #sec-decision once the commodity top-bar exists, so live
+// d.dataSources arriving after the first render would never reach the
+// picker (it would stay on the pre-snapshot fallback options with neutral
+// markers). Sync the select options and status pill in place instead.
+// Skipped while the user has the dropdown open so options don't reset
+// mid-selection.
+ChainView.prototype.patchDataSourcePicker = function(d) {
+  if (!d) return;
+  const sources = Array.isArray(d.dataSources) ? d.dataSources : [];
+  const select = document.getElementById('dataSourceSelect');
+  if (select && document.activeElement !== select) {
+    const selected = select.value || d.dataSource;
+    select.innerHTML = this.renderDataSourceOptions(sources, d.dataSource, false);
+    if (Array.from(select.options).some(option => option.value === selected)) {
+      select.value = selected;
+    }
+  }
+  const active = sources.find(s => s.active)
+    || sources.find(s => s.id === d.dataSource) || {};
+  const status = String(active.status || '');
+  const pill = document.querySelector('.data-source-status-pill');
+  const row = select && select.closest('.data-source-selector-row');
+  if (pill) {
+    pill.hidden = !status;
+    if (status) {
+      pill.textContent = status;
+      pill.dataset.status = status.toLowerCase();
+    }
+  } else if (status && row) {
+    row.insertAdjacentHTML('beforeend',
+      `<span class="feed-status-pill data-source-status-pill" data-status="${escapeHtml(status.toLowerCase())}" title="Active market-data source status">${escapeHtml(status)}</span>`);
   }
 };
 
@@ -150,11 +173,16 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const cas = d.casIndicative;
   const casLive = cas?.status === 'live' && cas.value !== null
     && cas.value !== undefined && Number.isFinite(Number(cas.value));
-  const casVisible = activeSymbol === 'NIFTY' && Boolean(cas?.status);
+  // The badge only earns its space during the auction window — outside it
+  // the payload is always status:'unavailable'/reason:'outside_cas_window',
+  // which rendered a permanent "CAS — inactive" chip all day. In-window
+  // unavailable states (coverage, constituent gaps) still show so the
+  // reason is visible when it matters.
+  const casVisible = activeSymbol === 'NIFTY' && Boolean(cas?.status)
+    && cas.reason !== 'outside_cas_window';
   const casCoverage = cas?.coverage || {};
   const casCoverageLabel = `${Number(casCoverage.available) || 0}/${Number(casCoverage.total) || 0}`;
   const casReason = ({
-    outside_cas_window: 'available only 15:20-15:30 IST',
     constituent_data_unavailable: 'constituent data unavailable',
     insufficient_iep_coverage: 'IEP coverage below threshold',
     invalid_calculation: 'invalid calculation',
@@ -163,20 +191,6 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const activeDataSource = dataSources.find(source => source.id === d.dataSource)
     || dataSources.find(source => source.active)
     || {};
-  const providerSourcePrice = Number(activeDataSource.indicativePrice);
-  const providerSourceHasPrice = activeDataSource.indicativePrice != null
-    && Number.isFinite(providerSourcePrice) && providerSourcePrice > 0;
-  const useKotakCasPrice = ['KOTAK', 'KOTAK_NEO'].includes(String(activeDataSource.id || d.dataSource || '').toUpperCase())
-    && casLive;
-  const activeSourcePrice = useKotakCasPrice ? Number(cas.value) : providerSourcePrice;
-  const activeSourceHasPrice = providerSourceHasPrice || useKotakCasPrice;
-  const activeSourcePriceLabel = useKotakCasPrice ? 'CAS IEP' : 'Indicative';
-  const activeSourcePriceText = activeSourceHasPrice
-    ? `₹${activeSourcePrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`
-    : '₹—';
-  const activeSourceQuoteTitle = activeSourceHasPrice
-    ? `${activeSourcePriceLabel} price from ${activeDataSource.label || activeDataSource.id}${useKotakCasPrice ? ` · As of ${cas.asOf || ''}` : activeDataSource.indicativeAsOf ? ` · As of ${activeDataSource.indicativeAsOf}` : ''}`
-    : `Indicative spot price unavailable from ${activeDataSource.label || d.dataSource || 'active provider'}`;
   const feedState = (window.AppState && AppState.feedState) || {status:'CONNECTING'};
   const rawFeedStatus = feedState.status || 'CONNECTING';
   const marketSession = feedState.marketSession || 'UNKNOWN';
@@ -218,24 +232,19 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
             <span id="commodity-price-change" class="commodity-price-change commodity-topbar-change">—</span>
           </div>
           <div class="commodity-topbar-contract-row">
-            <span id="commodity-price-contract" class="commodity-topbar-contract">MCX Futures</span>
+            <span id="commodity-futures-expiry-slot" class="commodity-topbar-contract-slot"></span>
             <span class="commodity-topbar-lot">Lot size <b id="commodity-price-lot-size">—</b></span>
           </div>
         </div>
       </div>
       <div class="expiry-strip commodity-expiry-strip">
-        <div class="expiry-pill feed-health-pill">
-          <span class="feed-row"><span class="expiry-pill-label">Feed</span><span id="commodity-price-status" class="feed-status-pill commodity-feed-status" data-status="${commodityFeedState.toLowerCase()}" role="status" title="MCX quote refresh status">${commodityFeedState}</span></span>
-          <span class="feed-row data-source-selector-row"><select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource, false)}</select></span>
-          <span class="data-source-meta"><span id="data-source-indicative-label" class="data-source-indicative-label">MCX FUTURES</span><span id="data-source-indicative-price" class="data-source-indicative-price">₹—</span><span class="feed-status-pill data-source-status-pill" data-status="${sourceStatus.toLowerCase().replaceAll('_','-')}" title="${escapeHtml(sourceStatusTitle)}">${escapeHtml(sourceStatus)}</span></span>
-        </div>
         <div class="expiry-pill topbar-expiry-pill commodity-option-expiry-pill">
           <span class="expiry-row"><span class="expiry-pill-label">Options</span></span>
           <span class="expiry-row"><span id="commodity-expiry-slot"></span></span>
         </div>
-        <div class="expiry-pill topbar-expiry-pill commodity-futures-expiry-pill">
-          <span class="expiry-row"><span class="expiry-pill-label">Futures</span></span>
-          <span class="expiry-row"><span id="commodity-futures-expiry-slot"></span></span>
+        <div class="expiry-pill feed-health-pill">
+          <span class="feed-row"><span class="expiry-pill-label">Feed</span><span id="commodity-price-status" class="feed-status-pill commodity-feed-status" data-status="${commodityFeedState.toLowerCase()}" role="status" title="MCX quote refresh status">${commodityFeedState}</span></span>
+          <span class="feed-row data-source-selector-row"><select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource, false)}</select><span class="feed-status-pill data-source-status-pill" data-status="${sourceStatus.toLowerCase().replaceAll('_','-')}" title="${escapeHtml(sourceStatusTitle)}">${escapeHtml(sourceStatus)}</span></span>
         </div>
         <div class="expiry-pill"><span class="expiry-pill-label">Updated</span><span class="expiry-pill-val time-val" id="commodity-updated-time">—</span></div>
       </div>
@@ -259,6 +268,18 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
     spotFlashCls = spotNum > this._lastSpot ? ' tick-flash-up' : ' tick-flash-down';
   }
   if (!isNaN(spotNum)) this._lastSpot = spotNum;
+  // Meta row under the spot price — mirrors the commodity top-bar's
+  // contract row (contract + "Lot size"): here it's Lot size + the futures
+  // contract's day change %, so both modes expose the same contract facts
+  // adjacent to the headline price.
+  const futChgPctNum = Number(d.futureChgPct) || 0;
+  const futChgCls = futChgPctNum >= 0 ? 'chg-pos' : 'chg-neg';
+  const futPriceNum = Number(d.future) || 0;
+  const futExpiryKey = d.futuresExpiry || 'NEAR';
+  const futMetaTitle = `Futures ${fmtI(d.future)} · ${Number(d.futureChange) >= 0 ? '+' : ''}${Math.round(Number(d.futureChange) || 0)} pts · Basis ${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}`;
+  const futOptions = ['NEAR', 'NEXT', 'FAR']
+    .map(v => `<option value="${v}"${futExpiryKey === v ? ' selected' : ''}>${v}</option>`)
+    .join('');
   return `<div id="sec-topbar" class="top-bar">
     <div class="top-bar-left">
       <!-- Symbol is now a picker, not static text — picking a value calls
@@ -283,20 +304,38 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
         </div>
       </div>
       <span class="spot-block">
-        <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
-        ${d.spotChgPct!==undefined?`
-        <span class="spot-change-row">
-          <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
-          <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
-        </span>`:''}
+        <span class="spot-row">
+          <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
+          ${d.spotChgPct!==undefined?`
+          <span class="spot-change-row">
+            <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
+            <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
+          </span>`:''}
+        </span>
+        <span class="spot-meta-row">
+          <span class="spot-meta spot-meta-fut" id="topbar-fut-segment" title="${escapeHtml(futMetaTitle)}"${isFuturesReferenceVisible() ? '' : ' hidden'}>
+            <span class="spot-meta-fut-label">FUT</span>
+            <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Futures reference contract" onchange="onFuturesExpiryPicked(this.value)">${futOptions}</select>
+            <b id="topbar-future" class="spot-meta-fut-price">${futPriceNum > 0 ? fmtI(futPriceNum) : '—'}</b>
+            <b id="topbar-fut-chg" class="${futChgCls}">${futChgPctNum >= 0 ? '+' : ''}${futChgPctNum.toFixed(2)}%</b>
+            <small id="topbar-basis" class="spot-meta-basis">Basis ${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}</small>
+          </span>
+          <span class="spot-meta">Lot <b id="topbar-lot-size">${d.lotSize ? Number(d.lotSize).toLocaleString('en-IN') : '—'}</b></span>
+        </span>
         ${casVisible ? `
         <span class="cas-indicative${casLive ? '' : ' cas-unavailable'}" title="${casLive
           ? `${escapeHtml(String(cas.source || 'CAS indicative'))}${Number(casCoverage.total) > 1 ? ` · ${escapeHtml(String(cas.coveragePct ?? 0))}% constituent coverage` : ''} · As of ${escapeHtml(String(cas.asOf || ''))}`
           : `${escapeHtml(String(cas.source || 'CAS indicative'))} unavailable · ${escapeHtml(casReason)}${cas.reason === 'outside_cas_window' ? '' : ` · ${escapeHtml(casCoverageLabel)} constituents`}`}">
           CAS <strong>${casLive ? Number(cas.value).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</strong>
-          <small>${casLive ? escapeHtml(String(cas.asOf || '').slice(11, 16)) : cas.reason === 'outside_cas_window' ? 'inactive' : escapeHtml(casCoverageLabel)}</small>
+          <small>${casLive ? escapeHtml(String(cas.asOf || '').slice(11, 16)) : escapeHtml(casCoverageLabel)}</small>
         </span>` : ''}
       </span>
+     ${renderIndexTicker(d)}
+    </div>
+    <div class="expiry-strip">
+      <!-- Option expiry pill sits first in the strip — left of the
+           feed-health/broker pill — same pill-row layout as the
+           commodity Options pill. -->
       <div class="expiry-pill topbar-expiry-pill">
        <span class="expiry-row">
          <span class="expiry-pill-label">Expiry</span>
@@ -304,9 +343,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
        </span>
        <span class="expiry-row"><span id="expiry-slot"></span></span>
      </div>
-     ${renderIndexTicker(d)}
-    </div>
-    <div class="expiry-strip">
+
       <div class="expiry-pill feed-health-pill">
         <span class="feed-row">
           <span class="expiry-pill-label">Feed</span>
@@ -325,16 +362,12 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
              pill to its right. -->
         <span class="feed-row data-source-selector-row">
           <select id="dataSourceSelect" class="price-source-select data-source-select" title="Market-data source — runtime switch, no server restart" onchange="onDataSourcePicked(this.value)">${this.renderDataSourceOptions(d.dataSources, d.dataSource, false)}</select>
-        </span>
-        <span class="data-source-meta">
-            <span id="data-source-indicative-label" class="data-source-indicative-label">${activeSourcePriceLabel}</span>
-            <span id="data-source-indicative-price" class="data-source-indicative-price" title="${escapeHtml(activeSourceQuoteTitle)}">${activeSourcePriceText}</span>
           ${(() => {
             const list = Array.isArray(d.dataSources) ? d.dataSources : [];
             const active = list.find(s => s.active) || (d.dataSource ? list.find(s => s.id === d.dataSource) : null) || {};
             const st = active.status || '';
             // Tiny plain borderless readout (see .data-source-status-pill in
-            // navigation.css) — the dropdown itself is the primary signal.
+            // navigation.css) — sits on the same row as the dropdown itself.
             return st ? `<span class="feed-status-pill data-source-status-pill" data-status="${String(st).toLowerCase()}" title="Active market-data source status">${escapeHtml(st)}</span>` : '';
           })()}
         </span>

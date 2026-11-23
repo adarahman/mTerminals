@@ -356,6 +356,10 @@ def export_dashboard_json(
         "expiryDates":   expiry_dates or [],   # <-- NEW: full list
         "dte":           _to_int(dte),
         "atm":           atm_strike,
+        # Contract lot size for the active symbol — the equity top-bar's
+        # spot meta row shows it next to the FUT change, matching the
+        # commodity top-bar's "Lot size" readout.
+        "lotSize":       lot_size,
 
         "future":        _r(spot + _r(ctx_dict.get("basis", 0), 2), 2),
         "basis":         _r(ctx_dict.get("basis", 0), 2),

@@ -7,6 +7,7 @@ const COMMODITY_SYMBOLS = [
 ];
 const DASHBOARD_MODE_STORAGE_KEY = 'dashboard.instrumentMode';
 const COMMODITY_SYMBOL_STORAGE_KEY = 'dashboard.commoditySymbol';
+const DATA_SOURCE_STORAGE_KEY = 'dashboard.dataSource';
 let savedInstrumentMode = 'equity';
 let savedCommoditySymbol = 'CRUDEOIL';
 try {
@@ -45,35 +46,11 @@ function renderIndexTicker(d) {
   const indices = d.allIndices || [];
   const active = d.symbol || 'NIFTY';
 
-  // FUT pill in the first slot: near-month
-  // futures symbol + price, day change / % change (smallest tier), basis,
-  // and the NEAR/NEXT/FAR contract dropdown — the whole futures-reference
-  // widget, moved in here from the expiry strip (same ids the top-bar
-  // patch in chain-dashboard-renderer.js updates: topbar-future,
-  // topbar-basis, futuresExpirySelect).
-  const futPrice = Number(d.future) || 0;
-  const futChg = Number(d.futureChange) || 0;
-  const futPct = Number(d.futureChgPct) || 0;
-  const futUp = futPct >= 0;
-  const futExpiry = d.futuresExpiry || 'NEAR';
-  const futOptions = ['NEAR', 'NEXT', 'FAR']
-    .map(v => `<option value="${v}"${futExpiry === v ? ' selected' : ''}>${v}</option>`)
-    .join('');
-  const futChgHtml = (d.futureChgPct !== undefined && (futChg || futPct))
-    ? `<span class="idx-pill-chg ${futUp ? 'up' : 'down'}">${futUp ? '▲' : '▼'} ${Math.abs(futChg).toFixed(2)} ${Math.abs(futPct).toFixed(2)}%</span>`
-    : '';
-  const futBasisHtml = `<small id="topbar-basis" class="idx-pill-basis">${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}</small>`;
-  const futPill = isFuturesReferenceVisible() ? `<div class="idx-pill idx-pill-fut" data-index-symbol="FUT" title="Near-month futures — confirmation only, does not change Greeks or confidence">
-    <span class="idx-pill-fut-row">
-      <span class="idx-pill-sym">FUT</span>
-      <span class="idx-pill-val" id="topbar-future">${futPrice > 0 ? fmtI(futPrice) : '—'}</span>
-      <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Futures reference contract" onchange="onFuturesExpiryPicked(this.value)">${futOptions}</select>
-    </span>
-    <span class="idx-pill-fut-row idx-pill-fut-meta">
-      ${futChgHtml}
-      ${futBasisHtml}
-    </span>
-  </div>` : '';
+  // The futures reference (NEAR/NEXT/FAR dropdown + price/change/basis)
+  // moved out of this ticker into the top-bar spot meta row — same
+  // "contract selector + facts" arrangement the commodity top-bar uses
+  // (see renderTopBarHtml's spot-meta-row). This ticker now carries only
+  // VIX + the index pills.
 
   const vix = Number(d.indiaVix) || 0;
   const vixPct = Number(d.indiaVixChgPct) || 0;
@@ -110,7 +87,7 @@ function renderIndexTicker(d) {
       </button>`;
     }).join('');
 
-  return `<div class="index-ticker" id="index-ticker-bar">${futPill}${vixPill}${pills}</div>`;
+  return `<div class="index-ticker" id="index-ticker-bar">${vixPill}${pills}</div>`;
 }
 
 // Patch the frequently-changing quote values without replacing ticker buttons.
@@ -121,8 +98,7 @@ function patchIndexTicker(d) {
   if (!ticker) return;
   const active = d.symbol || 'NIFTY';
   const indices = (d.allIndices || []).filter((idx) => (idx.BackendSymbol || idx.Symbol) !== active);
-  const expected = (isFuturesReferenceVisible() ? ['FUT'] : [])
-    .concat(['VIX'], indices.map((idx) => idx.BackendSymbol || idx.Symbol));
+  const expected = ['VIX'].concat(indices.map((idx) => idx.BackendSymbol || idx.Symbol));
   const existing = Array.from(ticker.querySelectorAll('[data-index-symbol]'))
     .map((el) => el.dataset.indexSymbol);
 
@@ -131,22 +107,6 @@ function patchIndexTicker(d) {
     const start = fresh.indexOf('>') + 1;
     ticker.innerHTML = fresh.slice(start, fresh.lastIndexOf('</div>'));
     return;
-  }
-
-  const fut = ticker.querySelector('[data-index-symbol="FUT"]');
-  if (fut) {
-    const value = fut.querySelector('.idx-pill-val');
-    const change = fut.querySelector('.idx-pill-chg');
-    const basis = fut.querySelector('.idx-pill-basis');
-    const futPrice = Number(d.future) || 0;
-    const futChg = Number(d.futureChange) || 0;
-    const futPct = Number(d.futureChgPct) || 0;
-    if (value) value.textContent = futPrice > 0 ? fmtI(futPrice) : '—';
-    if (basis) basis.textContent = `Basis ${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}`;
-    if (change && d.futureChgPct !== undefined && (futChg || futPct)) {
-      change.className = 'idx-pill-chg ' + (futPct >= 0 ? 'up' : 'down');
-      change.textContent = `${futPct >= 0 ? '▲' : '▼'} ${Math.abs(futChg).toFixed(2)} ${Math.abs(futPct).toFixed(2)}%`;
-    }
   }
 
   const vix = ticker.querySelector('[data-index-symbol="VIX"]');
@@ -337,6 +297,7 @@ window.switchActiveIndex = switchActiveIndex;
 function switchDataSource(ds) {
   if (!ds) return;
   const source = ds.toUpperCase();
+  try { localStorage.setItem(DATA_SOURCE_STORAGE_KEY, source); } catch (_) {}
   // The server applies this switch before sending the next market snapshot.
   // Do not leave the prior provider's AVAILABLE state visible during that
   // hand-off; NSE/BSE is REST polling rather than a persistent live feed.

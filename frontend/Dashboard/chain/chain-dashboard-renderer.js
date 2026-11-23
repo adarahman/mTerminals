@@ -52,12 +52,32 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
     if(basisEl) basisEl.textContent = `Basis ${Number(d.basis)>=0?'+':''}${fmtN(Number(d.basis)||0,1)}`;
     const futuresExpiryEl = document.getElementById('futuresExpirySelect');
     if(futuresExpiryEl && d.futuresExpiry) futuresExpiryEl.value = d.futuresExpiry;
+    const futChgEl = document.getElementById('topbar-fut-chg');
+    if (futChgEl && d.futureChgPct !== undefined) {
+      const futPct = Number(d.futureChgPct) || 0;
+      futChgEl.className = futPct >= 0 ? 'chg-pos' : 'chg-neg';
+      futChgEl.textContent = `${futPct >= 0 ? '+' : ''}${futPct.toFixed(2)}%`;
+    }
+    const futSegEl = document.getElementById('topbar-fut-segment');
+    if (futSegEl && typeof isFuturesReferenceVisible === 'function') {
+      futSegEl.hidden = !isFuturesReferenceVisible();
+    }
+    const lotEl = document.getElementById('topbar-lot-size');
+    if (lotEl && d.lotSize) lotEl.textContent = Number(d.lotSize).toLocaleString('en-IN');
     const tickerEl = document.getElementById('index-ticker-bar');
     if (tickerEl && window.patchIndexTicker) patchIndexTicker(d);
     const dteEl = document.getElementById('dte-display');
     if (dteEl) dteEl.textContent = (d.dte||0) + 'd';
     const timeEl = document.getElementById('time-display');
     if (timeEl) timeEl.textContent = d.refreshTime || '--';
+  }
+
+  // Provider statuses refresh on 'full' snapshots without a symbol change,
+  // so the mounted picker would otherwise keep the options/status pill from
+  // the last top-bar rebuild. Sync it in place only when the list changes.
+  if (d.dataSources !== this._lastDataSources) {
+    this._lastDataSources = d.dataSources;
+    if (typeof this.patchDataSourcePicker === 'function') this.patchDataSourcePicker(d);
   }
 
   // #sec-decision wraps both the always-visible verdict card AND the

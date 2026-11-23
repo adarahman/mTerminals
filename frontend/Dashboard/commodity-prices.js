@@ -54,6 +54,18 @@ class CommodityPricesView {
       window.clearInterval(this.newsTimer);
       this.newsTimer = null;
     }
+    // Rescue the persistent expiry pickers before the equity top-bar
+    // rebuild. They only exist as single DOM nodes (created once in
+    // DashboardPro.html inside the hidden holders); while in commodity mode
+    // they live inside #sec-topbar, and the equity render path replaces that
+    // element via outerHTML — destroying the <select> nodes outright. Once
+    // destroyed they can never be re-inserted until a full page reload.
+    const expiryPicker = document.getElementById('commodity-expiry');
+    const expiryHolder = document.getElementById('commodity-expiry-holder');
+    if (expiryPicker && expiryHolder) expiryHolder.appendChild(expiryPicker);
+    const futurePicker = document.getElementById('commodity-futures-expiry');
+    const futureHolder = document.getElementById('commodity-futures-expiry-holder');
+    if (futurePicker && futureHolder) futureHolder.appendChild(futurePicker);
   }
 
   select(symbol) {
@@ -93,7 +105,6 @@ class CommodityPricesView {
     this.latestAnalysis = {};
     this.futureExpiry = '';
     this.futureExpiries = [];
-    this._setText('commodity-price-contract', 'Loading contract…');
     this._setText('commodity-price-ltp', '—');
     const ltp = document.getElementById('commodity-price-ltp');
     if (ltp) ltp.classList.remove('up', 'down');
@@ -115,8 +126,6 @@ class CommodityPricesView {
       priceStatus.dataset.status = 'connecting';
       priceStatus.textContent = 'CONNECTING';
     }
-    const sourcePrice = document.getElementById('data-source-indicative-price');
-    if (sourcePrice) sourcePrice.textContent = '₹—';
     this._setText('commodity-updated-time', '—');
     const expiryPicker = document.getElementById('commodity-expiry');
     if (expiryPicker) expiryPicker.replaceChildren();
@@ -162,7 +171,7 @@ class CommodityPricesView {
     this.latestQuote = quote;
     this.latestQuoteError = '';
     this.latestProvider = payload.provider || 'SMARTAPI';
-    this._setText('commodity-price-contract', quote.Contract || 'MCX Futures');
+    this._syncContractLabel(quote);
     this._setText('commodity-price-ltp', this._format(quote.LTP));
     const change = quote.Change == null ? NaN : Number(quote.Change);
     const percent = quote.PctChange == null ? NaN : Number(quote.PctChange);
@@ -192,8 +201,6 @@ class CommodityPricesView {
       status.textContent = 'LIVE';
       status.title = `Live MCX quote via ${this.latestProvider}`;
     }
-    const sourcePrice = document.getElementById('data-source-indicative-price');
-    if (sourcePrice) sourcePrice.textContent = `₹${this._format(quote.LTP)}`;
     this._setText('commodity-updated-time', new Date().toLocaleTimeString('en-IN', {
       timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit',
     }));
@@ -315,7 +322,8 @@ class CommodityPricesView {
     ) || contracts[0];
     this.futureExpiry = selected.expiry;
     picker.replaceChildren(...contracts.map((item) => {
-      const option = new Option(this._formatExpiry(item.expiry), item.expiry);
+      const option = new Option(this._formatFutureContractLabel(item), item.expiry);
+      option.title = `${item.which} · ${this._formatExpiry(item.expiry)}`;
       option.selected = item === selected;
       return option;
     }));
@@ -444,7 +452,7 @@ class CommodityPricesView {
       if (sourceSelect && Array.from(sourceSelect.options).some(option => option.value === this.latestProvider)) {
         sourceSelect.value = this.latestProvider;
       }
-      this._setText('commodity-price-contract', quote.Contract || 'MCX Futures');
+      this._syncContractLabel(quote);
       this._setText('commodity-price-ltp', this._format(quote.LTP));
       const change = quote.Change == null ? NaN : Number(quote.Change);
       const percent = quote.PctChange == null ? NaN : Number(quote.PctChange);
@@ -479,11 +487,6 @@ class CommodityPricesView {
         status.textContent = 'LIVE';
         status.title = `Live MCX quote via ${payload.provider || 'active provider'}`;
       }
-      const sourcePrice = document.getElementById('data-source-indicative-price');
-      if (sourcePrice) {
-        sourcePrice.textContent = `₹${this._format(quote.LTP)}`;
-        sourcePrice.title = `MCX futures price via ${payload.provider || 'active provider'}`;
-      }
       const sourceStatus = document.querySelector('.data-source-status-pill');
       if (sourceStatus) {
         sourceStatus.textContent = 'AVAILABLE';
@@ -509,7 +512,6 @@ class CommodityPricesView {
           sourceStatus.title = this.latestQuoteError;
         }
         if (!hasLastGoodQuote) {
-          this._setText('commodity-price-contract', 'MCX quote unavailable');
           this._setText('commodity-price-ltp', '—');
           const ltp = document.getElementById('commodity-price-ltp');
           if (ltp) ltp.classList.remove('up', 'down');
@@ -602,6 +604,27 @@ class CommodityPricesView {
   _formatExpiry(expiry) {
     const match = /^(\d{2})([A-Z]{3})(\d{4})$/.exec(String(expiry || ''));
     return match ? `${match[1]}-${match[2][0]}${match[2].slice(1).toLowerCase()}-${match[3]}` : expiry;
+  }
+
+  // The futures picker now renders where the contract name used to sit
+  // under the price. Option labels are composed contract-style strings;
+  // once a live quote arrives, overwrite the selected option's label with
+  // the broker's exact Contract symbol (e.g. NATURALGAS24NOV26FUT).
+  _syncContractLabel(quote) {
+    const picker = document.getElementById('commodity-futures-expiry');
+    if (!picker || !quote || !quote.Contract) return;
+    const selected = Array.from(picker.options).find((option) =>
+      this._normalizeExpiry(option.value) === this._normalizeExpiry(quote.Expiry));
+    if (selected) selected.textContent = quote.Contract;
+  }
+
+  // Contract-style label for the futures picker (e.g. NATURALGAS24NOV26FUT)
+  // — the picker now sits where the contract name used to render under the
+  // price, so its options read like broker contract symbols.
+  _formatFutureContractLabel(item) {
+    const match = /^(\d{2})([A-Z]{3})(\d{4})$/.exec(this._normalizeExpiry(item.expiry));
+    if (!match) return this._formatExpiry(item.expiry);
+    return `${this.symbol}${match[1]}${match[2]}${match[3].slice(2)}FUT`;
   }
 
   _renderFiveMinuteContext(context) {
@@ -850,8 +873,18 @@ class CommodityPricesView {
       } else {
         dashboard.insertAdjacentHTML('beforeend', chainView.renderDecisionBoxHtml(data));
       }
+      // The top-bar (and its broker picker) stays mounted across polls, so
+      // push live provider statuses into it when the WS snapshot's
+      // dataSources actually change — otherwise the picker keeps whatever
+      // options the first render produced.
+      if (data.dataSources !== this._lastDataSources
+          && typeof chainView.patchDataSourcePicker === 'function') {
+        this._lastDataSources = data.dataSources;
+        chainView.patchDataSourcePicker(data);
+      }
     } else {
       dashboard.innerHTML = `${chainView.renderTopBarHtml(data, data.compositeBias === 'BEARISH')}${chainView.renderDecisionBoxHtml(data)}`;
+      this._lastDataSources = data.dataSources;
     }
     slot.hidden = false;
     dashboard.append(slot);

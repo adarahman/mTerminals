@@ -61,25 +61,6 @@
 
 .idx-pill-chg.na{color:var(--text-tertiary);font-weight:500;}
 
-.idx-pill-fut{
-  border-color:rgba(255,212,59,0.35);
-  padding:6px 11px;
-  flex-direction:column;
-  align-items:stretch;
-  gap:3px;
-  height:auto;
-  min-width:112px;
-  border-radius:14px;
-  cursor:default;
-}
-.idx-pill-fut:hover{transform:none;}
-.idx-pill-fut-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
-.idx-pill-fut .idx-pill-val{min-width:0;}
-.idx-pill-fut .idx-pill-fut-meta{justify-content:flex-start;}
-.idx-pill-fut .futures-expiry-select{padding:0 12px 0 0;font-size:var(--fs-2xs);text-align:center;margin-left:auto;background:transparent;border:none;color:var(--text-tertiary);}
-.idx-pill-fut .idx-pill-chg{justify-content:flex-start;font-size:var(--fs-2xs);min-width:0;flex:1;}
-.idx-pill-fut .idx-pill-basis{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:650;color:var(--text-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap;}
-
 /* ── TOP BAR ── */
 
 .top-bar{
@@ -309,29 +290,45 @@
 .feed-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;width:100%;white-space:nowrap;}
 .feed-row .expiry-pill-label{text-align:left;}
 .feed-row .data-source-select{text-align:left;width:100%;max-width:100%;min-width:0;padding:2px 12px 2px 2px;background-position:right center;}
-.data-source-meta .data-source-status-pill{text-align:right;}
-.data-source-selector-row{display:block;}
-.data-source-meta{display:flex;align-items:center;justify-content:space-between;gap:5px;width:100%;}
-.data-source-indicative-label{color:var(--text-tertiary);font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;}
-.data-source-indicative-price{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
 
 /* Data-source status readout (POLLING/LIVE/UNAVAILABLE/SESSION_REQUIRED)
-   under the dropdown — the SMALLEST text on the bar, set in the same tiny
+   beside the dropdown — the SMALLEST text on the bar, set in the same tiny
    display-face uppercase style the old execution-broker label used
    (8px font-display, .06em letterspacing): a micro hint only, not a
    fenced pill. Status accent color still follows the [data-status] rules
    below; this override strips the fence and re-sizes the type. */
-.data-source-meta .data-source-status-pill[data-status]{border:0;background:transparent;padding:0;font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.06em;line-height:1;text-transform:uppercase;white-space:nowrap;}
+.data-source-selector-row .data-source-status-pill[data-status]{border:0;background:transparent;padding:0;font-family:var(--font-display);font-size:8px;font-weight:600;letter-spacing:.06em;line-height:1;text-transform:uppercase;white-space:nowrap;}
 
 /* Spot price block — the big price with its change + %chg rendered as
    small plain text tokens directly below it (reorganized per the top-bar
    spec; replaces the old inline ▲% badge next to the price). Order is
    change (points) first, %chg to its right. */
-.spot-block{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
+.spot-block{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;flex-shrink:0;}
+/* Price + day change on one baseline row — same arrangement as the
+   commodity top-bar's .commodity-topbar-price-row (LTP · +chg (%)). */
+.spot-row{display:inline-flex;align-items:baseline;gap:8px;white-space:nowrap;}
 .spot-change-row{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
 .chg-token{font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;}
 .chg-pos{color:var(--pos);}
 .chg-neg{color:var(--neg);}
+
+/* Spot meta row — Lot size + FUT day change under the equity price,
+   matching the commodity top-bar's contract row (contract + Lot size).
+   Left-aligned like the rest of .spot-block. */
+.spot-meta-row{display:inline-flex;align-items:baseline;gap:10px;white-space:nowrap;}
+.spot-meta{color:var(--text-tertiary);font-size:var(--fs-xs);font-family:var(--font-mono);}
+.spot-meta b{color:var(--text-secondary);font-weight:600;}
+.spot-meta b.chg-pos,.spot-meta b.chg-neg{font-weight:700;}
+/* FUT contract segment inside the spot meta row — the NEAR/NEXT/FAR
+   selector + price/change/basis moved here from the index ticker so the
+   equity top-bar mirrors the commodity contract row (dropdown + facts). */
+.spot-meta-fut{display:inline-flex;align-items:baseline;gap:4px;}
+.spot-meta-fut .spot-meta-fut-label{color:var(--text-tertiary);font-size:var(--fs-2xs);font-weight:700;letter-spacing:.06em;}
+.spot-meta-fut .futures-expiry-select{padding:0 6px 0 2px;font-size:var(--fs-2xs);text-align:left;background:transparent;border:none;color:var(--text-tertiary);min-width:0;}
+.spot-meta-fut .futures-expiry-select:focus{color:var(--info);outline:none;}
+.spot-meta-fut-price{color:var(--text-primary);font-weight:700;font-variant-numeric:tabular-nums;}
+.spot-meta-fut #topbar-fut-chg{font-size:var(--fs-2xs);}
+.spot-meta-basis{font-size:var(--fs-2xs);color:var(--text-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap;}
 
 /* Data-source status pill — POLLING (ZERODHA/ICICI DIRECT/KOTAK NEO/NSE_BSE have no
    websocket client; the expected mode for them, not an error) gets the
@@ -350,7 +347,7 @@
 
 /* 1.8687rem (29.9px) -> --fs-3xl (28px): closer than --fs-4xl (34.4px)
    by 1.9px vs 4.5px. */
-.spot{font-size:var(--fs-3xl);font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:7ch;text-align:right;}
+.spot{font-size:var(--fs-3xl);font-weight:700;color:var(--pos);font-family:var(--font-mono);letter-spacing:-0.5px;flex-shrink:0;font-variant-numeric:tabular-nums;min-width:7ch;text-align:left;}
 
 .spot.bearish{color:var(--neg);}
 

@@ -27,7 +27,6 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-topbar .top-bar-left{gap:12px;}
 .commodity-topbar-quote{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;white-space:nowrap;}
 .commodity-topbar-price-row,.commodity-topbar-contract-row{display:flex;align-items:baseline;gap:9px;}
-.commodity-topbar-contract{color:var(--text-secondary);font-family:var(--font-mono);font-size:var(--fs-xs);}
 .commodity-topbar-lot{color:var(--text-tertiary);font-size:var(--fs-xs);}
 .commodity-topbar-lot b{color:var(--text-secondary);font-family:var(--font-mono);}
 .commodity-topbar-ltp{font-family:var(--font-mono);font-size:clamp(28px,5vw,38px);font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums;}
@@ -38,9 +37,9 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-option-expiry-pill #commodity-expiry-slot{display:inline-flex;min-width:0;max-width:150px;overflow:hidden;}
 .commodity-option-expiry-pill #commodity-expiry{max-width:150px;font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);background:transparent;border:0;padding:0 14px 0 0;}
 .commodity-option-expiry-pill #commodity-expiry:focus{color:var(--info);}
-.commodity-futures-expiry-pill #commodity-futures-expiry-slot{display:inline-flex;min-width:0;max-width:150px;overflow:hidden;}
-.commodity-futures-expiry-pill #commodity-futures-expiry{max-width:150px;font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;color:var(--text-primary);background:transparent;border:0;padding:0 14px 0 0;}
-.commodity-futures-expiry-pill #commodity-futures-expiry:focus{color:var(--info);}
+.commodity-topbar-contract-slot{display:inline-flex;min-width:0;align-items:baseline;}
+.commodity-topbar-contract-slot #commodity-futures-expiry{min-width:0;max-width:230px;font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:400;color:var(--text-secondary);background:transparent;border:0;padding:0 16px 0 0;}
+.commodity-topbar-contract-slot #commodity-futures-expiry:focus{color:var(--info);outline:none;}
 @media(max-width:680px){
   .commodity-topbar .top-bar-left{align-items:flex-start;flex-wrap:wrap;}
   .commodity-topbar-quote{flex:1 1 auto;}
@@ -93,17 +92,6 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
   background:var(--bg-1);
   border:1px solid var(--border);
   border-radius:var(--radius);
-}
-
-.commodity-price-contract{
-  color:var(--text-tertiary);
-  font-size:var(--fs-xs);
-}
-
-.commodity-price-contract b{
-  color:var(--text-secondary);
-  font-family:var(--font-mono);
-  font-weight:600;
 }
 
 .commodity-price-value{
