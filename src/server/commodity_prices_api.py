@@ -42,6 +42,30 @@ COMMODITY_NEWS_TERMS = {
 }
 GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
 
+# Providers whose APIs cannot serve MCX data at all. Their commodity
+# adapter stubs always return None, which would otherwise surface as a
+# misleading 404 "no live quote" — report the real limitation instead.
+_MCX_UNSUPPORTED_PROVIDERS = {
+    "BREEZE": "ICICI Breeze",
+}
+
+
+def _mcx_unsupported_response(provider_name: str):
+    label = _MCX_UNSUPPORTED_PROVIDERS.get(provider_name)
+    if label is None:
+        return None
+    return web.json_response(
+        {
+            "error": (
+                f"{label} does not provide MCX market data. Switch the "
+                "market-data provider to SMARTAPI, UPSTOX, or KOTAK for "
+                "commodities."
+            ),
+            "provider": provider_name,
+        },
+        status=501,
+    )
+
 
 class CommodityPricesApi:
     _HISTORY_WINDOW_SECONDS = 300
@@ -288,6 +312,9 @@ class CommodityPricesApi:
         provider = self._market_data()
         get_quote = getattr(provider, "get_commodity_futures_quote", None)
         provider_name = self._active_provider()
+        unsupported = _mcx_unsupported_response(provider_name)
+        if unsupported is not None:
+            return unsupported
         if not callable(get_quote):
             return web.json_response(
                 {
@@ -330,6 +357,9 @@ class CommodityPricesApi:
         get_expiries = getattr(provider, "get_commodity_option_expiries", None)
         get_chain = getattr(provider, "get_commodity_option_chain", None)
         provider_name = self._active_provider()
+        unsupported = _mcx_unsupported_response(provider_name)
+        if unsupported is not None:
+            return unsupported
         if not callable(get_expiries) or not callable(get_chain):
             return web.json_response(
                 {

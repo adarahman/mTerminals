@@ -199,3 +199,35 @@ def test_commodity_option_chain_rejects_unavailable_expiry():
     assert json.loads(response.text) == {
         "error": "Expiry is not available for this commodity."
     }
+
+
+def test_commodity_quote_reports_mcx_unsupported_provider():
+    provider = _Provider({"LTP": 1})
+    api = CommodityPricesApi(
+        market_data=lambda: provider,
+        active_provider=lambda: "BREEZE",
+    )
+
+    response = asyncio.run(api.quote(_request()))
+
+    assert response.status == 501
+    payload = json.loads(response.text)
+    assert payload["provider"] == "BREEZE"
+    assert "does not provide MCX market data" in payload["error"]
+    assert provider.requested == []
+
+
+def test_commodity_option_chain_reports_mcx_unsupported_provider():
+    provider = _Provider(expiries=["31DEC2099"])
+    api = CommodityPricesApi(
+        market_data=lambda: provider,
+        active_provider=lambda: "BREEZE",
+    )
+
+    response = asyncio.run(api.option_chain(_request()))
+
+    assert response.status == 501
+    payload = json.loads(response.text)
+    assert payload["provider"] == "BREEZE"
+    assert "does not provide MCX market data" in payload["error"]
+    assert provider.requested == []
