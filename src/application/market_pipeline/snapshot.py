@@ -131,12 +131,14 @@ class AnalyticsSnapshotService:
         if runtime_config.symbol == "NIFTY":
             from application.cas_indicative import get_nifty_cas_indicative
 
-            context["casIndicative"] = get_nifty_cas_indicative(indices)
+            context["casIndicative"] = get_nifty_cas_indicative(
+                indices, all_indices
+            )
         else:
             context["casIndicative"] = {
                 "status": "unavailable",
                 "value": None,
-                "source": "Kotak Neo CAS IEP",
+                "source": "CAS indicative",
                 "coverage": {"available": 0, "total": 0},
                 "coveragePct": 0.0,
             }

@@ -192,6 +192,33 @@ def _positive_number(value) -> float | None:
     return number if math.isfinite(number) and number > 0 else None
 
 
+def _broker_cas_quote(broker_quotes) -> float | None:
+    """NIFTY price broadcast by the active market-data provider.
+
+    During the CAS window exchanges disseminate the indicative index value
+    in place of the regular last price, so the broker's index quote ltp is
+    already the indicative close — no constituent math required.
+    """
+    for row in broker_quotes or []:
+        if str(row.get("Symbol", "")).strip().upper() != "NIFTY":
+            continue
+        for key in ("Last Price", "ltp", "last_price"):
+            value = _positive_number(row.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _cas_source_label() -> str:
+    try:
+        from brokers.market_data_registry import get_active_provider
+
+        provider = get_active_provider()
+    except Exception:
+        provider = ""
+    return f"{provider} CAS indicative" if provider else "Broker CAS indicative"
+
+
 def _unavailable_cas(
     now: datetime,
     available: int = 0,
@@ -199,13 +226,14 @@ def _unavailable_cas(
     coverage: float = 0.0,
     *,
     reason: str = "insufficient_iep_coverage",
+    source: str = "Kotak Neo CAS IEP",
 ) -> dict:
     return {
         "status": "unavailable",
         "reason": reason,
         "value": None,
         "asOf": now.isoformat(timespec="seconds"),
-        "source": "Kotak Neo CAS IEP",
+        "source": source,
         "coverage": {"available": available, "total": total},
         "coveragePct": round(coverage * 100, 1),
     }
@@ -262,10 +290,22 @@ class NiftyCASFeed:
         self._stream = None
         self._stop = threading.Event()
 
-    def indicative(self, rows) -> dict:
+    def indicative(self, rows, broker_quotes=None) -> dict:
         now = datetime.now(_IST)
         if not (_CAS_START <= now.time() < _CAS_END):
-            return _unavailable_cas(now, reason="outside_cas_window")
+            return _unavailable_cas(
+                now, reason="outside_cas_window", source="CAS indicative"
+            )
+        broker_value = _broker_cas_quote(broker_quotes)
+        if broker_value is not None:
+            return {
+                "status": "live",
+                "value": round(broker_value, 2),
+                "asOf": now.isoformat(timespec="seconds"),
+                "source": _cas_source_label(),
+                "coverage": {"available": 1, "total": 1},
+                "coveragePct": 100.0,
+            }
         with self._lock:
             prices = dict(self._prices)
         return compute_nifty_cas(rows, prices, now=now)
@@ -404,10 +444,10 @@ class NiftyCASFeed:
 _service = NiftyCASFeed()
 
 
-def get_nifty_cas_indicative(rows) -> dict:
+def get_nifty_cas_indicative(rows, broker_quotes=None) -> dict:
     if hasattr(rows, "to_dict"):
         rows = rows.to_dict("records")
-    return _service.indicative(rows)
+    return _service.indicative(rows, broker_quotes)
 
 
 def start_nifty_cas_feed() -> None:

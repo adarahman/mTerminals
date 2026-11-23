@@ -291,8 +291,8 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
         </span>`:''}
         ${casVisible ? `
         <span class="cas-indicative${casLive ? '' : ' cas-unavailable'}" title="${casLive
-          ? `Kotak Neo CAS IEP · ${escapeHtml(String(cas.coveragePct ?? 0))}% constituent coverage · As of ${escapeHtml(String(cas.asOf || ''))}`
-          : `Kotak Neo CAS IEP unavailable · ${escapeHtml(casReason)}${cas.reason === 'outside_cas_window' ? '' : ` · ${escapeHtml(casCoverageLabel)} constituents`}`}">
+          ? `${escapeHtml(String(cas.source || 'CAS indicative'))}${Number(casCoverage.total) > 1 ? ` · ${escapeHtml(String(cas.coveragePct ?? 0))}% constituent coverage` : ''} · As of ${escapeHtml(String(cas.asOf || ''))}`
+          : `${escapeHtml(String(cas.source || 'CAS indicative'))} unavailable · ${escapeHtml(casReason)}${cas.reason === 'outside_cas_window' ? '' : ` · ${escapeHtml(casCoverageLabel)} constituents`}`}">
           CAS <strong>${casLive ? Number(cas.value).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</strong>
           <small>${casLive ? escapeHtml(String(cas.asOf || '').slice(11, 16)) : cas.reason === 'outside_cas_window' ? 'inactive' : escapeHtml(casCoverageLabel)}</small>
         </span>` : ''}

@@ -1,6 +1,8 @@
 from datetime import datetime
 
+import application.cas_indicative as cas_module
 from application.cas_indicative import (
+    _broker_cas_quote,
     compute_nifty_cas,
     extract_indicative_closes,
     parse_cash_scrip_master,
@@ -90,3 +92,49 @@ def test_cas_index_rejects_stale_ieps():
 
     assert result["status"] == "unavailable"
     assert result["coverage"]["available"] == 0
+
+
+def test_broker_cas_quote_reads_nifty_price_from_index_quotes():
+    quotes = [
+        {"Symbol": "BANKNIFTY", "Last Price": 57000.0},
+        {"Symbol": "NIFTY", "Last Price": 24500.5},
+    ]
+
+    assert _broker_cas_quote(quotes) == 24500.5
+    assert _broker_cas_quote([{"Symbol": "NIFTY", "ltp": "24600.25"}]) == 24600.25
+    assert _broker_cas_quote([{"Symbol": "NIFTY", "Last Price": 0}]) is None
+    assert _broker_cas_quote([{"Symbol": "BANKNIFTY", "Last Price": 57000.0}]) is None
+    assert _broker_cas_quote(None) is None
+
+
+def test_indicative_prefers_broker_quote_during_cas_window(monkeypatch):
+    class FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 6, 11, 15, 22, tzinfo=cas_module._IST)
+
+    monkeypatch.setattr(cas_module, "datetime", FakeDateTime)
+
+    result = cas_module._service.indicative(
+        [], [{"Symbol": "NIFTY", "Last Price": 25100.0}]
+    )
+
+    assert result["status"] == "live"
+    assert result["value"] == 25100.0
+    assert "CAS indicative" in result["source"]
+
+
+def test_indicative_stays_unavailable_outside_cas_window(monkeypatch):
+    class FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 6, 11, 10, 0, tzinfo=cas_module._IST)
+
+    monkeypatch.setattr(cas_module, "datetime", FakeDateTime)
+
+    result = cas_module._service.indicative(
+        [], [{"Symbol": "NIFTY", "Last Price": 25100.0}]
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "outside_cas_window"

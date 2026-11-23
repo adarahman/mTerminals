@@ -430,7 +430,7 @@ def export_dashboard_json(
         "casIndicative": ctx_dict.get("casIndicative") or {
             "status": "unavailable",
             "value": None,
-            "source": "Kotak Neo CAS IEP",
+            "source": "CAS indicative",
             "coverage": {"available": 0, "total": 0},
             "coveragePct": 0.0,
         },
