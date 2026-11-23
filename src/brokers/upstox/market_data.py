@@ -332,10 +332,19 @@ class UpstoxMarketData:
 
         rows = _load_instrument_dump("MCX")
         symbol = str(underlying or "").strip().upper()
+        # Upstox's `name` is the group, not the contract: GOLD, GOLDM,
+        # GOLDPETAL, GOLDTEN and GOLDGUINEA all share name="GOLD". The
+        # trading_symbol prefix is the only reliable discriminator, so
+        # match "GOLD " exactly — never a bare substring, which would let
+        # GOLDM/GOLDPETAL rows leak into GOLD's chain.
+        prefix = f"{symbol} "
         accepted = set(option_types) if option_types else None
         return [
             row for row in rows
-            if str(row.get("name") or "").strip().upper() == symbol
+            if str(row.get("trading_symbol") or row.get("tradingsymbol") or "")
+            .strip()
+            .upper()
+            .startswith(prefix)
             and (accepted is None or str(row.get("instrument_type") or "").upper() in accepted)
         ]
 
