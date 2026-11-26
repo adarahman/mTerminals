@@ -98,6 +98,7 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
   // updates) instead of rebuilding every tick and racing to patch `open`
   // back on afterward.
   this.refreshDecisionBoxGuarded(d);
+  this.patchMomentumStats(d);
   const planEl = document.getElementById('decision-sticky-plan');
   if (planEl) planEl.outerHTML = this.renderDecisionActionBarHtml(d);
   const chartWorkspace = document.getElementById('price-chart-modal');
@@ -235,6 +236,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // rendered inline inside renderTopBarHtml() itself, so no separate patch
   // call is needed here.
   h+=this.renderTopBarHtml(d, isBear);
+  h+=this.renderMomentumStatsHtml(d);
 
   // The full decision owns the first view; the compact action summary
   // follows it and only becomes sticky once the user scrolls past the detail.

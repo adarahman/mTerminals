@@ -1,8 +1,11 @@
 """Broker-neutral market-data adapter for Angel One SmartAPI."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_float(value) -> Optional[float]:
@@ -10,6 +13,36 @@ def _safe_float(value) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _quote_is_foreign_commodity(quote, underlying):
+    """True when a getMarketData row clearly belongs to another MCX commodity.
+
+    Angel's batch endpoint intermittently returns a row for a different
+    instrument while still keying it under the requested symbolToken
+    (observed: SILVER ~142k quotes surfacing on a NATURALGAS ~340
+    request). The row's own tradingSymbol/symbol still names the true
+    instrument, so a different commodity name there is positive evidence
+    of a bad row — reject it rather than letting a foreign price reach
+    the dashboard. Anything unrecognized is left alone; the API-layer
+    bad-tick guards cover residual cases.
+    """
+    from brokers.smartapi.instruments import _COMMODITY_UNDERLYINGS
+
+    candidate = str(
+        quote.get("tradingSymbol") or quote.get("symbol") or ""
+    ).strip().upper()
+    if not candidate:
+        return False
+    name = str(underlying or "").strip().upper()
+    for other in _COMMODITY_UNDERLYINGS:
+        if other == name or not candidate.startswith(other):
+            continue
+        # Name must be followed by a non-letter (digit/space) so GOLD
+        # rows don't flag GOLDM and vice versa.
+        if len(candidate) == len(other) or not candidate[len(other)].isalpha():
+            return True
+    return False
 
 
 def _safe_positive_int(value) -> Optional[int]:
@@ -114,6 +147,13 @@ class SmartApiMarketData:
             "MCX", [(future.get("symbol"), token)], mode="FULL"
         )
         quote = quotes.get(token) if quotes else None
+        if quote and _quote_is_foreign_commodity(quote, underlying):
+            logger.warning(
+                "[smartapi] rejecting foreign MCX quote for %s: "
+                "token=%s tradingSymbol=%s",
+                future.get("symbol"), token, quote.get("tradingSymbol"),
+            )
+            quote = None
         if not quote:
             return None
         ltp = _safe_float(quote.get("ltp"))
@@ -178,6 +218,14 @@ class SmartApiMarketData:
         for contract in contracts:
             quote = quotes.get(str(contract["token"]))
             if not quote:
+                continue
+            if _quote_is_foreign_commodity(quote, underlying):
+                logger.warning(
+                    "[smartapi] rejecting foreign MCX option quote: "
+                    "contract=%s token=%s tradingSymbol=%s",
+                    contract.get("symbol"), contract.get("token"),
+                    quote.get("tradingSymbol"),
+                )
                 continue
             rows.append(
                 {

@@ -49,7 +49,7 @@ def test_commodity_quote_returns_provider_and_market_quote():
         "symbol": "CRUDEOIL",
         "quote": {
             **quote,
-            "FiveMinute": {"available": False, "window_minutes": 5},
+            "FiveMinute": {"available": False, "window_minutes": 1},
         },
     }
     assert provider.requested == [("CRUDEOIL", "NEAR")]
@@ -69,6 +69,92 @@ def test_commodity_quote_selects_requested_future_slot():
     assert response.status == 200
     assert json.loads(response.text)["quote"]["Expiry"] == "31-Jul-2026"
     assert provider.requested == [("CRUDEOIL", "NEXT")]
+
+
+def _quote(ltp, contract="CRUDEOILFUT"):
+    return {"Contract": contract, "LTP": ltp}
+
+
+def _quote_ltp(response):
+    return json.loads(response.text)["quote"]["LTP"]
+
+
+def test_commodity_quote_holds_last_good_on_single_poll_spike():
+    provider = _Provider(_quote(100.0))
+    api = CommodityPricesApi(
+        market_data=lambda: provider, active_provider=lambda: "SMARTAPI"
+    )
+    request = _request()
+
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.0
+
+    # +30% in one ~1s poll — a bad tick, not a trade. Held at last good.
+    provider.quote = _quote(130.0)
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.0
+
+    # Back to normal — still consistent with last good.
+    provider.quote = _quote(100.5)
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.5
+
+
+def test_commodity_quote_accepts_persistent_new_level_after_confirm():
+    provider = _Provider(_quote(100.0))
+    api = CommodityPricesApi(
+        market_data=lambda: provider, active_provider=lambda: "SMARTAPI"
+    )
+    request = _request()
+
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.0
+
+    # A genuine gap persists across polls — accepted after ~3 confirms so
+    # real fast moves are only delayed, never frozen out.
+    provider.quote = _quote(106.0)
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.0
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.0
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 106.0
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 106.0
+
+
+def test_commodity_quote_rejects_absurd_ltp_vs_prev_close_on_first_tick():
+    # No last-good baseline yet — PrevClose sanity still catches a print
+    # like 143624 against a ~345 contract.
+    provider = _Provider({"Contract": "NATGASFUT", "LTP": 143624.0, "PrevClose": 345.0})
+    api = CommodityPricesApi(
+        market_data=lambda: provider, active_provider=lambda: "SMARTAPI"
+    )
+
+    response = asyncio.run(api.quote(_request("NATURALGAS")))
+
+    # No baseline to fall back to — quote passes through, but the
+    # frontend PrevClose guard rejects it for display.
+    assert _quote_ltp(response) == 143624.0
+
+
+def test_commodity_quote_holds_absurd_ltp_when_baseline_exists():
+    provider = _Provider(_quote(345.0, "NATGASFUT"))
+    api = CommodityPricesApi(
+        market_data=lambda: provider, active_provider=lambda: "SMARTAPI"
+    )
+    request = _request("NATURALGAS")
+
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 345.0
+
+    provider.quote = {"Contract": "NATGASFUT", "LTP": 143624.0, "PrevClose": 344.0}
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 345.0
+
+
+def test_commodity_quote_rebaselines_on_contract_change():
+    provider = _Provider(_quote(100.0, "CRUDEOILFEBFUT"))
+    api = CommodityPricesApi(
+        market_data=lambda: provider, active_provider=lambda: "SMARTAPI"
+    )
+    request = _request()
+
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 100.0
+
+    # Roll to a differently-priced contract — not a "spike", new baseline.
+    provider.quote = _quote(250.0, "CRUDEOILMARFUT")
+    assert _quote_ltp(asyncio.run(api.quote(request))) == 250.0
 
 
 def test_commodity_quote_rejects_invalid_future_slot():

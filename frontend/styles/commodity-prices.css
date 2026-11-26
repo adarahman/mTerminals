@@ -152,6 +152,12 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 
 .commodity-price-details i{font-style:normal;}
 
+/* Equity twin of the commodity stats card — same markup/classes, pulled
+   tight under the (sticky) equity top bar. The card class is excluded
+   from the #dashboard child hide-rule above, so hide this id explicitly. */
+.equity-momentum-stats{margin-top:-5px;}
+body.commodity-mode .equity-momentum-stats{display:none!important;}
+
 .commodity-news{
   margin-top:12px;
   background:var(--bg-1);

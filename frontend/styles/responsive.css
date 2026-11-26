@@ -24,6 +24,10 @@
   .three-col{grid-template-columns:1fr;}
   .exec-grid .exec-card.c-movers{grid-column:auto;}
   .decision-flow{grid-template-columns:1fr 1fr;row-gap:16px;}
+  /* Key Levels moves to the right column here — mirror that in the
+     verdict header so the mini chart stays above it. */
+  .verdict-top{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .verdict-top>.verdict-conf{grid-column:1/-1;justify-self:end;}
   .short-horizon-grid{
     grid-template-columns:repeat(3,minmax(0,1fr));
     row-gap:14px;
@@ -41,6 +45,8 @@
   .zone-divider{align-items:flex-start;gap:2px;}
   .zone-divider-title,.zone-divider-subtitle{width:100%;}
   .decision-flow{grid-template-columns:1fr;}
+  .verdict-top{grid-template-columns:1fr;}
+  .verdict-top>.verdict-conf{grid-column:auto;justify-self:start;}
   .short-horizon-head{
     gap:14px;
   }

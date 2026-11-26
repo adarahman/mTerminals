@@ -116,6 +116,62 @@ _INDEX_QUOTES = IndexQuoteCache(
 # Public quote functions
 # ---------------------------------------------------------------------
 
+# Angel's getMarketData intermittently returns a row for a different
+# instrument under the requested token (observed: foreign-commodity
+# ~142k quotes on a ~340 request). _BATCH_CACHE is tick-scoped, so one
+# bad row flashes on the dashboard for exactly one poll. Guard each
+# symbol's LTP against the last accepted quote: a >5% jump within one
+# poll cannot be a real trade, but a persistent new level is accepted
+# after 3 consecutive polls so genuine gaps are never suppressed.
+_INDEX_LAST_GOOD: dict[str, dict] = {}
+_INDEX_TICK_CANDIDATES: dict[str, dict] = {}
+_INDEX_MAX_TICK_PCT = 5.0
+_INDEX_CONFIRM_POLLS = 3
+
+
+def _guard_index_quotes(quotes):
+    accepted = {}
+    for symbol, quote in (quotes or {}).items():
+        ltp = safe_float((quote or {}).get("ltp"))
+        last = _INDEX_LAST_GOOD.get(symbol)
+        if ltp is None or ltp <= 0:
+            if last is not None:
+                accepted[symbol] = last
+            continue
+        if last is not None:
+            last_ltp = safe_float(last.get("ltp"))
+            deviates = (
+                last_ltp is not None
+                and last_ltp > 0
+                and abs(ltp - last_ltp) / last_ltp * 100.0
+                > _INDEX_MAX_TICK_PCT
+            )
+            if deviates:
+                candidate = _INDEX_TICK_CANDIDATES.get(symbol) or {}
+                level = candidate.get("level")
+                # A different candidate level restarts the count — only
+                # the SAME new price persisting counts as confirmation.
+                count = (
+                    candidate.get("count", 0) + 1
+                    if level is not None and abs(ltp - level) / level * 100.0 <= 1.0
+                    else 1
+                )
+                if count >= _INDEX_CONFIRM_POLLS:
+                    _INDEX_TICK_CANDIDATES.pop(symbol, None)
+                    _INDEX_LAST_GOOD[symbol] = quote
+                    accepted[symbol] = quote
+                else:
+                    _INDEX_TICK_CANDIDATES[symbol] = {
+                        "quote": quote, "count": count, "level":ltp,
+                    }
+                    accepted[symbol] = last
+                continue
+        _INDEX_TICK_CANDIDATES.pop(symbol, None)
+        _INDEX_LAST_GOOD[symbol] = quote
+        accepted[symbol] = quote
+    return accepted
+
+
 def fetch_all_pills_and_vix_batched():
     """
     Fetch dashboard index pills and India VIX.
@@ -167,7 +223,9 @@ def _fetch_all_pills_and_vix_batched_locked():
             symbol_token_pairs,
             **provider_options,
         )
-        quotes.update(_quotes_by_symbol(symbol_token_pairs, by_token))
+        quotes.update(
+            _guard_index_quotes(_quotes_by_symbol(symbol_token_pairs, by_token))
+        )
 
     # An empty/failed response must not erase the last known-good snapshot.
     if quotes:

@@ -18,6 +18,290 @@
 // App()`). See DashboardPro.html script order.
 // ============================================================
 
+// ============================================================
+// Bad-tick guard for the merged market state's spot price.
+//
+// Angel's feed intermittently emits a foreign-instrument print for a
+// single message (observed live: ~142k Silver quotes surfacing on a
+// ~340 Natural Gas request, ~154k variants, each flashing for ~1s).
+// wsState.spot feeds EVERYTHING downstream — chart ticks, both modal
+// right panes, the top bar, decision engine, chain ATM — so it is
+// sanitized once here at ingest rather than in each consumer.
+//
+// A >5% jump within one message cannot be a real trade, but a genuine
+// gap must not be suppressed forever: a deviating level is only
+// accepted after persisting ~2.5s at the same price (±1%). Foreign
+// prints vary every message, so they can never satisfy that — they are
+// rejected indefinitely while the last good quote keeps rendering.
+// ============================================================
+const _SPOT_MAX_JUMP_PCT = 5.0;
+const _SPOT_CONFIRM_MS = 2500;
+// spot feeds the chart/top bar/right-pane primary card; future feeds the
+// right-pane Futures card, the top-bar futures element and the chain
+// futures meta — both arrive in the same WS payload and both can carry
+// a foreign-instrument print, so both get the same guard. auxKeys are
+// the derived fields restored alongside so they never disagree with the
+// price they were computed from.
+const _GUARDED_PRICE_FIELDS = {
+  spot:   { aux: ['spotChange', 'spotChgPct'] },
+  future: { aux: ['futureChange', 'basis'] },
+  // Session OHLC ride the same payload and feed the mini-chart caption +
+  // day-range band. They are sticky (a real new high repeats every
+  // message, so it passes the persistence confirm) while foreign prints
+  // vary and get clamped back to the last good session value.
+  dayOpen: { aux: [] },
+  dayHigh: { aux: [] },
+  dayLow:  { aux: [] },
+};
+const _lastGoodPrice = {};    // field -> {symbol, value, aux:{...}}
+const _priceCandidates = {};  // field -> {symbol, value, firstSeen}
+
+function _guardPriceTick(state, field, auxKeys){
+  const symbol = state.symbol ? String(state.symbol).toUpperCase() : '';
+  const value = Number(state[field]);
+  if(!symbol || !Number.isFinite(value) || value <= 0) return;
+  const last = (_lastGoodPrice[field]
+    && _lastGoodPrice[field].symbol === symbol)
+    ? _lastGoodPrice[field] : null;
+  const deviates = !!last
+    && Math.abs(value - last.value) / last.value * 100 > _SPOT_MAX_JUMP_PCT;
+  const aux = {};
+  auxKeys.forEach(k => { aux[k] = state[k]; });
+  if(!deviates){
+    _priceCandidates[field] = null;
+    _lastGoodPrice[field] = {symbol, value, aux};
+    return;
+  }
+  const now = Date.now();
+  const candidate = _priceCandidates[field];
+  const sameLevel = !!candidate
+    && candidate.symbol === symbol
+    && Math.abs(value - candidate.value) / candidate.value * 100 <= 1.0;
+  if(sameLevel && now - candidate.firstSeen >= _SPOT_CONFIRM_MS){
+    // The new level held for seconds — a real gap, accept it.
+    _priceCandidates[field] = null;
+    _lastGoodPrice[field] = {symbol, value, aux};
+    return;
+  }
+  _priceCandidates[field] = sameLevel
+    ? candidate
+    : {symbol, value, firstSeen: now};
+  // Serve the last good quote instead of the bad print.
+  state[field] = last.value;
+  auxKeys.forEach(k => { state[k] = last.aux[k]; });
+}
+
+function _sanitizeSpotTick(state){
+  if(!state) return;
+  Object.keys(_GUARDED_PRICE_FIELDS).forEach(field => {
+    const {aux} = _GUARDED_PRICE_FIELDS[field];
+    _guardPriceTick(state, field, aux);
+  });
+  // Index pills (allIndices) ride the same WS payload and the same
+  // foreign-row exposure — guard each pill's Last Price the same way.
+  if(Array.isArray(state.allIndices)){
+    state.allIndices.forEach(entry => _guardIndexPillTick(entry));
+  }
+  // indexQuotes rides its own WS message type ({NIFTY:{spot,spotChgPct}})
+  // and feeds the non-active index pills — same foreign-row exposure.
+  if(state.indexQuotes && typeof state.indexQuotes === 'object'){
+    _guardIndexQuotesMap(state.indexQuotes);
+  }
+  // providerIndicativeQuotes ({symbol, quotes:{PROVIDER:{price}}}) feeds
+  // the per-provider indicative prices in the chain panel.
+  if(state.providerIndicativeQuotes && typeof state.providerIndicativeQuotes === 'object'){
+    _guardProviderQuotes(state.providerIndicativeQuotes);
+  }
+  // casIndicative.value is the CAS aggregate price shown in the top-bar
+  // badge — a computed price that can carry the same foreign prints.
+  const cas = state.casIndicative;
+  if(cas && typeof cas === 'object' && cas.status === 'live'){
+    const casValue = Number(cas.value);
+    if(Number.isFinite(casValue) && casValue > 0){
+      const spotRef = Number(state.spot);
+      // CAS legitimately tracks spot within a fraction of a percent — a
+      // >5% gap while spot is sane means the CAS payload is foreign.
+      if(Number.isFinite(spotRef) && spotRef > 0
+          && Math.abs(casValue - spotRef) / spotRef * 100 > 5){
+        cas.value = null;
+        cas.status = 'unavailable';
+        cas.reason = 'guarded_foreign_print';
+      }
+    }
+  }
+  // Option-chain strike LTPs arrive as per-tick deltas and can carry the
+  // same foreign prints. A >10x jump on one leg is never a real option
+  // tick — restore the last good print for that strike/side.
+  if(Array.isArray(state.chain) && state.chain.length){
+    _guardChainLtpTicks(state);
+  }
+}
+
+// key: `${symbol}|${expiry}|${strike}|${side}` -> last accepted LTP
+const _lastGoodChainLtp = {};
+let _chainGuardKey = null; // `${symbol}|${expiry}` the map belongs to
+
+function _guardChainLtpTicks(state){
+  const symbol = String(state.symbol || '').toUpperCase();
+  const expiry = String(state.expiry || '').toUpperCase();
+  const scope = `${symbol}|${expiry}`;
+  if(scope !== _chainGuardKey){
+    for(const k in _lastGoodChainLtp) delete _lastGoodChainLtp[k];
+    _chainGuardKey = scope;
+  }
+  state.chain.forEach(row => {
+    if(!row || typeof row !== 'object') return;
+    const strike = Number(row.strike);
+    if(!Number.isFinite(strike)) return;
+    ['ceLTP', 'peLTP'].forEach(field => {
+      const side = field === 'ceLTP' ? 'CE' : 'PE';
+      const ltp = Number(row[field]);
+      if(!Number.isFinite(ltp)) return;
+      const key = `${scope}|${strike}|${side}`;
+      const last = _lastGoodChainLtp[key];
+      // Stateless bound — no baseline needed: a call premium can never
+      // exceed the underlying and a put premium can never exceed its
+      // strike. A foreign FUTURES print (~143k) keyed as an option row
+      // fails this on first sight, before any last-good exists.
+      const spotRef = Number(state.spot);
+      if(ltp > 0 && Number.isFinite(spotRef) && spotRef > 0){
+        const bound = side === 'CE' ? spotRef * 1.2 : strike * 1.2;
+        if(ltp > bound){
+          row[field] = last > 0 ? last : null;
+          return;
+        }
+      }
+      // Zero/absent prints are legitimate for illiquid strikes — only a
+      // positive print deviating >10x from the last good one is a bad tick.
+      if(ltp > 0 && last > 0 && (ltp > last * 10 || ltp < last / 10)){
+        row[field] = last;
+        return;
+      }
+      _lastGoodChainLtp[key] = ltp;
+    });
+  });
+}
+
+const _lastGoodPill = {};      // symbol -> {value, change, pct}
+const _pillCandidates = {};    // symbol -> {value, firstSeen}
+
+function _guardIndexPillTick(entry){
+  if(!entry || typeof entry !== 'object') return;
+  const symbol = String(entry.BackendSymbol || entry.Symbol || '')
+    .trim().toUpperCase();
+  const value = Number(entry['Last Price']);
+  if(!symbol || !Number.isFinite(value) || value <= 0) return;
+  const last = _lastGoodPill[symbol] || null;
+  const deviates = !!last
+    && Math.abs(value - last.value) / last.value * 100 > _SPOT_MAX_JUMP_PCT;
+  if(!deviates){
+    _pillCandidates[symbol] = null;
+    _lastGoodPill[symbol] = {
+      value,
+      change: entry['Change'],
+      pct: entry['% Change'],
+    };
+    return;
+  }
+  const now = Date.now();
+  const candidate = _pillCandidates[symbol];
+  const sameLevel = !!candidate
+    && Math.abs(value - candidate.value) / candidate.value * 100 <= 1.0;
+  if(sameLevel && now - candidate.firstSeen >= _SPOT_CONFIRM_MS){
+    _pillCandidates[symbol] = null;
+    _lastGoodPill[symbol] = {
+      value,
+      change: entry['Change'],
+      pct: entry['% Change'],
+    };
+    return;
+  }
+  _pillCandidates[symbol] = sameLevel
+    ? candidate
+    : {value, firstSeen: now};
+  entry['Last Price'] = last.value;
+  entry['Change'] = last.change;
+  entry['% Change'] = last.pct;
+}
+
+// indexQuotes: {NIFTY:{spot,spotChgPct}, ...} — same last-good +
+// persistence-confirm pattern as the pill guard, keyed per index.
+const _lastGoodIndexQuote = {};   // symbol -> {spot, chgPct}
+const _indexQuoteCandidates = {}; // symbol -> {spot, firstSeen}
+
+function _guardIndexQuotesMap(map){
+  Object.keys(map).forEach(symbol => {
+    const entry = map[symbol];
+    if(!entry || typeof entry !== 'object') return;
+    const key = String(symbol).toUpperCase();
+    const value = Number(entry.spot);
+    if(!Number.isFinite(value) || value <= 0) return;
+    const last = _lastGoodIndexQuote[key] || null;
+    const deviates = !!last
+      && Math.abs(value - last.spot) / last.spot * 100 > _SPOT_MAX_JUMP_PCT;
+    if(!deviates){
+      _indexQuoteCandidates[key] = null;
+      _lastGoodIndexQuote[key] = {spot: value, chgPct: entry.spotChgPct};
+      return;
+    }
+    const now = Date.now();
+    const candidate = _indexQuoteCandidates[key];
+    const sameLevel = !!candidate
+      && Math.abs(value - candidate.spot) / candidate.spot * 100 <= 1.0;
+    if(sameLevel && now - candidate.firstSeen >= _SPOT_CONFIRM_MS){
+      _indexQuoteCandidates[key] = null;
+      _lastGoodIndexQuote[key] = {spot: value, chgPct: entry.spotChgPct};
+      return;
+    }
+    _indexQuoteCandidates[key] = sameLevel
+      ? candidate
+      : {spot: value, firstSeen: now};
+    entry.spot = last.spot;
+    entry.spotChgPct = last.chgPct;
+  });
+}
+
+// providerIndicativeQuotes: {symbol, quotes:{PROVIDER:{price,asOf}}} —
+// guard each provider's indicative price the same way, keyed
+// `${symbol}|${provider}`.
+const _lastGoodProviderQuote = {};
+const _providerQuoteCandidates = {};
+
+function _guardProviderQuotes(payload){
+  const quotes = payload.quotes;
+  if(!quotes || typeof quotes !== 'object') return;
+  const symbol = String(payload.symbol || '').toUpperCase();
+  if(!symbol) return;
+  Object.keys(quotes).forEach(provider => {
+    const entry = quotes[provider];
+    if(!entry || typeof entry !== 'object') return;
+    const value = Number(entry.price);
+    if(!Number.isFinite(value) || value <= 0) return;
+    const key = `${symbol}|${String(provider).toUpperCase()}`;
+    const last = _lastGoodProviderQuote[key] || null;
+    const deviates = !!last
+      && Math.abs(value - last.price) / last.price * 100 > _SPOT_MAX_JUMP_PCT;
+    if(!deviates){
+      _providerQuoteCandidates[key] = null;
+      _lastGoodProviderQuote[key] = {price: value};
+      return;
+    }
+    const now = Date.now();
+    const candidate = _providerQuoteCandidates[key];
+    const sameLevel = !!candidate
+      && Math.abs(value - candidate.price) / candidate.price * 100 <= 1.0;
+    if(sameLevel && now - candidate.firstSeen >= _SPOT_CONFIRM_MS){
+      _providerQuoteCandidates[key] = null;
+      _lastGoodProviderQuote[key] = {price: value};
+      return;
+    }
+    _providerQuoteCandidates[key] = sameLevel
+      ? candidate
+      : {price: value, firstSeen: now};
+    entry.price = last.price;
+  });
+}
+
 class DataService {
   constructor() {
     this.fsaHandle = null;
@@ -331,6 +615,7 @@ class DataService {
   // emitting 'change') — this function is now pure side-effects: no more
   // branching on msg.type here, that lives in WSManager.
   updateDashboard(state, change){
+  _sanitizeSpotTick(state);
   AppState.wsState = state;
   if(!AppState.wsState) return;
   const messageType = change && change.messageType;

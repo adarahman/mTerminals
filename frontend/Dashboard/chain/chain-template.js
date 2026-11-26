@@ -432,7 +432,21 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       this._miniChartHistoryRetryAt = 0;
       this._miniChartHydrating = false;
     }
-    const spotNum = Number(d.spot);
+    let spotNum = Number(d.spot);
+    // Bad-tick guard: the median of the last 10 history points is a robust
+    // reference — a single bad print (seen live: NATURALGAS candle at
+    // ~146,000 vs ~345) can't poison it the way a last-point comparison
+    // can. A live price >50% off that median is a feed glitch: fall back
+    // to the median so it can't write a spike candle OR blind the
+    // proximity filter that validates history against livePrice.
+    const histNow = Array.isArray(this._miniChartHistory) ? this._miniChartHistory : [];
+    const recentPx = histNow.slice(-10).map(p => Number(p.p))
+      .filter(v => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+    const refMedian = recentPx.length ? recentPx[Math.floor(recentPx.length / 2)] : null;
+    if (refMedian > 0 && Number.isFinite(spotNum) && spotNum > 0
+        && Math.abs(spotNum - refMedian) / refMedian > 0.5) {
+      spotNum = refMedian;
+    }
     const priceChartEngine = window.priceChart;
     const hasCommodityReference = isCommodity && Number.isFinite(spotNum) && spotNum > 0;
     if (hasCommodityReference && this._miniChartHistoryNeedsNormalization
@@ -598,7 +612,16 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     const istDayKey = t => new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(t));
     const histAll = Array.isArray(this._miniChartHistory) ? this._miniChartHistory : [];
     const lastDayKey = histAll.length ? istDayKey(histAll[histAll.length - 1].t) : null;
-    const dayPts = lastDayKey ? histAll.filter(p => istDayKey(p.t) === lastDayKey) : [];
+    // Drop bad prints (e.g. the ~146,000 NATURALGAS candle vs ~345) before
+    // deriving day range — same 10x proximity rule the chart filter uses.
+    const nearSpot = p => {
+      if (!(spotNum > 0)) return true;
+      return [p.o, p.h, p.l, p.c, p.p].every(v => {
+        const n = Number(v);
+        return !Number.isFinite(n) || (n >= spotNum / 10 && n <= spotNum * 10);
+      });
+    };
+    const dayPts = lastDayKey ? histAll.filter(p => istDayKey(p.t) === lastDayKey && nearSpot(p)) : [];
     let dayRange = null;
     if (dayPts.length >= 2) {
       const dVal = (p, k) => Number.isFinite(p[k]) ? p[k] : p.p;
@@ -611,10 +634,16 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     }
     // Prefer the exchange's own session OHLC when the payload carries it
     // (commodity futures quote) — exact values beat candle-derived ones.
+    // Sanity-bound them against the trusted spot: a bad print can pollute
+    // the broker's session High/Low fields too (146641 recorded as the
+    // day's high), which would wreck both caption and chart scale.
     const payloadO = Number(d.dayOpen), payloadH = Number(d.dayHigh), payloadL = Number(d.dayLow);
-    if (Number.isFinite(payloadH) && Number.isFinite(payloadL) && payloadH > payloadL) {
+    const payloadSane = v => !(spotNum > 0)
+      || (Number.isFinite(v) && v >= spotNum / 10 && v <= spotNum * 10);
+    if (Number.isFinite(payloadH) && Number.isFinite(payloadL) && payloadH > payloadL
+        && payloadSane(payloadH) && payloadSane(payloadL)) {
       dayRange = {
-        open: payloadO > 0 ? payloadO : null,
+        open: payloadSane(payloadO) && payloadO > 0 ? payloadO : null,
         high: payloadH,
         low: payloadL,
       };
@@ -673,7 +702,17 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       const lows = pts.map(p => value(p, 'l'));
       const highs = pts.map(p => value(p, 'h'));
       const extent = robustPriceExtent([...lows, ...highs]);
-      const min = extent.min, max = extent.max;
+      let min = extent.min, max = extent.max;
+      // Keep the session key levels (the O/H/L caption) inside the visible
+      // span when they sit near the displayed window — the percentile
+      // trim or a wider day range can otherwise push them off-chart. A
+      // level farther than ~2x the window's own span is left out so it
+      // can't flatten the trace.
+      if (dayRange) {
+        const winSpan = Math.max(max - min, 1e-9);
+        if (dayRange.low >= min - winSpan * 2) min = Math.min(min, dayRange.low);
+        if (dayRange.high <= max + winSpan * 2) max = Math.max(max, dayRange.high);
+      }
       // Symmetric range around the live/key price (not the data midpoint),
       // widened ~10% so the trace doesn't hug the edges.
       const keyC = value(pts[pts.length - 1], 'c');
@@ -703,7 +742,13 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     } else {
       const vals = pts.map(p => p.p);
       const extent = robustPriceExtent(vals);
-      const min = extent.min, max = extent.max;
+      let min = extent.min, max = extent.max;
+      // Same key-level inclusion as candle mode — see comment above.
+      if (dayRange) {
+        const winSpan = Math.max(max - min, 1e-9);
+        if (dayRange.low >= min - winSpan * 2) min = Math.min(min, dayRange.low);
+        if (dayRange.high <= max + winSpan * 2) max = Math.max(max, dayRange.high);
+      }
       // Symmetric range around the latest price (the key level), widened
       // ~10% so the trace doesn't hug the edges. The half-range always
       // covers the full data extent, so nothing clips.
@@ -751,7 +796,7 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       <div id="verdict-mini-chart" class="verdict-mini-chart" ${chartTrigger}>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
         ${mcVolOiText ? `<div class="verdict-mini-chart-voi">${mcVolOiText}</div>` : ''}
-        ${dayRange ? `<div class="verdict-mini-chart-range">O ${rangeFmt(dayRange.open)} · H ${rangeFmt(dayRange.high)} · L ${rangeFmt(dayRange.low)}</div>` : ''}
+        ${dayRange ? `<div class="verdict-mini-chart-range">O <span class="ohlc-o">${rangeFmt(dayRange.open)}</span> · H <span class="ohlc-h">${rangeFmt(dayRange.high)}</span> · L <span class="ohlc-l">${rangeFmt(dayRange.low)}</span></div>` : ''}
       </div>`;
 };
 
@@ -763,6 +808,115 @@ ChainView.prototype.patchCommodityMiniChart = function(d) {
     template.innerHTML = this._buildMiniChartHtml(d).trim();
     const chart = template.content.firstElementChild;
     if (chart) current.replaceWith(chart);
+};
+
+// ── EQUITY 5-MINUTE MOMENTUM STRIP ──
+// Mirrors the commodity stats card under the top bar: 5m price move, 5m
+// OI change, 5m volume — sourced from data the equity payload already
+// carries (oiVelocity 5m block, per-strike ceVolChg/peVolChg) plus the
+// mini-chart history for the spot move. Reuses the commodity card classes
+// so both modes share one visual style; the row is a #dashboard child so
+// commodity mode's existing hide-rule keeps it out of the way there.
+ChainView.prototype._momentumStats = function(d) {
+    const stats = { priceMove: null, pricePct: null, oiChange: null, volChange: null };
+    // Market closed / holiday: candle history and snapshot diffs still
+    // produce numbers, but they measure the last session's tail — not a
+    // live 5-minute move. Report closed so the strip shows '—'.
+    const session = (window.AppState && AppState.feedState
+      && AppState.feedState.marketSession) || 'UNKNOWN';
+    if (session === 'MARKET_CLOSED' || session === 'HOLIDAY') {
+      stats.closed = true;
+      return stats;
+    }
+    const hist = Array.isArray(this._miniChartHistory) ? this._miniChartHistory : [];
+    if (hist.length >= 2) {
+      const last = hist[hist.length - 1];
+      const target = last.t - 5 * 60 * 1000;
+      let ref = null;
+      for (let i = hist.length - 2; i >= 0; i--) {
+        if (hist[i].t <= target) { ref = hist[i]; break; }
+      }
+      // History is bucketed by the price-chart interval. Accept only a
+      // reference about five minutes back — a 2-minute warmup and a
+      // 15m/1h/1d candle are not a 5-minute move.
+      if (ref) {
+        const span = last.t - ref.t;
+        if (span >= 4 * 60 * 1000 && span <= 7 * 60 * 1000
+            && Number.isFinite(last.p) && Number.isFinite(ref.p)) {
+          stats.priceMove = last.p - ref.p;
+          stats.pricePct = ref.p ? (stats.priceMove / ref.p) * 100 : null;
+        }
+      }
+    }
+    const vel5 = (Array.isArray(d.oiVelocity) ? d.oiVelocity : [])
+      .find(block => Number(block.window) === 5);
+    if (vel5 && Array.isArray(vel5.rows) && vel5.rows.length) {
+      stats.oiChange = vel5.rows.reduce(
+        (sum, row) => sum + (Number(row.ceDOI) || 0) + (Number(row.peDOI) || 0), 0
+      );
+    }
+    const chain = Array.isArray(d.chain) ? d.chain : [];
+    if (chain.length) {
+      stats.volChange = chain.reduce(
+        (sum, row) => sum + (Number(row.ceVolChg) || 0) + (Number(row.peVolChg) || 0), 0
+      );
+    }
+    return stats;
+};
+
+ChainView.prototype.renderMomentumStatsHtml = function(d) {
+    const s = this._momentumStats(d);
+    const pending = s.closed ? '—' : 'Collecting 5m baseline';
+    const signed = (value, digits = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n)
+        ? `${n > 0 ? '+' : ''}${n.toLocaleString('en-IN', { maximumFractionDigits: digits })}`
+        : pending;
+    };
+    const priceText = Number.isFinite(s.priceMove) && Number.isFinite(s.pricePct)
+      ? `${signed(s.priceMove, 2)} (${signed(s.pricePct, 2)}%)`
+      : pending;
+    const volText = Number.isFinite(s.volChange)
+      ? `${s.volChange >= 0 ? '+' : ''}${fmtK(s.volChange)}`
+      : pending;
+    return `<div id="equity-momentum-stats" class="commodity-price-card equity-momentum-stats">
+      <div class="commodity-price-details">
+        <span>5m price move <b id="eq-mom-price">${escapeHtml(priceText)}</b></span>
+        <span>5m OI change <b id="eq-mom-oi">${escapeHtml(signed(s.oiChange))}</b></span>
+        <span>5m volume <b id="eq-mom-vol">${escapeHtml(volText)}</b></span>
+      </div>
+    </div>`;
+};
+
+ChainView.prototype.patchMomentumStats = function(d) {
+    const priceEl = document.getElementById('eq-mom-price');
+    const oiEl = document.getElementById('eq-mom-oi');
+    const volEl = document.getElementById('eq-mom-vol');
+    if (!priceEl && !oiEl && !volEl) return;
+    const s = this._momentumStats(d);
+    const pending = s.closed ? '—' : 'Collecting 5m baseline';
+    const signed = (value, digits = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n)
+        ? `${n > 0 ? '+' : ''}${n.toLocaleString('en-IN', { maximumFractionDigits: digits })}`
+        : pending;
+    };
+    if (priceEl) {
+      priceEl.textContent = Number.isFinite(s.priceMove) && Number.isFinite(s.pricePct)
+        ? `${signed(s.priceMove, 2)} (${signed(s.pricePct, 2)}%)`
+        : pending;
+      priceEl.className = s.priceMove > 0 ? 'chg-pos' : s.priceMove < 0 ? 'chg-neg' : '';
+    }
+    if (oiEl) {
+      oiEl.textContent = signed(s.oiChange);
+      oiEl.className = s.oiChange > 0 ? 'chg-pos' : s.oiChange < 0 ? 'chg-neg' : '';
+    }
+    if (volEl) {
+      volEl.textContent = Number.isFinite(s.volChange)
+        ? `${s.volChange >= 0 ? '+' : ''}${fmtK(s.volChange)}`
+        : pending;
+      volEl.className = s.volChange > 0 ? 'chg-pos' : s.volChange < 0 ? 'chg-neg' : '';
+    }
 };
 
 ChainView.prototype._loadDecisionSessionContext = function(symbol) {
@@ -1077,7 +1231,12 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     // next complete snapshot then restored the real wall, causing a visible
     // one-frame jump. The chain is used only to obtain the OI displayed next
     // to the authoritative wall strike.
-    const wallChain = (typeof getFilteredChain === 'function') ? getFilteredChain(d) : (d.chain || []);
+    // Walls are the highest-OI strikes — usually far OTM, outside the
+    // visible getFilteredChain() window, so the OI lookup must use the
+    // FULL d.chain or the wall strike resolves to no row and shows '—'.
+    const wallChain = Array.isArray(d.chain) && d.chain.length
+      ? d.chain
+      : ((typeof getFilteredChain === 'function') ? getFilteredChain(d) : []);
     const wallRow = strike => wallChain.find(row => Number(row.strike) === Number(strike));
     const ceWallStrike = Number(d.ceWall) || null;
     const peWallStrike = Number(d.peWall) || null;

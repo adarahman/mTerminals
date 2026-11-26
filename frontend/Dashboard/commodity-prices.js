@@ -68,7 +68,7 @@ class CommodityPricesView {
     if (futurePicker && futureHolder) futureHolder.appendChild(futurePicker);
     // Return the stats card to its home inside the dashboard slot so the
     // equity render doesn't inherit a stray #dashboard child.
-    const priceCard = document.querySelector('.commodity-price-card');
+    const priceCard = document.querySelector('.commodity-price-card:not(#equity-momentum-stats)');
     const pricesContent = document.querySelector('.commodity-prices-content');
     if (priceCard && pricesContent && !pricesContent.contains(priceCard)) {
       pricesContent.prepend(priceCard);
@@ -165,6 +165,60 @@ class CommodityPricesView {
       : '—';
   }
 
+  // Reject foreign-instrument prints (seen live as NATURALGAS flashing
+  // ~143k-154k — real SILVER ticks leaking through Angel's flaky feed).
+  // Three layers, mirroring the equity _sanitizeSpotTick guard:
+  //  1. Identity — a quote whose own Underlying/Contract names a different
+  //     commodity is rejected outright (REST rows carry the true symbol).
+  //  2. Stateless PrevClose sanity — >10x away is impossible for an MCX
+  //     future, catches bad prints before any baseline exists.
+  //  3. Deviation >5% vs last accepted must persist ~2.5s at the same
+  //     level (real gap) — foreign ticks vary or get replaced, and an
+  //     instantly-accepted bad first tick can no longer poison the
+  //     baseline so the whole wrong instrument's range stays accepted.
+  _quoteGuardKey() {
+    return `${this.symbol}|${this._normalizeExpiry(this.futureExpiry) || 'default'}`;
+  }
+
+  _acceptQuoteTick(quote) {
+    const ltp = Number(quote && quote.LTP);
+    if (!Number.isFinite(ltp) || ltp <= 0) return false;
+    const underlying = String(quote.Underlying || '').trim().toUpperCase();
+    if (underlying && underlying !== this.symbol) return false;
+    const contract = String(quote.Contract || '').trim().toUpperCase();
+    if (contract) {
+      // 'NATURALGAS28DEC26FUT' matches 'NATURALGAS'; 'GOLDM30NOV26FUT'
+      // must NOT match 'GOLD' — require a digit boundary after the symbol.
+      const rest = contract.slice(this.symbol.length);
+      if (!contract.startsWith(this.symbol) || !/^\d/.test(rest)) return false;
+    }
+    const prevClose = Number(quote.PrevClose);
+    if (Number.isFinite(prevClose) && prevClose > 0
+        && (ltp > prevClose * 10 || ltp < prevClose / 10)) {
+      return false;
+    }
+    const key = this._quoteGuardKey();
+    const guard = this._quoteGuard = this._quoteGuard || { last: {}, cand: {} };
+    const prev = Number(guard.last[key]);
+    const deviates = Number.isFinite(prev) && prev > 0
+      && Math.abs(ltp - prev) / prev * 100 > 5;
+    if (!deviates) {
+      guard.cand[key] = null;
+      guard.last[key] = ltp;
+      return true;
+    }
+    const now = Date.now();
+    const cand = guard.cand[key];
+    const sameLevel = !!cand && Math.abs(ltp - cand.ltp) / cand.ltp * 100 <= 1;
+    if (sameLevel && now - cand.firstSeen >= 2500) {
+      guard.cand[key] = null;
+      guard.last[key] = ltp;
+      return true;
+    }
+    guard.cand[key] = sameLevel ? cand : { ltp, firstSeen: now };
+    return false;
+  }
+
   applyLiveQuote(payload) {
     if (window.dashboardInstrumentMode !== 'commodity'
         || !payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
@@ -172,6 +226,18 @@ class CommodityPricesView {
     if (quote.LTP == null) return;
     if (this.futureExpiry
         && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
+    // SMARTAPI_WS ticks bypass the REST getMarketData identity check —
+    // Angel's WS feed can attach a foreign instrument's LTP to our token.
+    // The quote's Underlying/Contract are OUR metadata here, so identity
+    // can't catch it; cross-validate against the last REST-accepted LTP
+    // instead (REST polls every 1s and is identity-checked end to end).
+    if (quote.FutSource === 'SMARTAPI_WS') {
+      const wsLtp = Number(quote.LTP);
+      const restLtp = Number(((this._restLtpByKey) || {})[this._quoteGuardKey()]);
+      if (Number.isFinite(wsLtp) && wsLtp > 0 && Number.isFinite(restLtp) && restLtp > 0
+          && Math.abs(wsLtp - restLtp) / restLtp * 100 > 5) return;
+    }
+    if (!this._acceptQuoteTick(quote)) return;
     this.lastLiveQuoteAt = Date.now();
     this.latestQuote = quote;
     this.latestQuoteError = '';
@@ -437,6 +503,12 @@ class CommodityPricesView {
       const quote = payload.quote || {};
       if (this.futureExpiry
           && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
+      if (!this._acceptQuoteTick(quote)) return;
+      // REST getMarketData rows carry the true instrument name and are
+      // identity-checked — record this LTP as the trusted reference the
+      // SMARTAPI_WS tick stream is validated against in applyLiveQuote,
+      // even when the fresh-WS early return below keeps it off latestQuote.
+      (this._restLtpByKey = this._restLtpByKey || {})[this._quoteGuardKey()] = Number(quote.LTP);
       const liveQuoteIsFresh = this.lastLiveQuoteAt
         && Date.now() - this.lastLiveQuoteAt < 10000;
       const liveQuoteMatchesExpiry = !this.futureExpiry
@@ -702,6 +774,12 @@ class CommodityPricesView {
     const rawChain = payload.chain || {};
     const analysis = this.latestAnalysis || {};
     const rowsByStrike = new Map();
+    // Stateless sanity bound: an option premium can never exceed the
+    // underlying (CE) or its own strike (PE). Angel's batch feed can key
+    // a foreign FUTURES row (~143k) under an option token — that can
+    // never be a real premium, so reject it even with no baseline.
+    const spotBound = Number(this.latestQuote && this.latestQuote.LTP)
+      || Number((payload.chain || {}).spot) || 0;
     (rawChain.rows || []).forEach((contract) => {
       const row = rowsByStrike.get(Number(contract.strike)) || {
         strike: Number(contract.strike), ceOI: 0, peOI: 0,
@@ -712,11 +790,19 @@ class CommodityPricesView {
       };
       const side = contract.type === 'CE' ? 'ce' : 'pe';
       row[`${side}OI`] = Number(contract.oi) || 0;
-      row[`${side}LTP`] = contract.ltp == null ? null : Number(contract.ltp);
+      const rawLtp = contract.ltp == null ? null : Number(contract.ltp);
+      const premiumBound = side === 'ce'
+        ? spotBound * 1.2
+        : Number(contract.strike) * 1.2;
+      const ltp = Number.isFinite(rawLtp) && rawLtp > 0
+          && Number.isFinite(premiumBound) && premiumBound > 0
+          && rawLtp > premiumBound
+        ? null
+        : rawLtp;
+      row[`${side}LTP`] = ltp;
       row[`${side}Vol`] = Number(contract.volume) || 0;
       row[`${side}IV`] = contract.iv == null ? null : Number(contract.iv);
       const oiChange = contract.oi_change == null ? null : Number(contract.oi_change);
-      const ltp = contract.ltp == null ? null : Number(contract.ltp);
       row[`${side}ChgOI`] = Number.isFinite(oiChange) ? oiChange : null;
       row[`${side}CapitalFlow`] = Number.isFinite(oiChange) && Number.isFinite(ltp)
         ? oiChange * ltp
@@ -889,7 +975,7 @@ class CommodityPricesView {
     // decision panel) — it ships inside the lower dashboard slot but is
     // more useful at-a-glance up top. It's a #dashboard sibling, so the
     // per-tick outerHTML swaps of #sec-topbar/#sec-decision don't touch it.
-    const priceCard = dashboard.querySelector('.commodity-price-card');
+    const priceCard = dashboard.querySelector('.commodity-price-card:not(#equity-momentum-stats)');
     const decisionAnchor = dashboard.querySelector('#sec-decision');
     if (priceCard && decisionAnchor && priceCard.nextElementSibling !== decisionAnchor) {
       decisionAnchor.before(priceCard);

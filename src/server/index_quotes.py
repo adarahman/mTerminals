@@ -79,7 +79,14 @@ class IndexQuoteFetcher:
         except Exception as exc:
             logger.warning(f"smartapi NSE batch failed: {exc}")
             raw = {}
+        by_name = {}
         for name, token in pairs:
             if row := raw.get(str(token)):
-                out["INDIA VIX" if name == state["vix_symbol"] else name] = {"spot": self._float(row.get("ltp")), "spotChange": self._float(row.get("netChange")), "spotChgPct": self._float(row.get("percentChange"))}
+                by_name[name] = row
+        # Same foreign-row guard as the ticker batch path — a bad tick
+        # here would poison the engine's spot for one poll.
+        from application.market_pipeline.quotes import _guard_index_quotes
+
+        for name, row in _guard_index_quotes(by_name).items():
+            out["INDIA VIX" if name == state["vix_symbol"] else name] = {"spot": self._float(row.get("ltp")), "spotChange": self._float(row.get("netChange")), "spotChgPct": self._float(row.get("percentChange"))}
         return out
