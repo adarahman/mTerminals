@@ -17,15 +17,7 @@ assert.match(source, /dec\.missingInputs/, 'decision view must expose missing in
 assert.match(source, /dec\.tradeability/, 'decision view must consume backend tradeability');
 assert.match(source, /dec\.tradeabilityReason/, 'decision view must consume backend tradeability reason');
 assert.match(source, /dec\.confirmationLevels/, 'decision view must consume backend confirmation levels');
-assert.match(source, /renderDecisionActionBarHtml/, 'dashboard must expose the sticky trade decision summary');
-assert.match(source, /confirmation\.aboveResistance/, 'sticky summary must use backend long confirmation level');
-assert.match(source, /confirmation\.belowSupport/, 'sticky summary must use backend short confirmation level');
-assert.match(source, /Stop \/ target/, 'sticky summary must make unavailable risk levels explicit');
-assert.match(dashboardRenderer, /renderDecisionActionBarHtml\(d\)/, 'sticky summary must be rendered outside the detail panel');
-assert.match(dashboardRenderer, /planEl\.outerHTML = this\.renderDecisionActionBarHtml\(d\)/, 'sticky summary must refresh on live ticks');
-assert.match(source, /window\.fetchMarketHistory\(symbol, '1m'/, 'session context must reuse the shared one-minute market-history cache');
-assert.match(source, /openingHigh:openingBars/, 'session context must compute the opening range from session candles');
-assert.match(source, /weightedPrice \/ tradedVolume/, 'VWAP must use candle volume and become unavailable when volume is missing');
+assert.doesNotMatch(dashboardRenderer, /renderDecisionActionBarHtml|decision-sticky-plan/, 'Home must not repeat the decision as a second summary block');
 assert.match(source, /cas-unavailable/, 'NIFTY CAS must remain visible when the indicative value is unavailable');
 assert.match(source, /casCoverageLabel/, 'unavailable CAS state must expose received constituent coverage');
 assert.match(source, /cas\.reason !== 'outside_cas_window'/,

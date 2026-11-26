@@ -99,8 +99,6 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
   // back on afterward.
   this.refreshDecisionBoxGuarded(d);
   this.patchMomentumStats(d);
-  const planEl = document.getElementById('decision-sticky-plan');
-  if (planEl) planEl.outerHTML = this.renderDecisionActionBarHtml(d);
   const chartWorkspace = document.getElementById('price-chart-modal');
   if(chartWorkspace && chartWorkspace.classList.contains('open') && app.modal){
     app.modal.renderPriceChartContext(d);
@@ -238,10 +236,7 @@ ChainView.prototype.renderDashboard = function(d) {
   h+=this.renderTopBarHtml(d, isBear);
   h+=this.renderMomentumStatsHtml(d);
 
-  // The full decision owns the first view; the compact action summary
-  // follows it and only becomes sticky once the user scrolls past the detail.
   h+=this.renderDecisionBoxHtml(d);
-  h+=this.renderDecisionActionBarHtml(d);
 
   // The decision stays visible as the dashboard's stable anchor. Everything
   // below it is grouped into one workspace at a time so analysis no longer
