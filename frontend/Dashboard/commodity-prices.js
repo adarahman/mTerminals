@@ -157,6 +157,20 @@ class CommodityPricesView {
     this._renderAnalysis({});
   }
 
+  _quoteMatchesSelectedSymbol(quote) {
+    if (!quote || typeof quote !== 'object') return false;
+    const symbol = String(this.symbol || '').trim().toUpperCase();
+    if (!symbol) return false;
+    const underlying = String(quote.Underlying || '').trim().toUpperCase();
+    if (underlying && underlying !== symbol) return false;
+    const contract = String(quote.Contract || '').trim().toUpperCase();
+    if (contract) {
+      const rest = contract.slice(symbol.length);
+      if (!contract.startsWith(symbol) || !rest || !/^[-\d]/.test(rest)) return false;
+    }
+    return true;
+  }
+
   _format(value, digits = 2) {
     if (value === null || value === undefined || value === '') return '—';
     const number = Number(value);
@@ -224,6 +238,7 @@ class CommodityPricesView {
         || !payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
     const quote = payload.quote || {};
     if (quote.LTP == null) return;
+    if (!this._quoteMatchesSelectedSymbol(quote)) return;
     if (this.futureExpiry
         && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
     // SMARTAPI_WS ticks bypass the REST getMarketData identity check —
@@ -501,6 +516,7 @@ class CommodityPricesView {
       if (window.dashboardInstrumentMode !== 'commodity'
           || symbol !== this.symbol || requestedExpiry !== this.futureExpiry) return;
       const quote = payload.quote || {};
+      if (!this._quoteMatchesSelectedSymbol(quote)) return;
       if (this.futureExpiry
           && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
       if (!this._acceptQuoteTick(quote)) return;
@@ -621,6 +637,7 @@ class CommodityPricesView {
       if (window.dashboardInstrumentMode !== 'commodity'
           || symbol !== this.symbol
           || (requestedExpiry && requestedExpiry !== this.expiry)) return;
+      if (String(payload.symbol || '').trim().toUpperCase() !== symbol) return;
       this.latestChainPayload = payload;
       this.latestAnalysis = payload.analysis || {};
       if (!requestedExpiry) this.expiry = payload.expiry;
@@ -769,8 +786,18 @@ class CommodityPricesView {
   }
 
   _toSharedDashboardData() {
-    const quote = this.latestQuote || {};
-    const payload = this.latestChainPayload || {};
+    const quoted = this.latestQuote || {};
+    const quote = this._quoteMatchesSelectedSymbol(quoted) ? quoted : {};
+    const chainPayload = this.latestChainPayload || {};
+    const payloadSymbol = String(
+      chainPayload.symbol
+      || chainPayload.chain?.symbol
+      || chainPayload.chain?.underlying
+      || ''
+    ).trim().toUpperCase();
+    const payload = payloadSymbol && payloadSymbol === this.symbol
+      ? chainPayload
+      : {};
     const rawChain = payload.chain || {};
     const analysis = this.latestAnalysis || {};
     const rowsByStrike = new Map();

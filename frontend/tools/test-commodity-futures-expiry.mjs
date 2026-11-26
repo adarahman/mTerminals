@@ -85,6 +85,37 @@ view._toSharedDashboardData();
 assert.equal(context._data, equityData);
 assert.equal(view.latestQuote, null);
 
+view.symbol = 'CRUDEOIL';
+view.latestQuote = null;
+view.latestChainPayload = null;
+view.applyLiveQuote({
+  symbol: 'SILVERM',
+  quote: {
+    Underlying: 'SILVERM',
+    Contract: 'SILVERM30NOV26FUT',
+    LTP: 146692,
+  },
+});
+assert.equal(view.latestQuote, null);
+const isolatedData = view._toSharedDashboardData();
+assert.equal(isolatedData.symbol, 'CRUDEOIL');
+assert.equal(isolatedData.spot, 0);
+view.latestQuote = {
+  Underlying: 'SILVERM',
+  Contract: 'SILVERM30NOV26FUT',
+  LTP: 146692,
+};
+view.latestChainPayload = {
+  symbol: 'SILVERM',
+  expiry: '30NOV2026',
+  chain: {symbol: 'SILVERM', rows: [{strike: 146000, type: 'CE', ltp: 100}]},
+};
+const staleData = view._toSharedDashboardData();
+assert.equal(staleData.spot, 0);
+assert.equal(staleData.chain.length, 0);
+view.latestQuote = null;
+view.latestChainPayload = null;
+
 let resolveQuoteResponse;
 context.fetch = () => new Promise((resolve) => {
   resolveQuoteResponse = resolve;
