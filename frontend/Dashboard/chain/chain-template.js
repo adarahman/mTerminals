@@ -661,17 +661,20 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       pts = pts.filter(p => istDay(p.t) === lastDay);
     }
     // The dashboard preview is intentionally a close-up, not a miniature
-    // copy of the whole session. For intraday intervals show only the most
-    // recent 90 trading minutes so individual 1m/5m/15m candles remain
-    // readable in the compact card. The full modal still shows the complete
-    // selected window (for example the entire 1D session).
-    if (pts.length && ['1m', '5m', '15m'].includes(chartPrefs.range)) {
+    // copy of the whole session; the full modal shows the complete window.
+    // Intraday candles show the latest `drawLimit` candles in fixed-width
+    // slots (right-aligned), so the gap between candles is the same for
+    // 1m, 5m and 15m. Intraday lines show the most recent 90 minutes.
+    const isIntraday = ['1m', '5m', '15m'].includes(chartPrefs.range);
+    const drawLimit = chartPrefs.type === 'candle' ? 55 : MINI_CHART_DRAW_POINTS;
+    if (pts.length && isIntraday && chartPrefs.type === 'candle') {
+      pts = pts.slice(-drawLimit);
+    } else if (pts.length && isIntraday) {
       const previewEnd = pts[pts.length - 1].t;
       pts = pts.filter(p => p.t >= previewEnd - 90 * 60 * 1000);
     }
     // Preserve the complete selected span while keeping the tiny SVG light.
     // Candle mode aggregates each pixel group so its high/low is retained.
-    const drawLimit = chartPrefs.type === 'candle' ? 55 : MINI_CHART_DRAW_POINTS;
     if (pts.length > drawLimit && chartPrefs.type === 'candle') {
       const source = pts;
       pts = Array.from({length: drawLimit}, (_, i) => {
@@ -726,14 +729,15 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
       const span = half * 2;
       const yMin = keyPrice - half;
       const y = v => PAD + (H - PAD * 2) * (1 - (v - yMin) / span);
-      const stepX = (W - PAD * 2) / pts.length;
+      const stepX = (W - PAD * 2) / drawLimit;
+      const firstSlot = drawLimit - pts.length;
       const bodyW = Math.max(1.5, Math.min(4, stepX * 0.65));
       const safeColor = (v, fallback) => /^#[0-9a-f]{6}$/i.test(v || '') ? v : fallback;
       const upColor = safeColor(chartPrefs.upColor, '#26A69A');
       const downColor = safeColor(chartPrefs.downColor, '#EF5350');
       svgInner = pts.map((p, i) => {
         const o = value(p, 'o'), h = value(p, 'h'), l = value(p, 'l'), c = value(p, 'c');
-        const x = PAD + (i + 0.5) * stepX;
+        const x = PAD + (firstSlot + i + 0.5) * stepX;
         const color = c >= o ? upColor : downColor;
         const bodyTop = Math.min(y(o), y(c));
         const bodyH = Math.max(1, Math.abs(y(c) - y(o)));
