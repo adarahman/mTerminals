@@ -39,7 +39,16 @@ class CanonicalPayloadPublisher:
         async with self._stream_lock:
             self._store_payload(payload, datetime.now().astimezone())
             previous = self._previous_payload()
-            if not self._use_delta() or previous is None:
+            # A symbol switch can overlap an in-flight analytics run: that
+            # older run may publish after LAST_SENT was invalidated and then
+            # become the baseline. Never diff across instruments; the first
+            # payload for a different symbol must be a full snapshot.
+            symbol_changed = (
+                isinstance(previous, dict)
+                and isinstance(payload, dict)
+                and previous.get("symbol") != payload.get("symbol")
+            )
+            if not self._use_delta() or previous is None or symbol_changed:
                 await self._broadcast({"type": "full", "payload": payload})
             else:
                 started_at = time.monotonic()

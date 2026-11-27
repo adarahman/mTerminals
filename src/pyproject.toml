@@ -29,6 +29,8 @@ dependencies = [
     "logzero>=1.7",
     "xlwings>=0.30",
     "smartapi-python>=1.4",
+    # Upstox adapters import the official SDK when that provider is selected.
+    "upstox-python-sdk>=2.29.0",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,7 @@ include = [
 
 [tool.setuptools]
 py-modules = [
+    "main",
     "paths",
     "nse_eod_fetch",
     "operational_metrics", "operational_readiness",

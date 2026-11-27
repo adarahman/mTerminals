@@ -20,7 +20,6 @@ import subprocess
 import sys
 import threading
 import urllib.request
-from urllib.parse import urlencode
 import webbrowser
 from datetime import datetime
 from http import HTTPStatus
@@ -291,9 +290,13 @@ class MobileSupervisor:
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
         environment = os.environ.copy()
+        # Keep the credential out of the WebSocket URL: URLs are commonly
+        # copied into diagnostics and access logs. The client sends it in the
+        # first WebSocket frame before receiving any market data.
         environment["EXPO_PUBLIC_MTERMINALS_WS"] = (
-            f"ws://{host}:{self.backend_port}/mobile-ws?{urlencode({'token': token})}"
+            f"ws://{host}:{self.backend_port}/mobile-ws"
         )
+        environment["EXPO_PUBLIC_MTERMINALS_TOKEN"] = token
         return environment
 
     def status(self) -> dict:

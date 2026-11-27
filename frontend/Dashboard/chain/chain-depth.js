@@ -249,7 +249,7 @@ RightPanelView.prototype.renderRightPanel = function(rows) {
         <div class="arp-val"><span class="sig ${aggBias.cls}" style="font-size:10px;">${aggBias.label}</span><span style="font-size:9px;color:var(--text-faint);margin-left:4px;">${bullStrikes}↑ ${bearStrikes}↓</span></div>
       </div>
       <div class="arp-row"><span class="arp-key">Net OI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netOI)};">${netOI >= 0 ? "+" : ""}${fmt(netOI)}</span><div class="arp-bar" style="width:${arpBarW(netOI, netAbsMax)}px;background-image:${tickFill(signColor(netOI))};"></div></div></div>
-      <div class="arp-row"><span class="arp-key">Chg OI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netDOI)};">${netDOI >= 0 ? "+" : ""}${fmt(netDOI)}</span><div class="arp-bar" style="width:${arpBarW(netDOI, netAbsMax)}px;background-image:${tickFill(signColor(netDOI))};"></div></div></div>
+      <div class="arp-row"><span class="arp-key">Session ΔOI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netDOI)};">${netDOI >= 0 ? "+" : ""}${fmt(netDOI)}</span><div class="arp-bar" style="width:${arpBarW(netDOI, netAbsMax)}px;background-image:${tickFill(signColor(netDOI))};"></div></div></div>
       <div class="arp-row"><span class="arp-key">Vel OI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netVel)};">${netVel >= 0 ? "+" : ""}${fmt(netVel)}</span><div class="arp-bar" style="width:${arpBarW(netVel, netAbsMax)}px;background-image:${tickFill(signColor(netVel))};"></div></div></div>
       <div style="padding-top:5px;margin-top:4px;border-top:1px solid var(--oc-border);">
         <div style="margin-bottom:6px;">
@@ -278,8 +278,8 @@ RightPanelView.prototype.renderRightPanel = function(rows) {
         <div></div><div class="crp-head-ce">CE</div><div class="crp-head-pe">PE</div>
       </div>
       <div class="crp-row"><span class="crp-label">OI</span><div class="crp-ce">${fmt(totCeOI)}</div><div class="crp-pe">${fmt(totPeOI)}</div></div>
-      <div class="crp-row"><span class="crp-label">Chg OI</span>${rpBar(totCeDOI, maxOIBox, totCeDOI >= 0 ? "var(--pe)" : "var(--ce)")}${rpBar(totPeDOI, maxOIBox, totPeDOI >= 0 ? "var(--ce)" : "var(--pe)")}</div>
-      <div class="crp-row"><span class="crp-label">OI Vel</span>${rpBar(totCeVel, maxOIBox, totCeVel >= 0 ? "var(--pe)" : "var(--ce)")}${rpBar(totPeVel, maxOIBox, totPeVel >= 0 ? "var(--ce)" : "var(--pe)")}</div>
+      <div class="crp-row"><span class="crp-label">Session ΔOI</span>${rpBar(totCeDOI, maxOIBox, totCeDOI >= 0 ? "var(--pe)" : "var(--ce)")}${rpBar(totPeDOI, maxOIBox, totPeDOI >= 0 ? "var(--ce)" : "var(--pe)")}</div>
+      <div class="crp-row"><span class="crp-label">${this.velocityWindowMin}m OI Vel</span>${rpBar(totCeVel, maxOIBox, totCeVel >= 0 ? "var(--pe)" : "var(--ce)")}${rpBar(totPeVel, maxOIBox, totPeVel >= 0 ? "var(--ce)" : "var(--pe)")}</div>
     </div>
 
     <div class="rp-box">

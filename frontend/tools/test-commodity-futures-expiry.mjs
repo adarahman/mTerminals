@@ -113,6 +113,31 @@ view.latestChainPayload = {
 const staleData = view._toSharedDashboardData();
 assert.equal(staleData.spot, 0);
 assert.equal(staleData.chain.length, 0);
+view.symbol = 'SILVERM';
+view.latestChainPayload = {
+  symbol: 'SILVERM',
+  expiry: '30NOV2026',
+  chain: {
+    spot: 146000,
+    atm_strike: 146000,
+    atm_iv: 55.46,
+    rows: [
+      {strike: 146000, type: 'CE', ltp: 300, net_change: 14.5, pct_change: 0.4, volume: 12, oi: 100},
+      {strike: 146000, type: 'PE', ltp: 280, net_change: -8.25, pct_change: -0.3, volume: 15, oi: 120},
+    ],
+    greeks: [],
+  },
+};
+const commodityData = view._toSharedDashboardData();
+assert.equal(commodityData.atmIV, 55.46);
+assert.equal(commodityData.risk.tradeGrade, 'Not rated');
+assert.equal(commodityData.risk.ivRegime, '55.46%');
+assert.equal(commodityData.decision.verdicts.atmIV, '55.46%');
+assert.equal(commodityData.chain[0].ceChg, 14.5);
+assert.equal(commodityData.chain[0].ceChgPct, 0.4);
+assert.equal(commodityData.chain[0].peChg, -8.25);
+assert.equal(commodityData.chain[0].peChgPct, -0.3);
+view.symbol = 'CRUDEOIL';
 view.latestQuote = null;
 view.latestChainPayload = null;
 

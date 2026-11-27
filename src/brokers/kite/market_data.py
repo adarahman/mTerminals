@@ -92,10 +92,14 @@ class KiteMarketData:
 
         return get_commodity_option_expiries(underlying)
 
-    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
+    def get_commodity_option_chain(
+        self, underlying, expiry, strikes_around_atm=10, future_quote=None
+    ):
         from brokers.kite.client import get_commodity_option_chain
 
-        return get_commodity_option_chain(underlying, expiry, strikes_around_atm)
+        return get_commodity_option_chain(
+            underlying, expiry, strikes_around_atm, future_quote=future_quote
+        )
 
     def get_fno_underlyings(self, force_refresh=False):
         # Public ScripMaster universe (same source kite_client's instrument

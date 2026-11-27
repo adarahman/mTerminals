@@ -189,7 +189,7 @@ class ModalManager {
   // cards[0] (primary price), cards[1] (futures reference) and cards[2]
   // (positioning rows) by index, so keep primary → futures → positioning
   // first in that order.
-  _focusContextCardsHtml(d, variant){
+  _focusContextCardsHtml(d){
   const dec=d.decision||{};
   const esc=v=>String(v==null?'—':v).replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -201,25 +201,29 @@ class ModalManager {
   const bias=String(dec.bias||'WAIT').toUpperCase();
   const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';
   const isCommodity=d.instrument==='MCX_FUT';
-  const chainVariant=variant==='chain';
-  const chainRange=(typeof _chainRange!=='undefined')?_chainRange:null;
-  const rangeText=Number(chainRange)===9999?'All strikes'
-    :Number.isFinite(Number(chainRange))?'ATM ±'+Number(chainRange):'—';
-  const primarySmall=chainVariant
-    ? `<small>${esc(d.expiry)} · ${num(d.dte,0)}d · ${esc(rangeText)}</small>`
-    : `<small class="${Number(d.spotChgPct)>=0?'positive':'negative'}">${signed(d.spotChange)} · ${signed(d.spotChgPct)}%</small>`;
+  const decisionBadge=`<div class="focus-context-decision ${tone}" data-fc="decision">
+        <span class="focus-context-label">Decision engine</span>
+        <strong>${esc(dec.bias||'WAIT')} · ${num(dec.confidence,0)}%</strong>
+      </div>`;
   return `
     <section class="focus-context-card focus-context-primary" data-fc="primary">
-      <span class="focus-context-label">${chainVariant?'Underlying':'Instrument'}</span>
-      <strong>${esc(d.symbol)} <em>${isCommodity?'MCX FUT':(chainVariant?'SPOT':'EQ')}</em></strong>
-      <div class="focus-context-price">₹${num(d.spot,2)}</div>
-      ${primarySmall}
+      <div class="focus-context-head">
+        <div>
+          <span class="focus-context-label">Underlying</span>
+          <strong>${esc(d.symbol)} <em>${isCommodity?'MCX FUT':'SPOT'}</em></strong>
+        </div>
+        ${decisionBadge}
+      </div>
+      <div class="focus-context-price-row">
+        <div class="focus-context-price">₹${num(d.spot,2)}</div>
+        <small class="focus-context-change ${Number(d.spotChgPct)>=0?'positive':'negative'}">${signed(d.spotChange)} · ${signed(d.spotChgPct)}%</small>
+      </div>
     </section>
     <section class="focus-context-card" data-fc="futures">
       <span class="focus-context-label">${isCommodity?'Futures contract':'Futures reference'}</span>
       <strong>${esc(isCommodity?d.futureExpiry:(d.futuresExpiry||'NEAR'))} · ₹${num(isCommodity?d.spot:d.future,2)}</strong>
-      <div class="focus-context-row"><span>${isCommodity?'Contract':'Basis'}</span><b>${isCommodity?esc(d.futureContract||'—'):signed(d.basis)}</b></div>
-      <small>${esc(isCommodity?d.quoteProvider:(d.futSignal||'Awaiting positioning'))}</small>
+      ${isCommodity?'':`<div class="focus-context-row"><span>Basis</span><b>${signed(d.basis)}</b></div>
+      <small>${esc(d.futSignal||'Awaiting positioning')}</small>`}
     </section>
     <section class="focus-context-card" data-fc="positioning">
       <span class="focus-context-label">Positioning</span>
@@ -237,13 +241,6 @@ class ModalManager {
       <div class="focus-context-row"><span>ATM IV</span><b>${num(d.atmIV,2)}%</b></div>
       <div class="focus-context-row"><span>IV Rank</span><b>${num(d.ivRank,0)}</b></div>
       <div class="focus-context-row"><span>India VIX</span><b>${num(d.indiaVix,2)}</b></div>
-      <small>Option expiry ${esc(d.expiry)} · ${num(d.dte,0)}d</small>
-    </section>
-    <section class="focus-context-card focus-context-decision ${tone}" data-fc="decision">
-      <span class="focus-context-label">Decision engine</span>
-      <strong>${esc(dec.bias||'WAIT')} · ${num(dec.confidence,0)}%</strong>
-      <div>${esc(dec.action||'No directional action')}</div>
-      <small>${esc(dec.suggestedStrategy||dec.strategyCaution||'Awaiting confirmation')}</small>
     </section>`;
   }
 
@@ -253,7 +250,15 @@ class ModalManager {
   if(!host||!layout||!d)return;
   const allColumns=typeof app!=='undefined' && app.chain && app.chain.chainLedgerView==='all';
   layout.classList.toggle('dense-all',allColumns);
-  host.innerHTML=this._focusContextCardsHtml(d,'chain');
+  host.innerHTML=this._focusContextCardsHtml(d);
+  const meta=document.getElementById('option-chain-expiry-meta');
+  if(meta){
+    const chainRange=(typeof _chainRange!=='undefined')?_chainRange:null;
+    const rangeText=Number(chainRange)===9999?'All strikes'
+      :Number.isFinite(Number(chainRange))?'ATM ±'+Number(chainRange):'—';
+    const dte=Number.isFinite(Number(d.dte))?`${Number(d.dte)}d`:'—';
+    meta.textContent=`${d.expiry||'—'} · ${dte} · ${rangeText}`;
+  }
 }
 
   closeOptionChainModal(){
@@ -322,7 +327,7 @@ class ModalManager {
   renderPriceChartContext(d){
   const host=document.getElementById('price-chart-context-grid');
   if(!host||!d)return;
-  host.innerHTML=this._focusContextCardsHtml(d,'chart');
+  host.innerHTML=this._focusContextCardsHtml(d);
 }
 
     updatePriceChartLiveContext(d){
@@ -338,9 +343,9 @@ class ModalManager {
     if(!primary)return;
     const price=primary.querySelector('.focus-context-price');
     if(price) price.textContent=`₹${num(d.spot,2)}`;
-    const change=primary.querySelector('small');
+    const change=primary.querySelector('.focus-context-change');
     if(change){
-      change.className=Number(d.spotChgPct)>=0?'positive':'negative';
+      change.className=`focus-context-change ${Number(d.spotChgPct)>=0?'positive':'negative'}`;
       change.textContent=`${signed(d.spotChange)} · ${signed(d.spotChgPct)}%`;
     }
     const reference=cards[1]?.querySelector('strong');
@@ -373,13 +378,9 @@ class ModalManager {
       const dec=d.decision||{};
       const bias=String(dec.bias||'WAIT').toUpperCase();
       const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';
-      decision.className=`focus-context-card focus-context-decision ${tone}`;
+      decision.className=`focus-context-decision ${tone}`;
       const strong=decision.querySelector('strong');
       if(strong) strong.textContent=`${dec.bias||'WAIT'} · ${num(dec.confidence,0)}%`;
-      const action=decision.querySelector('div');
-      if(action) action.textContent=dec.action||'No directional action';
-      const small=decision.querySelector('small');
-      if(small) small.textContent=dec.suggestedStrategy||dec.strategyCaution||'Awaiting confirmation';
     }
 }
 

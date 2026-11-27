@@ -141,9 +141,10 @@ window.desktopPrimaryNav = function(name, button) {
       app.ui.switchDashboardDestination('analytics', button);
 
       requestAnimationFrame(() => {
-        const target =
-          document.getElementById('zone-capital-flow') ||
-          document.getElementById('workspace-flow');
+        const target = window.dashboardInstrumentMode === 'commodity'
+          ? document.getElementById('commodity-analytics')
+          : document.getElementById('zone-capital-flow') ||
+            document.getElementById('workspace-flow');
 
         if (target) {
           const offset =
@@ -311,6 +312,7 @@ window.switchDashboardWorkspace = (...args) => app.ui.switchDashboardWorkspace(.
 window.secJump = (...args) => app.ui.secJump(...args);
 window.connectWebSocket = (...args) => app.data.connectWebSocket(...args);
 window.beginSymbolSwitch = (...args) => app.data.beginSymbolSwitch(...args);
+window.endSymbolSwitch = (...args) => app.data.endSymbolSwitch(...args);
 window.setBrokerFeed = (...args) => app.data.setBrokerFeed(...args);
 window.toggleBrokerFeed = () => {
   const button = document.getElementById('broker-feed-toggle');

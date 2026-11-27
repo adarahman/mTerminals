@@ -95,10 +95,13 @@ def test_shared_http_port_authenticates_mobile_and_delivers_snapshots(monkeypatc
 
         async with TestClient(TestServer(app)) as client:
             assert (await client.get('/health')).status == 200
-            assert (await client.get('/mobile-ws')).status == 401
-            assert (await client.get('/mobile-ws?token=wrong')).status == 401
+            async with client.ws_connect('/mobile-ws') as ws:
+                await ws.send_json({'type': 'authenticate', 'token': 'wrong'})
+                assert (await ws.receive()).type.name == 'CLOSE'
 
-            async with client.ws_connect('/mobile-ws?token=integration-test-token') as ws:
+            async with client.ws_connect('/mobile-ws') as ws:
+                await ws.send_json({'type': 'authenticate', 'token': 'integration-test-token'})
+                assert (await ws.receive_json(timeout=2))['type'] == 'authenticated'
                 assert (await ws.receive_json(timeout=2))['market']['spot'] == 25000
 
                 await bridge.broadcast({'market': {'symbol': 'NIFTY', 'spot': 25010}})

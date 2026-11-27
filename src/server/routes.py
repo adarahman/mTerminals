@@ -21,6 +21,7 @@ class ServerRoutes:
     commodity_quote: Callable[..., Any] | None = None
     commodity_option_chain: Callable[..., Any] | None = None
     commodity_news: Callable[..., Any] | None = None
+    commodity_inventory: Callable[..., Any] | None = None
 
 class HttpRouteHandlers:
     """Adapt HTTP requests to injected server services."""
@@ -100,6 +101,15 @@ class HttpRouteHandlers:
                 {"error": "Commodity news is not configured."}, status=501
             )
         return await self._commodity_prices.news(request)
+
+    async def commodity_inventory(self, request):
+        from aiohttp import web
+
+        if self._commodity_prices is None:
+            return web.json_response(
+                {"error": "Commodity inventory reports are not configured."}, status=501
+            )
+        return await self._commodity_prices.inventory(request)
 
     async def backtest(self, request):
         return await self._backtest_response(

@@ -109,6 +109,7 @@ def build_dashboard_transport(
         stop_funds_polling=stop_funds_polling,
         control_feed=control_feed,
         broadcast_control=broadcast_control,
+        switch_symbol=switch_symbol,
     )
     query_controller = WebSocketQueryController(
         current_symbol=lambda: runtime_state.MARKET_SELECTION.symbol,

@@ -105,7 +105,7 @@ _COMMODITY_UNDERLYINGS = frozenset(
         "ZINC",
     }
 )
-_COMMODITY_OPTION_TYPES = frozenset({"OPTFUT"})
+_COMMODITY_OPTION_TYPES = frozenset({"OPTFUT", "OPTCOM"})
 # AngelOne master mixes dummy/test underlyings (e.g. "011NSETEST") into the
 # FUT segment — drop them so they never surface in /api/lot-sizes.
 _TEST_SYMBOL_RE = re.compile(r"NSETEST", re.IGNORECASE)
@@ -226,8 +226,11 @@ class InstrumentResolver:
                 and itype in _COMMODITY_OPTION_TYPES
                 and name in _COMMODITY_UNDERLYINGS
             ):
-                symbol = inst.get("symbol", "")
+                symbol = str(inst.get("symbol", "")).upper()
                 option_type = symbol[-2:] if symbol.endswith(("CE", "PE")) else None
+                # AngelOne's MCX master has used OPTFUT and OPTCOM for
+                # commodity options across different master versions.
+                # Accept both spellings so valid contracts are indexed.
                 try:
                     expiry = datetime.strptime(
                         inst.get("expiry", ""), "%d%b%Y"

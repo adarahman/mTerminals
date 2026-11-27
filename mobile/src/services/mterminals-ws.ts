@@ -6,6 +6,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let sustainedErrorTimer: ReturnType<typeof setTimeout> | null = null;
 
 let activeUrl: string | null = null;
+let activeToken = '';
 let manuallyDisconnected = false;
 
 const RECONNECT_DELAY_MS = 3000;
@@ -50,7 +51,7 @@ function scheduleReconnect(url: string) {
     reconnectTimer = null;
 
     if (!manuallyDisconnected) {
-      connectMTerminalsWS(url, true);
+      connectMTerminalsWS(url, true, activeToken);
     }
   }, RECONNECT_DELAY_MS);
 }
@@ -58,8 +59,10 @@ function scheduleReconnect(url: string) {
 export function connectMTerminalsWS(
   url: string,
   isReconnect = false,
+  token = activeToken,
 ) {
   activeUrl = url;
+  activeToken = token;
   manuallyDisconnected = false;
 
   if (
@@ -85,19 +88,27 @@ export function connectMTerminalsWS(
       if (socket !== connection) return;
       console.log('[mobile-ws] connected');
 
+      if (token) {
+        connection.send(JSON.stringify({ type: 'authenticate', token }));
+      }
+
       clearReconnectTimer();
       clearSustainedErrorTimer();
 
-      marketStore.setConnectionStatus(
-        'connected',
-        null,
-      );
+      if (!token) {
+        marketStore.setConnectionStatus('error', 'Mobile authentication is not configured. Restart Mobile from the launcher.');
+      }
     };
 
     socket.onmessage = (event) => {
       if (socket !== connection) return;
       try {
         const message = JSON.parse(event.data);
+
+        if (message?.type === 'authenticated') {
+          marketStore.setConnectionStatus('connected', null);
+          return;
+        }
 
         /*
          * Control replies are transport messages, not market snapshots.
@@ -246,6 +257,7 @@ export function reconnectMTerminalsWS() {
   connectMTerminalsWS(
     activeUrl,
     true,
+    activeToken,
   );
 }
 

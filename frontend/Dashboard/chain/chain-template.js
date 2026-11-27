@@ -795,7 +795,7 @@ ChainView.prototype._buildMiniChartHtml = function(d) {
     const mcTotalVol = d.quoteVolume != null && Number.isFinite(quoteVolNum) ? quoteVolNum : chainVol;
     const mcTotalOi = d.quoteOI != null && Number.isFinite(quoteOiNum) ? quoteOiNum : chainOi;
     const mcVolOiText = (mcTotalVol > 0 || mcTotalOi > 0)
-      ? `Vol ${fmtK(mcTotalVol)} · OI ${fmtK(mcTotalOi)}` : '';
+      ? `Vol <span class="voi-vol">${fmtK(mcTotalVol)}</span> · OI <span class="voi-oi">${fmtK(mcTotalOi)}</span>` : '';
     return `
       <div id="verdict-mini-chart" class="verdict-mini-chart" ${chartTrigger}>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svgInner}</svg>
@@ -927,10 +927,18 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     const dec  = d.decision || {};
     const vrd  = dec.verdicts || {};
     const sigs = dec.activeSignals || [];
-    const bias = dec.bias || d.compositeBias || '—';
+    const bias = d.optionsUnavailable
+      ? 'OPTIONS UNAVAILABLE'
+      : dec.bias || d.compositeBias || '—';
     const str  = dec.biasStrength || '';
     const conf = dec.confidence || 0;
     const act  = dec.action || '—';
+    const isWaitAction = /^wait\b/i.test(String(act).trim());
+    const actionLabel = isWaitAction ? 'WAIT' : act;
+    const actionTip = isWaitAction
+      ? [act, dec.actionNote].filter((detail, index, all) => detail && all.indexOf(detail) === index).join(' · ')
+      : dec.actionNote;
+    const isCommodity = d.instrument === 'MCX_FUT';
     const conflict = dec.conflictFlag || false;
 
     // Canonical tradeability comes from the backend DecisionResult.
@@ -967,8 +975,10 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       ['max_pain', 'Max-pain gravity', 5],
       ['oi_velocity', 'OI velocity', 17],
       ['capital_flow', 'Capital flow', 10],
-    ];
-    const visibleContributors = [...contributors];
+    ].filter(([key]) => !(isCommodity && key === 'engine_bias'));
+    const visibleContributors = contributors.filter(c =>
+      !(isCommodity && c && c.key === 'engine_bias')
+    );
     const contributorKeys = new Set(visibleContributors.map(c => c && c.key));
     requiredEvidence.forEach(([key, label, weight]) => {
       if (!contributorKeys.has(key)) {
@@ -977,7 +987,8 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
     });
     const evidenceCoverage = Number.isFinite(Number(dec.evidenceCoverage)) ? Number(dec.evidenceCoverage) : 0;
     const decisionDegraded = dec.degraded === true;
-    const decisionMissing = Array.isArray(dec.missingInputs) ? dec.missingInputs : [];
+    const decisionMissing = Array.isArray(dec.missingInputs)
+      ? dec.missingInputs.filter(key => !(isCommodity && key === 'engine_bias')) : [];
     const feedState = (window.AppState && AppState.feedState) || {};
     const partialData = feedState.quality === 'PARTIAL';
     const partialMissing = Array.isArray(feedState.missing) ? feedState.missing : [];
@@ -1092,7 +1103,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           const color = contribution > 0 ? 'var(--pos)' : contribution < 0 ? 'var(--neg)' : 'var(--text-tertiary)';
           const marker = contribution > 0 ? '\u2191' : contribution < 0 ? '\u2193' : '\u00b7';
           const label = escapeHtml(c.label || c.key || 'Evidence');
-          const title = escapeHtml(`${c.weight || 0}% weight · ${contribution >= 0 ? '+' : ''}${contribution.toFixed(3)} contribution`);
+          const title = escapeHtml(`${c.weight || 0}% weight · ${contribution >= 0 ? '+' : ''}${contribution.toFixed(5)} contribution`);
           return `<div class="decision-flow-line">
             <span class="decision-flow-dot" style="color:${color};">${marker}</span>
             <span title="${title}">${label} · ${direction} · ${Number(c.weight)||0}% weight</span>
@@ -1227,7 +1238,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
        name) is likewise supporting detail, so it moved to Decision Detail
        — same Tier-3 treatment as ATM Greeks / IV vs HV further down the
        page. ── -->
-  <div class="verdict ${biasCardCls}">
+  <div class="verdict ${biasCardCls}${d.optionsUnavailable ? ' options-unavailable' : ''}">
     <div class="verdict-top">
       <div>
         <div class="verdict-heading-row">
@@ -1272,7 +1283,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
                 const contribution = Number(c.weightedContribution);
                 const available = c.available !== false && Number.isFinite(contribution);
                 const color = !available ? 'var(--text-tertiary)' : contribution > 0 ? 'var(--pos)' : contribution < 0 ? 'var(--neg)' : 'var(--text-tertiary)';
-                const value = available ? `${contribution > 0 ? '+' : ''}${contribution.toFixed(3)}` : 'Unavailable';
+                const value = available ? `${contribution > 0 ? '+' : ''}${contribution.toFixed(5)}` : 'Unavailable';
                 return `<div class="decision-engine-evidence-row"><span>${escapeHtml(c.label || c.key || 'Evidence')} · ${Number(c.weight)||0}% weight</span><strong style="color:${color};">${value}</strong></div>`;
               }).join('')}
             </div>
@@ -1308,27 +1319,34 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           ${wallBuild.ceStrike===null && wallBuild.peStrike===null ? '<div class="oic-empty">—</div>' : ''}
         </div>
       </section>
-      <section class="decision-flow-block decision-flow-action">
-        <div class="decision-flow-label">Action</div>
-        <div class="decision-flow-action-text">${act && act !== '—' ? act : 'Wait for a clearer edge'}</div>
+      <section class="decision-flow-block decision-flow-action${actionTip ? ' info-tip' : ''}"${actionTip ? ` data-tip="${escapeHtml(actionTip)}"` : ''}>
+        <div class="decision-flow-action-head">
+          <div class="decision-flow-label info-tip-label">Action</div>
+          <div class="decision-flow-action-text">${actionLabel && actionLabel !== '—' ? actionLabel : 'WAIT'}</div>
+        </div>
         <div class="decision-flow-action-meta">
           <span>Grade <strong style="color:${gradeColor};">${risk.tradeGrade || '—'}</strong></span>
           <span>IV <strong style="color:${ivRgColor};">${risk.ivRegime || '—'}</strong></span>
         </div>
 
-        <div class="decision-confirmation" aria-label="Confirmation levels">
-           <span class="decision-confirmation-label">${tradeability === 'NO_TRADE' ? 'Upgrade when' : 'Confirm at'}</span>
-          ${confirmationLevels.belowSupport != null
-            ? `<span>Below <strong>${fmtI(confirmationLevels.belowSupport)}</strong></span>`
-            : ''}
-          ${confirmationLevels.aboveResistance != null
-            ? `<span>Above <strong>${fmtI(confirmationLevels.aboveResistance)}</strong></span>`
-            : ''}
-          ${confirmationLevels.belowSupport == null &&
-            confirmationLevels.aboveResistance == null
-            ? `<span>ATM <strong>${confirmationLevels.atm != null ? fmtI(confirmationLevels.atm) : '—'}</strong></span>`
-            : ''}
-        </div>
+        ${isCommodity
+          ? `<div class="decision-confirmation" aria-label="Commodity execution status">
+              <span class="decision-confirmation-label">Execution</span>
+              <span>Informational only · no execution trigger</span>
+            </div>`
+          : `<div class="decision-confirmation" aria-label="Confirmation levels">
+              <span class="decision-confirmation-label">${tradeability === 'NO_TRADE' ? 'Upgrade when' : 'Confirm at'}</span>
+              ${confirmationLevels.belowSupport != null
+                ? `<span>Below <strong>${fmtI(confirmationLevels.belowSupport)}</strong></span>`
+                : ''}
+              ${confirmationLevels.aboveResistance != null
+                ? `<span>Above <strong>${fmtI(confirmationLevels.aboveResistance)}</strong></span>`
+                : ''}
+              ${confirmationLevels.belowSupport == null &&
+                confirmationLevels.aboveResistance == null
+                ? `<span>ATM <strong>${confirmationLevels.atm != null ? fmtI(confirmationLevels.atm) : '—'}</strong></span>`
+                : ''}
+            </div>`}
       </section>
     </div>
 
@@ -1347,15 +1365,12 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           </div>
         </div>
 
-        <div class="short-horizon-probability">
-          <div class="short-horizon-prob-label">Move Likelihood</div>
+        <div class="short-horizon-probability info-tip" data-tip="${sh.probabilityCalibrated === true
+          ? 'Calibrated'
+          : 'Experimental · uncalibrated'}">
+          <div class="short-horizon-prob-label info-tip-label">Move Likelihood</div>
           <div class="short-horizon-prob-value" style="color:${shDirectionColor};">
             ${shProbability}%
-          </div>
-          <div class="short-horizon-prob-note">
-            ${sh.probabilityCalibrated === true
-              ? 'Calibrated'
-              : 'Experimental · uncalibrated'}
           </div>
         </div>
       </div>
@@ -1530,6 +1545,17 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
 
   // Unit-aware K/L/Cr formatting comes from shared/utils/formatters.js.
   const signedFmt = (v) => (v>0?'+':'') + fmtCrLK(v);
+  const formatLtpAmount = change => {
+    if (change == null || !Number.isFinite(Number(change))) return '—';
+    const amount = Number(change);
+    return `${amount > 0 ? '+' : amount < 0 ? '−' : ''}${fmtN(Math.abs(amount), 2)}`;
+  };
+  const formatLtpPercent = pctChange => {
+    if (pctChange == null || !Number.isFinite(Number(pctChange))) return 'Percent change unavailable';
+    const percent = Number(pctChange);
+    return `${percent > 0 ? '+' : percent < 0 ? '−' : ''}${fmtN(Math.abs(percent), 2)}%`;
+  };
+  const changeClass = value => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : '';
   const fmtCapital = (v) => {
     if (v == null || isNaN(v)) return '—';
     const a = Math.abs(v), sign = v > 0 ? '+' : v < 0 ? '-' : '';
@@ -1669,7 +1695,7 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           <div class="oi-snap-balance-track"><i class="ce" style="width:${hasOiChangeData?ceChgPct:0}%"></i><i class="pe" style="width:${hasOiChangeData?peChgPct:0}%"></i></div>
         </div>
         <div class="oi-snap-inline-metrics" aria-label="Net OI flow and velocity">
-          <div class="oi-snap-inline-heading"><strong>OI Flow / Velocity</strong><small>PE−CE ΔOI</small></div>
+          <div class="oi-snap-inline-heading"><strong>Options OI Flow / Velocity</strong><small>Visible strikes · PE−CE ΔOI</small></div>
           <div class="oi-snap-inline-grid three">
             ${oiChangePeriods.map(({label,value}) => `<span><small>${label}</small><strong style="color:${value==null?'var(--text-tertiary)':signColor(value)}">${fmtNetOiVelocity(value)}</strong></span>`).join('')}
           </div>
@@ -1682,21 +1708,22 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
       <div class="oc-native-scroll">
         <table class="oc-ledger-table" data-view="${ledgerView}" aria-label="Option Chain ledger by strike">
           <colgroup>
-            <col class="c-sig"><col class="c-ltp"><col class="c-ltp"><col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-capital">
-            <col class="c-iv"><col class="c-vol"><col class="c-prem"><col class="c-delta"><col class="c-gamma"><col class="c-theta"><col class="c-vega"><col class="c-foot"><col class="c-struct">
+            <col class="c-sig"><col class="c-vol"><col class="c-iv"><col class="c-prem"><col class="c-ltp">${isCommodity ? '' : '<col class="c-ltp">'}<col class="c-strike"><col class="c-oi"><col class="c-chg"><col class="c-capital">
+            <col class="c-delta"><col class="c-gamma"><col class="c-theta"><col class="c-vega"><col class="c-foot"><col class="c-struct">
           </colgroup>
           <thead>
             <tr>
               <th class="oc-metric positioning">Signal <small>composite</small></th>
-              <th class="ce">CE LTP <small>change</small></th>
-              <th class="pe">PE LTP <small>change</small></th>
+              <th class="oc-metric activity positioning">Volume <small>PE / CE</small></th>
+              <th class="oc-metric activity positioning greeks">IV <small>PE / CE</small></th>
+              <th class="oc-metric activity positioning">Premium ₹ <small>PE / CE</small></th>
+              ${isCommodity
+                ? '<th class="ltp">LTP <small>PE / CE</small></th>'
+                : '<th class="ce">CE LTP <small>change</small></th><th class="pe">PE LTP <small>change</small></th>'}
               <th class="strike">Strike <small>PCR</small></th>
               <th class="oc-metric positioning">Open Int <small>PE / CE</small></th>
               <th class="oc-metric positioning">Chg OI <small>PE / CE</small></th>
              <th class="oc-metric positioning">Capital Flow <small>${isCommodity?'Day ΔOI × LTP':'PE / CE'}</small></th>
-              <th class="oc-metric activity">IV <small>PE / CE</small></th>
-              <th class="oc-metric activity">Volume <small>PE / CE</small></th>
-              <th class="oc-metric activity">Premium ₹ <small>PE / CE</small></th>
               <th class="oc-metric greeks">Delta <small>PE / CE</small></th>
               <th class="oc-metric greeks">Gamma <small>PE / CE</small></th>
               <th class="oc-metric greeks">Theta <small>PE / CE</small></th>
@@ -1708,15 +1735,20 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
           <tbody>
             ${chain.map(r => { const sig=chainCombinedSignal(r.ceSignal,r.peSignal); const isAtm=r.strike===activeAtm(d); const g=greeksByStrike.get(Number(r.strike))||{}; const structure=structureByStrike[Number(r.strike)]; const structureText=structure?structure.text:(isAtm?'ATM':'—'); const structureStyle=structure&&structure.color?` style="color:${structure.color}"`:''; const oiWinner=(Number(r.peOI)||0)===(Number(r.ceOI)||0)?'':((Number(r.peOI)||0)>(Number(r.ceOI)||0)?'pe':'ce'); const chgWinner=Math.abs(Number(r.peChgOI)||0)===Math.abs(Number(r.ceChgOI)||0)?'':(Math.abs(Number(r.peChgOI)||0)>Math.abs(Number(r.ceChgOI)||0)?'pe':'ce'); return `<tr class="oc-ledger-row ${isAtm?'atm':''}" data-strike="${Number(r.strike)}">
               <td class="oc-metric positioning signal"><span class="oc-ledger-signal ${sig.cls||''}">${escapeHtml(sig.label||'Mixed')}</span></td>
-              <td class="ltp ce">${isCommodity?`<span><strong>${fmtN(r.ceLTP,2)}</strong><small>—</small></span>`:`<button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button>`}</td>
-              <td class="ltp pe">${isCommodity?`<span><strong>${fmtN(r.peLTP,2)}</strong><small>—</small></span>`:`<button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button>`}</td>
+              <td class="oc-metric activity positioning"><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
+              <td class="oc-metric activity positioning greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
+              <td class="oc-metric activity positioning"><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
+              ${isCommodity
+                ? `<td class="ltp"><div class="oc-ledger-stack">
+                    <span class="side-value pe ltp-change-row"><strong>${fmtN(r.peLTP,2)}</strong><small class="${changeClass(r.peChg)}" title="${formatLtpPercent(r.peChgPct)}">${formatLtpAmount(r.peChg)}</small></span>
+                    <span class="side-value ce ltp-change-row"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${changeClass(r.ceChg)}" title="${formatLtpPercent(r.ceChgPct)}">${formatLtpAmount(r.ceChg)}</small></span>
+                  </div></td>`
+                : `<td class="ltp ce"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'CE',${r.ceLTP==null?'null':Number(r.ceLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} CE"><strong>${fmtN(r.ceLTP,2)}</strong><small class="${r.ceChg>=0?'up':'down'}">${r.ceChg==null?'—':signedFmt(r.ceChg)}</small></button></td>
+                  <td class="ltp pe"><button type="button" onclick="event.stopPropagation();ptOpenQuickOrder(event,${Number(r.strike)},'PE',${r.peLTP==null?'null':Number(r.peLTP)})" aria-label="Buy or sell ${fmtI(r.strike)} PE"><strong>${fmtN(r.peLTP,2)}</strong><small class="${r.peChg>=0?'up':'down'}">${r.peChg==null?'—':signedFmt(r.peChg)}</small></button></td>`}
               <td class="strike"><button type="button" onclick="event.stopPropagation();openOptionChainAtStrike(${Number(r.strike)})" aria-label="Open Strike Detail for ${fmtI(r.strike)}"><strong>${fmtI(r.strike)}</strong><small>PCR ${r.ceOI?fmtN((r.peOI||0)/r.ceOI,2):'—'}</small></button></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${oiWinner==='pe'?'dominant':''}">${fmtCrLK(r.peOI)}</span><span class="side-value ce ${oiWinner==='ce'?'dominant':''}">${fmtCrLK(r.ceOI)}</span></div></td>
               <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe ${chgWinner==='pe'?'dominant':''}">${hasOiChangeData?signedFmt(r.peChgOI):'—'}</span><span class="side-value ce ${chgWinner==='ce'?'dominant':''}">${hasOiChangeData?signedFmt(r.ceChgOI):'—'}</span></div></td>
              <td class="oc-metric positioning"><div class="oc-ledger-stack"><span class="side-value pe">${fmtCapital(r.peCapitalFlow)}</span><span class="side-value ce">${fmtCapital(r.ceCapitalFlow)}</span></div></td>
-              <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtN(r.peIV,2)}%</span><span class="ce">${fmtN(r.ceIV,2)}%</span></div></td>
-              <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">${fmtCrLK(r.peVol)}</span><span class="ce">${fmtCrLK(r.ceVol)}</span></div></td>
-              <td class="oc-metric activity"><div class="oc-ledger-stack"><span class="pe">₹${fmtCrLK(r.pePremiumLocked)}</span><span class="ce">₹${fmtCrLK(r.cePremiumLocked)}</span></div></td>
               <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pDelta,3)}</span><span class="ce">${fmtN(g.cDelta,3)}</span></div></td>
               <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pGamma,5)}</span><span class="ce">${fmtN(g.cGamma,5)}</span></div></td>
               <td class="oc-metric greeks"><div class="oc-ledger-stack"><span class="pe">${fmtN(g.pTheta,2)}</span><span class="ce">${fmtN(g.cTheta,2)}</span></div></td>

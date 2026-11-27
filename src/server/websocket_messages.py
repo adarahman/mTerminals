@@ -23,6 +23,7 @@ class WebSocketMessageRouter:
         stop_funds_polling: Callable[[], Any],
         control_feed: Callable[[bool], Mapping[str, Any]],
         broadcast_control: Callable[[dict], Awaitable[Any]],
+        switch_symbol: Callable[[str, Any], Any] | None = None,
     ):
         self._place_order = place_order
         self._cancel_order = cancel_order
@@ -33,6 +34,7 @@ class WebSocketMessageRouter:
         self._stop_funds_polling = stop_funds_polling
         self._control_feed = control_feed
         self._broadcast_control = broadcast_control
+        self._switch_symbol = switch_symbol
 
     async def dispatch(self, data: Mapping[str, Any] | Any) -> None:
         if not isinstance(data, Mapping):
@@ -70,6 +72,36 @@ class WebSocketMessageRouter:
                 self._start_funds_polling()
             else:
                 self._stop_funds_polling()
+            return
+
+        if message_type == "switch_symbol":
+            symbol = str(payload.get("symbol") or "").strip().upper()
+            expiry = payload.get("expiry")
+            if not symbol or self._switch_symbol is None:
+                await self._broadcast_control({
+                    "type": "control_error",
+                    "action": "switch_symbol",
+                    "symbol": symbol,
+                    "error": "symbol_switch_unavailable" if self._switch_symbol is None else "missing_symbol",
+                })
+                return
+            try:
+                result = self._switch_symbol(symbol, expiry)
+            except Exception as exc:
+                logger.warning("symbol switch failed: %s", exc)
+                await self._broadcast_control({
+                    "type": "control_error",
+                    "action": "switch_symbol",
+                    "symbol": symbol,
+                    "error": "symbol_switch_failed",
+                })
+                return
+            await self._broadcast_control({
+                "type": "control_ack",
+                "action": "switch_symbol",
+                "symbol": symbol,
+                "result": result,
+            })
             return
 
         if message_type == "control_feed":

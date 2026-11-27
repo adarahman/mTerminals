@@ -263,7 +263,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // Inside dashboard.js, within the DataService or global scope:
 function switchActiveIndex(sym) {
-  if (!sym) return;
+  if (!sym || String(sym).toUpperCase() === String(window.AppState?.wsState?.symbol || '').toUpperCase()) return;
   // Mask the previous symbol's price immediately and make DataService wait
   // for a matching full baseline before rendering the replacement market.
   if (typeof window.beginSymbolSwitch === 'function') window.beginSymbolSwitch(sym);
@@ -277,11 +277,19 @@ function switchActiveIndex(sym) {
   // became "ZYDUS%20LIFESCIENCES%20LTD" on the backend, which then failed
   // every expiry/chain lookup). Set the raw value.
   params.set('symbol', sym);
-  connectWebSocket(`${base}?${params.toString()}`);
-  // Phase 5 (event-bus.js): announce the switch on the shared bus. Purely
-  // additive — connectWebSocket() above is still the only thing that
-  // actually performs the switch; this just gives other modules a way to
-  // react to it later without switchActiveIndex needing to know who.
+  const nextUrl = `${base}?${params.toString()}`;
+  const switchedOnCurrentSocket = typeof app !== 'undefined' && app.data
+    && typeof app.data.switchSymbol === 'function'
+    && app.data.switchSymbol(sym);
+  if (switchedOnCurrentSocket) {
+    // Keep the active dashboard socket open. The server switches its shared
+    // market feed and broadcasts the new symbol's next full snapshot.
+    _wsUrl = nextUrl;
+  } else {
+    connectWebSocket(nextUrl);
+  }
+  // Announce the switch on the shared bus so other panels can react without
+  // coupling them directly to the feed transport.
   if (window.eventBus) window.eventBus.emit('symbol:change', { symbol: sym });
 }
 window.switchActiveIndex = switchActiveIndex;

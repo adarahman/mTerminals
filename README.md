@@ -75,7 +75,9 @@ There are three services: launcher on **5400**, shared desktop/mobile backend on
 **5500**, and Expo development server on **8081**. Mobile data uses
 `ws://<computer-LAN-IP>:5500/mobile-ws`. The launcher enables mobile access,
 creates or reuses its token in the backend `.env`, and supplies the complete
-authenticated URL to Expo automatically. It also follows `--backend-port`.
+backend address and authentication token to Expo automatically. The token is
+sent as the first WebSocket message and is not placed in the connection URL.
+It also follows `--backend-port`.
 There is no need to edit `mobile/.env` when using the launcher. For a computer
 with multiple network adapters, use `--mobile-host <computer-Wi-Fi-IP>`.
 Port **5501** is no longer used. Separate manual Expo startup still reads
@@ -84,6 +86,9 @@ Only the authenticated mobile route accepts LAN access; desktop routes remain
 local-only. Restart the backend and Expo after changing connection settings.
 Click **Start Backend** to begin receiving market data. If mobile access was
 enabled after the backend was already running, restart that backend once.
+Manual Expo startup must set `EXPO_PUBLIC_MTERMINALS_WS` and
+`EXPO_PUBLIC_MTERMINALS_TOKEN` in `mobile/.env`. The token must match
+`MTERMINALS_MOBILE_TOKEN` in the backend `.env`; keep both files private.
 
 The application is served from `http://127.0.0.1:5500`; operational endpoints
 are `/health` and `/metrics`. Broker credentials are required for SmartAPI mode.

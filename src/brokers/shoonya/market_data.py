@@ -438,10 +438,10 @@ def get_commodity_option_expiries(underlying):
     return get_commodity_option_expiries(underlying)
 
 
-def get_commodity_option_chain(underlying, expiry, strikes_around_atm=10):
+def get_commodity_option_chain(underlying, expiry, strikes_around_atm=10, future_quote=None):
     from brokers.smartapi.instruments import get_commodity_option_contracts
 
-    future = get_commodity_futures_quote(underlying)
+    future = future_quote or get_commodity_futures_quote(underlying)
     if not future:
         return None
     try:
@@ -535,8 +535,12 @@ class ShoonyaMarketData:
     def get_commodity_option_expiries(self, underlying):
         return get_commodity_option_expiries(underlying)
 
-    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
-        return get_commodity_option_chain(underlying, expiry, strikes_around_atm)
+    def get_commodity_option_chain(
+        self, underlying, expiry, strikes_around_atm=10, future_quote=None
+    ):
+        return get_commodity_option_chain(
+            underlying, expiry, strikes_around_atm, future_quote=future_quote
+        )
 
     def get_fno_underlyings(self, force_refresh=False):
         return get_fno_underlyings(force_refresh=force_refresh)

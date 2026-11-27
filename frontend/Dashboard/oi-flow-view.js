@@ -295,8 +295,10 @@ class OiFlowView {
     if(a>=1e3) return sign+'₹'+(a/1e3).toFixed(1)+'K';
     return sign+'₹'+Math.round(a);
   };
-  const capitalMetric = (label, value, qualifier) => `<div title="${value==null?'Unavailable':`Exact: ₹${Math.round(Math.abs(value)).toLocaleString('en-IN')}`}"><span>${label}</span><strong>${fmtCapital(value,false)}</strong>${qualifier?`<small>${qualifier}</small>`:''}</div>`;
-  const flowAction = (v) => v==null ? 'unavailable' : v>0 ? 'premium-weighted OI added' : v<0 ? 'premium-weighted OI unwound' : 'no net day-session change';
+  const capitalMetric = (label, value, qualifier) => value == null || !Number.isFinite(Number(value))
+    ? ''
+    : `<div title="Exact: ₹${Math.round(Math.abs(value)).toLocaleString('en-IN')}"><span>${label}</span><strong>${fmtCapital(value,false)}</strong>${qualifier?`<small>${qualifier}</small>`:''}</div>`;
+  const flowAction = (v) => v==null ? 'unavailable' : v>0 ? 'premium OI added' : v<0 ? 'premium OI unwound' : 'no net change';
   const netFlowRead = netCapitalFlow==null ? 'Net flow is unavailable.'
     : netCapitalFlow>0 ? 'Put-side flow leads call-side flow; a bullish positioning tilt, not proof of fresh buying.'
     : netCapitalFlow<0 ? 'Call-side flow leads put-side flow; a bearish positioning tilt, not proof of fresh writing.'
@@ -349,70 +351,40 @@ class OiFlowView {
   return `
   <div class="oic-card" id="oi-flow-summary-card">
     <div class="capital-flow-section oi-flow-frame" aria-label="Capital Flow">
-      <div class="oi-flow-frame-heading">
+      <div class="oi-flow-frame-heading" tabindex="0" title="Where is options capital moving?">
         <div>
           <span class="oi-flow-eyebrow">Capital Flow</span>
-          <h3>Where is options capital moving?</h3>
         </div>
-        <span class="oi-flow-scope">${flowScope}${baselineQualifier}</span>
+        <span class="oi-flow-header-tilt ${sessionTone}" title="${escapeHtml(netFlowRead)}">${netCapitalFlow==null ? 'Unavailable' : netCapitalFlow>0 ? 'Bullish Tilt' : netCapitalFlow<0 ? 'Bearish Tilt' : 'Neutral'}</span>
+        <span class="oi-flow-header-net" tabindex="0" title="${escapeHtml(`${flowScope}${baselineQualifier}. ${netFlowRead}`)}"><span>Net PE−CE</span><strong>${fmtCapital(netCapitalFlow)}</strong></span>
       </div>
 
-      <section class="oi-flow-verdict ${sessionTone}" aria-label="Session flow verdict">
-        <div>
-          <span class="oi-flow-step">${verdictLabel}</span>
-          <strong>${sessionTitle}</strong>
-          <p>${netFlowRead}</p>
-        </div>
-        <div class="oi-flow-net-value">
-          <span>Net PE−CE</span>
-          <strong>${fmtCapital(netCapitalFlow)}</strong>
-        </div>
-      </section>
+      <div class="oi-flow-content-grid">
+        <section class="oi-flow-context" aria-labelledby="oi-flow-context-title">
+          <div class="oi-flow-section-heading">
+            <span class="oi-flow-step" id="oi-flow-context-title" tabindex="0" title="Scale and concentration, not directional signals">Capital context</span>
+          </div>
+          <div class="capital-foundation-strip" aria-label="Stage 1 capital metrics">
+          ${capitalMetric('Premium locked',totalPremiumLocked,'positioned premium')}
+          ${capitalMetric('Premium turnover',totalPremiumTurnover,'session activity')}
+          ${capitalMetric('Gross strike notional',totalNotionalExposure,'exposure scale, not cash deployed')}
+          </div>
+          ${topCapital ? `<div class="capital-concentration-note"><strong>Concentration:</strong> <button class="strike-link" onclick="event.stopPropagation();openOptionChainAtStrike(${topCapital.strike})">${fmtI(topCapital.strike)}</button> holds ${fmtN(topCapitalPct,1)}% of visible premium locked.</div>` : ''}
+        </section>
 
-      <section aria-labelledby="oi-flow-compare-title">
-        <div class="oi-flow-section-heading">
-          <span class="oi-flow-step" id="oi-flow-compare-title">Compare both sides</span>
-          <small>Positive = premium-weighted OI added; negative = unwound</small>
-        </div>
-        <div class="oi-flow-side-grid">
-          <article class="oi-flow-side-card ce">
-            <div class="oi-flow-side-head"><span>CE</span><strong>Call-side flow</strong></div>
-            <div class="oi-flow-side-value">${fmtCapital(totalCeFlow)}</div>
-            <dl>
-              <div><dt>Session state</dt><dd>${flowAction(totalCeFlow)}</dd></div>
-              <div><dt>Leading strike</dt><dd>${topCeFlow ? `<button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${topCeFlow.strike})">${fmtI(topCeFlow.strike)}</button>` : '—'}</dd></div>
-            </dl>
-          </article>
-          <article class="oi-flow-side-card pe">
-            <div class="oi-flow-side-head"><span>PE</span><strong>Put-side flow</strong></div>
-            <div class="oi-flow-side-value">${fmtCapital(totalPeFlow)}</div>
-            <dl>
-              <div><dt>Session state</dt><dd>${flowAction(totalPeFlow)}</dd></div>
-              <div><dt>Leading strike</dt><dd>${topPeFlow ? `<button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${topPeFlow.strike})">${fmtI(topPeFlow.strike)}</button>` : '—'}</dd></div>
-            </dl>
-          </article>
-        </div>
-      </section>
+        <section class="oi-flow-values" aria-label="Capital flow verdict and CE, PE values">
+          <div class="oi-flow-value ce">
+            <span>CE</span><strong>${fmtCapital(totalCeFlow)}</strong>
+            <small>${flowAction(totalCeFlow)} · lead ${topCeFlow ? `<button class="strike-link ce" onclick="event.stopPropagation();openOptionChainAtStrike(${topCeFlow.strike})">${fmtI(topCeFlow.strike)}</button>` : '—'}</small>
+          </div>
+          <div class="oi-flow-value pe">
+            <span>PE</span><strong>${fmtCapital(totalPeFlow)}</strong>
+            <small>${flowAction(totalPeFlow)} · lead ${topPeFlow ? `<button class="strike-link pe" onclick="event.stopPropagation();openOptionChainAtStrike(${topPeFlow.strike})">${fmtI(topPeFlow.strike)}</button>` : '—'}</small>
+          </div>
+        </section>
 
-      <section aria-labelledby="oi-flow-context-title">
-        <div class="oi-flow-section-heading">
-          <span class="oi-flow-step" id="oi-flow-context-title">Capital context</span>
-          <small>Scale and concentration, not directional signals</small>
-        </div>
-        <div class="capital-foundation-strip" aria-label="Stage 1 capital metrics">
-        ${capitalMetric('Premium locked',totalPremiumLocked,'positioned premium')}
-        ${capitalMetric('Premium turnover',totalPremiumTurnover,'session activity')}
-        ${capitalMetric('Gross strike notional',totalNotionalExposure,'exposure scale, not cash deployed')}
-        </div>
-        ${topCapital ? `<div class="capital-concentration-note"><strong>Concentration:</strong> <button class="strike-link" onclick="event.stopPropagation();openOptionChainAtStrike(${topCapital.strike})">${fmtI(topCapital.strike)}</button> holds ${fmtN(topCapitalPct,1)}% of visible premium locked.</div>` : ''}
-      </section>
+      </div>
 
-      <details class="oi-flow-method">
-        <summary>How to read these values</summary>
-        <div class="capital-unit-note">${isCommodity
-          ? 'MCX flow uses current option OI minus OI at the previous trading session close, multiplied by option LTP. It is unavailable when historical OI for the previous close cannot be loaded.'
-          : 'Units: ₹ underlying quantity terms. OI is already lot-scaled; turnover alone converts raw volume contracts using lot size. Capital Flow is day-session ΔOI × LTP; 5m/15m/30m below is separate intraday velocity.'}</div>
-      </details>
     </div>
   </div>`;
 }

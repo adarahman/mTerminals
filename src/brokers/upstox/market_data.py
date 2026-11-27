@@ -423,8 +423,10 @@ class UpstoxMarketData:
         today = datetime.now().date()
         return sorted(expiry for expiry in expiries if datetime.strptime(expiry, "%Y-%m-%d").date() >= today)
 
-    def get_commodity_option_chain(self, underlying, expiry, strikes_around_atm=10):
-        future = self.get_commodity_futures_quote(underlying)
+    def get_commodity_option_chain(
+        self, underlying, expiry, strikes_around_atm=10, future_quote=None
+    ):
+        future = future_quote or self.get_commodity_futures_quote(underlying)
         if not future:
             return None
         rows = [

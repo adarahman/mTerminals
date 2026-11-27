@@ -364,3 +364,23 @@ def test_commodity_oi_velocity_empty_without_history():
     blocks = api._oi_velocity("CRUDEOIL", "31DEC2099")
     assert [block["window"] for block in blocks] == [5, 15, 30]
     assert all(block["rows"] == [] for block in blocks)
+
+
+def test_commodity_option_chain_attaches_black76_greeks():
+    from analytics.commodity_greeks import black76_price, years_to_expiry
+
+    t = years_to_expiry("31DEC2099")
+    rows = [
+        {"strike": k, "type": side, "oi": 100,
+         "ltp": round(black76_price(6000.0, k, t, 0.3, "C" if side == "CE" else "P"), 2)}
+        for k in (5900, 6000, 6100) for side in ("CE", "PE")
+    ]
+    chain = {"spot": 6000.0, "atm_strike": 6000, "lot_size": 100, "rows": rows}
+    provider = _Provider(expiries=["31DEC2099"], chain=chain)
+    api = CommodityPricesApi(market_data=lambda: provider, active_provider=lambda: "SMARTAPI")
+
+    response_chain = json.loads(asyncio.run(api.option_chain(_request())).text)["chain"]
+
+    assert abs(response_chain["atm_iv"] - 30) < 0.5
+    assert [g["strike"] for g in response_chain["greeks"]] == [5900, 6000, 6100]
+    assert all("iv" in row for row in response_chain["rows"])

@@ -8,10 +8,15 @@ class CommodityPricesView {
     this.futureExpiryLoads = new Map();
     this.timer = null;
     this.chainTimer = null;
+    this.chainRetryTimer = null;
     this.newsTimer = null;
+    this.inventoryTimer = null;
+    this.inventoryLoading = false;
     this.quoteLoadingSymbols = new Set();
+    this.quoteRefreshPendingSymbols = new Set();
     this.chainLoading = false;
     this.chainRefreshPendingSymbol = '';
+    this.chainLoads = new Map();
     this.newsLoading = false;
     this.newsRefreshPending = false;
     this.latestQuote = null;
@@ -20,6 +25,9 @@ class CommodityPricesView {
     this.latestProvider = '';
     this.latestChainPayload = null;
     this.latestAnalysis = {};
+    this.quoteCache = new Map();
+    this.chainCache = new Map();
+    this.optionsUnavailableUntil = new Map();
   }
 
   open(symbol) {
@@ -30,15 +38,21 @@ class CommodityPricesView {
       this.expiry = '';
     }
     window.commodityActiveSymbol = this.symbol;
+    this._restoreCachedSymbolView(this.symbol);
     this.renderDashboard();
     if (this.timer !== null) window.clearInterval(this.timer);
     if (this.chainTimer !== null) window.clearInterval(this.chainTimer);
+    if (this.chainRetryTimer !== null) window.clearTimeout(this.chainRetryTimer);
+    this.chainRetryTimer = null;
     if (this.newsTimer !== null) window.clearInterval(this.newsTimer);
+    if (this.inventoryTimer !== null) window.clearInterval(this.inventoryTimer);
     this.refresh();
     this.timer = window.setInterval(() => this._refreshQuote(this.symbol), 1000);
     this.chainTimer = window.setInterval(() => this._refreshOptionChain(this.symbol), 10000);
     this.refreshNews();
     this.newsTimer = window.setInterval(() => this.refreshNews(), 300000);
+    this.refreshInventory();
+    this.inventoryTimer = window.setInterval(() => this.refreshInventory(), 1800000);
   }
 
   close() {
@@ -50,9 +64,17 @@ class CommodityPricesView {
       window.clearInterval(this.chainTimer);
       this.chainTimer = null;
     }
+    if (this.chainRetryTimer !== null) {
+      window.clearTimeout(this.chainRetryTimer);
+      this.chainRetryTimer = null;
+    }
     if (this.newsTimer !== null) {
       window.clearInterval(this.newsTimer);
       this.newsTimer = null;
+    }
+    if (this.inventoryTimer !== null) {
+      window.clearInterval(this.inventoryTimer);
+      this.inventoryTimer = null;
     }
     // Rescue the persistent expiry pickers before the equity top-bar
     // rebuild. They only exist as single DOM nodes (created once in
@@ -80,10 +102,11 @@ class CommodityPricesView {
     if (nextSymbol !== this.symbol) this._resetForSymbol(nextSymbol);
     this.symbol = nextSymbol;
     window.commodityActiveSymbol = nextSymbol;
-    this.expiry = '';
+    this._restoreCachedSymbolView(nextSymbol);
     this.renderDashboard();
     this.refresh();
     this.refreshNews();
+    this.refreshInventory();
   }
 
   selectExpiry(expiry) {
@@ -103,6 +126,13 @@ class CommodityPricesView {
     if (element) element.textContent = value;
   }
 
+  _markSelectedCommodityFeedFresh(symbol) {
+    if (typeof app !== 'undefined' && app.data
+        && typeof app.data.markExternalCommodityQuote === 'function') {
+      app.data.markExternalCommodityQuote(symbol);
+    }
+  }
+
   _resetForSymbol(symbol) {
     this.latestQuote = null;
     this.lastLiveQuoteAt = 0;
@@ -112,26 +142,48 @@ class CommodityPricesView {
     this.latestAnalysis = {};
     this.futureExpiry = '';
     this.futureExpiries = [];
-    this._setText('commodity-price-ltp', '—');
+    const cached = this.quoteCache.get(symbol);
+    const cachedQuoteIsFresh = cached && Date.now() - cached.receivedAt < 30000;
+    this.latestQuote = cachedQuoteIsFresh ? { ...cached.quote } : null;
+    this.latestProvider = cachedQuoteIsFresh ? cached.provider : '';
+    this._setText('commodity-price-ltp', cachedQuoteIsFresh ? this._format(cached.quote.LTP) : '—');
     const ltp = document.getElementById('commodity-price-ltp');
     if (ltp) ltp.classList.remove('up', 'down');
     const change = document.getElementById('commodity-price-change');
     if (change) {
-      change.textContent = '—';
+      const amount = Number(cachedQuoteIsFresh && cached.quote.Change);
+      const percent = Number(cachedQuoteIsFresh && cached.quote.PctChange);
+      change.textContent = Number.isFinite(amount) && Number.isFinite(percent)
+        ? `${amount >= 0 ? '+' : ''}${this._format(amount)} (${percent >= 0 ? '+' : ''}${this._format(percent)}%)`
+        : '—';
       change.classList.remove('up', 'down');
+      change.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
+      change.classList.toggle('down', Number.isFinite(percent) && percent < 0);
+    }
+    if (ltp && cachedQuoteIsFresh) {
+      const percent = Number(cached.quote.PctChange);
+      ltp.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
+      ltp.classList.toggle('down', Number.isFinite(percent) && percent < 0);
     }
     [
       'commodity-price-change-5m', 'commodity-price-oi-change-5m',
       'commodity-price-volume-change-5m',
     ].forEach((id) => this._setText(id, '—'));
-    this._setText('commodity-price-lot-size', '—');
+    this._setText('commodity-price-lot-size', cachedQuoteIsFresh
+      ? this._format(cached.quote.LotSize, 0) : '—');
     const priceStatus = document.getElementById('commodity-price-status');
     if (priceStatus) {
-      priceStatus.dataset.tone = '';
-      priceStatus.dataset.status = 'connecting';
-      priceStatus.textContent = 'CONNECTING';
+      priceStatus.dataset.tone = cachedQuoteIsFresh ? 'stale' : '';
+      priceStatus.dataset.status = cachedQuoteIsFresh ? 'stale' : 'connecting';
+      priceStatus.textContent = cachedQuoteIsFresh ? 'UPDATING' : 'CONNECTING';
+      priceStatus.title = cachedQuoteIsFresh
+        ? `Showing the latest ${symbol} quote while refreshing the feed.`
+        : `Waiting for ${symbol} quote.`;
     }
-    this._setText('commodity-updated-time', '—');
+    this._setText('commodity-updated-time', cachedQuoteIsFresh
+      ? new Date(cached.receivedAt).toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }) : '—');
     const expiryPicker = document.getElementById('commodity-expiry');
     if (expiryPicker) expiryPicker.replaceChildren();
     const futureExpiryPicker = document.getElementById('commodity-futures-expiry');
@@ -142,11 +194,30 @@ class CommodityPricesView {
     const chainStatus = document.getElementById('commodity-chain-status');
     if (chainStatus) {
       chainStatus.dataset.tone = '';
-      chainStatus.textContent = `Loading ${symbol} option chain…`;
+      chainStatus.textContent = `Refreshing ${symbol} option chain…`;
     }
-    const chainHost = document.getElementById('commodity-chain-shared');
-    if (chainHost) chainHost.replaceChildren();
-    this._renderAnalysis({});
+  }
+
+  _restoreCachedSymbolView(symbol) {
+    const cached = this.chainCache.get(symbol);
+    const isUsable = cached && Date.now() - cached.receivedAt < 300000;
+    if (!isUsable) {
+      this.latestChainPayload = null;
+      this.latestAnalysis = {};
+      this.expiry = '';
+      this._clearOptionChain();
+      return;
+    }
+    this.latestChainPayload = cached.payload;
+    this.latestAnalysis = cached.payload.analysis || {};
+    this.expiry = cached.payload.expiry || '';
+    this._renderSharedOptionChain(cached.payload);
+    this._renderAnalysis(this.latestAnalysis);
+    const status = document.getElementById('commodity-chain-status');
+    if (status) {
+      status.dataset.tone = 'stale';
+      status.textContent = `Updating ${symbol} option chain…`;
+    }
   }
 
   _clearOptionChain() {
@@ -157,9 +228,36 @@ class CommodityPricesView {
     this._renderAnalysis({});
   }
 
+  _showOptionsUnavailable(symbol) {
+    this.optionsUnavailableUntil.set(symbol, Date.now() + 30000);
+    if (this.chainRetryTimer !== null) {
+      window.clearTimeout(this.chainRetryTimer);
+      this.chainRetryTimer = null;
+    }
+    this.latestChainPayload = null;
+    this.latestAnalysis = {};
+    this.expiry = '';
+    const picker = document.getElementById('commodity-expiry');
+    if (picker) {
+      picker.replaceChildren(new Option('Options unavailable', ''));
+      picker.disabled = true;
+    }
+    this._clearOptionChain();
+    this._renderAnalysis({ optionsUnavailable: true });
+    const status = document.getElementById('commodity-chain-status');
+    if (status) {
+      status.dataset.tone = 'unavailable';
+      status.textContent = `Options unavailable for ${symbol}.`;
+    }
+  }
+
   _quoteMatchesSelectedSymbol(quote) {
+    return this._quoteMatchesSymbol(quote, this.symbol);
+  }
+
+  _quoteMatchesSymbol(quote, symbol) {
     if (!quote || typeof quote !== 'object') return false;
-    const symbol = String(this.symbol || '').trim().toUpperCase();
+    symbol = String(symbol || '').trim().toUpperCase();
     if (!symbol) return false;
     const underlying = String(quote.Underlying || '').trim().toUpperCase();
     if (underlying && underlying !== symbol) return false;
@@ -234,11 +332,20 @@ class CommodityPricesView {
   }
 
   applyLiveQuote(payload) {
-    if (window.dashboardInstrumentMode !== 'commodity'
-        || !payload || String(payload.symbol || '').toUpperCase() !== this.symbol) return;
+    if (window.dashboardInstrumentMode !== 'commodity' || !payload) return;
     const quote = payload.quote || {};
-    if (quote.LTP == null) return;
-    if (!this._quoteMatchesSelectedSymbol(quote)) return;
+    const symbol = String(payload.symbol || '').trim().toUpperCase();
+    const ltp = Number(quote.LTP);
+    if (!COMMODITY_SYMBOLS.includes(symbol) || !Number.isFinite(ltp) || ltp <= 0
+        || !this._quoteMatchesSymbol(quote, symbol)) return;
+    if (symbol !== this.symbol) {
+      this.quoteCache.set(symbol, {
+        quote: { ...quote },
+        provider: payload.provider || 'SMARTAPI',
+        receivedAt: Date.now(),
+      });
+      return;
+    }
     if (this.futureExpiry
         && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
     // SMARTAPI_WS ticks bypass the REST getMarketData identity check —
@@ -253,18 +360,26 @@ class CommodityPricesView {
           && Math.abs(wsLtp - restLtp) / restLtp * 100 > 5) return;
     }
     if (!this._acceptQuoteTick(quote)) return;
+    this.quoteCache.set(symbol, {
+      quote: { ...quote },
+      provider: payload.provider || 'SMARTAPI',
+      receivedAt: Date.now(),
+    });
+    this._markSelectedCommodityFeedFresh(this.symbol);
     this.lastLiveQuoteAt = Date.now();
-    this.latestQuote = quote;
+    // Copy: the WS store merges every symbol's tick into the same object, so
+    // keeping a reference lets a later COPPER/GOLD tick overwrite this quote.
+    this.latestQuote = { ...quote };
     this.latestQuoteError = '';
     this.latestProvider = payload.provider || 'SMARTAPI';
     this._syncContractLabel(quote);
     this._setText('commodity-price-ltp', this._format(quote.LTP));
     const change = quote.Change == null ? NaN : Number(quote.Change);
     const percent = quote.PctChange == null ? NaN : Number(quote.PctChange);
-    const ltp = document.getElementById('commodity-price-ltp');
-    if (ltp) {
-      ltp.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
-      ltp.classList.toggle('down', Number.isFinite(percent) && percent < 0);
+    const ltpElement = document.getElementById('commodity-price-ltp');
+    if (ltpElement) {
+      ltpElement.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
+      ltpElement.classList.toggle('down', Number.isFinite(percent) && percent < 0);
     }
     const changeElement = document.getElementById('commodity-price-change');
     if (changeElement) {
@@ -318,9 +433,12 @@ class CommodityPricesView {
   async refresh() {
     if (window.dashboardInstrumentMode !== 'commodity') return;
     const requestedSymbol = this.symbol;
-    this._refreshQuote(requestedSymbol);
+    // Start the chain immediately. Waiting for the quote request first adds
+    // the full broker round-trip to every symbol change; the chain adapter
+    // can resolve ATM from its own provider data while both requests run.
     this._refreshFutureExpiries(requestedSymbol);
     this._refreshOptionChain(requestedSymbol);
+    this._refreshQuote(requestedSymbol);
   }
 
   _normalizeExpiry(expiry) {
@@ -450,6 +568,109 @@ class CommodityPricesView {
     }
   }
 
+  async refreshInventory() {
+    if (window.dashboardInstrumentMode !== 'commodity') return;
+    const card = document.getElementById('commodity-inventory-outlook');
+    if (!card) return;
+    const symbol = this.symbol;
+    if (!['CRUDEOIL', 'NATURALGAS'].includes(symbol)) {
+      card.hidden = true;
+      return;
+    }
+    if (this.inventoryLoading) {
+      if (this.inventoryLoadingSymbol === symbol) return;
+      this.inventoryRefreshPendingSymbol = symbol;
+      return;
+    }
+    this.inventoryLoading = true;
+    this.inventoryLoadingSymbol = symbol;
+    card.hidden = false;
+    const summary = document.getElementById('commodity-inventory-summary');
+    const detail = document.getElementById('commodity-inventory-detail');
+    if (summary && !summary.textContent.trim()) summary.textContent = 'Loading latest report…';
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(
+        `/api/commodities/inventory?symbol=${encodeURIComponent(symbol)}`,
+        { cache: 'no-store', signal: controller.signal }
+      );
+      const payload = await response.json();
+      if (window.dashboardInstrumentMode !== 'commodity' || this.symbol !== symbol) return;
+      const naturalGas = symbol === 'NATURALGAS';
+      const fmt = (value) => value != null && value !== '' && Number.isFinite(Number(value))
+        ? (naturalGas
+          ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(1)} Bcf`
+          : `${Number(value) > 0 ? '+' : ''}${(Number(value) / 1000).toFixed(1)}M`)
+        : '—';
+      const fullFmt = (value) => {
+        const compact = fmt(value);
+        return compact === '—' ? compact : naturalGas ? compact : `${compact} barrels`;
+      };
+      const outlook = payload.outlook || 'Inventory report unavailable';
+      const hasReport = payload.actual != null;
+      if (summary) {
+        const surprise = payload.surprise == null ? null : Number(payload.surprise);
+        const actual = Number(payload.actual);
+        const volume = surprise == null ? actual : surprise;
+        const absVolume = Math.abs(volume);
+        const strength = absVolume >= (naturalGas ? 100 : 5000) ? 'Strong'
+          : absVolume >= (naturalGas ? 40 : 2000) ? 'Mild' : '';
+        const direction = surprise == null
+          ? (volume < 0 ? 'Positive' : volume > 0 ? 'Negative' : 'Neutral')
+          : surprise < 0 ? 'Positive' : surprise > 0 ? 'Negative' : 'Neutral';
+        summary.textContent = hasReport
+          ? `${strength ? `${strength} ` : ''}${direction}`
+          : 'Report unavailable';
+        summary.dataset.tone = direction === 'Positive' ? 'bullish'
+          : direction === 'Negative' ? 'bearish' : 'neutral';
+        summary.title = outlook;
+      }
+      if (detail) {
+        const previousReport = payload.previous_date
+          ? `P (${payload.previous_date}): ${fullFmt(payload.previous)}`
+          : `P: ${fullFmt(payload.previous)}`;
+        detail.replaceChildren();
+        const lines = hasReport
+          ? [`A ${fullFmt(payload.actual)} · F ${fullFmt(payload.expected)} · ${previousReport}`]
+          : [];
+        if (hasReport && payload.report_date) lines.push(`Report week: ${payload.report_date}`);
+        const sourceLine = [
+          payload.source ? (payload.source.includes('Energy Information Administration') ? 'EIA' : payload.source) : '',
+          payload.expected_source ? `Forecast: ${payload.expected_source}` : '',
+        ].filter(Boolean);
+        if (sourceLine.length) lines.push(sourceLine.join(' · '));
+        if (payload.stale) lines.push('Cached report');
+        if (payload.availability_note) lines.push(payload.availability_note);
+        else if (payload.error) lines.push(payload.error);
+        detail.textContent = lines.join('\n');
+        if (payload.source_url) {
+          const link = document.createElement('a');
+          link.href = payload.source_url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = ' Open EIA report';
+          detail.appendChild(link);
+        }
+      }
+      if (!response.ok) throw new Error(payload.error || 'Inventory unavailable');
+    } catch (error) {
+      const message = error.name === 'AbortError'
+        ? 'Inventory request timed out. Check backend internet access and try again.'
+        : error.message || 'Inventory report unavailable.';
+      if (summary) summary.textContent = 'Report unavailable';
+      if (detail) detail.textContent = message;
+    } finally {
+      window.clearTimeout(timeout);
+      this.inventoryLoading = false;
+      this.inventoryLoadingSymbol = '';
+      if (this.inventoryRefreshPendingSymbol) {
+        this.inventoryRefreshPendingSymbol = '';
+        this.refreshInventory();
+      }
+    }
+  }
+
   _renderNews(payload) {
     const status = document.getElementById('commodity-news-status');
     const list = document.getElementById('commodity-news-list');
@@ -494,20 +715,21 @@ class CommodityPricesView {
 
   async _refreshQuote(symbol) {
     if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
-    if (this.quoteLoadingSymbols.has(symbol)) return;
+    if (this.quoteLoadingSymbols.has(symbol)) {
+      this.quoteRefreshPendingSymbols.add(symbol);
+      return;
+    }
     this.quoteLoadingSymbols.add(symbol);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
     const requestedAt = Date.now();
     const requestedExpiry = this.futureExpiry;
     const which = this._futureSlot(requestedExpiry);
     const status = document.getElementById('commodity-price-status');
-    if (status && document.getElementById('commodity-price-ltp')?.textContent === '—') {
-      status.dataset.tone = '';
-      status.textContent = 'Loading live MCX quote…';
-    }
     try {
       const response = await fetch(
         `/api/commodities/quote?symbol=${encodeURIComponent(symbol)}&which=${which}`,
-        { cache: 'no-store' }
+        { cache: 'no-store', signal: controller.signal }
       );
       const payload = await response.json();
       if (!response.ok) {
@@ -520,6 +742,16 @@ class CommodityPricesView {
       if (this.futureExpiry
           && this._normalizeExpiry(quote.Expiry) !== this._normalizeExpiry(this.futureExpiry)) return;
       if (!this._acceptQuoteTick(quote)) return;
+      this.quoteCache.set(symbol, {
+        quote: { ...quote },
+        provider: payload.provider || '',
+        receivedAt: Date.now(),
+      });
+      this._markSelectedCommodityFeedFresh(symbol);
+      // The REST quote carries minute-bucketed price/OI/volume history even
+      // when a fresher WebSocket tick owns the displayed live price. Render
+      // this independent context before the live-tick guard can return.
+      this._renderFiveMinuteContext(quote.FiveMinute);
       // REST getMarketData rows carry the true instrument name and are
       // identity-checked — record this LTP as the trusted reference the
       // SMARTAPI_WS tick stream is validated against in applyLiveQuote,
@@ -563,7 +795,6 @@ class CommodityPricesView {
           ? Number(quote.LotSize).toLocaleString('en-IN')
           : 'Unavailable'
       );
-      this._renderFiveMinuteContext(quote.FiveMinute);
       if (status) {
         status.dataset.tone = 'live';
         status.dataset.status = 'live';
@@ -609,37 +840,59 @@ class CommodityPricesView {
       }
     }
     finally {
+      window.clearTimeout(timeout);
       this.quoteLoadingSymbols.delete(symbol);
+      if (this.quoteRefreshPendingSymbols.delete(symbol)
+          && window.dashboardInstrumentMode === 'commodity'
+          && symbol === this.symbol) {
+        this._refreshQuote(symbol);
+      }
     }
   }
 
   async _refreshOptionChain(symbol) {
     if (window.dashboardInstrumentMode !== 'commodity' || symbol !== this.symbol) return;
-    if (this.chainLoading) {
-      this.chainRefreshPendingSymbol = symbol;
-      return;
-    }
+    if ((this.optionsUnavailableUntil.get(symbol) || 0) > Date.now()) return;
+    const requestedExpiry = this.expiry;
+    const loadKey = `${symbol}:${requestedExpiry || 'NEAR'}`;
+    const existing = this.chainLoads.get(loadKey);
+    if (existing) return existing;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
     this.chainLoading = true;
     const status = document.getElementById('commodity-chain-status');
     if (status && !document.querySelector('#commodity-chain-shared .oc-ledger-row')) {
       status.dataset.tone = '';
       status.textContent = 'Loading option chain…';
     }
-    const requestedExpiry = this.expiry;
     const query = new URLSearchParams({ symbol });
     if (requestedExpiry) query.set('expiry', requestedExpiry);
-    try {
-      const response = await fetch(`/api/commodities/option-chain?${query}`, { cache: 'no-store' });
+    const load = (async () => { try {
+      const response = await fetch(`/api/commodities/option-chain?${query}`, {
+        cache: 'no-store', signal: controller.signal,
+      });
       const payload = await response.json();
       if (!response.ok) {
+        if (response.status === 404 && /no MCX option expiries/i.test(payload.error || '')) {
+          if (window.dashboardInstrumentMode === 'commodity' && symbol === this.symbol
+              && requestedExpiry === this.expiry) {
+            this._showOptionsUnavailable(symbol);
+          }
+          return;
+        }
         throw new Error(payload.error || `Option-chain request failed (${response.status}).`);
       }
       if (window.dashboardInstrumentMode !== 'commodity'
           || symbol !== this.symbol
           || (requestedExpiry && requestedExpiry !== this.expiry)) return;
       if (String(payload.symbol || '').trim().toUpperCase() !== symbol) return;
+      this.optionsUnavailableUntil.delete(symbol);
       this.latestChainPayload = payload;
       this.latestAnalysis = payload.analysis || {};
+      if (!(payload.chain?.rows || []).length) {
+        throw new Error('No option quotes are available right now. Retrying…');
+      }
+      this.chainCache.set(symbol, { payload, receivedAt: Date.now() });
       if (!requestedExpiry) this.expiry = payload.expiry;
       const expiryPicker = document.getElementById('commodity-expiry');
       if (expiryPicker) {
@@ -653,9 +906,10 @@ class CommodityPricesView {
       }
       this._renderSharedOptionChain(payload);
       this._renderAnalysis(payload.analysis || {});
+      this._renderCommodityAnalytics();
       this._syncSharedQuoteContext();
       if (status) {
-        status.dataset.tone = '';
+        status.dataset.tone = 'live';
         status.textContent = payload.chain.rows && payload.chain.rows.length
           ? `${payload.provider} · ATM ${this._format(payload.chain.atm_strike, 2)}`
           : 'No option quotes available for this expiry.';
@@ -666,18 +920,21 @@ class CommodityPricesView {
         status.dataset.tone = 'error';
         status.textContent = error.message || 'Unable to load commodity option chain.';
         this._clearOptionChain();
+        if (this.chainRetryTimer !== null) window.clearTimeout(this.chainRetryTimer);
+        this.chainRetryTimer = window.setTimeout(() => {
+          this.chainRetryTimer = null;
+          if (window.dashboardInstrumentMode === 'commodity' && symbol === this.symbol
+              && requestedExpiry === this.expiry) this._refreshOptionChain(symbol);
+        }, 2500);
       }
     }
     finally {
-      this.chainLoading = false;
-      const pendingSymbol = this.chainRefreshPendingSymbol;
-      this.chainRefreshPendingSymbol = '';
-      const nextSymbol = pendingSymbol || (symbol !== this.symbol ? this.symbol : '');
-      if (window.dashboardInstrumentMode === 'commodity'
-          && nextSymbol && nextSymbol === this.symbol) {
-        this._refreshOptionChain(nextSymbol);
-      }
-    }
+      window.clearTimeout(timeout);
+      this.chainLoads.delete(loadKey);
+      this.chainLoading = this.chainLoads.size > 0;
+    } })();
+    this.chainLoads.set(loadKey, load);
+    return load;
   }
 
   _formatExpiry(expiry) {
@@ -776,6 +1033,7 @@ class CommodityPricesView {
 
   _renderAnalysis(analysis) {
     this.latestAnalysis = analysis || {};
+    this._renderCommodityAnalytics();
     const decision = document.getElementById('sec-decision');
     const chainView = typeof app !== 'undefined' && app.chain;
     if (decision && chainView && typeof chainView.refreshDecisionBoxGuarded === 'function') {
@@ -785,7 +1043,45 @@ class CommodityPricesView {
     }
   }
 
+  _renderCommodityAnalytics() {
+    const set = (id, value) => {
+      const element = document.getElementById(id);
+      if (element) element.textContent = value == null || value === '' ? '—' : String(value);
+    };
+    const blocks = this.latestChainPayload?.chain?.oi_velocity || [];
+    const sharedData = this._toSharedDashboardData();
+    const visibleChain = typeof getFilteredChain === 'function'
+      ? getFilteredChain(sharedData)
+      : sharedData.chain || [];
+    const visibleStrikes = new Set(visibleChain.map((row) => Number(row.strike)));
+    [5, 15, 30].forEach((windowMinutes) => {
+      const block = blocks.find((item) => Number(item.window) === windowMinutes);
+      const rows = (block?.rows || []).filter((row) =>
+        visibleStrikes.has(Number(row.strike))
+      );
+      const ce = rows.reduce((sum, row) => sum + (Number(row.ceDOI) || 0), 0);
+      const pe = rows.reduce((sum, row) => sum + (Number(row.peDOI) || 0), 0);
+      const format = (value) => `${value > 0 ? '+' : ''}${Math.round(value).toLocaleString('en-IN')}`;
+      const valueElement = document.getElementById(`commodity-oi-velocity-${windowMinutes}`);
+      if (valueElement) {
+        valueElement.textContent = rows.length
+          ? `${format(ce)} CE · ${format(pe)} PE`
+          : 'Collecting history';
+        const periodLabel = valueElement.parentElement?.querySelector('span');
+        if (periodLabel) {
+          periodLabel.textContent = rows.length
+            ? `${windowMinutes} minute · Net PE−CE ${format(pe - ce)}`
+            : `${windowMinutes} minute`;
+        }
+      }
+    });
+    set('commodity-analytics-reason', this.latestChainPayload?.chain?.oi_velocity?.some((item) => item.rows?.length)
+      ? `Selected strike range · same PE−CE calculation as Market OI Flow · ${this._formatExpiry(this.expiry)}.`
+      : 'Collecting option-chain snapshots; horizon totals appear after enough history builds.');
+  }
+
   _toSharedDashboardData() {
+    const optionsUnavailable = !!this.latestAnalysis?.optionsUnavailable;
     const quoted = this.latestQuote || {};
     const quote = this._quoteMatchesSelectedSymbol(quoted) ? quoted : {};
     const chainPayload = this.latestChainPayload || {};
@@ -827,6 +1123,10 @@ class CommodityPricesView {
         ? null
         : rawLtp;
       row[`${side}LTP`] = ltp;
+      const netChange = contract.net_change == null ? null : Number(contract.net_change);
+      const percentChange = contract.pct_change == null ? null : Number(contract.pct_change);
+      row[`${side}Chg`] = Number.isFinite(netChange) ? netChange : null;
+      row[`${side}ChgPct`] = Number.isFinite(percentChange) ? percentChange : null;
       row[`${side}Vol`] = Number(contract.volume) || 0;
       row[`${side}IV`] = contract.iv == null ? null : Number(contract.iv);
       const oiChange = contract.oi_change == null ? null : Number(contract.oi_change);
@@ -856,15 +1156,22 @@ class CommodityPricesView {
       : undefined;
     const steps = chain.slice(1).map((row, index) => row.strike - chain[index].strike)
       .filter((step) => Number.isFinite(step) && step > 0);
-    const bias = ['BULLISH', 'BEARISH', 'NEUTRAL', 'WAIT'].includes(analysis.verdict)
-      ? analysis.verdict : 'WAIT';
+    const bias = optionsUnavailable
+      ? 'UNAVAILABLE'
+      : ['BULLISH', 'BEARISH', 'NEUTRAL', 'WAIT'].includes(analysis.verdict)
+        ? analysis.verdict : 'WAIT';
     const short = analysis.short_horizon || null;
     const contributors = (analysis.contributors || []).map((item) => ({
       ...item,
       weightedContribution: item.weightedContribution,
     }));
+    const missingInputs = (analysis.missing_inputs || [])
+      .filter((input) => input !== 'engine_bias');
     const pcr = analysis.put_call_oi_ratio;
     const expiry = payload.expiry || quote.Expiry || '';
+    const atmIV = rawChain.atm_iv == null || rawChain.atm_iv === ''
+      ? null
+      : Number(rawChain.atm_iv);
     const expiryParts = /^(\d{2})([A-Z]{3})(\d{4})$/.exec(String(expiry).toUpperCase());
     const monthIndex = expiryParts
       ? ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'].indexOf(expiryParts[2])
@@ -907,29 +1214,40 @@ class CommodityPricesView {
       chain,
       totalPCR: undefined,
       oiChgPCR,
-      greeks: [],
+      greeks: Array.isArray(rawChain.greeks) ? rawChain.greeks : [],
+      atmIV: Number.isFinite(atmIV) ? atmIV : undefined,
       oiVelocity: Array.isArray(rawChain.oi_velocity) ? rawChain.oi_velocity : [],
       compositeBias: bias,
+      optionsUnavailable,
       maxPain: analysis.visible_window_max_pain,
       ceWall: analysis.call_oi_wall,
       peWall: analysis.put_oi_wall,
-      risk: { tradeGrade: '—', ivRegime: 'Unavailable', trapWarn: 'none' },
+      risk: {
+        tradeGrade: 'Not rated',
+        ivRegime: Number.isFinite(atmIV) ? `${atmIV.toFixed(2)}%` : 'Unavailable',
+        trapWarn: 'none',
+      },
       decision: {
         bias,
+        unavailableReason: optionsUnavailable
+          ? `Options are not listed for ${this.symbol}.`
+          : '',
         biasStrength: analysis.bias_strength || '',
         confidence: Number(analysis.confidence) || 0,
         evidenceCoverage: Number(analysis.evidence_coverage) || 0,
         contributors,
-        missingInputs: analysis.missing_inputs || [],
-        degraded: !!(analysis.missing_inputs || []).length,
+        missingInputs,
+        degraded: missingInputs.length > 0,
         conflictFlag: analysis.verdict === 'NEUTRAL',
-        action: 'Informational view · commodity order execution is not enabled here',
+        action: '',
+        actionNote: 'Informational view · commodity order execution is not enabled here',
         tradeability: 'NO_TRADE',
         tradeabilityReason: analysis.reason || 'Waiting for commodity option-chain evidence.',
         strategyCaution: 'MCX analysis is informational; verify contract liquidity and broker execution.',
         verdicts: {
           pcr: pcr == null ? '—' : `${pcr} — Put / call open interest`,
           vix: 'Unavailable — not applicable to MCX contracts',
+          atmIV: Number.isFinite(atmIV) ? `${atmIV.toFixed(2)}%` : undefined,
         },
         activeSignals: [],
         shortHorizon: short ? {

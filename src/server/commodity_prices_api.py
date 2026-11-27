@@ -2,17 +2,26 @@
 
 from collections import deque
 import asyncio
-from datetime import datetime
+from datetime import date, datetime, timedelta
+import inspect
+import json
 import logging
 import math
+import os
+from pathlib import Path
+import tempfile
 import time
+import weakref
 from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
 
 import aiohttp
+import pandas as pd
 from aiohttp import web
 
+from analytics.commodity_greeks import attach_commodity_greeks
 from analytics.commodity_option_analysis import analyze_commodity_option_chain
+from infrastructure.paths import CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +51,184 @@ COMMODITY_NEWS_TERMS = {
 }
 GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
 GOOGLE_NEWS_RSS_API = "https://news.google.com/rss/search"
+EIA_CRUDE_STOCKS_API = "https://api.eia.gov/v2/seriesid/WCESTUS1"
+EIA_NATURAL_GAS_STORAGE_API = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
+_INVENTORY_CACHE_PATHS = {
+    "CRUDEOIL": Path(CACHE_DIR) / "crude_inventory_report.json",
+    "NATURALGAS": Path(CACHE_DIR) / "natural_gas_inventory_report.json",
+}
+_COMMODITY_OI_HISTORY_PATH = Path(CACHE_DIR) / "commodity_oi_history.parquet"
+_COMMODITY_OI_HISTORY_RETENTION_SECONDS = 35 * 60
+_COMMODITY_OI_HISTORY_FLUSH_SECONDS = 60
+_COMMODITY_QUOTE_METRICS_PATH = Path(CACHE_DIR) / "commodity_quote_metrics.parquet"
+_COMMODITY_QUOTE_METRICS_RETENTION_SECONDS = 35 * 60
+_COMMODITY_API_INSTANCES = weakref.WeakSet()
+
+
+def flush_commodity_oi_history():
+    """Persist recent commodity chain snapshots for velocity after restart."""
+    now_mono, now_wall = time.monotonic(), time.time()
+    snapshots = {}
+    for api in list(_COMMODITY_API_INSTANCES):
+        for key, history in api._chain_history.items():
+            for timestamp, rows in history:
+                wall_timestamp = now_wall - (now_mono - timestamp)
+                snapshots[(key[0], key[1], round(wall_timestamp, 3))] = rows
+    cutoff = now_wall - _COMMODITY_OI_HISTORY_RETENTION_SECONDS
+    records = []
+    for (symbol, expiry, timestamp), rows in snapshots.items():
+        if timestamp < cutoff:
+            continue
+        for row in rows:
+            records.append({
+                "snapshot_time": timestamp,
+                "symbol": symbol,
+                "expiry": expiry,
+                "strike": row.get("strike"),
+                "type": row.get("type"),
+                "oi": row.get("oi"),
+                "ltp": row.get("ltp"),
+            })
+    if not records:
+        return
+    temp_path = None
+    try:
+        _COMMODITY_OI_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=_COMMODITY_OI_HISTORY_PATH.parent,
+            prefix=".commodity_oi_history_", suffix=".parquet", delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+        pd.DataFrame(records).to_parquet(temp_path, index=False)
+        os.replace(temp_path, _COMMODITY_OI_HISTORY_PATH)
+        for api in list(_COMMODITY_API_INSTANCES):
+            api._last_chain_history_flush = now_mono
+    except Exception as error:
+        logger.warning("Could not persist commodity OI history: %s", error)
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _load_commodity_oi_history():
+    histories = {}
+    if not _COMMODITY_OI_HISTORY_PATH.is_file():
+        return histories
+    try:
+        frame = pd.read_parquet(_COMMODITY_OI_HISTORY_PATH)
+        cutoff = time.time() - _COMMODITY_OI_HISTORY_RETENTION_SECONDS
+        frame = frame[pd.to_numeric(frame["snapshot_time"], errors="coerce") >= cutoff]
+        now_wall, now_mono = time.time(), time.monotonic()
+        for (symbol, expiry, timestamp), group in frame.groupby(
+            ["symbol", "expiry", "snapshot_time"], sort=True,
+        ):
+            rows = group[["strike", "type", "oi", "ltp"]].to_dict("records")
+            mono_timestamp = now_mono - max(0.0, now_wall - float(timestamp))
+            histories.setdefault((symbol, expiry), deque(maxlen=400)).append(
+                (mono_timestamp, rows)
+            )
+    except Exception as error:
+        logger.warning("Could not load commodity OI history: %s", error)
+    return histories
+
+
+def flush_commodity_quote_metrics():
+    """Persist recent minute-level MCX quote metrics for restart-safe 5m deltas."""
+    now_minute = int(time.time() // 60)
+    cutoff = now_minute - _COMMODITY_QUOTE_METRICS_RETENTION_SECONDS // 60
+    records = []
+    for api in list(_COMMODITY_API_INSTANCES):
+        for symbol, history in api._quote_metrics_history.items():
+            for minute, sample in history:
+                if minute < cutoff:
+                    continue
+                records.append({
+                    "minute": minute,
+                    "symbol": symbol,
+                    "price": sample.get("price"),
+                    "oi": sample.get("oi"),
+                    "volume": sample.get("volume"),
+                })
+    if not records:
+        return
+    temp_path = None
+    try:
+        _COMMODITY_QUOTE_METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=_COMMODITY_QUOTE_METRICS_PATH.parent,
+            prefix=".commodity_quote_metrics_", suffix=".parquet", delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+        pd.DataFrame(records).drop_duplicates(
+            subset=["symbol", "minute"], keep="last"
+        ).to_parquet(temp_path, index=False)
+        os.replace(temp_path, _COMMODITY_QUOTE_METRICS_PATH)
+        now_mono = time.monotonic()
+        for api in list(_COMMODITY_API_INSTANCES):
+            api._last_quote_metrics_flush = now_mono
+    except Exception as error:
+        logger.warning("Could not persist commodity quote metrics: %s", error)
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _load_commodity_quote_metrics():
+    histories = {}
+    if not _COMMODITY_QUOTE_METRICS_PATH.is_file():
+        return histories
+    try:
+        frame = pd.read_parquet(_COMMODITY_QUOTE_METRICS_PATH)
+        now_minute = int(time.time() // 60)
+        cutoff = now_minute - _COMMODITY_QUOTE_METRICS_RETENTION_SECONDS // 60
+        frame["minute"] = pd.to_numeric(frame["minute"], errors="coerce")
+        frame = frame[frame["minute"].between(cutoff, now_minute)]
+        for (symbol, minute), group in frame.groupby(["symbol", "minute"], sort=True):
+            row = group.iloc[-1]
+            sample = {}
+            for key in ("price", "oi", "volume"):
+                value = pd.to_numeric(row.get(key), errors="coerce")
+                sample[key] = float(value) if pd.notna(value) else None
+            histories.setdefault(symbol, deque(maxlen=20)).append(
+                (int(minute), sample)
+            )
+    except Exception as error:
+        logger.warning("Could not load commodity quote metrics: %s", error)
+    return histories
+
+
+def _load_inventory_report_cache(symbol):
+    cache_path = _INVENTORY_CACHE_PATHS[symbol]
+    try:
+        result = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return result if isinstance(result, dict) and result.get("actual") is not None else None
+
+
+def _save_inventory_report_cache(symbol, result):
+    cache_path = _INVENTORY_CACHE_PATHS[symbol]
+    temp_path = None
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=cache_path.parent,
+            prefix=f".{symbol.lower()}_inventory_", suffix=".tmp", delete=False,
+        ) as temp_file:
+            json.dump(result, temp_file)
+            temp_path = temp_file.name
+        os.replace(temp_path, cache_path)
+    except OSError as error:
+        logger.warning("Could not save crude inventory cache: %s", error)
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 # Providers whose APIs cannot serve MCX data at all. Their commodity
 # adapter stubs always return None, which would otherwise surface as a
@@ -83,13 +270,17 @@ class CommodityPricesApi:
         self._active_provider = (
             active_provider if active_provider is not None else self._get_active_provider
         )
-        self._chain_history = {}
+        self._chain_history = _load_commodity_oi_history()
+        self._last_chain_history_flush = time.monotonic()
+        _COMMODITY_API_INSTANCES.add(self)
         self._quote_history = {}
-        self._quote_metrics_history = {}
+        self._quote_metrics_history = _load_commodity_quote_metrics()
+        self._last_quote_metrics_flush = time.monotonic()
         self._previous_close_oi = {}
         self._previous_close_oi_retry_at = {}
         self._previous_close_oi_jobs = {}
         self._news_cache = {}
+        self._inventory_cache = {}
         # GDELT DOC API allows roughly one request per 5s globally — not
         # per symbol. Without a shared throttle, switching symbols (or a
         # cold cache after restart) bursts requests and every one comes
@@ -98,6 +289,29 @@ class CommodityPricesApi:
         self._last_news_fetch = 0.0
         self._last_good_quotes = {}
         self._tick_candidates = {}
+        self._commodity_greeks_cache = {}
+        self._commodity_greeks_jobs = set()
+        self._commodity_greeks_tasks = set()
+        self._commodity_expiry_cache = {}
+        self._latest_commodity_quotes = {}
+
+    async def _cache_commodity_greeks(self, key, chain):
+        """Enrich a chain off the event loop so decision/quote responses stay live."""
+        try:
+            enriched = await asyncio.to_thread(attach_commodity_greeks, chain)
+            self._commodity_greeks_cache[key] = {
+                "greeks": enriched.get("greeks") or [],
+                "atm_iv": enriched.get("atm_iv"),
+                "rows": [
+                    {"strike": row.get("strike"), "type": row.get("type"), "iv": row.get("iv")}
+                    for row in enriched.get("rows") or []
+                    if row.get("iv") is not None
+                ],
+            }
+        except Exception:
+            logger.exception("[commodity] background Greeks calculation failed for %s", key)
+        finally:
+            self._commodity_greeks_jobs.discard(key)
 
     def _observe_quote(self, symbol, quote):
         """Keep one futures close per minute for the commodity 2–3m view."""
@@ -127,8 +341,9 @@ class CommodityPricesApi:
         if not math.isfinite(price) or price <= 0:
             return {"available": False}
 
-        now = time.monotonic()
-        minute = int(now // 60)
+        # Wall-clock minute keys are persisted to Parquet and converted back
+        # to recent history after a process restart.
+        minute = int(time.time() // 60)
         history = self._quote_metrics_history.setdefault(symbol, deque(maxlen=20))
         try:
             oi = float(quote.get("OI"))
@@ -148,6 +363,8 @@ class CommodityPricesApi:
             history[-1] = (minute, sample)
         else:
             history.append((minute, sample))
+        if time.monotonic() - self._last_quote_metrics_flush >= _COMMODITY_OI_HISTORY_FLUSH_SECONDS:
+            flush_commodity_quote_metrics()
         baseline = next(
             ((at, values) for at, values in reversed(history)
              if at <= minute - 5),
@@ -203,6 +420,12 @@ class CommodityPricesApi:
         ]
         for history_key in expired_keys:
             self._chain_history.pop(history_key, None)
+        cutoff_history = now - _COMMODITY_OI_HISTORY_RETENTION_SECONDS
+        for snapshots in self._chain_history.values():
+            while snapshots and snapshots[0][0] < cutoff_history:
+                snapshots.popleft()
+        if now - self._last_chain_history_flush >= _COMMODITY_OI_HISTORY_FLUSH_SECONDS:
+            flush_commodity_oi_history()
 
         if baseline is None:
             return None, None
@@ -541,6 +764,7 @@ class CommodityPricesApi:
                 status=404,
             )
         self._observe_quote(symbol, quote)
+        self._latest_commodity_quotes[(symbol, which)] = (time.monotonic(), dict(quote))
         quote = {**quote, "FiveMinute": self._observe_quote_metrics(symbol, quote)}
         return web.json_response(
             {"provider": provider_name, "symbol": symbol, "quote": quote}
@@ -572,7 +796,13 @@ class CommodityPricesApi:
                 status=501,
             )
 
-        expiries = await asyncio.to_thread(get_expiries, symbol)
+        now = time.monotonic()
+        expiry_cache = self._commodity_expiry_cache.get(symbol)
+        if expiry_cache and now - expiry_cache[0] < 300:
+            expiries = expiry_cache[1]
+        else:
+            expiries = await asyncio.to_thread(get_expiries, symbol)
+            self._commodity_expiry_cache[symbol] = (time.monotonic(), expiries)
         if not expiries:
             return web.json_response(
                 {
@@ -589,9 +819,24 @@ class CommodityPricesApi:
                 status=400,
             )
 
-        chain = await asyncio.to_thread(
-            get_chain, symbol, expiry, strikes_around_atm=10
-        )
+        recent_quote = self._latest_commodity_quotes.get((symbol, "NEAR"))
+        quote_is_fresh = recent_quote and time.monotonic() - recent_quote[0] <= 3
+        try:
+            supports_quote = "future_quote" in inspect.signature(get_chain).parameters
+        except (TypeError, ValueError):
+            supports_quote = False
+        if quote_is_fresh and supports_quote:
+            chain = await asyncio.to_thread(
+                get_chain,
+                symbol,
+                expiry,
+                strikes_around_atm=10,
+                future_quote=recent_quote[1],
+            )
+        else:
+            chain = await asyncio.to_thread(
+                get_chain, symbol, expiry, strikes_around_atm=10
+            )
         if not chain:
             return web.json_response(
                 {
@@ -617,6 +862,35 @@ class CommodityPricesApi:
             provider, symbol, expiry, chain.get("rows") or []
         )
         self._attach_previous_close_oi(chain, symbol, expiry)
+        # The decision only needs the normalized chain and futures fields.
+        # Greeks require repeated IV inversion across every visible leg, so
+        # let the first decision render while that optional enrichment runs.
+        greeks_key = (symbol, expiry)
+        cached_greeks = self._commodity_greeks_cache.get(greeks_key)
+        if cached_greeks is not None:
+            chain["greeks"] = cached_greeks["greeks"]
+            chain["atm_iv"] = cached_greeks["atm_iv"]
+            iv_by_leg = {
+                (row["strike"], row["type"]): row["iv"]
+                for row in cached_greeks["rows"]
+            }
+            for row in chain["rows"]:
+                iv = iv_by_leg.get((row.get("strike"), row.get("type")))
+                if iv is not None:
+                    row["iv"] = iv
+        else:
+            chain["greeks"] = []
+            chain["atm_iv"] = None
+            if greeks_key not in self._commodity_greeks_jobs:
+                self._commodity_greeks_jobs.add(greeks_key)
+                task = asyncio.create_task(
+                    self._cache_commodity_greeks(
+                        greeks_key,
+                        {**chain, "rows": [dict(row) for row in chain["rows"]]},
+                    )
+                )
+                self._commodity_greeks_tasks.add(task)
+                task.add_done_callback(self._commodity_greeks_tasks.discard)
         chain["oi_velocity"] = self._oi_velocity(symbol, expiry)
         if chain["flow_baseline_status"] == "pending":
             chain["flow_baseline_status"] = baseline_status
@@ -706,6 +980,207 @@ class CommodityPricesApi:
         }
         self._news_cache[symbol] = (time.monotonic(), result)
         return web.json_response(result)
+
+    async def inventory(self, request):
+        """Return latest EIA inventory change for crude oil or natural gas.
+
+        Crude actual/previous values are in thousand barrels; natural gas
+        actual/previous values are in Bcf. Crude forecast is optional.
+        """
+        symbol = request.query.get("symbol", "CRUDEOIL").strip().upper()
+        if symbol not in _INVENTORY_CACHE_PATHS:
+            return web.json_response({"error": "Inventory outlook is available for CRUDEOIL and NATURALGAS."}, status=400)
+        now = time.monotonic()
+        if symbol not in self._inventory_cache:
+            cached_report = _load_inventory_report_cache(symbol)
+            if cached_report:
+                self._inventory_cache[symbol] = (now, cached_report)
+        # Missing-key and failed responses must not be cached: a newly added
+        # key should take effect on the next refresh without waiting 30 min.
+        cached = self._inventory_cache.get(symbol)
+        if (cached and cached[1].get("actual") is not None
+                and now - cached[0] < 1800):
+            return web.json_response(cached[1])
+
+        api_key = os.getenv("EIA_API_KEY", "").strip()
+        if not api_key:
+            return web.json_response({
+                "symbol": symbol,
+                "actual": None,
+                "expected": None,
+                "previous": None,
+                "outlook": "Inventory report unavailable",
+                "availability_note": (
+                    "EIA key missing — configure EIA_API_KEY and restart."
+                ),
+            })
+        params = {
+            "api_key": api_key,
+            "frequency": "weekly",
+            "data[0]": "value",
+            "sort[0][column]": "period",
+            "sort[0][direction]": "desc",
+            "length": "3",
+        }
+        if symbol == "NATURALGAS":
+            params["facets[series][]"] = "NW2_EPG0_SWO_R48_BCF"
+            params["data[0]"] = "value"
+        endpoint = EIA_NATURAL_GAS_STORAGE_API if symbol == "NATURALGAS" else EIA_CRUDE_STOCKS_API
+        unit_label = "Bcf" if symbol == "NATURALGAS" else "thousand barrels"
+        report_url = "https://www.eia.gov/naturalgas/storage/" if symbol == "NATURALGAS" else "https://www.eia.gov/petroleum/supply/weekly/"
+        headers = {"User-Agent": "mTerminals/commodity-inventory"}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.get(endpoint, params=params) as response:
+                    if response.status != 200:
+                        # Keep the key out of logs while surfacing EIA's useful
+                        # error message (for example an invalid/disabled key).
+                        try:
+                            error_payload = await response.json(content_type=None)
+                            eia_error = error_payload.get("error")
+                            if isinstance(eia_error, dict):
+                                detail = eia_error.get("message") or eia_error.get("code")
+                            elif isinstance(eia_error, str):
+                                detail = eia_error
+                            else:
+                                detail = ""
+                        except (ValueError, AttributeError):
+                            detail = ""
+                        safe_detail = str(detail or "").strip()
+                        if api_key and api_key in safe_detail:
+                            safe_detail = ""
+                        raise RuntimeError(
+                            f"EIA returned HTTP {response.status}"
+                            + (f": {safe_detail}" if safe_detail else "")
+                        )
+                    payload = await response.json(content_type=None)
+            rows = payload.get("response", {}).get("data", [])
+            values = []
+            for row in rows:
+                try:
+                    value = float(row["value"])
+                    if math.isfinite(value):
+                        values.append((str(row.get("period") or ""), value))
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if len(values) < 3:
+                raise RuntimeError(f"EIA did not return three weekly {symbol.lower()} inventory values")
+            report_date, latest_level = values[0]
+            previous_date, previous_level = values[1]
+            _, prior_level = values[2]
+            actual = latest_level - previous_level
+            previous = previous_level - prior_level
+            expected, expected_source = (await self._fetch_inventory_consensus(report_date)
+                                         if symbol == "CRUDEOIL" else (None, None))
+            delta = actual - previous
+            if expected is None:
+                outlook = f"{symbol} inventory report available · forecast unavailable"
+                surprise = None
+            else:
+                surprise = actual - expected
+                if surprise > 0:
+                    outlook = "Stocks rose more than expected · crude may face pressure"
+                elif surprise < 0:
+                    outlook = "Stocks rose less than expected or fell · potentially supportive"
+                else:
+                    outlook = "Stocks matched expectations · mixed signal"
+            result = {
+                "symbol": symbol,
+                "actual": actual,
+                "expected": expected,
+                "previous": previous,
+                "actual_change": actual,
+                "surprise": surprise,
+                "week_over_week_change": delta,
+                "report_date": report_date,
+                "previous_date": previous_date,
+                "source": "U.S. Energy Information Administration",
+                "source_url": report_url,
+                "expected_source": expected_source,
+                "updated_at": time.time(),
+                "outlook": outlook,
+                "availability_note": (
+                    "Forecast unavailable: add TRADING_ECONOMICS_API_KEY to the backend environment."
+                    if symbol == "CRUDEOIL" and expected is None else None
+                ),
+                "unit": unit_label,
+            }
+            self._inventory_cache[symbol] = (time.monotonic(), result)
+            _save_inventory_report_cache(symbol, result)
+            return web.json_response(result)
+        except Exception as error:
+            error_text = str(error).strip()
+            if not error_text:
+                error_text = f"{type(error).__name__} while requesting EIA"
+            logger.warning("Crude inventory report unavailable: %s", error_text)
+            cached = self._inventory_cache.get(symbol)
+            if cached and cached[1].get("actual") is not None:
+                return web.json_response({**cached[1], "stale": True})
+            reason = error_text
+            if "401" in reason or "403" in reason:
+                note = "EIA rejected the API key (HTTP 401/403). Verify the key is complete and restart the backend."
+            elif isinstance(error, (aiohttp.ClientError, asyncio.TimeoutError, OSError)):
+                note = f"Could not reach EIA ({type(error).__name__}). Check backend internet access and refresh."
+            else:
+                safe_reason = reason if len(reason) < 180 else f"{type(error).__name__}"
+                note = f"EIA inventory request failed: {safe_reason}"
+            return web.json_response({
+                "symbol": symbol,
+                "actual": None,
+                "expected": None,
+                "previous": None,
+                "outlook": "Inventory report unavailable",
+                "error": note,
+                "availability_note": note,
+            }, status=200)
+
+    @staticmethod
+    async def _fetch_inventory_consensus(report_date):
+        """Fetch a dated market consensus; never substitute a guess."""
+        api_key = os.getenv("TRADING_ECONOMICS_API_KEY", "").strip()
+        if not api_key:
+            return None, None
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                end_date = date.fromisoformat(report_date) + timedelta(days=7)
+                url = (
+                    "https://api.tradingeconomics.com/calendar/country/"
+                    "united%20states/event/crude%20oil%20stocks%20change/"
+                    f"{report_date}/{end_date.isoformat()}"
+                )
+                async with session.get(url, params={"c": api_key}) as response:
+                    if response.status != 200:
+                        return None, None
+                    payload = await response.json(content_type=None)
+        except Exception:
+            return None, None
+        if not isinstance(payload, list):
+            return None, None
+        for event in payload:
+            if not isinstance(event, dict):
+                continue
+            reference_date = str(event.get("ReferenceDate") or "")[:10]
+            if reference_date and reference_date != report_date:
+                continue
+            raw = event.get("Forecast")
+            if raw is None or not str(raw).strip():
+                continue
+            try:
+                value_text = str(raw).strip().replace(",", "")
+                multiplier = 1.0
+                if value_text[-1:].upper() == "M":
+                    multiplier = 1000.0  # millions -> thousand barrels
+                    value_text = value_text[:-1]
+                elif value_text[-1:].upper() == "K":
+                    value_text = value_text[:-1]
+                value = float(value_text) * multiplier
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                return value, "Trading Economics consensus"
+        return None, None
 
     @staticmethod
     async def _fetch_google_news(symbol, query):

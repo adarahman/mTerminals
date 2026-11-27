@@ -155,7 +155,7 @@ def test_mobile_reports_missing_dependencies_and_rejects_invalid_mode(monkeypatc
 
 def test_mobile_configuration_reuses_token_and_custom_backend_port(monkeypatch, tmp_path):
     from dotenv import dotenv_values
-    from urllib.parse import urlsplit, parse_qs
+    from urllib.parse import urlsplit
     monkeypatch.setattr(control_server, 'PROJECT_ROOT', tmp_path)
     mobile = control_server.MobileSupervisor(backend_port=5599)
     first = mobile.connection_environment('web')
@@ -165,5 +165,7 @@ def test_mobile_configuration_reuses_token_and_custom_backend_port(monkeypatch, 
     values = dotenv_values(tmp_path / '.env')
     assert url.hostname == '127.0.0.1'
     assert url.port == 5599
-    assert parse_qs(url.query)['token'] == [values['MTERMINALS_MOBILE_TOKEN']]
+    assert url.path == '/mobile-ws'
+    assert url.query == ''
+    assert first['EXPO_PUBLIC_MTERMINALS_TOKEN'] == values['MTERMINALS_MOBILE_TOKEN']
     assert values['MTERMINALS_MOBILE_WS_ENABLED'] == 'true'

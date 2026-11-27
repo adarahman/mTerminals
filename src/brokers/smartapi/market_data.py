@@ -197,11 +197,11 @@ class SmartApiMarketData:
         return get_previous_close_oi("MCX", str(token))
 
     def get_commodity_option_chain(
-        self, underlying, expiry, strikes_around_atm=10
+        self, underlying, expiry, strikes_around_atm=10, future_quote=None
     ):
         from brokers.smartapi.instruments import get_commodity_option_contracts
 
-        future = self.get_commodity_futures_quote(underlying)
+        future = future_quote or self.get_commodity_futures_quote(underlying)
         if not future:
             return None
         contracts = get_commodity_option_contracts(

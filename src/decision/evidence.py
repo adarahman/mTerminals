@@ -63,7 +63,10 @@ def aggregate_evidence(
             "available": available,
             "weight": round(weight * 100),
             "score": round(score, 3) if available else None,
-            "weightedContribution": round(score * weight, 3) if available else None,
+            # Keep enough precision for small contributors (for example a
+            # 0.002 OI velocity score at 17% weighs 0.00034). Rounding to
+            # three decimals made changing inputs appear permanently zero.
+            "weightedContribution": round(score * weight, 5) if available else None,
         })
 
     return {

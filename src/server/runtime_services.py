@@ -17,6 +17,13 @@ def flush_oi_history() -> None:
     from oi.oi_analysis import flush_history_to_disk
 
     flush_history_to_disk()
+    from server.commodity_prices_api import (
+        flush_commodity_oi_history,
+        flush_commodity_quote_metrics,
+    )
+
+    flush_commodity_oi_history()
+    flush_commodity_quote_metrics()
 
 
 @dataclass(frozen=True)

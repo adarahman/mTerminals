@@ -356,7 +356,8 @@ class StrategyView {
         <span style="color:${ac};">₹${fmtN(ltp,2)}</span>
       </span>`;
     }).join('');
-    setHtmlIfChanged(legsEl, nameTag + expiryPill + staleExpiryWarn + multiExpiryWarn + pillsHtml + enginePickHtml);
+    const previewHeading = `<div class="strategy-preview-heading">${nameTag}${expiryPill}${staleExpiryWarn}${multiExpiryWarn}${pillsHtml}</div>`;
+    setHtmlIfChanged(legsEl, previewHeading + enginePickHtml);
   }
 }
 

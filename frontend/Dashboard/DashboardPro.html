@@ -101,8 +101,15 @@
       <div class="commodity-price-card">
         <div class="commodity-price-details">
           <span>5m price move <b id="commodity-price-change-5m">Building history</b></span>
-          <span>5m OI change <b id="commodity-price-oi-change-5m">Building history</b></span>
+          <span>5m Futures OI Δ <b id="commodity-price-oi-change-5m">Building history</b></span>
           <span>5m volume <b id="commodity-price-volume-change-5m">Building history</b></span>
+          <div id="commodity-inventory-outlook" class="commodity-inventory-outlook" hidden>
+            <span class="commodity-inventory-heading">Inventory</span>
+            <button id="commodity-inventory-toggle" class="commodity-inventory-toggle" type="button" aria-label="Inventory outlook details" aria-expanded="false" aria-controls="commodity-inventory-detail">
+              <span id="commodity-inventory-summary" class="commodity-inventory-summary">Loading…</span>
+            </button>
+            <div id="commodity-inventory-detail" class="commodity-inventory-detail" hidden></div>
+          </div>
         </div>
       </div>
       <div id="commodity-expiry-holder" hidden>
@@ -117,6 +124,15 @@
         <div id="commodity-chain-shared"></div>
       </section>
       <section id="commodity-capital-flow" class="commodity-capital-flow dashboard-workspace" data-dashboard-workspace="positioning" aria-label="Commodity capital flow"></section>
+      <section id="commodity-analytics" class="commodity-analytics dashboard-workspace" data-dashboard-workspace="institutional" aria-label="Commodity analytics">
+        <div class="commodity-analytics-heading">Option open-interest buildup · calls / puts</div>
+        <div class="commodity-analytics-grid commodity-oi-velocity-grid">
+          <div><span>5 minute</span><strong id="commodity-oi-velocity-5">Collecting</strong></div>
+          <div><span>15 minute</span><strong id="commodity-oi-velocity-15">Collecting</strong></div>
+          <div><span>30 minute</span><strong id="commodity-oi-velocity-30">Collecting</strong></div>
+        </div>
+        <p id="commodity-analytics-reason" class="commodity-analytics-reason">Change in call and put open interest across the selected expiry.</p>
+      </section>
       <details class="commodity-news">
         <summary>
           <span>Latest commodity news</span>
@@ -150,11 +166,7 @@
     </div>
     <div class="price-chart-focus-grid">
       <div id="price-chart-modal-host" class="price-chart-modal-body"></div>
-      <aside class="price-chart-context" aria-label="Live chart context">
-        <div class="focus-context-heading">
-          <span>Live Context</span>
-          <small>Same instrument · same tick</small>
-        </div>
+      <aside class="price-chart-context focus-context-pane" aria-label="Live chart context">
         <div id="price-chart-context-grid" class="focus-context-grid"></div>
       </aside>
     </div>
@@ -173,17 +185,17 @@
       <div class="option-chain-modal-range" aria-label="Option chain ATM strike range">
         <div class="option-chain-view-tabs" role="group" aria-label="Option chain metrics shown">
           <button type="button" class="option-chain-view-toggle active" data-chain-view="positioning" onclick="setOptionChainLedgerView('positioning',this)" aria-pressed="true">Positioning</button>
-          <button type="button" class="option-chain-view-toggle" data-chain-view="activity" onclick="setOptionChainLedgerView('activity',this)" aria-pressed="false">Activity</button>
           <button type="button" class="option-chain-view-toggle" data-chain-view="greeks" onclick="setOptionChainLedgerView('greeks',this)" aria-pressed="false">Greeks</button>
           <button type="button" class="option-chain-view-toggle" data-chain-view="all" onclick="setOptionChainLedgerView('all',this)" aria-pressed="false">All</button>
         </div>
         <span>ATM Range</span>
         <div class="tab-group" id="range-tabs-chain" data-range-tabs></div>
+        <span id="option-chain-expiry-meta" class="option-chain-expiry-meta" aria-label="Option chain expiry"></span>
       </div>
     </div>
     <div id="option-chain-focus-grid" class="option-chain-focus-grid">
       <div id="option-chain-modal-body" class="option-chain-modal-body"></div>
-      <aside id="option-chain-context" class="option-chain-context" aria-label="Live option-chain context">
+      <aside id="option-chain-context" class="option-chain-context focus-context-pane" aria-label="Live option-chain context">
         <div id="option-chain-context-grid" class="focus-context-grid"></div>
       </aside>
     </div>

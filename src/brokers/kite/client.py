@@ -412,8 +412,8 @@ def get_commodity_option_expiries(underlying: str) -> list[str]:
     return [expiry.strftime("%d%b%Y").upper() for expiry in dates if expiry >= datetime.now().date()]
 
 
-def get_commodity_option_chain(underlying, expiry, strikes_around_atm=10):
-    future = get_commodity_futures_quote(underlying)
+def get_commodity_option_chain(underlying, expiry, strikes_around_atm=10, future_quote=None):
+    future = future_quote or get_commodity_futures_quote(underlying)
     if not future:
         return None
     try:

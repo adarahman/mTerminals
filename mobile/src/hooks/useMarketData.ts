@@ -14,6 +14,7 @@ import {
 const WS_URL =
   process.env.EXPO_PUBLIC_MTERMINALS_WS ??
   'ws://localhost:5500/ws';
+const MOBILE_TOKEN = process.env.EXPO_PUBLIC_MTERMINALS_TOKEN ?? '';
 
 export function useMarketData() {
   const snapshot =
@@ -24,7 +25,7 @@ export function useMarketData() {
     );
 
   useEffect(() => {
-    connectMTerminalsWS(WS_URL);
+    connectMTerminalsWS(WS_URL, false, MOBILE_TOKEN);
   }, []);
 
   return snapshot;

@@ -53,21 +53,29 @@ def _vol_multiplier(vol_oi: float) -> float:
     return 0.75   # OI moved but almost no volume → likely roll / adjustment
 
 
-def score_capital_flow(net_capital_flow: float, total_premium_locked: float) -> float:
+def score_capital_flow(
+    net_capital_flow: float,
+    total_premium_locked: float,
+    *,
+    noise_ratio: float = _CAPITAL_FLOW_NOISE_RATIO,
+    full_score_ratio: float = _CAPITAL_FLOW_FULL_SCORE_RATIO,
+) -> float:
     """Normalize net option capital flow against chain premium, with a noise band."""
     if total_premium_locked <= 0:
         return 0.0
 
     flow_ratio = net_capital_flow / total_premium_locked
     magnitude = abs(flow_ratio)
-    if magnitude <= _CAPITAL_FLOW_NOISE_RATIO:
+    noise_ratio = max(0.0, float(noise_ratio))
+    full_score_ratio = max(noise_ratio + 1e-12, float(full_score_ratio))
+    if magnitude <= noise_ratio:
         return 0.0
 
     # The deadband keeps small session changes from adding noise.
     strength = min(
         1.0,
-        (magnitude - _CAPITAL_FLOW_NOISE_RATIO)
-        / (_CAPITAL_FLOW_FULL_SCORE_RATIO - _CAPITAL_FLOW_NOISE_RATIO),
+        (magnitude - noise_ratio)
+        / (full_score_ratio - noise_ratio),
     )
     return strength if flow_ratio > 0 else -strength
 
@@ -230,7 +238,9 @@ def score_max_pain(spot, max_pain, dist, dte, atm_theta,
 def score_oi_velocity(vel_df, spot: float, step: int,
                        out: DecisionResult,
                        vol_oi_ratios: dict | None = None,
-                       window: int = 5) -> float:
+                       window: int = 5,
+                       mild_threshold: float | None = None,
+                       active_strikes_only: bool = False) -> float:
     """
     vel_df is oi_analysis.get_oi_velocity()'s actual output: one row per
     strike PER WINDOW (5/15/30 min by default), columns window/strike/
@@ -266,6 +276,7 @@ def score_oi_velocity(vel_df, spot: float, step: int,
         return 0.0
 
     vol_map = vol_oi_ratios or {}
+    mild_threshold = T.OI_VEL_MILD if mild_threshold is None else max(0.0, float(mild_threshold))
     annotations = {}
     strike_scores: list[float] = []
 
@@ -304,7 +315,7 @@ def score_oi_velocity(vel_df, spot: float, step: int,
             ("PE", pe_doi, pe_pct, pe_vol_mul, pe_vol_oi, pe_vol_abs),
         ]:
             strength = abs(pct)
-            if strength < T.OI_VEL_MILD:
+            if strength < mild_threshold:
                 continue
 
             # Weight by distance-from-ATM: ATM strikes score full weight
@@ -342,7 +353,8 @@ def score_oi_velocity(vel_df, spot: float, step: int,
                     sev, 15 + len(strike_scores),
                     f"oi-velocity:{otype.lower()}:{strike}:{action.lower()}"))
 
-        strike_scores.append(max(-1.0, min(1.0, s_score)))
+        if not active_strikes_only or max(abs(ce_pct), abs(pe_pct)) >= mild_threshold:
+            strike_scores.append(max(-1.0, min(1.0, s_score)))
 
     out.oi_annotations = annotations
     if not strike_scores:

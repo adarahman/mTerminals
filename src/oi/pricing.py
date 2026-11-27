@@ -133,26 +133,28 @@ def _d2(S: float, K: float, T: float, r: float, sigma: float, q: float = 0.0) ->
 # Option pricing
 # ---------------------------------------------------------------------------
 
-def bs_call(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Black-Scholes European call price."""
+def bs_call(S: float, K: float, T: float, r: float, sigma: float,
+            q: float = 0.0) -> float:
+    """Black-Scholes European call price. q=r gives Black-76 (S = futures)."""
     if T <= 0:
         return max(S - K, 0.0)
     if sigma <= 0 or S <= 0 or K <= 0:
         return max(S - K, 0.0)
-    d1 = _d1(S, K, T, r, sigma)
+    d1 = _d1(S, K, T, r, sigma, q)
     d2 = d1 - sigma * math.sqrt(T)
-    return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
+    return S * math.exp(-q * T) * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
 
 
-def bs_put(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Black-Scholes European put price."""
+def bs_put(S: float, K: float, T: float, r: float, sigma: float,
+           q: float = 0.0) -> float:
+    """Black-Scholes European put price. q=r gives Black-76 (S = futures)."""
     if T <= 0:
         return max(K - S, 0.0)
     if sigma <= 0 or S <= 0 or K <= 0:
         return max(K - S, 0.0)
-    d1 = _d1(S, K, T, r, sigma)
+    d1 = _d1(S, K, T, r, sigma, q)
     d2 = d1 - sigma * math.sqrt(T)
-    return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
+    return K * math.exp(-r * T) * norm_cdf(-d2) - S * math.exp(-q * T) * norm_cdf(-d1)
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +333,8 @@ def get_iv_skew(K: float, S: float, base_iv: float,
 
 def solve_iv(market_price: float, S: float, K: float, T: float, r: float,
              opt_type: str = "C",
-             init_guess: float = DEFAULT_BASE_IV) -> float:
+             init_guess: float = DEFAULT_BASE_IV,
+             q: float = 0.0) -> float:
     """Newton-Raphson implied volatility solver.
 
     Returns IV as decimal, or DEFAULT_BASE_IV on failure (degenerate input,
@@ -346,8 +349,8 @@ def solve_iv(market_price: float, S: float, K: float, T: float, r: float,
     sigma = max(min(init_guess, _IV_MAX), _IV_MIN)
     for _ in range(_IV_SOLVE_ITERS):
         price_fn = bs_call if opt_type.upper() == "C" else bs_put
-        price    = price_fn(S, K, T, r, sigma)
-        vega_val = bs_vega(S, K, T, r, sigma) * 100.0   # undo /100 from bs_vega
+        price    = price_fn(S, K, T, r, sigma, q)
+        vega_val = bs_vega(S, K, T, r, sigma, q) * 100.0   # undo /100 from bs_vega
         if abs(vega_val) < 1e-10:
             break
         diff  = price - market_price

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 
@@ -40,6 +41,17 @@ def resolve_chain_tokens(
     expiries = market_data.list_expiries(symbol, exchange=exchange)
     if not expiries:
         report(f"[smartapi] No expiries found for {symbol}, skipping feed")
+        return None
+
+    # Instrument masters can retain the just-expired contract first in their
+    # sorted list. Ignore it so a symbol switch does not subscribe to zero
+    # option legs (observed for SENSEX on 27-Nov with 26NOV as list[0]).
+    expiries = [
+        candidate for candidate in expiries
+        if (parsed := parse_expiry(candidate)) is not None and parsed >= date.today()
+    ]
+    if not expiries:
+        report(f"[smartapi] No unexpired option contracts found for {symbol}, skipping feed")
         return None
 
     resolved_expiry = expiries[0]

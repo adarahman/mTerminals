@@ -289,13 +289,13 @@ class DashboardBridge:
             "supervision": supervision,
         }
 
-    def _mobile_token_valid(self, request) -> bool:
+    def _mobile_token_valid(self, supplied) -> bool:
         expected = os.getenv("MTERMINALS_MOBILE_TOKEN", "").strip()
 
         if not expected:
             return False
 
-        supplied = str(request.query.get("token") or "").strip()
+        supplied = str(supplied or "").strip()
 
         if not supplied:
             return False
@@ -307,12 +307,37 @@ class DashboardBridge:
 
     async def handle_mobile(self, request):
         """Authenticated mobile WebSocket with narrow market-data control."""
-
-        if not self._mobile_token_valid(request):
-            return web.Response(status=401, text="Unauthorized")
-
         websocket = web.WebSocketResponse(heartbeat=20)
         await websocket.prepare(request)
+
+        # Authenticate before registering the client or sending snapshots.
+        # This avoids putting the bearer token in a URL, where it can be
+        # captured by ordinary access logging. A short timeout bounds idle
+        # unauthenticated connections.
+        try:
+            auth_message = await asyncio.wait_for(websocket.receive(), timeout=5)
+        except asyncio.TimeoutError:
+            await websocket.close(code=1008, message=b"authentication required")
+            return websocket
+
+        try:
+            auth_payload = (
+                orjson.loads(auth_message.data)
+                if auth_message.type == WSMsgType.TEXT
+                else None
+            )
+        except (orjson.JSONDecodeError, TypeError):
+            auth_payload = None
+
+        if (
+            not isinstance(auth_payload, dict)
+            or auth_payload.get("type") != "authenticate"
+            or not self._mobile_token_valid(auth_payload.get("token"))
+        ):
+            await websocket.close(code=1008, message=b"unauthorized")
+            return websocket
+
+        await websocket.send_json({"type": "authenticated"})
 
         self._clients.add(websocket)
 

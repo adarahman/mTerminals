@@ -175,9 +175,19 @@ class ConcurrentMarketDataGatherer:
                     raise
                 stale_operations.append("chain")
 
+            # Futures only affect price-source selection and enrichment. They
+            # must not hold up a ready option chain (especially on a symbol
+            # switch); when unavailable this pass can safely use the chain's
+            # underlying price and retry futures on the next poll.
+            try:
+                futures_value = result(futures, "futures")
+            except TimeoutError:
+                futures_value = None
+                stale_operations.append("futures")
+
             return GatheredMarketInputs(
                 chain=chain_value,
-                futures=result(futures, "futures"),
+                futures=futures_value,
                 indices=result(indices, "indices"),
                 ticker_payload=result(ticker, "ticker") if ticker is not None else None,
                 vix=result(vix, "vix") if vix is not None else None,

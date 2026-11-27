@@ -13,9 +13,14 @@
 .commodity-dashboard-slot{display:none;width:100%;}
 body.commodity-mode .commodity-dashboard-slot{display:block;}
 body.commodity-mode #dashboard{display:block!important;}
+.symbol-switch-banner{display:flex;align-items:center;gap:9px;margin:0 0 10px;padding:9px 12px;border:1px solid color-mix(in srgb,var(--warn) 32%,var(--border));border-radius:var(--radius-sm,6px);background:color-mix(in srgb,var(--warn) 8%,var(--bg-1));color:var(--text-secondary);font-size:var(--fs-xs);line-height:1.4;}
+.symbol-switch-indicator{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 14%,transparent);animation:symbol-switch-pulse 1.5s ease-in-out infinite;}
+@keyframes symbol-switch-pulse{50%{opacity:.4;}}
 body.commodity-mode #sec-topbar{margin-bottom:2px;}
-body.commodity-mode #dashboard>*:not(#sec-topbar):not(#sec-decision):not(#commodity-dashboard-slot):not(.commodity-price-card){display:none!important;}
-body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
+body.commodity-mode #dashboard>*:not(#symbol-switch-banner):not(#sec-topbar):not(#sec-decision):not(#commodity-dashboard-slot):not(.commodity-price-card):not(.dashboard-workspace){display:none!important;}
+body.commodity-mode #dashboard>#sec-decision{display:block!important;}
+body.commodity-mode #dashboard .dashboard-workspace[hidden]{display:none!important;}
+body.commodity-mode #dashboard .dashboard-workspace:not([hidden]){display:block!important;}
 .commodity-topbar-status{flex:0 0 auto;min-height:0;margin:0 0 0 auto;text-align:right;white-space:nowrap;font-size:var(--fs-xs);}
 .instrument-mode-switch{display:flex;gap:2px;padding:3px;background:var(--bg-0);border:1px solid var(--border);border-radius:999px;}
 .instrument-mode-switch button{padding:4px 8px;border:0;border-radius:999px;background:transparent;color:var(--text-secondary);font:inherit;font-size:var(--fs-xs);cursor:pointer;white-space:nowrap;}
@@ -123,7 +128,7 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 .commodity-price-details{
   grid-column:1/-1;
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:repeat(3,minmax(0,1fr)) minmax(190px,1.2fr);
   gap:2px 14px;
   margin-top:2px;
   padding-top:0;
@@ -151,6 +156,28 @@ body.commodity-mode .oc-ledger-table .oc-metric.greeks{display:none!important;}
 }
 
 .commodity-price-details i{font-style:normal;}
+
+.commodity-inventory-outlook{position:relative;display:flex;min-width:0;align-items:baseline;}
+.commodity-inventory-outlook[hidden]{display:none;}
+.commodity-inventory-heading{flex:0 0 auto;margin-right:6px;color:var(--text-primary);font-size:var(--fs-xs);font-weight:700;}
+.commodity-inventory-toggle{display:inline-flex;max-width:100%;align-items:center;padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:help;}
+.commodity-inventory-summary{overflow:hidden;color:var(--text-primary);font-size:var(--fs-xs);font-weight:700;text-overflow:ellipsis;white-space:nowrap;}
+.commodity-inventory-summary[data-tone="bullish"]{color:var(--pos);}
+.commodity-inventory-summary[data-tone="bearish"]{color:var(--neg);}
+.commodity-inventory-detail{position:absolute;top:calc(100% + 5px);left:0;z-index:30;width:min(380px,calc(100vw - 32px));padding:9px 11px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-0);box-shadow:0 10px 28px rgba(0,0,0,.3);color:var(--text-secondary);font-size:var(--fs-xs);font-weight:400;line-height:1.6;white-space:pre-line;}
+.commodity-inventory-detail[hidden]{display:none;}
+.commodity-inventory-outlook:hover .commodity-inventory-detail,.commodity-inventory-toggle:focus-visible+.commodity-inventory-detail{display:block;}
+.commodity-inventory-detail a{color:var(--info);white-space:nowrap;}
+.commodity-inventory-outlook:hover .commodity-inventory-detail[hidden],.commodity-inventory-toggle:focus-visible+.commodity-inventory-detail[hidden]{display:none;}
+.commodity-analytics{margin:14px 0;padding:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-1);}
+.commodity-analytics[hidden]{display:none!important;}
+.commodity-analytics-heading{margin-bottom:10px;color:var(--text-primary);font-size:var(--fs-sm);font-weight:700;}
+.commodity-analytics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+.commodity-analytics-grid>div{display:flex;flex-direction:column;gap:3px;min-width:0;padding:8px 10px;border:1px solid var(--border-2);border-radius:var(--radius-sm);background:var(--bg-0);}
+.commodity-analytics-grid span{color:var(--text-secondary);font-size:var(--fs-xs);}
+.commodity-analytics-grid strong{overflow:hidden;color:var(--text-primary);font-family:var(--font-mono);font-size:var(--fs-sm);text-overflow:ellipsis;white-space:nowrap;}
+.commodity-analytics-reason{margin:10px 0 0;color:var(--text-secondary);font-size:var(--fs-xs);line-height:1.5;}
+@media(max-width:720px){.commodity-price-details{grid-template-columns:repeat(2,minmax(0,1fr));}}
 
 /* Equity twin of the commodity stats card — same markup/classes, pulled
    tight under the (sticky) equity top bar. The card class is excluded
@@ -258,13 +285,23 @@ body.commodity-mode .equity-momentum-stats{display:none!important;}
 .commodity-chain-heading .commodity-picker{min-width:132px;}
 
 .commodity-chain-status{
+  display:flex;
+  align-items:center;
+  gap:8px;
   min-height:20px;
-  padding:8px 14px 0;
+  margin:0 14px;
+  padding:9px 0 8px;
+  border-bottom:1px solid var(--border-2);
   color:var(--text-secondary);
   font-size:var(--fs-xs);
 }
-
+.commodity-chain-status:before{content:"";width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 14%,transparent);}
+.commodity-chain-status[data-tone="live"]{color:var(--text-secondary);}
+.commodity-chain-status[data-tone="live"]:before{background:var(--pos);box-shadow:0 0 0 3px color-mix(in srgb,var(--pos) 14%,transparent);}
 .commodity-chain-status[data-tone="error"]{color:var(--neg);}
+.commodity-chain-status[data-tone="error"]:before{background:var(--neg);box-shadow:0 0 0 3px color-mix(in srgb,var(--neg) 14%,transparent);}
+.commodity-chain-status[data-tone="unavailable"]{color:var(--text-tertiary);}
+.commodity-chain-status[data-tone="unavailable"]:before{background:var(--text-tertiary);box-shadow:none;}
 
 .commodity-chain-scroll{overflow:auto;}
 
@@ -307,7 +344,7 @@ body.commodity-mode .equity-momentum-stats{display:none!important;}
 .commodity-chain-table td.put-ltp{color:var(--neg);}
 
 @media(max-width:720px){
-  .commodity-price-details{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .commodity-price-details{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 
 @media(max-width:520px){

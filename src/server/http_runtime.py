@@ -53,6 +53,7 @@ def build_http_runtime(
     commodity_quote=None,
     commodity_option_chain=None,
     commodity_news=None,
+    commodity_inventory=None,
     starter=start_http_server,
 ) -> HttpRuntime:
     """Assemble HTTP routes and bind configuration from app-level handlers."""
@@ -72,6 +73,7 @@ def build_http_runtime(
             commodity_quote=commodity_quote,
             commodity_option_chain=commodity_option_chain,
             commodity_news=commodity_news,
+            commodity_inventory=commodity_inventory,
         ),
         host=host,
         port=port,

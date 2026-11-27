@@ -318,8 +318,19 @@ class DataService {
     this.snapshotRecoveryTimer = null;
     this.awaitingMarketSnapshot = true;
     this.pendingSymbol = null;
+    this.pendingWireSymbol = null;
+    this.symbolSwitchTimer = null;
     this._setFeedStatus('CONNECTING');
     this.wsManager.on('open', () => {
+      if (window.dashboardInstrumentMode === 'commodity') {
+        this.pendingWireSymbol = null;
+        return;
+      }
+      if (this.pendingWireSymbol) {
+        const symbol = this.pendingWireSymbol;
+        this.pendingWireSymbol = null;
+        this.wsManager.send({ type: 'switch_symbol', payload: { symbol } });
+      }
       err('');
       const dot=$i('ws-status'); if(dot) dot.style.background='var(--warn)';
       // Socket open is not the same thing as a coherent market snapshot.
@@ -330,6 +341,7 @@ class DataService {
     });
     this.wsManager.on('close', () => {
       this._clearSnapshotRecovery();
+      if (window.dashboardInstrumentMode === 'commodity') return;
       const dot=$i('ws-status'); if(dot) dot.style.background='var(--red)';
       this._setFeedStatus('DISCONNECTED', 'WebSocket closed');
     });
@@ -352,6 +364,15 @@ class DataService {
         }
       }
 
+      const commodityQuotePayload = raw && raw.type === 'commodityQuote'
+        ? (raw.payload || raw) : null;
+      const commodityQuoteLtp = Number(commodityQuotePayload?.quote?.LTP);
+      const selectedCommodityQuote = window.dashboardInstrumentMode === 'commodity'
+        && commodityQuotePayload
+        && Number.isFinite(commodityQuoteLtp) && commodityQuoteLtp > 0
+        && String(commodityQuotePayload.symbol || '').trim().toUpperCase()
+          === String(window.commodityActiveSymbol || '').trim().toUpperCase();
+
       if (this.pendingSymbol && this._isMarketSnapshotMessage(raw)) {
         // A closing socket can have one buffered payload, and a newly opened
         // socket must establish a full baseline before any deltas are safe.
@@ -363,10 +384,18 @@ class DataService {
           ? String(payload.symbol).toUpperCase() : '';
         if (!isFull || incomingSymbol !== this.pendingSymbol) return;
         this.pendingSymbol = null;
+        if (typeof window.endSymbolSwitch === 'function') window.endSymbolSwitch();
       }
-      if (this._isMarketSnapshotMessage(raw)) {
+      if (this._isMarketSnapshotMessage(raw)
+          && window.dashboardInstrumentMode !== 'commodity') {
         this.awaitingMarketSnapshot = false;
         this._clearSnapshotRecovery();
+        this._markFeedMessage();
+      } else if (selectedCommodityQuote) {
+        // Commodity quotes use their own feed message instead of equity
+        // full/delta snapshots. They still prove fresh market data for the
+        // selected instrument and must keep the shared status from declaring
+        // the healthy commodity feed stale.
         this._markFeedMessage();
       }
       this.store.ingest(raw);
@@ -374,6 +403,7 @@ class DataService {
     this.feedStatusTimer = setInterval(() => this._checkFeedFreshness(), 1000);
     this.store.on('change', (state, change) => this.updateDashboard(state, change));
     this.store.on('baselineMismatch', () => {
+      if (window.dashboardInstrumentMode === 'commodity') return;
       this._setFeedStatus('RECOVERING', 'Refreshing incompatible market snapshot');
       this.wsManager.connect(undefined, true);
     });
@@ -405,6 +435,7 @@ class DataService {
     this._clearSnapshotRecovery();
     this.snapshotRecoveryTimer = setTimeout(() => {
       this.snapshotRecoveryTimer = null;
+      if (window.dashboardInstrumentMode === 'commodity') return;
       if (!this.awaitingMarketSnapshot) return;
       this._setFeedStatus('RECOVERING', 'Connected without a market snapshot; resyncing');
       this.wsManager.connect(undefined, true);
@@ -489,6 +520,13 @@ class DataService {
     }
   }
 
+  markExternalCommodityQuote(symbol){
+    if (window.dashboardInstrumentMode !== 'commodity'
+        || String(symbol || '').trim().toUpperCase()
+          !== String(window.commodityActiveSymbol || '').trim().toUpperCase()) return;
+    this._markFeedMessage();
+  }
+
   _updateDataQuality(state){
     const prev = AppState.feedState || {};
     const missing = [];
@@ -508,6 +546,10 @@ class DataService {
   }
 
   _checkFeedFreshness(){
+    // Commodity mode has its own quote and option-chain health indicators.
+    // The equity snapshot timer must not reconnect the equity stream simply
+    // because the active commodity provider does not publish equity deltas.
+    if (window.dashboardInstrumentMode === 'commodity') return;
     const fs = AppState.feedState || {};
     if (!fs.lastMessageAt) return;
     if (fs.status === 'DISCONNECTED' || fs.status === 'CONNECTING') return;
@@ -577,6 +619,20 @@ class DataService {
     this._renderStreamingControls();
   }
 
+  switchSymbol(symbol){
+    const command = {
+      type: 'switch_symbol',
+      payload: { symbol: String(symbol || '').trim().toUpperCase() },
+    };
+    if (this.wsManager.send(command)) return true;
+    if (this.wsManager.ws
+        && this.wsManager.ws.readyState === WebSocket.CONNECTING) {
+      this.pendingWireSymbol = command.payload.symbol;
+      return true;
+    }
+    return false;
+  }
+
   setBrokerFeed(enabled){
     const sent = this.wsManager.send({type:'control_feed', payload:{enabled:!!enabled}});
     if (!sent) err('Connect the dashboard before controlling the broker feed.');
@@ -597,8 +653,38 @@ class DataService {
   beginSymbolSwitch(symbol){
     this.pendingSymbol = String(symbol || '').trim().toUpperCase() || null;
     this.awaitingMarketSnapshot = true;
+    if (this.symbolSwitchTimer !== null) window.clearTimeout(this.symbolSwitchTimer);
     this._setFeedStatus('RECOVERING', this.pendingSymbol
       ? `Loading ${this.pendingSymbol}` : 'Loading symbol');
+
+    const dashboard = $i('dashboard');
+    if (dashboard) {
+      dashboard.classList.add('symbol-switch-pending');
+      dashboard.setAttribute('aria-busy', 'true');
+      // Keep the last complete dashboard snapshot visible while the next
+      // symbol loads. The banner labels it as previous data, and the actual
+      // symbol picker remains usable in the top bar.
+      let banner = $i('symbol-switch-banner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'symbol-switch-banner';
+        banner.className = 'symbol-switch-banner';
+        banner.setAttribute('role', 'status');
+        banner.setAttribute('aria-live', 'polite');
+        banner.innerHTML = '<span class="symbol-switch-indicator" aria-hidden="true"></span><span id="symbol-switch-message"></span>';
+        dashboard.insertBefore(banner, dashboard.firstChild);
+      }
+      const message = $i('symbol-switch-message');
+      if (message) message.textContent = this.pendingSymbol
+        ? `Loading ${this.pendingSymbol} · showing the last complete snapshot`
+        : 'Loading symbol · showing the last complete snapshot';
+      this.symbolSwitchTimer = window.setTimeout(() => {
+        this.symbolSwitchTimer = null;
+        if (!this.pendingSymbol) return;
+        const currentMessage = $i('symbol-switch-message');
+        if (currentMessage) currentMessage.textContent = `${this.pendingSymbol} is taking longer than usual · showing the last complete snapshot`;
+      }, 8000);
+    }
 
     // Never present the previous instrument's spot/change as if it belongs
     // to the newly selected symbol while the replacement snapshot is in
@@ -609,6 +695,19 @@ class DataService {
       node.textContent = '—';
       node.classList.remove('tick-flash-up', 'tick-flash-down', 'chg-pos', 'chg-neg');
     });
+  }
+
+  endSymbolSwitch(){
+    if (this.symbolSwitchTimer !== null) {
+      window.clearTimeout(this.symbolSwitchTimer);
+      this.symbolSwitchTimer = null;
+    }
+    const dashboard = $i('dashboard');
+    if (!dashboard) return;
+    dashboard.classList.remove('symbol-switch-pending');
+    dashboard.removeAttribute('aria-busy');
+    const banner = $i('symbol-switch-banner');
+    if (banner) banner.remove();
   }
 
   // Called with the already-merged state (MarketStore.ingest ran before
