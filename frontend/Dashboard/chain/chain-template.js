@@ -27,6 +27,11 @@
   // "Indices" so the dropdown always shows the true current value instead
   // of silently falling back to the first option.
 ChainView.prototype.renderSymbolOptions = function(active, fnoSymbols, mode) {
+    if (mode === 'currency') {
+      return `<optgroup label="Currency">${CURRENCY_SYMBOLS.map(s =>
+        `<option value="${s}"${s === active ? ' selected' : ''}>${s}</option>`
+      ).join('')}</optgroup>`;
+    }
     if (mode === 'commodity') {
       return `<optgroup label="Commodities">${COMMODITY_SYMBOLS.map(s =>
         `<option value="${s}"${s === active ? ' selected' : ''}>${s}</option>`
@@ -166,10 +171,12 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const mode = window.dashboardInstrumentMode || 'equity';
   const activeSymbol = mode === 'commodity'
     ? (window.commodityActiveSymbol || 'CRUDEOIL')
-    : (d.symbol || 'NIFTY');
+    : mode === 'currency'
+      ? (CURRENCY_SYMBOLS.includes(String(d.symbol || '').toUpperCase()) ? String(d.symbol).toUpperCase() : (window.currencyActiveSymbol || 'USDINR'))
+      : (d.symbol || 'NIFTY');
   // `symbolName` is resolved from the instrument master by the payload
   // builder. Do not maintain a partial browser-side company-name table.
-  const symbolName = mode === 'commodity' ? activeSymbol : (d.symbolName || d.companyName || d.displayName || activeSymbol);
+  const symbolName = mode === 'commodity' || mode === 'currency' ? activeSymbol : (d.symbolName || d.companyName || d.displayName || activeSymbol);
   const cas = d.casIndicative;
   const casLive = cas?.status === 'live' && cas.value !== null
     && cas.value !== undefined && Number.isFinite(Number(cas.value));
@@ -213,9 +220,11 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   if (isBear === undefined) {
     isBear = isBearBias(d);
   }
+  const isCurrency = mode === 'currency';
   const modeSwitch = `<div class="instrument-mode-switch" role="group" aria-label="Instrument category">
-    <button type="button" data-mode="equity" class="${mode === 'equity' ? 'active' : ''}" aria-pressed="${mode === 'equity'}" onclick="setDashboardInstrumentMode('equity')">Equity</button>
-    <button type="button" data-mode="commodity" class="${mode === 'commodity' ? 'active' : ''}" aria-pressed="${mode === 'commodity'}" onclick="setDashboardInstrumentMode('commodity')">Commodities</button>
+    <div class="instrument-mode-option"><button type="button" data-mode="equity" class="${mode === 'equity' ? 'active' : ''}" aria-pressed="${mode === 'equity'}" onclick="setDashboardInstrumentMode('equity')">Equity</button></div>
+    <div class="instrument-mode-option"><button type="button" data-mode="commodity" class="${mode === 'commodity' ? 'active' : ''}" aria-pressed="${mode === 'commodity'}" onclick="setDashboardInstrumentMode('commodity')">Commodities</button></div>
+    <div class="instrument-mode-option"><button type="button" data-mode="currency" class="${mode === 'currency' ? 'active' : ''}" aria-pressed="${mode === 'currency'}" onclick="setDashboardInstrumentMode('currency')">Currency</button></div>
   </div>`;
   if (mode === 'commodity') {
     const commodityFeedState = d.quoteAvailable ? 'LIVE' : d.quoteError ? 'UNAVAILABLE' : 'CONNECTING';
@@ -280,7 +289,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
   const futOptions = ['NEAR', 'NEXT', 'FAR']
     .map(v => `<option value="${v}"${futExpiryKey === v ? ' selected' : ''}>${v}</option>`)
     .join('');
-  return `<div id="sec-topbar" class="top-bar">
+  return `<div id="sec-topbar" class="top-bar${isCurrency ? ' currency-topbar' : ' equity-topbar'}">
     <div class="top-bar-left">
       <!-- Symbol is now a picker, not static text — picking a value calls
            the same switchActiveIndex(sym) the index-ticker pills already
@@ -298,7 +307,7 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       <div class="instrument-picker-stack">
         ${modeSwitch}
         <div class="active-symbol-pill" title="${escapeHtml(symbolName)}">
-          <select id="symbolSelect" class="symbol symbol-select" title="Switch equity or index" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols, mode)}</select>
+          <select id="symbolSelect" class="symbol symbol-select" title="Switch ${mode === 'currency' ? 'currency pair' : 'equity or index'}" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols, mode)}</select>
         <span class="symbol-name">${escapeHtml(symbolName)}</span>
 
         </div>
@@ -306,21 +315,23 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
       <span class="spot-block">
         <span class="spot-row">
           <span id="topbar-spot" class="spot${isBear?' bearish':''}${spotFlashCls}">${fmtI(d.spot)}</span>
-          ${d.spotChgPct!==undefined?`
+          ${d.spotChgPct!=null?`
           <span class="spot-change-row">
-            <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="Change in points">${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}</span>
+            <span id="spot-chg-pts" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}" title="${isCurrency ? 'Currency futures change' : 'Change in points'}">${isCurrency ? fmtN(d.spotChange, 4) : `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}`}</span>
             <span id="spot-chg-pct" class="chg-token ${d.spotChgPct>=0?'chg-pos':'chg-neg'}">${d.spotChgPct>=0?'▲':'▼'} ${Math.abs(d.spotChgPct).toFixed(2)}%</span>
           </span>`:''}
         </span>
         <span class="spot-meta-row">
-          <span class="spot-meta spot-meta-fut" id="topbar-fut-segment" title="${escapeHtml(futMetaTitle)}"${isFuturesReferenceVisible() ? '' : ' hidden'}>
-            <span class="spot-meta-fut-label">FUT</span>
+          <span class="spot-meta spot-meta-fut" id="topbar-fut-segment" title="${escapeHtml(futMetaTitle)}"${!isCurrency && !isFuturesReferenceVisible() ? ' hidden' : ''}>
+            ${isCurrency ? '' : '<span class="spot-meta-fut-label">FUT</span>'}
             <select id="futuresExpirySelect" class="price-source-select futures-expiry-select" title="Futures reference contract" onchange="onFuturesExpiryPicked(this.value)">${futOptions}</select>
+            ${isCurrency ? '' : `
             <b id="topbar-future" class="spot-meta-fut-price">${futPriceNum > 0 ? fmtI(futPriceNum) : '—'}</b>
             <b id="topbar-fut-chg" class="${futChgCls}">${futChgPctNum >= 0 ? '+' : ''}${futChgPctNum.toFixed(2)}%</b>
-            <small id="topbar-basis" class="spot-meta-basis">Basis ${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}</small>
+            <small id="topbar-basis" class="spot-meta-basis">Basis ${Number(d.basis) >= 0 ? '+' : ''}${fmtN(Number(d.basis) || 0, 1)}</small>`}
           </span>
           <span class="spot-meta">Lot <b id="topbar-lot-size">${d.lotSize ? Number(d.lotSize).toLocaleString('en-IN') : '—'}</b></span>
+          ${isCurrency ? `<span class="spot-meta" id="currency-quote-status" role="status" title="${escapeHtml(d.quoteError || 'Currency futures quote status')}">${d.quoteError ? 'CDS · unavailable' : d.quoteAvailable ? 'CDS · live' : 'CDS · connecting'}</span>` : ''}
         </span>
         ${casVisible ? `
         <span class="cas-indicative${casLive ? '' : ' cas-unavailable'}" title="${casLive

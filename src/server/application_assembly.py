@@ -9,6 +9,7 @@ from typing import Any
 from application.lifecycle import ApplicationLifecycle
 from server.backtest_api import handle_backtest
 from server.commodity_prices_api import CommodityPricesApi
+from server.currency_rates_api import CurrencyRatesApi
 from server.health_api import (
     broker_health,
     build_health_snapshot,
@@ -108,6 +109,7 @@ def build_server_application(
         metrics=runtime_state.METRICS,
         symbols=get_fno_symbols,
         commodity_prices=CommodityPricesApi(),
+        currency_rates=CurrencyRatesApi(),
     )
     runtime_state.HTTP_ROUTE_HANDLERS = handlers
     http = build_http_runtime(
@@ -126,6 +128,8 @@ def build_server_application(
         commodity_option_chain=handlers.commodity_option_chain,
         commodity_news=handlers.commodity_news,
         commodity_inventory=handlers.commodity_inventory,
+        currency_quote=handlers.currency_quote,
+        currency_option_chain=handlers.currency_option_chain,
         host=host,
         port=http_port,
         symbol=lambda: runtime_state.MARKET_SELECTION.symbol,

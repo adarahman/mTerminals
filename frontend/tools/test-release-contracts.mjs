@@ -17,6 +17,7 @@ const packageJson = JSON.parse(read('frontend/package.json'));
 const suites = [
   'option-chain','strike-detail','capital-flow','decision','scenario',
   'paper-trading','price-chart','design-system','health-status','feed-recovery',
+  'currency-rates',
   'ci-supply-chain','system-architecture','ui-system','data-model','engineering',
   'diagrams','audits','release','manifest',
 ];

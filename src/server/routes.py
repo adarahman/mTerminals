@@ -22,6 +22,8 @@ class ServerRoutes:
     commodity_option_chain: Callable[..., Any] | None = None
     commodity_news: Callable[..., Any] | None = None
     commodity_inventory: Callable[..., Any] | None = None
+    currency_quote: Callable[..., Any] | None = None
+    currency_option_chain: Callable[..., Any] | None = None
 
 class HttpRouteHandlers:
     """Adapt HTTP requests to injected server services."""
@@ -40,6 +42,7 @@ class HttpRouteHandlers:
         metrics,
         symbols,
         commodity_prices=None,
+        currency_rates=None,
     ):
         self._history_api = history_api
         self._backtest_response = backtest_response
@@ -52,6 +55,19 @@ class HttpRouteHandlers:
         self._metrics = metrics
         self._symbols = symbols
         self._commodity_prices = commodity_prices
+        self._currency_rates = currency_rates
+
+    async def currency_quote(self, request):
+        from aiohttp import web
+        if self._currency_rates is None:
+            return web.json_response({"error": "Currency rates are not configured."}, status=501)
+        return await self._currency_rates.quote(request)
+
+    async def currency_option_chain(self, request):
+        from aiohttp import web
+        if self._currency_rates is None:
+            return web.json_response({"error": "Currency rates are not configured."}, status=501)
+        return await self._currency_rates.option_chain(request)
 
 
     async def spot_history(self, request):

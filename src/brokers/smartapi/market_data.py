@@ -186,6 +186,74 @@ class SmartApiMarketData:
             "FutSource": "SMARTAPI",
         }
 
+    def get_currency_futures_quote(self, underlying, which="NEAR"):
+        from brokers.smartapi.instruments import get_currency_futures_contract
+
+        future = get_currency_futures_contract(underlying, which=which)
+        if not future:
+            return None
+        token = str(future.get("token") or "")
+        quotes = self.get_batch_quotes_by_token(
+            "CDS", [(future.get("symbol"), token)], mode="FULL"
+        )
+        quote = quotes.get(token) if quotes else None
+        ltp = _safe_float(quote.get("ltp")) if quote else None
+        if ltp is None:
+            return None
+        previous_close = _safe_float(quote.get("close"))
+        change = _safe_float(quote.get("netChange"))
+        percent_change = _safe_float(quote.get("percentChange"))
+        if percent_change is None and previous_close:
+            percent_change = round((ltp - previous_close) / previous_close * 100, 2)
+        return {
+            "Contract": future.get("symbol"),
+            "Underlying": underlying,
+            "Exchange": "CDS",
+            "Expiry": datetime.strptime(future["expiry"], "%d%b%Y").strftime("%d-%b-%Y"),
+            "LotSize": _safe_positive_int(future.get("lotsize")),
+            "LTP": ltp,
+            "Change": change,
+            "PctChange": percent_change,
+            "PrevClose": previous_close,
+            "FutSource": "SMARTAPI",
+        }
+
+    def get_currency_option_chain(
+        self, underlying, expiry=None, strikes_around=8, which="NEAR"
+    ):
+        from brokers.smartapi.instruments import get_currency_option_contracts
+
+        future_quote = self.get_currency_futures_quote(underlying, which)
+        reference = future_quote.get("LTP") if future_quote else None
+        resolved = get_currency_option_contracts(
+            underlying, expiry=expiry, reference_price=reference,
+            strikes_around=strikes_around,
+        )
+        contracts = resolved.get("contracts") or []
+        pairs = [(item["symbol"], item["token"]) for item in contracts]
+        quotes = self.get_batch_quotes_by_token("CDS", pairs, mode="FULL")
+        by_strike = {}
+        for item in contracts:
+            raw = quotes.get(item["token"])
+            if not raw:
+                continue
+            option = {
+                "symbol": item["symbol"], "ltp": _safe_float(raw.get("ltp")),
+                "change": _safe_float(raw.get("netChange")),
+                "pct_change": _safe_float(raw.get("percentChange")),
+                "oi": _safe_float(raw.get("opnInterest")),
+                "volume": _safe_float(raw.get("tradeVolume")),
+            }
+            by_strike.setdefault(item["strike"], {"strike": item["strike"]})[
+                "call" if item["type"] == "CE" else "put"
+            ] = option
+        return {
+            "expiry": resolved.get("expiry"),
+            "expiries": resolved.get("expiries") or [],
+            "spot": reference,
+            "rows": [by_strike[key] for key in sorted(by_strike)],
+        }
+
     def get_commodity_option_expiries(self, underlying):
         from brokers.smartapi.instruments import get_commodity_option_expiries
 

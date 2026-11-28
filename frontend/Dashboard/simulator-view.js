@@ -726,6 +726,10 @@ return '<div class="sdt-row' +
   // currently open.
   var atmEl = document.getElementById('sdt-stat-atm');
   var spotEl = document.getElementById('sdt-stat-spot');
+  var spotLabelEl = spotEl && spotEl.previousElementSibling;
+  if (spotLabelEl && spotLabelEl.classList.contains('sdt-stat-label')) {
+    spotLabelEl.textContent = window.dashboardInstrumentMode === 'currency' ? 'Futures Price' : 'Spot Price';
+  }
   var totalOiEl = document.getElementById('sdt-stat-totaloi');
   var pcrEl = document.getElementById('sdt-stat-pcr');
   {

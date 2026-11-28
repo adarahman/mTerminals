@@ -5,15 +5,20 @@ const COMMODITY_SYMBOLS = [
   'ALUMINIUM', 'COPPER', 'CRUDEOIL', 'GOLD', 'GOLDM',
   'LEAD', 'NATURALGAS', 'SILVER', 'SILVERM', 'ZINC',
 ];
+// Currency derivatives listed on NSE CDS. The dashboard's shared symbol
+// feed can resolve these through the active broker just like other contracts.
+const CURRENCY_SYMBOLS = ['USDINR', 'EURINR', 'GBPINR', 'JPYINR'];
 const DASHBOARD_MODE_STORAGE_KEY = 'dashboard.instrumentMode';
 const COMMODITY_SYMBOL_STORAGE_KEY = 'dashboard.commoditySymbol';
 const DATA_SOURCE_STORAGE_KEY = 'dashboard.dataSource';
 let savedInstrumentMode = 'equity';
 let savedCommoditySymbol = 'CRUDEOIL';
 try {
-  if (localStorage.getItem(DASHBOARD_MODE_STORAGE_KEY) === 'commodity') {
-    savedInstrumentMode = 'commodity';
-  }
+  const storedMode = localStorage.getItem(DASHBOARD_MODE_STORAGE_KEY);
+  if (storedMode === 'commodity') savedInstrumentMode = 'commodity';
+  if (storedMode === 'currency') savedInstrumentMode = 'currency';
+  const storedCurrency = String(localStorage.getItem('dashboard.currencySymbol') || '').toUpperCase();
+  if (CURRENCY_SYMBOLS.includes(storedCurrency)) window.currencyActiveSymbol = storedCurrency;
   const savedSymbol = String(localStorage.getItem(COMMODITY_SYMBOL_STORAGE_KEY) || '').toUpperCase();
   if (COMMODITY_SYMBOLS.includes(savedSymbol)) savedCommoditySymbol = savedSymbol;
 } catch (_) {}
@@ -41,6 +46,7 @@ function isFuturesReferenceVisible(now = new Date()) {
 
 function renderIndexTicker(d) {
   if (!d) d = {};
+  if (window.dashboardInstrumentMode === 'currency') return '';
 
   // The 'indices' array comes from your new unified stream in mTerminals_json.py
   const indices = d.allIndices || [];
@@ -215,6 +221,16 @@ function onSymbolPicked(val){
     }
     return;
   }
+  if(window.dashboardInstrumentMode === 'currency'){
+    const symbol = String(val || '').toUpperCase();
+    if(CURRENCY_SYMBOLS.includes(symbol)) {
+      window.currencyActiveSymbol = symbol;
+      try { localStorage.setItem('dashboard.currencySymbol', symbol); } catch (_) {}
+      if(window.currencyRates) window.currencyRates.select(symbol);
+      if(window.AppState?.wsState && typeof app !== 'undefined' && app.chain) app.chain.renderDashboard(window.AppState.wsState);
+    }
+    return;
+  }
   if(val === '__other__'){
     const sym = prompt('Symbol to switch to (e.g. RELIANCE):');
     if(sym) switchActiveIndex(sym.trim().toUpperCase());
@@ -225,11 +241,14 @@ function onSymbolPicked(val){
 window.onSymbolPicked = onSymbolPicked;
 
 function setDashboardInstrumentMode(mode){
-  const nextMode = mode === 'commodity' ? 'commodity' : 'equity';
+  const nextMode = ['commodity', 'currency'].includes(mode) ? mode : 'equity';
   const topBar = document.getElementById('sec-topbar');
   const topBarMatchesMode = nextMode === 'commodity'
     ? !!topBar?.classList.contains('commodity-topbar')
-    : !!topBar && !topBar.classList.contains('commodity-topbar');
+    : !!topBar && (nextMode === 'currency'
+        ? topBar.classList.contains('currency-topbar')
+        : topBar.classList.contains('equity-topbar'))
+      && window.dashboardInstrumentMode === nextMode;
   if(window.dashboardInstrumentMode === nextMode && topBarMatchesMode) return;
   window.dashboardInstrumentMode = nextMode;
   try { localStorage.setItem(DASHBOARD_MODE_STORAGE_KEY, nextMode); } catch (_) {}
@@ -245,6 +264,8 @@ function setDashboardInstrumentMode(mode){
     if(window.commodityPrices) window.commodityPrices.open(window.commodityActiveSymbol);
   } else {
     if(window.commodityPrices) window.commodityPrices.close();
+    if(nextMode === 'currency' && window.currencyRates) window.currencyRates.open(window.currencyActiveSymbol || 'USDINR');
+    else if(window.currencyRates) window.currencyRates.close();
     if(slot){ slot.hidden = true; document.body.append(slot); }
     const current = window.AppState && AppState.wsState;
     if(current && typeof app !== 'undefined' && app.chain){
@@ -258,12 +279,16 @@ window.setDashboardInstrumentMode = setDashboardInstrumentMode;
 window.addEventListener('DOMContentLoaded', () => {
   if (window.dashboardInstrumentMode === 'commodity') {
     setDashboardInstrumentMode('commodity');
+  } else if (window.dashboardInstrumentMode === 'currency') {
+    setDashboardInstrumentMode('currency');
   }
 });
 
 // Inside dashboard.js, within the DataService or global scope:
 function switchActiveIndex(sym) {
   if (!sym || String(sym).toUpperCase() === String(window.AppState?.wsState?.symbol || '').toUpperCase()) return;
+  const requestedSymbol = String(sym).toUpperCase();
+  if (window.dashboardInstrumentMode === 'currency') return;
   // Mask the previous symbol's price immediately and make DataService wait
   // for a matching full baseline before rendering the replacement market.
   if (typeof window.beginSymbolSwitch === 'function') window.beginSymbolSwitch(sym);
@@ -436,6 +461,10 @@ window.setFuturesExpiry = setFuturesExpiry;
 
 // Called by the top-bar <select onchange> next to the price-source picker.
 function onFuturesExpiryPicked(val){
+  if (window.dashboardInstrumentMode === 'currency' && window.currencyRates) {
+    window.currencyRates.selectFutureExpiry(val);
+    return;
+  }
   setFuturesExpiry(val);
 }
 window.onFuturesExpiryPicked = onFuturesExpiryPicked;

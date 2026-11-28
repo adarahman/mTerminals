@@ -367,6 +367,96 @@ class InstrumentResolver:
         )
         return live[index][0]
 
+    def get_currency_futures_contract(
+        self, underlying: str, which: str = "NEAR"
+    ) -> Optional[dict]:
+        """Resolve a non-expired CDS FUTCUR contract by expiry slot."""
+        requested = (underlying or "").strip().upper()
+        if requested not in {"USDINR", "EURINR", "GBPINR", "JPYINR"}:
+            return None
+        candidates = []
+        today = datetime.combine(date.today(), datetime.min.time())
+        for row in self._instruments:
+            if (
+                row.get("exch_seg") != "CDS"
+                or row.get("instrumenttype") != "FUTCUR"
+                or str(row.get("name") or "").strip().upper() != requested
+            ):
+                continue
+            try:
+                expiry = datetime.strptime(row.get("expiry", ""), "%d%b%Y")
+            except (TypeError, ValueError):
+                continue
+            if expiry >= today:
+                candidates.append((row, expiry))
+        candidates.sort(key=lambda pair: pair[1])
+        if not candidates:
+            return None
+        index = min({"NEAR": 0, "NEXT": 1, "FAR": 2}.get(
+            str(which or "NEAR").upper(), 0
+        ), len(candidates) - 1)
+        return candidates[index][0]
+
+    def get_currency_option_contracts(
+        self, underlying: str, expiry: str | None = None,
+        reference_price: float | None = None, strikes_around: int = 8,
+    ) -> dict:
+        """Resolve nearby CDS OPTCUR contracts and available expiries."""
+        requested = (underlying or "").strip().upper()
+        if requested not in {"USDINR", "EURINR", "GBPINR", "JPYINR"}:
+            return {"expiry": None, "expiries": [], "contracts": []}
+        today = datetime.combine(date.today(), datetime.min.time())
+        grouped = {}
+        for row in self._instruments:
+            if (row.get("exch_seg") != "CDS"
+                    or row.get("instrumenttype") != "OPTCUR"
+                    or str(row.get("name") or "").strip().upper() != requested):
+                continue
+            try:
+                parsed = datetime.strptime(row.get("expiry", ""), "%d%b%Y")
+                strike = round(float(row.get("strike", "0")) / 10_000_000.0, 4)
+            except (TypeError, ValueError):
+                continue
+            if parsed < today:
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            option_type = symbol[-2:]
+            if option_type not in {"CE", "PE"} or strike <= 0:
+                continue
+            expiry_key = parsed.date().isoformat()
+            grouped.setdefault(expiry_key, []).append({
+                "symbol": row.get("symbol"), "token": str(row.get("token") or ""),
+                "strike": strike, "type": option_type,
+                "expiry": parsed.strftime("%d-%b-%Y"),
+                "lotsize": int(float(row.get("lotsize") or 1)),
+            })
+        expiries = sorted(grouped)
+        selected = None
+        if expiry:
+            raw = str(expiry).strip().upper()
+            try:
+                selected = datetime.strptime(raw, "%Y-%m-%d").date().isoformat()
+            except ValueError:
+                try:
+                    selected = datetime.strptime(raw, "%d-%b-%Y").date().isoformat()
+                except ValueError:
+                    try:
+                        selected = datetime.strptime(raw, "%d%b%Y").date().isoformat()
+                    except ValueError:
+                        selected = None
+            if selected not in grouped:
+                return {"expiry": None, "expiries": expiries, "contracts": []}
+        elif expiries:
+            selected = expiries[0]
+        contracts = grouped.get(selected, []) if selected else []
+        strikes = sorted({item["strike"] for item in contracts})
+        if reference_price and strikes:
+            nearest = sorted(strikes, key=lambda value: abs(value - reference_price))[:max(1, strikes_around * 2 + 1)]
+            keep = set(nearest)
+            contracts = [item for item in contracts if item["strike"] in keep]
+        contracts.sort(key=lambda item: (item["strike"], item["type"]))
+        return {"expiry": selected, "expiries": expiries, "contracts": contracts}
+
     def get_commodity_option_expiries(self, underlying: str) -> list[str]:
         """Return sorted, non-expired MCX commodity option expiries."""
         requested = (underlying or "").strip().upper()
@@ -490,6 +580,30 @@ def get_commodity_futures_contract(
     if refresh or _default_resolver is None:
         _default_resolver = InstrumentResolver().load(force_refresh=refresh)
     return _default_resolver.get_commodity_futures_contract(underlying, which)
+
+
+def get_currency_futures_contract(
+    underlying: str, refresh: bool = False, *, which: str = "NEAR"
+) -> Optional[dict]:
+    """Resolve a live CDS FUTCUR contract by expiry slot."""
+    global _default_resolver
+    if refresh or _default_resolver is None:
+        _default_resolver = InstrumentResolver().load(force_refresh=refresh)
+    return _default_resolver.get_currency_futures_contract(underlying, which)
+
+
+def get_currency_option_contracts(
+    underlying: str, expiry: str | None = None,
+    reference_price: float | None = None, strikes_around: int = 8,
+    refresh: bool = False,
+) -> dict:
+    """Resolve nearby CDS OPTCUR contracts from the daily instrument master."""
+    global _default_resolver
+    if refresh or _default_resolver is None:
+        _default_resolver = InstrumentResolver().load(force_refresh=refresh)
+    return _default_resolver.get_currency_option_contracts(
+        underlying, expiry, reference_price, strikes_around
+    )
 
 
 def get_commodity_option_expiries(

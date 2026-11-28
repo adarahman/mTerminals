@@ -130,6 +130,9 @@ ChainDenseView.prototype.buildRowsHtml = function(rows) {
 };
 
 ChainDenseView.prototype.refreshView = function(payload) {
+    if (window.dashboardInstrumentMode === 'currency' && window.currencyRates) {
+        payload = window.currencyRates.projectPayload(payload);
+    }
     // Keep canonical mapped rows available to dashboard drill-downs even
     // though the old duplicate standalone chain has been removed.
     window._lastPayload = payload;

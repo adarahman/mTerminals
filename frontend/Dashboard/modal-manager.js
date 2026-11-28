@@ -190,13 +190,16 @@ class ModalManager {
   // (positioning rows) by index, so keep primary → futures → positioning
   // first in that order.
   _focusContextCardsHtml(d){
+  if (window.dashboardInstrumentMode === 'currency' && window.currencyRates) {
+    d = window.currencyRates.projectPayload(d || {});
+  }
   const dec=d.decision||{};
   const esc=v=>String(v==null?'—':v).replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   })[c]);
-  const num=(v,digits=2)=>Number.isFinite(Number(v))
+  const num=(v,digits=2)=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))
     ? Number(v).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
-  const signed=v=>Number.isFinite(Number(v))
+  const signed=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))
     ? `${Number(v)>=0?'+':''}${num(v,2)}` : '—';
   const bias=String(dec.bias||'WAIT').toUpperCase();
   const tone=bias.includes('BULL')?'bull':bias.includes('BEAR')?'bear':'neutral';

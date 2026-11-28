@@ -108,6 +108,10 @@ ChainView.prototype.renderIvSurfaceModal = function() {
 };
 
   ChainView.prototype.onExpiryChange = function(selectedExpiry) {
+  if (window.dashboardInstrumentMode === 'currency' && window.currencyRates) {
+    window.currencyRates.selectExpiry(selectedExpiry);
+    return;
+  }
   if(!_data || !selectedExpiry) {
     return;
   }

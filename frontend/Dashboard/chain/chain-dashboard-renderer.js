@@ -2,6 +2,7 @@
 
 ChainView.prototype.patchTopBarAndDecision = function(d) {
   if (!d) return;
+  if (window.dashboardInstrumentMode === 'currency' && window.currencyRates) d = window.currencyRates.projectPayload(d);
   // MCX quotes and chain data arrive through the commodity instrument adapter.
   // Do not let the equity websocket repaint their shared dashboard components.
   if (window.dashboardInstrumentMode === 'commodity') return;
@@ -34,7 +35,7 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
     }
     const pctEl = document.getElementById('spot-chg-pct');
     const ptsEl = document.getElementById('spot-chg-pts');
-    if (d.spotChgPct !== undefined && (pctEl || ptsEl)) {
+    if (d.spotChgPct != null && (pctEl || ptsEl)) {
       const chgCls = d.spotChgPct >= 0 ? 'chg-pos' : 'chg-neg';
       if (pctEl) {
         pctEl.className = 'chg-token ' + chgCls;
@@ -42,8 +43,9 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
       }
       if (ptsEl) {
         ptsEl.className = 'chg-token ' + chgCls;
-        ptsEl.textContent = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}`;
-        ptsEl.title = `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points`;
+        const isCurrency = window.dashboardInstrumentMode === 'currency';
+        ptsEl.textContent = isCurrency ? fmtN(d.spotChange, 4) : `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)}`;
+        ptsEl.title = isCurrency ? 'Currency futures change' : `${d.spotChange>=0?'+':''}${Math.round(d.spotChange||0)} points`;
       }
     }
     const futureEl = document.getElementById('topbar-future');
@@ -60,10 +62,15 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
     }
     const futSegEl = document.getElementById('topbar-fut-segment');
     if (futSegEl && typeof isFuturesReferenceVisible === 'function') {
-      futSegEl.hidden = !isFuturesReferenceVisible();
+      futSegEl.hidden = window.dashboardInstrumentMode !== 'currency' && !isFuturesReferenceVisible();
     }
     const lotEl = document.getElementById('topbar-lot-size');
     if (lotEl && d.lotSize) lotEl.textContent = Number(d.lotSize).toLocaleString('en-IN');
+    const currencyStatusEl = document.getElementById('currency-quote-status');
+    if (currencyStatusEl) {
+      currencyStatusEl.textContent = d.quoteError ? 'CDS · unavailable' : d.quoteAvailable ? 'CDS · live' : 'CDS · connecting';
+      currencyStatusEl.title = d.quoteError || 'Currency futures quote status';
+    }
     const tickerEl = document.getElementById('index-ticker-bar');
     if (tickerEl && window.patchIndexTicker) patchIndexTicker(d);
     const dteEl = document.getElementById('dte-display');
@@ -196,6 +203,11 @@ ChainView.prototype.buildGreeksMoneynessHtml = function(d) {
 };
 
 ChainView.prototype.renderDashboard = function(d) {
+  if (window.dashboardInstrumentMode === 'currency') {
+    // Keep the Equity dashboard renderer and workspace layout; substitute
+    // only the instrument values with the selected CDS quote and chain.
+    d = window.currencyRates ? window.currencyRates.projectPayload(d) : d;
+  }
   if (window.dashboardInstrumentMode === 'commodity') {
     // The selected MCX instrument owns the dashboard payload while this mode
     // is active. The commodity adapter normalizes it into the shared decision
@@ -437,7 +449,7 @@ ChainView.prototype.renderDashboard = function(d) {
     // previously while sim-vel-val/sim-vel-slider were still expected
     // elsewhere in panels-views.js.
     const simRangeControls = [
-      { id: 'spot', label: 'Spot Price',
+      { id: 'spot', label: window.dashboardInstrumentMode === 'currency' ? 'Futures Price' : 'Spot Price',
         min: Math.round(spot*0.97), max: Math.round(spot*1.03), step: step,
         override: _simSpotOverride, overrideVar: '_simSpotOverride',
         base: spot, clamp: true, fmt: v => fmtI(Math.round(v)) },

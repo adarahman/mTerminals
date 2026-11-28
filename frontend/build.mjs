@@ -76,6 +76,7 @@ const pages = [
 
         "Dashboard/chain/chain-helpers.js",
         "Dashboard/chain/market-context.js",
+        "Dashboard/currency-rates.js",
         "Dashboard/chain/metrics.js",
         "Dashboard/chain/chain-view.js",
         "Dashboard/chain/chain-template.js",
