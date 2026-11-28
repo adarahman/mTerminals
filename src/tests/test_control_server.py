@@ -130,7 +130,8 @@ def test_mobile_launch_and_process_group_cleanup(monkeypatch, tmp_path, mode, sc
     mobile = control_server.MobileSupervisor(host="192.168.1.20")
     mobile.start(mode, 8090)
     environment = popen.call_args.kwargs["env"]
-    assert environment["EXPO_PUBLIC_MTERMINALS_WS"].startswith("ws://192.168.1.20:5500/mobile-ws?token=")
+    assert environment["EXPO_PUBLIC_MTERMINALS_WS"] == "ws://192.168.1.20:5500/mobile-ws"
+    assert environment["EXPO_PUBLIC_MTERMINALS_TOKEN"]
     popen.assert_called_once_with(
         ["/usr/bin/npm", "run", script, "--", "--port", "8090"],
         cwd=tmp_path / "mobile", env=environment, start_new_session=True,

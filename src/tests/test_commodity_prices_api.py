@@ -379,7 +379,16 @@ def test_commodity_option_chain_attaches_black76_greeks():
     provider = _Provider(expiries=["31DEC2099"], chain=chain)
     api = CommodityPricesApi(market_data=lambda: provider, active_provider=lambda: "SMARTAPI")
 
-    response_chain = json.loads(asyncio.run(api.option_chain(_request())).text)["chain"]
+    async def fetch_after_greeks_cache():
+        # Greeks are deliberately enriched in the background. Wait for that
+        # optional calculation, then read the cached values from the next poll.
+        await api.option_chain(_request())
+        tasks = tuple(api._commodity_greeks_tasks)
+        if tasks:
+            await asyncio.gather(*tasks)
+        return await api.option_chain(_request())
+
+    response_chain = json.loads(asyncio.run(fetch_after_greeks_cache()).text)["chain"]
 
     assert abs(response_chain["atm_iv"] - 30) < 0.5
     assert [g["strike"] for g in response_chain["greeks"]] == [5900, 6000, 6100]
