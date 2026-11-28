@@ -1,6 +1,6 @@
 // ============================================================
 // probability-view.js
-// "Probability" — standalone Confirmation-zone card answering one
+// "Smart Money Ranking" — standalone Confirmation-zone card answering one
 // question: which strikes show the strongest institutional-grade
 // positioning right now.
 //
@@ -73,7 +73,7 @@ ChainView.prototype.buildProbabilityHtml = function(d) {
   return `
   <details class="card" id="probability-card">
     <summary>
-      <div class="card-head"><span class="ic">🧠</span>Probability<span class="fill"></span></div>
+      <div class="card-head"><span class="ic">🧠</span>Smart Money Ranking<span class="fill"></span></div>
       <span class="chev">▶</span>
     </summary>
     <div class="detail-body">

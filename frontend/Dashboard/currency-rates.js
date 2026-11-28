@@ -194,6 +194,22 @@ class CurrencyRatesView {
       if (requestSymbol !== this.symbol || requestExpiry !== this.futuresExpiry) return;
       this.latestQuote = payload.quote || null;
       this.quoteError = '';
+      const ltp = Number(this.latestQuote?.LTP);
+      const chartContext = {
+        symbol: this.symbol,
+        instrument: 'CDS_FUT',
+        expiry: this.futuresExpiry,
+      };
+      if (window.priceChart && Number.isFinite(ltp) && ltp > 0) {
+        window.priceChart.addTick(ltp, Date.now(), null, chartContext);
+      }
+      const priceChartModal = document.getElementById('price-chart-modal');
+      const modalManager = typeof app !== 'undefined' && app.modal;
+      if (priceChartModal?.classList.contains('open') && modalManager) {
+        modalManager.updatePriceChartLiveContext(
+          this.projectPayload(window.AppState?.wsState || {})
+        );
+      }
       this.refreshDashboard();
     } catch (error) {
       console.warn('[currency] quote refresh failed:', error?.message || error);

@@ -47,24 +47,26 @@ backend from its minimal GUI:
 .venv/bin/python scripts/control_server.py
 ```
 
-Open `http://127.0.0.1:5400`, choose the symbol, optional expiry, and market-data
-broker, then enter any required broker credentials and use **Start Backend**.
+Open `http://127.0.0.1:5400`, choose the market-data broker, then enter any
+required broker credentials and use **Start Backend**. The backend starts on
+NIFTY with the nearest expiry by default; choose a different symbol or expiry
+from the dashboard after it opens.
 The launcher masks credentials and saves supplied values to `.env`; blank fields
 preserve values already stored there. The full dashboard remains on port `5500`;
 stopping it does not close the launcher page. The launcher opens this address
 automatically; pass `--no-browser` when automatic browser opening is not wanted.
 
-The same command also starts the mobile Expo server, displaying its QR code in
-the terminal. Install mobile dependencies once with `cd mobile && npm install`.
-The launcher page also has a **Mobile app** selector and **Start Mobile** /
-**Stop Mobile** buttons. Stop the mobile server before selecting another mode.
-You can also choose a startup mode from the command line:
+The launcher does not start the mobile server by default. To use it, install
+mobile dependencies once with `cd mobile && npm install`, then select a mode
+and click **Start Mobile** in the launcher. Expo displays its QR code in the
+terminal. Stop the mobile server before choosing another mode. You can also
+start a mobile mode directly from the command line:
 
 ```bash
 .venv/bin/python scripts/control_server.py --mobile web
 .venv/bin/python scripts/control_server.py --mobile android
 .venv/bin/python scripts/control_server.py --mobile ios
-.venv/bin/python scripts/control_server.py --mobile off  # launcher only
+.venv/bin/python scripts/control_server.py --mobile expo
 ```
 
 Expo defaults to port `8081`; override it with `--mobile-port`. Press Ctrl+C to

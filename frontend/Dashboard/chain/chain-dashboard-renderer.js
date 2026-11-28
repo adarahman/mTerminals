@@ -624,26 +624,26 @@ ChainView.prototype.renderDashboard = function(d) {
 
   // ── ZONE: CAPITAL FLOW ──
   // Left owns capital/OI flow. Right stacks participant cash flow with
-  // Vol/OI Velocity and its derived block-print summary. Keeping #sdt-panel
+  // Vol/OI Velocity and its derived high-ratio summary. Keeping #sdt-panel
   // separate preserves its interactive subtree across live refreshes.
   h += `<section id="workspace-flow" class="dashboard-workspace" data-dashboard-workspace="flow"${workspaceVisible('flow')?'':' hidden'}><div id="oi-flow-section">
 
-  <div id="zone-capital-flow" class="zone-divider zone-divider--primary"><span class="zone-divider-title">Participation Evidence</span><span class="zone-divider-subtitle">Institutional activity and unusual block participation</span></div>
+  <div id="zone-capital-flow" class="zone-divider zone-divider--primary"><span class="zone-divider-title">Participation Evidence</span><span class="zone-divider-subtitle">Institutional activity and unusual option turnover</span></div>
   <div class="capital-flow-story">
     <div class="capital-flow-support-grid" aria-label="Supporting flow evidence">
       ${buildFiiDiiSummaryCard(d)}
       <div id="sdt-panel" class="section-card sc-neutral velocity-summary-card">
         <button class="section-header nav-card-header" onclick="openVolOiVelocityModal()"
-           aria-label="Open Vol/OI Velocity by Strike — view block-detection chart" title="Open the block-detection chart">
-          <span class="section-title nav-card-header-label"><span class="section-icon">⚡</span>Vol/OI Velocity by Strike <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;">(Block Detection)</span></span>
+           aria-label="Open Vol/OI Velocity by Strike chart" title="Open the Vol/OI chart">
+          <span class="section-title nav-card-header-label"><span class="section-icon">⚡</span>Vol/OI Velocity by Strike <span style="text-transform:none;font-weight:500;color:var(--text-tertiary);letter-spacing:0;">(Unusual Turnover)</span></span>
           <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
         </button>
-        <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading block-print scan…</div>
+        <div class="oi-flow-block-line" id="oi-flow-block-summary">Loading Vol/OI scan…</div>
         <!-- The Vol/OI Velocity slider that used to sit here has moved
              into the Vol/OI Velocity modal itself (opened by the header
              above) — see the renderSimRangeRow() comment near the top of
              this function for why. The dashboard card is now just the
-             header + block-prints readout below; dragging the velocity
+             header + high-ratio readout below; dragging the velocity
              slider happens inside the modal, next to the grid it
              actually controls. -->
 
@@ -654,7 +654,7 @@ ChainView.prototype.renderDashboard = function(d) {
              above is now the single click target for this card), the
              leftover background/border/radius box had no content and no
              function, just a visual remnant of the old click affordance.
-             The block-print summary remains directly below this header. -->
+             The unusual-turnover summary remains directly below this header. -->
 
         <!-- Strike Detail table itself lives only in the Strike Detail
              Report modal now (opened via the "📄 Strike Detail Report →"

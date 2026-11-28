@@ -150,29 +150,16 @@ ChainView.prototype._rerenderChainPanels = function() {
   greeks.forEach(row=>{ if(!greeksByStrike.has(row.strike)) greeksByStrike.set(row.strike,row); });
   const velBlock       = (_data.oiVelocity||[]).find(b=>b.window===_velWin)||(_data.oiVelocity||[])[0];
   const velByStrike    = {};
-  let totCeVel=0, totPeVel=0, velMax=1, maxOI=1;
+  let velMax=1;
   if(velBlock&&velBlock.rows) velBlock.rows.forEach(vr=>{
     velByStrike[vr.strike]=vr;
   });
   const oiAnnot        = (_data.decision&&_data.decision.oiAnnotations)||{};
-  let totCeOI=0, totPeOI=0, totCeDOI=0, totPeDOI=0;
-  let totCeVolChg=0, totPeVolChg=0, totCeVol=0, totPeVol=0;
-  let bullStrikes=0, bearStrikes=0;
   for(const r of chain){
     const ceVel=velByStrike[r.strike]||{};
     const ceVelocity=Math.abs(ceVel.ceDOI||0), peVelocity=Math.abs(ceVel.peDOI||0);
-    totCeVel+=ceVel.ceDOI||0; totPeVel+=ceVel.peDOI||0;
     if(ceVelocity>velMax) velMax=ceVelocity;
     if(peVelocity>velMax) velMax=peVelocity;
-    const rowOI=Math.max(r.ceOI||0,r.peOI||0);
-    if(rowOI>maxOI) maxOI=rowOI;
-    totCeOI+=r.ceOI||0; totPeOI+=r.peOI||0;
-    totCeDOI+=r.ceChgOI||0; totPeDOI+=r.peChgOI||0;
-    totCeVolChg+=r.ceVolChg||0; totPeVolChg+=r.peVolChg||0;
-    totCeVol+=r.ceVol||0; totPeVol+=r.peVol||0;
-    const signalClass=combinedSignal(r.ceSignal,r.peSignal).cls;
-    if(signalClass==='sp-strongbull'||signalClass==='sp-bull') bullStrikes++;
-    else if(signalClass==='sp-strongbear'||signalClass==='sp-bear') bearStrikes++;
   }
 
   // ── 1. Chain table body ───────────────────────────────────────────────────
@@ -236,101 +223,6 @@ ChainView.prototype._rerenderChainPanels = function() {
     const dte = _data.dte || 0;
     dteEl.textContent = '· '+dte+'d';
     dteEl.style.color = dte<=1?'var(--red)':dte<=3?'var(--amber)':'var(--amber)';
-  }
-
-  // ── 3. Right analytics panel ──────────────────────────────────────────────
-  const rpEl = document.querySelector('.chain-right-panel');
-  if(rpEl){
-    const maxDOIrp=Math.max(Math.abs(totCeDOI),Math.abs(totPeDOI),1);
-    const maxVelrp=Math.max(Math.abs(totCeVel),Math.abs(totPeVel),1);
-    function rpBar(v,max,clr){const w=Math.max(Math.round(Math.abs(v)/max*72),2);return `<div class="crp-spark-wrap"><div class="crp-spark" style="width:${w}px;background:${clr};"></div><span style="font-size:9px;font-family:var(--mono);color:${clr};">${fmtK(v)}</span></div>`;}
-    const aggBias=bullStrikes>bearStrikes?{label:'Bullish',cls:'sp-bull'}:bearStrikes>bullStrikes?{label:'Bearish',cls:'sp-bear'}:{label:'Mixed',cls:'sp-mixed'};
-    const panelPCR=totCeOI>0?(totPeOI/totCeOI).toFixed(2):'—';
-    const pcrColor=parseFloat(panelPCR)>1?'var(--green)':parseFloat(panelPCR)<0.8?'var(--red)':'var(--amber)';
-    const netOI=totPeOI-totCeOI; const netDOI=totPeDOI-totCeDOI; const netVel=totPeVel-totCeVel;
-    const netAbsMax=Math.max(Math.abs(netOI),Math.abs(netDOI),Math.abs(netVel),1);
-    const arpBarW=(v,max)=>Math.max(Math.round(Math.abs(v)/max*72),3);
-    const maxVolChg=Math.max(Math.abs(totCeVolChg),Math.abs(totPeVolChg),1);
-    // ── VOL VEL FIX (v2) ──
-    // v1 diffed against the *previous render*, which fires almost every WS
-    // tick (multiple times a second) — not a "(${_velWin}m)" velocity at
-    // all, just a sub-second delta. That's why it was spiking from near-zero
-    // to large and back on every tick instead of showing a stable 5-minute
-    // trend. Fix: keep a timestamped history buffer and diff each strike's
-    // ceVol/peVol against the snapshot closest to _velWin minutes ago —
-    // same windowing concept the backend's oiVelocity block already applies
-    // to OI Vel, just computed client-side since no equivalent volume field
-    // exists in that payload.
-    this._volHistory = this._volHistory || [];
-    const _now = Date.now();
-    const _nowSnap = {};
-    chain.forEach(r=>{ _nowSnap[r.strike] = { ceVol: r.ceVol, peVol: r.peVol }; });
-    this._volHistory.push({ ts: _now, snap: _nowSnap });
-    const _windowMs = _velWin * 60 * 1000;
-    const _cutoff = _now - _windowMs;
-    // Trim history once entries are more than one window past the cutoff —
-    // keeps memory bounded without discarding the reference sample we need.
-    while (this._volHistory.length > 1 && this._volHistory[1].ts < _cutoff - _windowMs) this._volHistory.shift();
-    // Pick the newest sample that's still at least a full window old. Until
-    // enough history has accumulated (e.g. just after page load), this
-    // falls back to the oldest sample available — the window is shorter
-    // than _velWin for the first few minutes, then self-corrects.
-    let _refSnap = this._volHistory[0].snap;
-    for (const h of this._volHistory) { if (h.ts <= _cutoff) _refSnap = h.snap; else break; }
-    let totCeVelVol = 0, totPeVelVol = 0;
-    chain.forEach(r=>{
-      const prev = _refSnap[r.strike];
-      if (prev) {
-        if (r.ceVol != null && prev.ceVol != null) totCeVelVol += (r.ceVol - prev.ceVol);
-        if (r.peVol != null && prev.peVol != null) totPeVelVol += (r.peVol - prev.peVol);
-      }
-    });
-    const maxVelVol=Math.max(Math.abs(totCeVelVol),Math.abs(totPeVelVol),1);
-    rpEl.innerHTML=`
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;">
-      <div class="arp-row" style="padding-bottom:5px;margin-bottom:4px;border-bottom:1px solid var(--border);">
-        <span class="arp-key">Signal</span>
-        <div class="arp-val"><span class="sp ${aggBias.cls}" style="font-size:10px;font-weight:700;">${aggBias.label}</span><span style="font-size:9px;color:var(--txt3);margin-left:4px;">${bullStrikes}↑ ${bearStrikes}↓</span></div>
-      </div>
-      <div class="arp-row"><span class="arp-key">Net OI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netOI)};">${netOI>=0?'+':''}${fmtK(netOI)}</span><div class="arp-bar" style="width:${arpBarW(netOI,netAbsMax)}px;background:${signColor(netOI)};"></div></div></div>
-      <div class="arp-row"><span class="arp-key">Session ΔOI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netDOI)};">${netDOI>=0?'+':''}${fmtK(netDOI)}</span><div class="arp-bar" style="width:${arpBarW(netDOI,netAbsMax)}px;background:${signColor(netDOI)};"></div></div></div>
-      <div class="arp-row"><span class="arp-key">Vel OI</span><div class="arp-val"><span class="arp-num" style="color:${signColor(netVel)};">${netVel==null||isNaN(netVel)?'—':(netVel>=0?'+':'')+fmtK(netVel)}</span><div class="arp-bar" style="width:${arpBarW(netVel,netAbsMax)}px;background:${signColor(netVel)};"></div></div></div>
-      <div style="padding-top:5px;margin-top:4px;border-top:1px solid var(--border);">
-        <div style="margin-bottom:6px;">
-          <div style="display:flex;justify-content:space-between;font-size:8px;font-family:var(--mono);margin-bottom:2px;">
-            <span style="color:var(--red);">CE ${totCeOI>0?Math.round(totCeOI/(totCeOI+totPeOI)*100):50}%</span>
-            <span style="color:var(--txt3);font-size:7px;text-transform:uppercase;letter-spacing:.05em;">OI Split</span>
-            <span style="color:var(--green);">PE ${totPeOI>0?Math.round(totPeOI/(totCeOI+totPeOI)*100):50}%</span>
-          </div>
-          <div class="oi-flow-bar">
-            <div class="oi-flow-ce" style="flex:${totCeOI>0?Math.round(totCeOI/(totCeOI+totPeOI)*100):50};"></div>
-            <div class="oi-flow-pe" style="flex:${totPeOI>0?Math.round(totPeOI/(totCeOI+totPeOI)*100):50};"></div>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-        <span class="arp-key">PCR <span style="font-size:8px;font-weight:400;text-transform:none;">(visible)</span></span>
-        <span style="font-size:14px;font-weight:700;font-family:var(--mono);color:${pcrColor};">${panelPCR}</span>
-        </div>
-      </div>
-    </div>
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;">
-      <div class="crp-title" style="margin-bottom:6px;">OI Analytics <span style="color:var(--txt3);font-weight:400;">(${_velWin}m)</span></div>
-      <div style="display:grid;grid-template-columns:64px 1fr 1fr;gap:2px;margin-bottom:4px;">
-        <div></div><div class="crp-head-ce">CE</div><div class="crp-head-pe">PE</div>
-      </div>
-      <div class="crp-row"><span class="crp-label">OI</span><div class="crp-ce">${fmtK(totCeOI)}</div><div class="crp-pe">${fmtK(totPeOI)}</div></div>
-      <div class="crp-row"><span class="crp-label">Session ΔOI</span>${rpBar(totCeDOI,maxDOIrp,totCeDOI>=0?'var(--red)':'var(--green)')}${rpBar(totPeDOI,maxDOIrp,totPeDOI>=0?'var(--green)':'var(--red)')}</div>
-      <div class="crp-row"><span class="crp-label">${_velWin}m OI Vel</span>${rpBar(totCeVel,maxVelrp,totCeVel>=0?'var(--red)':'var(--green)')}${rpBar(totPeVel,maxVelrp,totPeVel>=0?'var(--green)':'var(--red)')}</div>
-    </div>
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
-      <div class="crp-title" style="margin-bottom:6px;">Volume Analytics <span style="color:var(--txt3);font-weight:400;">(${_velWin}m)</span></div>
-      <div style="display:grid;grid-template-columns:64px 1fr 1fr;gap:2px;margin-bottom:4px;">
-        <div></div><div class="crp-head-ce">CE</div><div class="crp-head-pe">PE</div>
-      </div>
-      <div class="crp-row"><span class="crp-label">Vol</span><div class="crp-ce">${fmtK(totCeVol)}</div><div class="crp-pe">${fmtK(totPeVol)}</div></div>
-      <div class="crp-row"><span class="crp-label">Vol Chg</span>${rpBar(totCeVolChg,maxVolChg,totCeVolChg>=0?'var(--red)':'var(--green)')}${rpBar(totPeVolChg,maxVolChg,totPeVolChg>=0?'var(--green)':'var(--red)')}</div>
-      <div class="crp-row"><span class="crp-label">Vol Vel</span>${rpBar(totCeVelVol,maxVelVol,totCeVelVol>=0?'var(--red)':'var(--green)')}${rpBar(totPeVelVol,maxVelVol,totPeVelVol>=0?'var(--green)':'var(--red)')}</div>
-    </div>`;
   }
 
   // NOTE: Conviction Multiplier Gauge no longer has its own tick-refresh

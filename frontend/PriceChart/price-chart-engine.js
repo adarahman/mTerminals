@@ -161,8 +161,8 @@ class PriceChartEngine {
     const incomingContext = sourceContext
       ? {
         symbol: String(sourceContext.symbol || '').trim().toUpperCase(),
-        instrument: sourceContext.instrument === 'MCX_FUT' ? 'MCX_FUT' : 'EQ',
-        expiry: sourceContext.instrument === 'MCX_FUT'
+        instrument: ['MCX_FUT', 'CDS_FUT'].includes(sourceContext.instrument) ? sourceContext.instrument : 'EQ',
+        expiry: ['MCX_FUT', 'CDS_FUT'].includes(sourceContext.instrument)
           ? String(sourceContext.expiry || '').trim().toUpperCase()
           : '',
       }
@@ -185,7 +185,7 @@ class PriceChartEngine {
 
   _getContext(){
     const stateSymbol = AppState.wsState && AppState.wsState.symbol;
-    if(this._chartContext && this._chartContext.instrument === 'MCX_FUT'){
+    if(this._chartContext && ['MCX_FUT', 'CDS_FUT'].includes(this._chartContext.instrument)){
       return this._chartContext;
     }
     return {
@@ -201,11 +201,12 @@ class PriceChartEngine {
 
   setContext(context){
     const previousKey = this._contextKey(this._getContext());
-    const instrument = context && context.instrument === 'MCX_FUT' ? 'MCX_FUT' : 'EQ';
+    const instrument = context && ['MCX_FUT', 'CDS_FUT'].includes(context.instrument)
+      ? context.instrument : 'EQ';
     const next = {
       symbol: String(context && context.symbol || PRICE_CHART_DEFAULT_SYMBOL).trim().toUpperCase(),
       instrument,
-      expiry: instrument === 'MCX_FUT'
+      expiry: ['MCX_FUT', 'CDS_FUT'].includes(instrument)
         ? String(context && context.expiry || '').trim().toUpperCase()
         : '',
     };
@@ -302,6 +303,10 @@ class PriceChartEngine {
 
   async hydrateRange(range, force){
     const context = this._getContext();
+    // CDS history is not served by the history endpoint yet. Keep currency
+    // charts scoped to their live quote series instead of fetching candles
+    // under an equity symbol.
+    if(context.instrument === 'CDS_FUT') return;
     await this.historyLoader.hydrateRange(
       range, force, context.symbol, context.instrument, context.expiry
     );
@@ -541,7 +546,7 @@ class PriceChartEngine {
           this._saveSettings();
           if(w.ms === Infinity){
             this._zoomStart = null; this._zoomEnd = null;
-          } else if(w.session && this._getContext().instrument !== 'MCX_FUT'){
+          } else if(w.session && !['MCX_FUT', 'CDS_FUT'].includes(this._getContext().instrument)){
             const now = this._lastDataAnchor();
             const session = indianSessionBounds(now);
             this._zoomStart = session.start;
@@ -978,7 +983,7 @@ class PriceChartEngine {
     if(symEl) symEl.textContent = symText || '—';
 
     let visible = this._visibleTicks().filter(t =>
-      chartContext.instrument === 'MCX_FUT' || isIndianTradingTimestamp(t.t)
+      ['MCX_FUT', 'CDS_FUT'].includes(chartContext.instrument) || isIndianTradingTimestamp(t.t)
     );
     if(invalidCommodityLivePrice){
       visible = visible.filter(t => t.p >= latestHistoryPrice * 0.5
@@ -1050,7 +1055,7 @@ class PriceChartEngine {
         if(savedWin.ms===Infinity){
           this._zoomStart=null;
           this._zoomEnd=null;
-        }else if(savedWin.session && chartContext.instrument !== 'MCX_FUT'){
+        }else if(savedWin.session && !['MCX_FUT', 'CDS_FUT'].includes(chartContext.instrument)){
           const session=indianSessionBounds(dataMaxT);
           this._zoomStart=session.start;
           this._zoomEnd=Math.min(dataMaxT,session.end);
@@ -1142,9 +1147,14 @@ class PriceChartEngine {
     }
     const historyWarning = $i('pc-history-warning');
     if(historyWarning){
-      historyWarning.hidden = rejectedCommodityPoints === 0 && !invalidCommodityLivePrice;
+      const currencyHistoryUnavailable = chartContext.instrument === 'CDS_FUT';
+      historyWarning.hidden = rejectedCommodityPoints === 0 && !invalidCommodityLivePrice
+        && !currencyHistoryUnavailable;
       const pointType = this.settings.type === 'candle' ? 'candle' : 'point';
       const warnings = [];
+      if(currencyHistoryUnavailable){
+        warnings.push('Currency history is unavailable; this chart shows quotes collected during the current session.');
+      }
       if(rejectedCommodityPoints){
         const referenceLabel = invalidCommodityLivePrice ? 'latest history close' : 'live price';
         warnings.push(`Ignored ${rejectedCommodityPoints} MCX ${pointType}${rejectedCommodityPoints === 1 ? '' : 's'} outside 0.1×–10× of the ${referenceLabel}. Verify the history data.`);

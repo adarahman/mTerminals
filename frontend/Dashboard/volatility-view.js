@@ -25,14 +25,16 @@
 // numbers, not alerts (those live inline on the always-visible Greeks /
 // Net GEX card).
 function _volIvRankHtml(d) {
-  const rank = d.ivRank || 0;
-  const ivVsHv = (d.atmIV || 0) - (d.hv30 || 0);
-  const richCheap = ivVsHv >= 0 ? 'rich' : 'cheap';
+  const hasRank = d.ivRank != null && Number.isFinite(Number(d.ivRank));
+  const hasIv = d.atmIV != null && Number.isFinite(Number(d.atmIV));
+  const hasHv = d.hv30 != null && Number.isFinite(Number(d.hv30));
+  const ivVsHv = hasIv && hasHv ? Number(d.atmIV) - Number(d.hv30) : null;
+  const richCheap = ivVsHv == null ? '' : ivVsHv >= 0 ? 'rich' : 'cheap';
   return `<div class="metric-strip">
-      <div class="metric-cell"><div class="k">IV Rank</div><div class="v">${Math.round(rank)}/100</div></div>
+      <div class="metric-cell"><div class="k">IV Rank</div><div class="v">${hasRank ? `${Math.round(Number(d.ivRank))}/100` : '—'}</div></div>
       <div class="metric-cell"><div class="k">ATM IV</div><div class="v">${fmtN(d.atmIV, 2)}%</div></div>
       <div class="metric-cell"><div class="k">HV (30d)</div><div class="v">${fmtN(d.hv30, 2)}%</div></div>
-      <div class="metric-cell"><div class="k">IV vs HV</div><div class="v ${ivVsHv >= 0 ? 'bear' : 'bull'}">${fmtN(ivVsHv, 2)}% ${richCheap}</div></div>
+      <div class="metric-cell"><div class="k">IV vs HV</div><div class="v ${ivVsHv == null ? '' : ivVsHv >= 0 ? 'bear' : 'bull'}">${ivVsHv == null ? '—' : `${fmtN(ivVsHv, 2)}% ${richCheap}`}</div></div>
       <div class="metric-cell"><div class="k">Skew</div><div class="v">${fmtN(d.atmSkew, 2)}%</div></div>
     </div>`;
 }

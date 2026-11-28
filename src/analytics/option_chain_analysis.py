@@ -160,7 +160,9 @@ def analyze_option_chain(chain: dict, *, previous_rows=None, elapsed_seconds=Non
     evidence = aggregate_evidence(weights=DECISION_EVIDENCE_WEIGHTS, scores=scores,
         availability=available, labels={**DECISION_EVIDENCE_LABELS, **(evidence_labels or {})})
     pos, neg = evidence["positiveContributors"], evidence["negativeContributors"]
-    conflict = evidence["conflict"] or (pos > 0 and neg > 0)
+    # Keep conflict policy centralized with weighted evidence aggregation.
+    # A raw contributor-count check here would bypass its weight threshold.
+    conflict = evidence["conflict"]
     bias, strength = derive_bias(evidence["composite"], conflict)
     required_missing = any(k in (required_evidence or {"pcr", "futures"})
                           for k in evidence["missingInputs"])

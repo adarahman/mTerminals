@@ -154,7 +154,15 @@ class DecisionEngine:
 
         # ── Conflict detection ────────────────────────────────────────────────
         # A conflict exists when directional sub-scores point opposite ways strongly
-        weights = DECISION_EVIDENCE_WEIGHTS
+        # Reserve 8% of the composite for oversold + OI support below. Scale
+        # the shared evidence weights into the remaining 92% so the complete
+        # decision score has one consistent 100% weight budget.
+        oversold_weight = 0.08
+        core_weight_scale = 1.0 - oversold_weight
+        weights = {
+            key: weight * core_weight_scale
+            for key, weight in DECISION_EVIDENCE_WEIGHTS.items()
+        }
         availability = {
             "pcr": total_pcr > 0,
             "engine_bias": bool(bias_str.strip()),
@@ -178,19 +186,30 @@ class DecisionEngine:
             scores=score_map,
             availability=availability,
             labels=labels,
+            # Conflict applies to core evidence only, so preserve the same
+            # relative threshold after scaling its total weight to 92%.
+            conflict_weight_threshold=0.20 * core_weight_scale,
         )
         out.missing_inputs = evidence["missingInputs"]
         critical_missing = any(key in required for key in out.missing_inputs)
         out.degraded = critical_missing
-        out.evidence_coverage = evidence["evidenceCoverage"]
+        oversold_available = oversold_support["state"] != "unavailable"
+        out.evidence_coverage = round(
+            evidence["evidenceCoverage"]
+            + (oversold_weight * 100 if oversold_available else 0)
+        )
         out.contributors = evidence["contributors"]
         out.contributors.append({
             "key": "oversold_oi_support",
             "label": "Oversold + OI Support",
             "available": oversold_support["state"] != "unavailable",
-            "weight": 8,
+            "weight": round(oversold_weight * 100),
             "score": oversold_support["score"] if oversold_support["state"] != "unavailable" else None,
-            "weightedContribution": round(oversold_support["score"] * 0.08, 3)
+            # Match aggregate_evidence precision so small but real support
+            # scores remain visible instead of rounding to zero.
+            "weightedContribution": round(
+                oversold_support["score"] * oversold_weight, 5
+            )
             if oversold_support["state"] != "unavailable" else None,
             "state": oversold_support["state"],
             "detail": oversold_support.get("detail", ""),
@@ -208,11 +227,10 @@ class DecisionEngine:
                 "warn", 0, "decision:conflict"))
 
         # ── Composite score (conviction-weighted) ─────────────────────────────
-        # Weights must sum to 1.0.
-        # PCR and combined bias remain the anchors; capital flow starts at 10%
-        # and is normalized against premium locked to avoid raw-value scaling.
+        # Core evidence uses 92% of the score; oversold support owns the
+        # remaining 8%. Capital flow is normalized against premium locked.
         composite = evidence["composite"]
-        composite += oversold_support["score"] * 0.08
+        composite += oversold_support["score"] * oversold_weight
         composite = max(-1.0, min(1.0, composite))
 
         if oversold_support["state"] == "confirmed":

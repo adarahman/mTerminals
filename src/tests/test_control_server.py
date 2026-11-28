@@ -21,13 +21,13 @@ def test_rejects_invalid_symbol_without_starting_process(monkeypatch):
 
 def test_control_page_contains_minimum_launcher_controls():
     page = control_server.CONTROL_PAGE
-    assert 'id="symbol"' in page
-    assert 'id="expiry"' in page
-    assert 'class="selection-grid"' in page
+    assert 'id="symbol"' not in page
+    assert 'id="expiry"' not in page
+    assert "Choose the symbol and expiry in the dashboard." in page
     assert 'id="broker"' in page
     assert 'id="credentials"' in page
     assert 'id="modify-credentials"' in page
-    assert '<option value="no" selected>No</option>' in page
+    assert '<option value="no" selected>Use saved</option>' in page
     assert 'id="start"' in page
     assert 'id="stop"' in page
     assert "Start Backend" in page

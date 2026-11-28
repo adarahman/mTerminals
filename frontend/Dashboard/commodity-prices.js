@@ -411,17 +411,26 @@ class CommodityPricesView {
     if (chainView && typeof chainView.patchCommodityMiniChart === 'function') {
       chainView.patchCommodityMiniChart(sharedData);
     }
-    if (window.priceChart && Number.isFinite(sharedData.spot) && sharedData.spot > 0) {
-      window.priceChart.addTick(sharedData.spot, Date.now(), null, {
-        symbol: this.symbol,
-        instrument: 'MCX_FUT',
-        expiry: this.futureExpiry,
-      });
-    }
+    const chartContext = {
+      symbol: this.symbol,
+      instrument: 'MCX_FUT',
+      expiry: this.futureExpiry,
+    };
     const priceChartModal = document.getElementById('price-chart-modal');
+    const priceChartOpen = priceChartModal?.classList.contains('open');
+    if (window.priceChart && priceChartOpen) {
+      // Keep the chart keyed to the selected futures contract. Otherwise a
+      // quote for a newly selected expiry is rejected as belonging to the
+      // previously plotted contract.
+      window.priceChart.setContext(chartContext);
+    }
+    const chartPrice = Number(sharedData.spot);
+    if (window.priceChart && Number.isFinite(chartPrice) && chartPrice > 0) {
+      window.priceChart.addTick(chartPrice, Date.now(), null, chartContext);
+    }
     const modalManager = typeof app !== 'undefined' && app.modal;
-    if (priceChartModal?.classList.contains('open')
-        && modalManager && typeof modalManager.updatePriceChartLiveContext === 'function') {
+    if (priceChartOpen && modalManager
+        && typeof modalManager.updatePriceChartLiveContext === 'function') {
       modalManager.updatePriceChartLiveContext(sharedData);
     }
     const modal = document.getElementById('option-chain-modal');
@@ -433,12 +442,13 @@ class CommodityPricesView {
   async refresh() {
     if (window.dashboardInstrumentMode !== 'commodity') return;
     const requestedSymbol = this.symbol;
-    // Start the chain immediately. Waiting for the quote request first adds
-    // the full broker round-trip to every symbol change; the chain adapter
-    // can resolve ATM from its own provider data while both requests run.
-    this._refreshFutureExpiries(requestedSymbol);
-    this._refreshOptionChain(requestedSymbol);
+    // Prioritize the selected futures quote on a cold load. Starting the
+    // three expiry lookups and an option-chain request first can queue the
+    // price behind several broker calls, while the chain endpoint can reuse
+    // the fresh quote once it has arrived.
     this._refreshQuote(requestedSymbol);
+    this._refreshOptionChain(requestedSymbol);
+    this._refreshFutureExpiries(requestedSymbol);
   }
 
   _normalizeExpiry(expiry) {
@@ -475,14 +485,22 @@ class CommodityPricesView {
 
     const load = Promise.all(['NEAR', 'NEXT', 'FAR'].map(async (which) => {
       const query = new URLSearchParams({ symbol, which });
-      const response = await fetch(`/api/commodities/quote?${query}`, { cache: 'no-store' });
-      if (response.status === 404) return null;
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || `Futures expiry request failed (${response.status}).`);
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`/api/commodities/quote?${query}`, {
+          cache: 'no-store', signal: controller.signal,
+        });
+        if (response.status === 404) return null;
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || `Futures expiry request failed (${response.status}).`);
+        }
+        const expiry = payload.quote && payload.quote.Expiry;
+        return expiry ? { expiry, which } : null;
+      } finally {
+        window.clearTimeout(timeout);
       }
-      const expiry = payload.quote && payload.quote.Expiry;
-      return expiry ? { expiry, which } : null;
     })).then((results) => {
       const unique = new Map();
       results.filter(Boolean).forEach((contract) => {
@@ -496,12 +514,15 @@ class CommodityPricesView {
       this._applyFutureExpiries(symbol, contracts);
       return contracts;
     }).catch((error) => {
+      const message = error.name === 'AbortError'
+        ? `Futures lookup timed out for ${symbol}. Try another market-data source.`
+        : error.message || 'Unable to load MCX futures expiries.';
       if (symbol === this.symbol) {
         const picker = document.getElementById('commodity-futures-expiry');
         if (picker) {
           picker.replaceChildren(new Option('Futures unavailable', ''));
           picker.disabled = true;
-          picker.title = error.message || 'Unable to load MCX futures expiries.';
+          picker.title = message;
         }
       }
       return [];
@@ -813,12 +834,16 @@ class CommodityPricesView {
       this._syncSharedQuoteContext();
     } catch (error) {
       if (window.dashboardInstrumentMode === 'commodity' && symbol === this.symbol && status) {
-        this.latestQuoteError = error.message || 'MCX quote unavailable.';
+        this.latestQuoteError = error.name === 'AbortError'
+          ? 'Commodity quote request timed out.'
+          : error.message || 'MCX quote unavailable.';
         const hasLastGoodQuote = !!this.latestQuote;
         status.dataset.tone = hasLastGoodQuote ? 'stale' : 'error';
         status.dataset.status = hasLastGoodQuote ? 'stale' : 'unavailable';
         status.textContent = hasLastGoodQuote ? 'STALE' : 'UNAVAILABLE';
-        status.title = this.latestQuoteError;
+        status.title = error.name === 'AbortError'
+          ? 'Commodity quote timed out. It will retry automatically.'
+          : this.latestQuoteError;
         const sourceStatus = document.querySelector('.data-source-status-pill');
         if (sourceStatus) {
           sourceStatus.textContent = hasLastGoodQuote ? 'STALE' : 'UNAVAILABLE';
@@ -906,7 +931,6 @@ class CommodityPricesView {
       }
       this._renderSharedOptionChain(payload);
       this._renderAnalysis(payload.analysis || {});
-      this._renderCommodityAnalytics();
       this._syncSharedQuoteContext();
       if (status) {
         status.dataset.tone = 'live';
@@ -917,9 +941,20 @@ class CommodityPricesView {
     } catch (error) {
       if (window.dashboardInstrumentMode === 'commodity'
           && symbol === this.symbol && requestedExpiry === this.expiry && status) {
-        status.dataset.tone = 'error';
-        status.textContent = error.message || 'Unable to load commodity option chain.';
-        this._clearOptionChain();
+        const cached = this.latestChainPayload;
+        const cachedMatchesRequest = cached
+          && String(cached.symbol || '').toUpperCase() === symbol
+          && Array.isArray(cached.chain?.rows) && cached.chain.rows.length > 0
+          && (!requestedExpiry
+            || this._normalizeExpiry(cached.expiry) === this._normalizeExpiry(requestedExpiry));
+        status.dataset.tone = cachedMatchesRequest ? 'stale' : 'error';
+        const errorMessage = error.name === 'AbortError'
+          ? 'Option-chain refresh timed out.'
+          : error.message || 'Unable to load commodity option chain.';
+        status.textContent = cachedMatchesRequest
+          ? `Showing cached ${symbol} chain · refresh delayed`
+          : errorMessage;
+        if (!cachedMatchesRequest) this._clearOptionChain();
         if (this.chainRetryTimer !== null) window.clearTimeout(this.chainRetryTimer);
         this.chainRetryTimer = window.setTimeout(() => {
           this.chainRetryTimer = null;

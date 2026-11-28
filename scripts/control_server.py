@@ -19,6 +19,7 @@ import socket
 import subprocess
 import sys
 import threading
+from urllib.parse import urlsplit
 import urllib.request
 import webbrowser
 from datetime import datetime
@@ -40,6 +41,7 @@ BROKER_CREDENTIALS = {
     "KOTAK": (("KOTAK_CONSUMER_KEY", "Consumer key"), ("KOTAK_MOBILE", "Mobile number"), ("KOTAK_UCC", "UCC"), ("KOTAK_TOTP_SECRET", "TOTP secret"), ("KOTAK_MPIN", "MPIN")),
     "NSE_BSE": (),
 }
+_ENV_LOCK = threading.RLock()
 
 
 def _env_path() -> Path:
@@ -50,31 +52,41 @@ def _env_path() -> Path:
 
 def update_env(values: dict[str, str]) -> None:
     """Update selected keys without exposing or disturbing other .env entries."""
-    path = _env_path()
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    pending: dict[str, str] = {}
-    for key, value in values.items():
-        value = str(value).strip()
-        if not value:
-            continue
-        if "\n" in value or "\r" in value:
-            raise ValueError(f"{key} cannot contain a new line.")
-        if not re.fullmatch(r"[A-Za-z0-9_./:+-]+", value):
-            value = "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-        pending[key] = value
-    updated: list[str] = []
-    for line in lines:
-        match = re.match(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=", line)
-        key = match.group(1) if match else None
-        updated.append(f"{key}={pending.pop(key)}" if key in pending else line)
-    if pending and updated and updated[-1]:
-        updated.append("")
-    updated.extend(f"{key}={value}" for key, value in pending.items())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.launcher.tmp")
-    temporary.write_text("\n".join(updated) + "\n", encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(path)
+    with _ENV_LOCK:
+        path = _env_path()
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        pending: dict[str, str] = {}
+        for key, value in values.items():
+            value = str(value).strip()
+            if not value:
+                continue
+            if "\n" in value or "\r" in value:
+                raise ValueError(f"{key} cannot contain a new line.")
+            if not re.fullmatch(r"[A-Za-z0-9_./:+-]+", value):
+                value = "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+            pending[key] = value
+        updated: list[str] = []
+        found: set[str] = set()
+        for line in lines:
+            match = re.match(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=", line)
+            key = match.group(1) if match else None
+            if key in pending:
+                updated.append(f"{key}={pending[key]}")
+                found.add(key)
+            else:
+                updated.append(line)
+        additions = [(key, value) for key, value in pending.items() if key not in found]
+        if additions and updated and updated[-1]:
+            updated.append("")
+        updated.extend(f"{key}={value}" for key, value in additions)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        try:
+            temporary.write_text("\n".join(updated) + "\n", encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 CONTROL_PAGE = """<!doctype html>
@@ -83,31 +95,33 @@ CONTROL_PAGE = """<!doctype html>
 :root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#07101f;color:#e8eef8}*{box-sizing:border-box}[hidden]{display:none!important}
 body{margin:0;height:100vh;height:100dvh;padding:14px;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at top,#12233e,#07101f 55%)}
 main{width:min(620px,100%);max-height:calc(100vh - 28px);max-height:calc(100dvh - 28px);display:flex;flex-direction:column;border:1px solid #263b59;border-radius:18px;background:#0c1729;box-shadow:0 24px 70px #0008;overflow:hidden}
-.header{padding:20px 22px 0;flex:none}.form-scroll{padding:0 22px 18px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.footer{padding:12px 22px 18px;border-top:1px solid #263b59;background:#0c1729;box-shadow:0 -10px 24px #07101fcc;flex:none}
-h1{font-size:22px;margin:0 0 4px}.sub{color:#94a7c3;margin:0 0 14px}.status{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:10px;background:#101f35;margin-bottom:4px}
+.header{padding:20px 22px 0;flex:none}.header-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.form-scroll{min-height:0;flex:1 1 auto;padding:0 22px 18px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.footer{padding:12px 22px 18px;border-top:1px solid #263b59;background:#0c1729;box-shadow:0 -10px 24px #07101fcc;flex:none}
+h1{font-size:22px;margin:0 0 4px}.sub{color:#94a7c3;margin:0 0 14px}.status{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;background:#101f35;white-space:nowrap}
 .dot{width:10px;height:10px;border-radius:50%;background:#64748b}.dot.ready{background:#22c55e}.dot.starting{background:#f59e0b}.dot.stopped{background:#ef4444}
 label{display:block;color:#aebdd2;font-size:12px;margin:11px 0 5px}input,select{width:100%;padding:9px 11px;border:1px solid #314662;border-radius:9px;background:#081321;color:#f5f8fc;font-size:14px}
-.selection-grid,.credential-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.credentials{margin-top:12px;padding:10px 12px 12px;border:1px solid #263b59;border-radius:10px}.credentials legend{color:#aebdd2;font-size:12px}.hint{color:#7186a4;font-size:11px;margin:7px 0 0}
+.broker-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.credential-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.credentials{margin-top:12px;padding:10px 12px 12px;border:1px solid #263b59;border-radius:10px}.broker-settings-grid .credentials{min-width:0;margin-top:0;padding:0;border:0}.credentials legend{color:#aebdd2;font-size:12px}.hint{color:#7186a4;font-size:11px;margin:7px 0 0}
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}button,a.button{border:0;border-radius:9px;padding:11px;text-align:center;font-weight:700;text-decoration:none;cursor:pointer}
 #start{background:#22c55e;color:#052e16}#stop{background:#ef4444;color:white}.button{display:block;margin-top:8px;background:#2563eb;color:white}.button.disabled{opacity:.4;pointer-events:none}
-button:disabled{opacity:.4;cursor:not-allowed}.msg{min-height:16px;margin-top:7px;color:#fbbf24;font-size:12px}
-@media(max-width:520px){body{padding:0;place-items:stretch}main{width:100%;max-height:100vh;max-height:100dvh;border:0;border-radius:0}.header{padding:14px 16px 0}.form-scroll{padding:0 16px 12px}.footer{padding:10px 16px 12px}.selection-grid,.credential-grid{grid-template-columns:1fr}h1{font-size:19px}.sub{font-size:13px}}
+button:disabled{opacity:.4;cursor:not-allowed}input:disabled,select:disabled{opacity:.55;cursor:not-allowed}.msg{min-height:16px;margin-top:7px;color:#fbbf24;font-size:12px}
+@media(max-width:520px){body{padding:0;place-items:stretch}main{width:100%;height:100vh;height:100dvh;border:0;border-radius:0}.header{padding:14px 16px 0}.form-scroll{padding:0 16px 12px}.footer{padding:10px 16px 12px}.broker-settings-grid{grid-template-columns:1fr;gap:0}.broker-settings-grid .credentials{margin-top:12px}.credential-grid{grid-template-columns:1fr}h1{font-size:19px}.sub{font-size:13px}}
 @media(max-height:650px){.header{padding-top:12px}.sub{display:none}.status{margin-top:5px}.form-scroll{padding-bottom:10px}label{margin-top:8px}.footer{padding-top:9px;padding-bottom:9px}}
 </style></head><body><main>
-<div class="header"><h1>mTerminals Launcher</h1><p class="sub">Start the market engine only when you need it.</p>
-<div class="status"><span id="dot" class="dot stopped"></span><strong id="status">Backend stopped</strong></div>
+<div class="header"><div class="header-top"><div><h1>mTerminals Launcher</h1><p class="sub">Start the backend here. Choose the symbol and expiry in the dashboard.</p></div>
+<div class="status"><span id="dot" class="dot stopped"></span><strong id="status">Backend stopped</strong></div></div>
+<p id="backend-hint" class="hint" hidden></p>
 </div><div class="form-scroll">
-<div class="selection-grid"><div><label for="symbol">Symbol</label><input id="symbol" list="symbols" value="NIFTY" autocomplete="off">
-<datalist id="symbols"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option></datalist>
- </div><div><label for="expiry">Expiry (blank = nearest)</label><input id="expiry" type="date"></div></div>
+<div id="broker-settings" class="broker-settings-grid">
+<div>
 <label for="broker">Market-data broker</label><select id="broker">
 <option value="SMARTAPI">Angel One (SmartAPI)</option><option value="UPSTOX">Upstox</option>
 <option value="KITE">Zerodha (Kite)</option><option value="SHOONYA">Shoonya</option>
 <option value="BREEZE">ICICI Direct (Breeze)</option><option value="KOTAK">Kotak Neo</option>
 <option value="NSE_BSE">NSE/BSE public data</option></select>
-<fieldset id="credentials" class="credentials"><legend>Broker credentials</legend>
-<label for="modify-credentials">Modify credentials?</label><select id="modify-credentials"><option value="no" selected>No</option><option value="yes">Yes</option></select>
+</div>
+<fieldset id="credentials" class="credentials">
+<label for="modify-credentials">Broker credentials</label><select id="modify-credentials"><option value="no" selected>Use saved</option><option value="yes">Edit</option></select>
 <div id="credential-fields" class="credential-grid" hidden></div><p id="credential-hint" class="hint" hidden>Leave a field blank to keep its existing value in .env.</p></fieldset>
+</div>
 <p style="margin:7px 0 0;color:#7186a4;font-size:11px">Live-order execution broker remains the protected <code>EXECUTION_BROKER</code> configured in .env.</p>
 <fieldset class="credentials"><legend>Mobile app</legend>
 <div id="mobile-status" class="hint">Checking mobile server…</div>
@@ -123,15 +137,16 @@ button:disabled{opacity:.4;cursor:not-allowed}.msg{min-height:16px;margin-top:7p
 </div></main><script>
 const $=id=>document.getElementById(id);let busy=false;
 const credentialSchema=__CREDENTIAL_SCHEMA__;
-function drawCredentials(){const fields=$('credential-fields');fields.replaceChildren();const schema=credentialSchema[$('broker').value]||[];$('credentials').style.display=schema.length?'block':'none';const open=$('modify-credentials').value==='yes'&&schema.length>0;fields.hidden=!open;$('credential-hint').hidden=!open;if(!open)return;for(const [key,label] of schema){const group=document.createElement('div');const l=document.createElement('label');l.htmlFor='cred-'+key;l.textContent=label;const input=document.createElement('input');input.id='cred-'+key;input.dataset.envKey=key;input.type='password';input.autocomplete='off';input.placeholder='Existing value remains if blank';group.append(l,input);fields.append(group)}}
+function drawCredentials(){const fields=$('credential-fields');fields.replaceChildren();const schema=credentialSchema[$('broker').value]||[];$('credentials').style.display=schema.length?'block':'none';$('broker-settings').style.gridTemplateColumns=schema.length?'':'1fr';const open=$('modify-credentials').value==='yes'&&schema.length>0;fields.hidden=!open;$('credential-hint').hidden=!open;if(!open)return;for(const [key,label] of schema){const group=document.createElement('div');const l=document.createElement('label');l.htmlFor='cred-'+key;l.textContent=label;const input=document.createElement('input');input.id='cred-'+key;input.dataset.envKey=key;input.type='password';input.autocomplete='off';input.placeholder='Existing value remains if blank';group.append(l,input);fields.append(group)}}
 function credentials(){return Object.fromEntries([...document.querySelectorAll('[data-env-key]')].map(input=>[input.dataset.envKey,input.value]))}
 async function request(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d}
-function paint(s){$('status').textContent=s.ready?'Backend ready':s.running?'Backend starting…':'Backend stopped';$('dot').className='dot '+(s.ready?'ready':s.running?'starting':'stopped');$('start').disabled=busy||s.running;$('stop').disabled=busy||!s.running;$('symbol').disabled=s.running;$('expiry').disabled=s.running;$('broker').disabled=s.running;$('modify-credentials').disabled=s.running;document.querySelectorAll('[data-env-key]').forEach(input=>input.disabled=s.running);$('dashboard').classList.toggle('disabled',!s.ready);if(s.error)$('msg').textContent=s.error}
+function paint(s){$('status').textContent=s.ready?'Backend ready':s.running?'Backend starting…':'Backend stopped';$('dot').className='dot '+(s.ready?'ready':s.running?'starting':'stopped');$('start').disabled=busy||s.running;$('stop').disabled=busy||!s.running;$('broker').disabled=s.running;$('modify-credentials').disabled=s.running;document.querySelectorAll('[data-env-key]').forEach(input=>input.disabled=s.running);$('dashboard').classList.toggle('disabled',!s.ready);const hint=$('backend-hint');hint.hidden=!s.running;hint.textContent=s.running?'Data-source settings are locked while the backend is active. Stop Backend before changing the broker.':'';if(s.error)$('msg').textContent=s.error;else if(!busy)$('msg').textContent=''}
 async function refresh(){try{paint(await request('/api/status'))}catch(e){$('msg').textContent=e.message}}
 $('broker').onchange=drawCredentials;
 $('modify-credentials').onchange=drawCredentials;
-$('start').onclick=async()=>{busy=true;$('msg').textContent='Saving configuration and starting…';try{paint(await request('/api/start',{symbol:$('symbol').value,expiry:$('expiry').value,broker:$('broker').value,credentials:credentials()}))}catch(e){$('msg').textContent=e.message}finally{busy=false;refresh()}};
-$('stop').onclick=async()=>{if(!confirm('Stop the analytics backend completely?'))return;busy=true;$('msg').textContent='Stopping…';try{paint(await request('/api/stop',{}));$('msg').textContent='Backend stopped.'}catch(e){$('msg').textContent=e.message}finally{busy=false;refresh()}};
+function setBusy(value){busy=value;$('start').disabled=value||$('status').textContent!=='Backend stopped';$('stop').disabled=value||$('status').textContent==='Backend stopped'}
+$('start').onclick=async()=>{setBusy(true);$('msg').textContent='Saving configuration and starting…';try{paint(await request('/api/start',{broker:$('broker').value,credentials:credentials()}))}catch(e){$('msg').textContent=e.message}finally{setBusy(false);refresh()}};
+$('stop').onclick=async()=>{if(!confirm('Stop the analytics backend completely?'))return;setBusy(true);$('msg').textContent='Stopping…';try{paint(await request('/api/stop',{}));$('msg').textContent='Backend stopped.'}catch(e){$('msg').textContent=e.message}finally{setBusy(false);refresh()}};
 let mobileBusy=false;
 async function refreshMobile(){try{const s=await request('/api/mobile/status');$('mobile-status').textContent=s.running?'Mobile server running ('+s.mode+')':'Mobile server stopped';$('mobile-start').disabled=mobileBusy||s.running;$('mobile-stop').disabled=mobileBusy||!s.running;$('mobile-mode').disabled=mobileBusy||s.running;if(s.running)$('mobile-mode').value=s.mode;$('mobile-msg').textContent=s.error||''}catch(e){$('mobile-msg').textContent=e.message}}
 async function mobileAction(action){mobileBusy=true;await refreshMobile();try{await request('/api/mobile/'+action,{mode:$('mobile-mode').value})}catch(e){$('mobile-msg').textContent=e.message}finally{mobileBusy=false;await refreshMobile()}}
@@ -201,10 +216,9 @@ class BackendSupervisor:
             if self.running:
                 return self.status()
             try:
-                with urllib.request.urlopen(f"{self.backend_url}/health", timeout=0.25):
+                with socket.create_connection(("127.0.0.1", self.backend_port), timeout=0.25):
                     raise ValueError(
-                        f"Port {self.backend_port} already has a backend not owned by this launcher. "
-                        "Stop that process first."
+                        f"Port {self.backend_port} is already in use. Stop the existing service first."
                     )
             except ValueError:
                 raise
@@ -228,14 +242,18 @@ class BackendSupervisor:
             environment["LIVE_FEED_PROVIDER"] = broker
             src_path = str(PROJECT_ROOT / "src")
             environment["PYTHONPATH"] = src_path + os.pathsep + environment.get("PYTHONPATH", "")
-            self.process = subprocess.Popen(
-                command,
-                cwd=PROJECT_ROOT,
-                env=environment,
-                stdout=self.log_handle,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
+            try:
+                self.process = subprocess.Popen(
+                    command,
+                    cwd=PROJECT_ROOT,
+                    env=environment,
+                    stdout=self.log_handle,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                self._close_log()
+                self.last_error = f"Could not start backend: {exc}"
             return self.status()
 
     def stop(self) -> dict:
@@ -380,13 +398,29 @@ class ControlHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
         try:
+            host = urlsplit(f"//{self.headers.get('Host', '')}")
+            loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+            expected_port = self.server.server_port
+            if host.hostname not in loopback_hosts or (host.port or 80) != expected_port:
+                self._json(HTTPStatus.FORBIDDEN, {"error": "Requests must target the local control server."})
+                return
+            origin = self.headers.get("Origin")
+            if origin:
+                parsed_origin = urlsplit(origin)
+                if (parsed_origin.scheme != "http"
+                        or parsed_origin.hostname not in loopback_hosts
+                        or (parsed_origin.port or 80) != expected_port):
+                    self._json(HTTPStatus.FORBIDDEN, {"error": "Cross-origin control requests are not allowed."})
+                    return
             length = int(self.headers.get("Content-Length", "0"))
-            if length > 4096:
+            if length < 0 or length > 4096:
                 raise ValueError("Request is too large.")
             payload = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Request body must be a JSON object.")
             if self.path == "/api/start":
                 result = self.supervisor.start(
-                    payload.get("symbol", ""),
+                    payload.get("symbol", "NIFTY"),
                     payload.get("expiry", ""),
                     payload.get("broker", "SMARTAPI"),
                     payload.get("credentials", {}),
@@ -416,8 +450,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5400)
     parser.add_argument("--backend-port", type=int, default=5500)
-    parser.add_argument("--mobile", choices=("expo", "web", "android", "ios", "off"), default="expo",
-                        help="Mobile startup mode (default: expo); use off for backend-only operation.")
+    parser.add_argument("--mobile", choices=("expo", "web", "android", "ios", "off"), default="off",
+                        help="Optional mobile startup mode (default: off; start it later from the launcher page).")
     parser.add_argument("--mobile-port", type=int, default=8081)
     parser.add_argument("--mobile-host", help="Override the automatically detected computer IP for mobile data.")
     parser.add_argument(

@@ -483,13 +483,13 @@ simRenderVolGrid(gexData, simVel) {
 
   // ── Summary line (always visible, above the click-to-open chart) ──
   // Same "count + strongest" rollup shape as the Institutional Activity
-  // Crux card, scoped to this panel's own block-print flags instead of
+  // Crux card, scoped to this panel's own high Vol/OI flags instead of
   // Crux's OI-standout flags — the two scan by strike but aren't
   // measuring the same thing, so they're allowed to disagree. Recomputes
   // over the same near/far pools buildSection already built, rather than
   // parsing its HTML output back apart.
   // Writes into #oi-flow-block-summary inside the Vol/OI Velocity card.
-  // Block prints are a velocity-derived result, so the summary stays with
+  // High Vol/OI flags are a velocity-derived result, so the summary stays with
   // the control that owns the scan instead of the general Capital Flow card.
   var summaryEl = document.getElementById('oi-flow-block-summary');
   if (summaryEl) {
@@ -501,9 +501,9 @@ simRenderVolGrid(gexData, simVel) {
     });
     if (flaggedAll.length) {
       var strongest = flaggedAll.slice().sort(function(a, b) { return b.ratio - a.ratio; })[0];
-      summaryEl.innerHTML = '<span style="color:var(--amber);font-weight:700;">' + flaggedAll.length + ' block print' + (flaggedAll.length === 1 ? '' : 's') + '</span> flagged \u2022 strongest ' + fmtI(strongest.strike) + ' ' + strongest.side;
+      summaryEl.innerHTML = '<span style="color:var(--amber);font-weight:700;">' + flaggedAll.length + ' high Vol/OI flag' + (flaggedAll.length === 1 ? '' : 's') + '</span> \u2022 strongest ' + fmtI(strongest.strike) + ' ' + strongest.side;
     } else {
-      summaryEl.innerHTML = 'No block-size prints detected right now.';
+      summaryEl.innerHTML = 'No unusually high Vol/OI ratios detected right now.';
     }
   }
 }

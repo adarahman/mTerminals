@@ -13,7 +13,7 @@
 //
 // Pillars, each reusing data/functions this app already computes —
 // nothing here talks to the backend directly:
-//   1. FII/DII index-futures net flow direction, from
+//   1. FII/DII index-futures net-position direction, from
 //      d.fiiDiiSentiment.{fii,dii}_index_fut_net (same fields
 //      buildFiiDiiSummaryCard in panels-views.js already renders).
 //   2. Gamma flip vs spot distance, via findGammaFlipStrike()
@@ -44,16 +44,17 @@ const GAMMA_FLIP_MIN_DISTANCE = 15;   // points spot must clear the flip by to v
 const OI_CHG_PCR_EXPANSION_MIN = 0.05; // minimum oiChgPCR-vs-totalPCR gap to count as "expansion"
 
 function _convictionPillarFiiDii(d) {
+  const LABEL = 'FII/DII Index Futures Net';
   const s = d.fiiDiiSentiment || {};
   const net = (s.fii_index_fut_net || 0) + (s.dii_index_fut_net || 0);
   if (!s.source_date || net === 0) {
-    return { vote: 0, label: 'FII/DII Flow', detail: 'Awaiting EOD feed' };
+    return { vote: 0, label: LABEL, detail: 'Awaiting EOD feed' };
   }
   const vote = net > 0 ? 1 : -1;
   return {
     vote,
-    label: 'FII/DII Flow',
-    detail: `${net > 0 ? '+' : ''}${Math.round(net)} Cr combined net`,
+    label: LABEL,
+    detail: `${net > 0 ? '+' : ''}${Math.round(net).toLocaleString('en-IN')} contracts combined`,
   };
 }
 
@@ -184,9 +185,9 @@ function computeConvictionGauge(d) {
     verdict = 'GO LONG'; verdictColor = 'var(--pos)'; verdictCls = 'go-long'; direction = 1;
   } else if (bearish >= 3) {
     verdict = 'GO SHORT'; verdictColor = 'var(--neg)'; verdictCls = 'go-short'; direction = -1;
-  } else if (bullish === 2 && bullish > bearish) {
+  } else if (bullish === 2 && bearish === 0) {
     verdict = 'LEAN LONG'; verdictColor = 'var(--info)'; verdictCls = 'lean-long'; direction = 1;
-  } else if (bearish === 2 && bearish > bullish) {
+  } else if (bearish === 2 && bullish === 0) {
     verdict = 'LEAN SHORT'; verdictColor = 'var(--warn)'; verdictCls = 'lean-short'; direction = -1;
   } else {
     verdict = 'WAIT'; verdictColor = 'var(--text-tertiary)'; verdictCls = 'wait'; direction = 0;

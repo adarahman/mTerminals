@@ -27,10 +27,10 @@
 // this card into purpose-specific ones is a multi-pass effort, not a
 // single refactor. Three passes done: IV Rank details moved out to its
 // own "Volatility" card (volatility-view.js), Smart Money Ranking moved
-// out to its own "Probability" card (probability-view.js), and Scenario
+// out to its own "Smart Money Ranking" card (probability-view.js), and Scenario
 // P&L moved out to its own "Scenario Analysis" card
 // (scenario-analysis-view.js) — three of the four destinations §2.3
-// names (Volatility / Scenario Analysis / Probability / Cross-Market).
+// names (Volatility / Scenario Analysis / Smart Money Ranking / Cross-Market).
 // A future Cross-Market destination has no candidate content yet in this
 // codebase, so nothing is pending extraction for it. Capital Confirmation
 // and Futures-Options Divergence do not map cleanly to any of the four named
@@ -100,7 +100,7 @@ function _aaCapitalConfirmationHtml(d) {
   const body = `
     <div style="font-size:14px;font-weight:700;color:${confColor};margin-bottom:8px;">${c.confirmation}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      ${voteChip('Capital Flow', c.capitalVote)}
+      ${voteChip('Options Capital', c.capitalVote)}
       ${voteChip('Regime', c.regimeVote)}
       ${voteChip('Price', c.priceVote)}
     </div>

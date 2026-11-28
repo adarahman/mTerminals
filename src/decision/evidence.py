@@ -61,7 +61,9 @@ def aggregate_evidence(
             "key": key,
             "label": labels.get(key, key),
             "available": available,
-            "weight": round(weight * 100),
+            # Preserve fractional percentages when a caller reserves part of
+            # the total weight for a separate contributor.
+            "weight": round(weight * 100, 1),
             "score": round(score, 3) if available else None,
             # Keep enough precision for small contributors (for example a
             # 0.002 OI velocity score at 17% weighs 0.00034). Rounding to

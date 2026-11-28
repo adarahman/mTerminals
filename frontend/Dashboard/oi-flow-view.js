@@ -323,7 +323,7 @@ class OiFlowView {
   // an independent read.
   //
   // NOTE: the ATM strike's own OI/PCR tile that used to sit here was
-  // removed in favor of the Block Detection readout below.
+  // removed in favor of the unusual Vol/OI readout below.
   //
   // NOTE: the "🏛️ Biggest Build" tile that used to sit here (Biggest CE
   // OI / Biggest PE OI) was removed — it's now
@@ -336,12 +336,12 @@ class OiFlowView {
   // visualized the same canonical option-chain values. This native card
   // remains the single OI Flow summary inside the dashboard.
 
-  // Block Detection readout: #oi-flow-block-summary is a plain
+  // Unusual Vol/OI readout: #oi-flow-block-summary is a plain
   // placeholder here, not a computed value — this card doesn't scan for
-  // block prints itself. simRenderVolGrid() (simulator-view.js) already
-  // runs that scan every tick/scenario-slider move for the Vol/OI
-  // Velocity by Strike (Block Detection) panel; it now writes its "N
-  // block prints flagged • strongest STRIKE SIDE" result straight into
+  // for raw block prints itself. simRenderVolGrid() (simulator-view.js) already
+  // runs that ratio scan every tick/scenario-slider move for the Vol/OI
+  // Velocity by Strike panel; it now writes its "N high Vol/OI flags •
+  // strongest STRIKE SIDE" result straight into
   // this element instead of its old home (#sdt-voi-summary), so the
   // content moved here rather than being duplicated. See the tick
   // pipeline in chain-renderer.js: this card's outerHTML is patched
@@ -352,7 +352,7 @@ class OiFlowView {
   // Renders as a plain caption line now, not a boxed .oic-tile (own
   // background/border/icon-chip/uppercase label) — that nested-card
   // treatment made this read as its own alienated block sitting below
-  // Vol/OI Velocity rather than that panel's own block-print readout,
+  // Vol/OI Velocity rather than that panel's own high-ratio readout,
   // even though #sdt-panel's header above already says "(Block
   // Detection)" so the tile's icon+label were pure duplication anyway.
   return `
