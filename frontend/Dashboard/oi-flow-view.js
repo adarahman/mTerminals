@@ -40,6 +40,13 @@ class OiFlowView {
   const BFLY_MAX=260;
   const COMBINED_MIN_BAR=18;
   const COMBINED_MIN_SEG=8;
+  const alignedFigure=(value)=>{
+    const match=String(value).match(/^([+-]?)(\d+)(?:\.(\d+))?([KL]?)$/);
+    if(!match) return value;
+    let [,sign,whole,fraction='',suffix='']=match;
+    fraction=fraction ? fraction.padEnd(2,'0') : '00';
+    return `<span class="oi-aligned-number"><span class="oi-number-leading">${sign}${whole}</span><span class="oi-number-fraction">${fraction?'.'+fraction:'&nbsp;'}</span><span class="oi-number-suffix">${suffix||'&nbsp;'}</span></span>`;
+  };
   const combinedBar=(baseClass,color,width,currentOI,chgOI,anchorRight)=>{
     const w=Math.max(Math.round(width),1);
     const outer=`width:${w}px;background:${color};border:1px solid ${color};position:relative;overflow:hidden;box-sizing:border-box;`;
@@ -86,8 +93,8 @@ class OiFlowView {
     let peLbl=(signed&&peV>=0?'+':'')+fmtK(peV);
     if(mode==='combined'){
       const ceChg=r.ceChgOI||0, peChg=r.peChgOI||0;
-      ceLbl += `<small class="oi-combined-change" style="color:${ceOiChgClr(ceChg)}">${ceChg>=0?'+':''}${fmtK(ceChg)}</small>`;
-      peLbl += `<small class="oi-combined-change" style="color:${sClr(peChg)}">${peChg>=0?'+':''}${fmtK(peChg)}</small>`;
+      ceLbl = `<span class="oi-combined-oi">${alignedFigure(ceLbl)}</span><small class="oi-combined-change" style="color:${ceOiChgClr(ceChg)}">${alignedFigure((ceChg>=0?'+':'')+fmtK(ceChg))}</small>`;
+      peLbl = `<span class="oi-combined-oi">${alignedFigure(peLbl)}</span><small class="oi-combined-change" style="color:${sClr(peChg)}">${alignedFigure((peChg>=0?'+':'')+fmtK(peChg))}</small>`;
     }
     const ceBar=mode==='combined'
       ?combinedBar('oi-ce-bar',ceClr,cW,r.ceOI||0,r.ceChgOI||0,false)

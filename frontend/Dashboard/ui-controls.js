@@ -129,21 +129,20 @@ class UiControls {
    * Desktop information architecture
    *
    * Home
-   *   Decision / executive anchor only.
+   *   Decision anchor and live market header.
    *
    * Market
-   *   Structure & Positioning + Flow.
+   *   Structure & Positioning, including the Option Chain Snapshot and OI Flow.
    *
    * Analytics
-   *   Flow + Institutional + Strategy & Risk.
+   *   Capital Flow + Institutional + Strategy & Risk.
    *
-   * Flow intentionally participates in both Market and Analytics because
-   * the existing workspace contains both market-flow observations and
-   * capital-flow analytics. The same DOM is reused; nothing is recomputed.
+   * Each analytical workspace has one primary destination. The same DOM is
+   * reused; nothing is recomputed.
    */
   const visibleByDestination = {
     home: [],
-    market: ['positioning','flow'],
+    market: ['positioning'],
     chain: [],
     analytics: ['flow','institutional','validation'],
     trade: []

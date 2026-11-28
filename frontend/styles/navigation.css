@@ -199,7 +199,7 @@
 
 .top-bar-left{
   display:flex;align-items:center;
-  gap:10px;
+  gap:4px;
   flex-wrap:nowrap;
   flex:1 1 auto;
   min-width:0; /* lets .index-ticker's own overflow-x scroll instead of pushing the bar wider */
@@ -798,7 +798,6 @@ body.rail-collapsed .desktop-primary-nav .primary-nav-btn > span{
 
 /* Market is for market state / positioning / flow. Keep the compact live
    Greeks/GEX summary visible here; its full strike table remains in the modal. */
-body[data-dashboard-destination="market"] #sec-greeks-moneyness,
 body[data-dashboard-destination="market"] #volatility-card,
 body[data-dashboard-destination="market"] #voloi-detail-card,
 body[data-dashboard-destination="market"] #advanced-analytics-card,
@@ -808,9 +807,10 @@ body[data-dashboard-destination="market"] #scenario-analysis-card,
 body[data-dashboard-destination="market"] #strategy-simulator-card{
   display:none !important;
 }
+body:not([data-dashboard-destination="market"]) #decision-detail-dock{display:none !important;}
+body:not([data-dashboard-destination="market"]) #exec-section-wrap{display:none !important;}
 
-/* Home is intentionally an executive surface.
-   Old analytical workspaces are not shown beneath Decision. */
+/* Home stays focused on the decision anchor and live market header. */
 body[data-dashboard-destination="home"] .dashboard-workspace{
   display:none !important;
 }

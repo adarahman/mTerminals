@@ -15,6 +15,9 @@
 // ============================================================
 
 const _fileHttpOrigin = location.protocol === 'file:' ? 'http://127.0.0.1:5500' : '';
+// The backend serves its static dashboard and /ws endpoint on one HTTP port.
+// Keep the WebSocket same-origin so custom backend ports work without a
+// separate port setting.
 const _wsOrigin = location.protocol === 'file:'
   ? 'ws://127.0.0.1:5500'
   : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;

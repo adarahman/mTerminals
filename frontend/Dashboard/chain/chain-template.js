@@ -232,18 +232,13 @@ ChainView.prototype.renderTopBarHtml = function(d, isBear) {
     const sourceStatusTitle = d.quoteError || `MCX quote source: ${activeDataSource.label || activeDataSource.id || d.dataSource || 'Unknown'}`;
     return `<div id="sec-topbar" class="top-bar commodity-topbar">
       <div class="top-bar-left">
-        <div class="instrument-picker-stack">${modeSwitch}
+        <div class="instrument-picker-stack">
+          ${modeSwitch}
           <div class="active-symbol-pill"><select id="symbolSelect" class="symbol symbol-select" title="Select commodity" onchange="onSymbolPicked(this.value)">${this.renderSymbolOptions(activeSymbol, d.fnoSymbols, mode)}</select></div>
         </div>
         <div class="commodity-topbar-quote">
-          <div class="commodity-topbar-price-row">
-            <strong id="commodity-price-ltp" class="commodity-topbar-ltp">—</strong>
-            <span id="commodity-price-change" class="commodity-price-change commodity-topbar-change">—</span>
-          </div>
-          <div class="commodity-topbar-contract-row">
-            <span id="commodity-futures-expiry-slot" class="commodity-topbar-contract-slot"></span>
-            <span class="commodity-topbar-lot">Lot size <b id="commodity-price-lot-size">—</b></span>
-          </div>
+          <div class="commodity-topbar-price-row"><strong id="commodity-price-ltp" class="commodity-topbar-ltp">—</strong><span id="commodity-price-change" class="commodity-price-change commodity-topbar-change">—</span></div>
+          <div class="commodity-topbar-contract-row"><span id="commodity-futures-expiry-slot" class="commodity-topbar-contract-slot"></span><span class="commodity-topbar-lot">Lot size <b id="commodity-price-lot-size">—</b></span></div>
         </div>
       </div>
       <div class="expiry-strip commodity-expiry-strip">
@@ -1052,15 +1047,6 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
         ? 'Bullish and bearish option structures are balanced; wait for separation.'
         : `${dominantSignalDirection} structure · ${activeSignalAgreement}% agreement across classified strike observations.`;
 
-    // ATM IV — the one number in decision.verdicts that isn't already
-    // shown elsewhere on this card (PCR/VIX/Max Pain are in the Tier-1
-    // strip above; CE Wall/PE Wall are just R1/S1 restated in the S&R
-    // Levels grid below). Everything else that verdictDefs used to list
-    // was duplicate copy, so this card no longer carries a separate
-    // "Verdicts" section at all — just this one fact, folded into S&R
-    // Levels as a fifth cell.
-    const atmIvTxt = vrd.atmIV ? vrd.atmIV + (vrd.ivRank ? ' · ' + vrd.ivRank.split('—')[0].trim() : '') : null;
-
     // ── Risk row (Trade Grade / IV Regime / CE Wall / PE Wall / Trap
     // Warning) — previously its own standalone "🛡️ Risk Dashboard"
     // section-card lower on the page (#sec-risk); folded up into the
@@ -1115,12 +1101,48 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           const marker = contribution > 0 ? '\u2191' : contribution < 0 ? '\u2193' : '\u00b7';
           const label = escapeHtml(c.label || c.key || 'Evidence');
           const title = escapeHtml(`${c.weight || 0}% weight · ${contribution >= 0 ? '+' : ''}${contribution.toFixed(5)} contribution`);
-          return `<div class="decision-flow-line">
+          return `<div class="decision-flow-line decision-flow-evidence-row">
             <span class="decision-flow-dot" style="color:${color};">${marker}</span>
-            <span title="${title}">${label} · ${direction} · ${Number(c.weight)||0}% weight</span>
+            <span title="${title}">${label} · ${direction} · ${Number(c.weight)||0}%</span>
+            <strong style="color:${color};">${contribution > 0 ? '+' : ''}${contribution.toFixed(5)}</strong>
           </div>`;
         }).join('')
       : `<div class="decision-flow-line"><span class="decision-flow-dot">·</span><span>${explainVal(vrd.pcr) || explainVal(vrd.vix) || 'No strong confirming signal yet.'}</span></div>`;
+    const decisionEvidenceHtml = `<div class="decision-evidence-top"><div class="decision-flow-content">${heroWhyHtml}</div></div>`;
+    const decisionEvidenceDetailsHtml = `<div id="decision-engine-evidence" class="decision-engine-evidence" role="tooltip">
+        <div class="decision-engine-evidence-title">Decision Evidence</div>
+        <div class="decision-engine-evidence-reason">${escapeHtml(tradeabilityReason)}</div>
+        <div class="decision-engine-evidence-summary">
+          <span>Confidence <strong>${conf}%</strong></span>
+          <span>Coverage <strong>${evidenceCoverage}%</strong></span>
+        </div>
+        <div class="decision-engine-evidence-meta">
+          <div><span>PCR</span><strong>${shortVal(vrd.pcr)}</strong></div>
+          <div><span>VIX</span><strong>${shortVal(vrd.vix)}</strong></div>
+          <div><span>Grade</span><strong style="color:${gradeColor};">${risk.tradeGrade || '—'}</strong></div>
+          <div><span>IV</span><strong style="color:${ivRgColor};">${risk.ivRegime || '—'}</strong></div>
+          <div class="decision-engine-evidence-execution"><span>Execution</span><strong>${isCommodity
+            ? 'Informational only · no execution trigger'
+            : confirmationLevels.belowSupport != null || confirmationLevels.aboveResistance != null
+              ? `${tradeability === 'NO_TRADE' ? 'Upgrade when' : 'Confirm at'} ${confirmationLevels.belowSupport != null ? `below ${fmtI(confirmationLevels.belowSupport)}` : ''}${confirmationLevels.belowSupport != null && confirmationLevels.aboveResistance != null ? ' · ' : ''}${confirmationLevels.aboveResistance != null ? `above ${fmtI(confirmationLevels.aboveResistance)}` : ''}`
+              : `ATM ${confirmationLevels.atm != null ? fmtI(confirmationLevels.atm) : '—'}`}</strong></div>
+        </div>
+        ${actionTip ? `<div class="decision-engine-evidence-reason">${escapeHtml(actionTip)}</div>` : ''}
+        <div class="decision-engine-evidence-list">
+          ${visibleContributors.map(c => {
+            const contribution = Number(c.weightedContribution);
+            const available = c.available !== false && Number.isFinite(contribution);
+            const color = !available ? 'var(--text-tertiary)' : contribution > 0 ? 'var(--pos)' : contribution < 0 ? 'var(--neg)' : 'var(--text-tertiary)';
+            const value = available ? `${contribution > 0 ? '+' : ''}${contribution.toFixed(5)}` : 'Unavailable';
+            return `<div class="decision-engine-evidence-row"><span>${escapeHtml(c.label || c.key || 'Evidence')} · ${Number(c.weight)||0}% weight</span><strong style="color:${color};">${value}</strong></div>`;
+          }).join('')}
+        </div>
+        <div class="decision-engine-evidence-footer">
+          <span>${sigs.length} signals · ${bullishSignalCount} bullish · ${bearishSignalCount} bearish</span>
+          <span>Feed ${escapeHtml(signalFreshness)} · observed ${escapeHtml(signalObservedLabel)}</span>
+        </div>
+        ${decisionMissing.length ? `<div class="decision-engine-evidence-missing">Missing inputs: ${decisionMissing.map(escapeHtml).join(', ')}</div>` : ''}
+    </div>`;
 
     // Use the wall strikes computed from the coherent backend snapshot.
     // Recomputing them here from the filtered, incrementally patched chain
@@ -1254,63 +1276,19 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
       <div>
         <div class="verdict-heading-row">
           <div class="verdict-label">Decision Engine</div>
-          <div class="verdict-reason-hover" tabindex="0">
-            <div class="verdict-tradeability ${tradeabilityCls}">
+          <div class="verdict-reason-hover" tabindex="0" aria-describedby="decision-engine-evidence">
+            <div class="verdict-tradeability ${tradeabilityCls}" title="Hover for decision evidence and blockers">
               ${tradeabilityLabel}
             </div>
-            <div class="verdict-reason-tip" role="tooltip">${escapeHtml(tradeabilityReason)}</div>
+            ${decisionEvidenceDetailsHtml}
           </div>
         </div>
         <div class="verdict-call verdict-bias">${bias}${str?` · <span class="verdict-bias-strength">${str}</span>`:''}${conflict?' ⚡':''}</div>
         ${d.futSignal && d.futSignal !== bias ? `<div class="verdict-fut">Fut: <strong style="color:${biasCls(d.futSignal).includes('bull')?'var(--pos)':biasCls(d.futSignal).includes('bear')?'var(--neg)':'var(--warn)'}">${d.futSignal}</strong></div>` : ''}
+        ${decisionEvidenceHtml}
       </div>
       ${this._buildMiniChartHtml(d)}
-      <div class="verdict-conf">
-        <div class="verdict-conf-label">Evidence Confidence</div>
-        <div class="verdict-conf-big" style="color:${confColor};">${conf}%</div>
-        <div class="verdict-conf-msg">Coverage ${evidenceCoverage}%</div>
-        ${decisionDegraded ? `<div class="verdict-data-quality" title="Missing: ${decisionMissing.join(', ')}">DEGRADED${decisionMissing.length ? ' · '+decisionMissing.join(', ') : ''}</div>` : ''}
-        ${partialData ? `<div class="verdict-data-quality" title="Missing: ${partialMissing.join(', ')}">PARTIAL DATA${partialMissing.length ? ' · '+partialMissing.join(', ') : ''}</div>` : ''}
-      </div>
-    </div>
-    <div class="decision-flow" aria-label="Decision summary">
-      <section class="decision-flow-block decision-flow-why">
-        <div class="decision-evidence-hover" tabindex="0" aria-describedby="decision-engine-evidence">
-          <div class="decision-flow-label">
-            ${tradeability === 'NO_TRADE'
-              ? 'Why — Blockers'
-              : tradeability === 'CONDITIONAL'
-                ? 'Why — Conditions'
-                : 'Why — Evidence'}
-          </div>
-          <div id="decision-engine-evidence" class="decision-engine-evidence" role="tooltip">
-            <div class="decision-engine-evidence-title">Decision Evidence</div>
-            <div class="decision-engine-evidence-summary">
-              <span>Confidence <strong>${conf}%</strong></span>
-              <span>Coverage <strong>${evidenceCoverage}%</strong></span>
-            </div>
-            <div class="decision-engine-evidence-list">
-              ${visibleContributors.map(c => {
-                const contribution = Number(c.weightedContribution);
-                const available = c.available !== false && Number.isFinite(contribution);
-                const color = !available ? 'var(--text-tertiary)' : contribution > 0 ? 'var(--pos)' : contribution < 0 ? 'var(--neg)' : 'var(--text-tertiary)';
-                const value = available ? `${contribution > 0 ? '+' : ''}${contribution.toFixed(5)}` : 'Unavailable';
-                return `<div class="decision-engine-evidence-row"><span>${escapeHtml(c.label || c.key || 'Evidence')} · ${Number(c.weight)||0}% weight</span><strong style="color:${color};">${value}</strong></div>`;
-              }).join('')}
-            </div>
-            <div class="decision-engine-evidence-footer">
-              <span>${sigs.length} signals · ${bullishSignalCount} bullish · ${bearishSignalCount} bearish</span>
-              <span>Feed ${escapeHtml(signalFreshness)} · observed ${escapeHtml(signalObservedLabel)}</span>
-            </div>
-            ${decisionMissing.length ? `<div class="decision-engine-evidence-missing">Missing inputs: ${decisionMissing.map(escapeHtml).join(', ')}</div>` : ''}
-          </div>
-        </div>
-        <div class="decision-flow-content">
-          ${heroWhyHtml}
-        </div>
-        <div class="decision-flow-foot" title="${vrd.pcr || ''} · ${vrd.vix || ''}">PCR ${shortVal(vrd.pcr)} · VIX ${shortVal(vrd.vix)}</div>
-      </section>
-      <section class="decision-flow-block decision-flow-levels">
+      <section class="decision-flow-block decision-flow-levels verdict-key-levels">
         <div class="decision-flow-label">Key Levels</div>
         <div class="decision-flow-level-grid">
           <div><span>ATM</span><strong>${atm?fmtI(atm):'—'}</strong></div>
@@ -1329,35 +1307,6 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           </div>` : ''}
           ${wallBuild.ceStrike===null && wallBuild.peStrike===null ? '<div class="oic-empty">—</div>' : ''}
         </div>
-      </section>
-      <section class="decision-flow-block decision-flow-action${actionTip ? ' info-tip' : ''}"${actionTip ? ` data-tip="${escapeHtml(actionTip)}"` : ''}>
-        <div class="decision-flow-action-head">
-          <div class="decision-flow-label info-tip-label">Action</div>
-          <div class="decision-flow-action-text">${actionLabel && actionLabel !== '—' ? actionLabel : 'WAIT'}</div>
-        </div>
-        <div class="decision-flow-action-meta">
-          <span>Grade <strong style="color:${gradeColor};">${risk.tradeGrade || '—'}</strong></span>
-          <span>IV <strong style="color:${ivRgColor};">${risk.ivRegime || '—'}</strong></span>
-        </div>
-
-        ${isCommodity
-          ? `<div class="decision-confirmation" aria-label="Commodity execution status">
-              <span class="decision-confirmation-label">Execution</span>
-              <span>Informational only · no execution trigger</span>
-            </div>`
-          : `<div class="decision-confirmation" aria-label="Confirmation levels">
-              <span class="decision-confirmation-label">${tradeability === 'NO_TRADE' ? 'Upgrade when' : 'Confirm at'}</span>
-              ${confirmationLevels.belowSupport != null
-                ? `<span>Below <strong>${fmtI(confirmationLevels.belowSupport)}</strong></span>`
-                : ''}
-              ${confirmationLevels.aboveResistance != null
-                ? `<span>Above <strong>${fmtI(confirmationLevels.aboveResistance)}</strong></span>`
-                : ''}
-              ${confirmationLevels.belowSupport == null &&
-                confirmationLevels.aboveResistance == null
-                ? `<span>ATM <strong>${confirmationLevels.atm != null ? fmtI(confirmationLevels.atm) : '—'}</strong></span>`
-                : ''}
-            </div>`}
       </section>
     </div>
 
@@ -1426,31 +1375,22 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
 
   </div>
 
-  <!-- ── DECISION DETAIL — always visible ── -->
+  <!-- ── Supporting signals and levels; mounted at the dashboard end ── -->
   <section class="card" id="decision-detail-card" style="margin-bottom:10px;">
-    <div class="card-head"><span class="ic">🧭</span>Risk Level</div>
+    <div class="card-head"><span class="ic">🧭</span>Active Signals</div>
     <div class="detail-body">
 
-      <!-- Active Signals (left) + S & R Levels (right), 2-column grid
-           (.dd-grid, panels.css). Trap Warning used to be its own
-           full-width strip above this grid; it's folded into the S&R
-           Levels column instead — it originally lived in the Risk
-           Dashboard section alongside key levels before that section was
-           removed (see chain-renderer.js), so this puts it back next to
-           the numbers it's warning about rather than floating above
-           both columns on its own. Only rendered when there's an actual
-           warning, same gating as before.
-
-           Both columns are wrapped so they stretch to the row's full
-           height and center their content within it (dd-sig-list on the
-           left, metric-strip on the right already did this) — on a busy tick
-           Active Signals can run 4-5 rows deep and S&R Levels (now
-           carrying the trap strip too) needs to match that height rather
-           than leaving the shorter side looking sparse. -->
-      <div class="dd-grid">
+      <!-- Key levels are shown in the top decision grid. -->
+      <div class="dd-grid dd-grid-signals">
         <div class="dd-col">
           <div class="dd-col-title">Active Signals · ${sigs.length} observations · ${escapeHtml(signalFreshness)}</div>
           <div style="font-size:9px;color:var(--text-tertiary);margin:-2px 0 6px;">Observed ${escapeHtml(signalObservedLabel)}</div>
+          ${hasTrapWarn ? `
+          <div class="dd-trap">
+            <span class="ic">\u26A0</span>
+            <span class="lbl">Trap Warning</span>
+            <span class="txt" title="${escapeHtml(risk.trapWarn)}">${escapeHtml(risk.trapWarn)}</span>
+          </div>` : ''}
           ${sigs.length ? `
           <div class="signal-cluster-summary ${dominantSignalDirection.toLowerCase()}">
             <div><span>Dominant read</span><strong>${activeSignalRead}</strong></div>
@@ -1472,42 +1412,7 @@ ChainView.prototype.renderDecisionBoxHtml = function(d, opts) {
           </details>` : '<div class="dd-empty">No active signals.</div>'}
         </div>
 
-        <div class="dd-col">
-          <div class="dd-col-title">S &amp; R Levels</div>
-          ${hasTrapWarn ? `
-          <div class="dd-trap">
-            <span class="ic">\u26A0</span>
-            <span class="lbl">Trap Warning</span>
-            <span class="txt" title="${escapeHtml(risk.trapWarn)}">${escapeHtml(risk.trapWarn)}</span>
-          </div>` : ''}
-          ${(()=>{
-            const r1   = d.ceWall || 0;
-            const s1   = d.peWall || 0;
-            const step = d.strikeStep || 200;
-            const r2   = r1 + step;
-            const s2   = s1 - step;
-            const spot = Number(d.spot) || 0;
-            // Points-away-from-spot, sign-prefixed — the same
-            // "+123"/"-123" convention panels-views.js's rupee() helper
-            // uses. Resistance levels sit above spot (bear-colored),
-            // support below (bull-colored) — flip which color reads as
-            // "closer" vs "further" would be backwards, so the dist line
-            // keeps the same bull/bear class as its parent cell rather
-            // than a directional color of its own.
-            const dist = lvl => spot ? `${lvl>=spot?'+':''}${fmtI(Math.round(lvl-spot))}` : '';
-            // Split atmIvTxt's "13.0% · IV Rank 35" back into its two
-            // parts (was joined with ' · ' above) so each half gets its
-            // own line instead of both fighting for one line's width.
-            const [ivMain, ivSub] = atmIvTxt ? atmIvTxt.split(' · ') : [null, null];
-            return `<div class="metric-strip">
-              <div class="metric-cell"><div class="k">R2</div><div class="v bear">${fmtI(r2)}</div><div class="d bear">${dist(r2)}</div></div>
-              <div class="metric-cell"><div class="k">R1</div><div class="v bear">${fmtI(r1)}</div><div class="d bear">${dist(r1)}</div></div>
-              <div class="metric-cell"><div class="k">S1</div><div class="v bull">${fmtI(s1)}</div><div class="d bull">${dist(s1)}</div></div>
-              <div class="metric-cell"><div class="k">S2</div><div class="v bull">${fmtI(s2)}</div><div class="d bull">${dist(s2)}</div></div>
-              ${ivMain ? `<div class="metric-cell"><div class="k">ATM IV</div><div class="v">${ivMain}</div>${ivSub ? `<div class="d">${ivSub}</div>` : ''}</div>` : ''}
-            </div>`;
-          })()}
-        </div>
+
       </div>
 
     </div>
@@ -1542,10 +1447,12 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
     return `
   <div class="section-card sc-green" id="chain-summary-card">
     <div class="section-header oi-snap-toolbar">
-      <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table" aria-label="Open Option Chain" title="Open Option Chain">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+      <button type="button" class="oi-snap-title-group oi-snap-header-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table" aria-label="Open Option Chain" title="Open Option Chain">
+        <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
+        <span class="oi-snap-open-link" aria-hidden="true">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+        </span>
       </button>
-      <span class="section-title nav-card-header-label"><span class="section-icon">📊</span>Option Chain Snapshot</span>
       <div class="oi-snap-header-actions">
         <label class="oi-snap-range"><span>Range</span><select data-chain-range-select onchange="switchChainRange(Number(this.value),this)" aria-label="Option chain strike range">${typeof buildRangeSelectOptionsHtml === 'function' ? buildRangeSelectOptionsHtml(_chainRange) : ''}</select></label>
       </div>
@@ -1634,30 +1541,27 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
   return `
   <div class="section-card sc-green" id="chain-summary-card">
     <div class="section-header oi-snap-toolbar">
-      <button type="button" class="oi-snap-open-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table" aria-label="Open Option Chain" title="Open Option Chain">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+      <button type="button" class="oi-snap-title-group oi-snap-header-link" onclick="openOptionChainModal(this)" aria-expanded="${tableOpen}" aria-controls="option-chain-table" aria-label="Open Option Chain" title="Open Option Chain">
+        <span class="oi-snap-heading nav-card-header-label">
+          <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--ce)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pe)"/></svg>
+          Option Chain Snapshot
+        </span>
+        <span class="oi-snap-open-link" aria-hidden="true">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.25V2.75M2 13.25h12M4.25 10l2.5-2.5 2 1.5 3.5-4M10.75 5h1.5v1.5"/></svg>
+        </span>
       </button>
-      <span class="oi-snap-heading nav-card-header-label">
-        <svg width="20" height="16" viewBox="0 0 20 16" fill="none"><rect x="1" y="5" width="7" height="11" rx="1" fill="var(--ce)"/><rect x="12" y="1" width="7" height="15" rx="1" fill="var(--pe)"/></svg>
-        Option Chain Snapshot
-      </span>
       <div class="oi-snap-header-actions">
+        <div class="oi-snap-pcr-inline" aria-label="Range PCR ${fmtN(pcr,2)}, ${positioningLabel}, PCR change ${signedPcrDelta(pcrShift)}">
+          <span>Range PCR</span><strong>${fmtN(pcr,2)}</strong>
+          <em class="oi-snap-positioning ${positioningClass}">${positioningLabel}</em>
+          <span class="oi-snap-pcr-change"><small>PCR change</small><strong>${signedPcrDelta(pcrShift)}</strong></span>
+        </div>
         <label class="oi-snap-range"><span>Range</span><select data-chain-range-select onchange="switchChainRange(Number(this.value),this)" aria-label="Option chain strike range">${typeof buildRangeSelectOptionsHtml === 'function' ? buildRangeSelectOptionsHtml(_chainRange) : ''}</select></label>
       </div>
     </div>
 
     <div class="oi-snap-content">
 
-    <div class="oi-snap-overview" aria-label="Visible option-chain positioning summary">
-      <div class="oi-snap-overview-main">
-        <span class="oi-snap-overview-label">Range PCR</span>
-        <strong>${fmtN(pcr,2)}</strong>
-        <span class="oi-snap-positioning ${positioningClass}">${positioningLabel}</span>
-      </div>
-      <div class="oi-snap-overview-detail">
-        <span><small>PCR change</small><strong>${signedPcrDelta(pcrShift)}</strong></span>
-      </div>
-    </div>
 
     <div class="oi-snap-grid">
 
@@ -1714,6 +1618,8 @@ ChainView.prototype.buildChainSummaryHtml = function(d) {
       </div>
 
     </div>
+
+
 
     <div class="oc-native-chain" id="option-chain-table" ${tableOpen?'':'hidden'}>
       <div class="oc-native-scroll">

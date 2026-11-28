@@ -23,15 +23,47 @@ body.commodity-mode #dashboard .dashboard-workspace[hidden]{display:none!importa
 body.commodity-mode #dashboard .dashboard-workspace:not([hidden]){display:block!important;}
 .commodity-topbar-status{flex:0 0 auto;min-height:0;margin:0 0 0 auto;text-align:right;white-space:nowrap;font-size:var(--fs-xs);}
 .instrument-mode-switch{display:flex;gap:2px;padding:3px;background:var(--bg-0);border:1px solid var(--border);border-radius:999px;}
+.instrument-mode-option{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:3px;}
 .instrument-mode-switch button{padding:4px 8px;border:0;border-radius:999px;background:transparent;color:var(--text-secondary);font:inherit;font-size:var(--fs-xs);cursor:pointer;white-space:nowrap;}
 .instrument-mode-switch button.active{background:var(--bg-2);color:var(--text-primary);}
+.instrument-mode-switch button:focus-visible{outline:1px solid var(--info);outline-offset:1px;}
 .instrument-picker-stack{display:flex;flex-direction:column;align-items:flex-start;gap:3px;flex:0 0 auto;}
+.equity-topbar .instrument-picker-stack,.currency-topbar .instrument-picker-stack,.commodity-topbar .instrument-picker-stack{position:relative;padding-top:44px;}
+.equity-topbar .instrument-picker-stack>.instrument-mode-switch,.currency-topbar .instrument-picker-stack>.instrument-mode-switch,.commodity-topbar .instrument-picker-stack>.instrument-mode-switch{position:absolute;top:0;left:0;}
 .instrument-picker-stack .instrument-mode-switch{align-self:flex-start;}
 .instrument-picker-stack .active-symbol-pill{height:42px;min-height:42px;grid-template-rows:auto auto;gap:1px;padding:4px 8px;}
 .instrument-picker-stack .symbol-select{font-size:var(--fs-sm);}
 .instrument-picker-stack .symbol-name{font-size:8px;}
-.commodity-topbar .top-bar-left{gap:12px;}
+.currency-topbar .top-bar-left{align-items:flex-start;}
+.currency-topbar .instrument-picker-stack{align-items:flex-start;}
+body.currency-mode #dashboard{display:block!important;}
+.currency-home-context{margin:12px 0 16px;}
+.currency-home-card-intro{margin:2px 0 10px;color:var(--text-tertiary);font-size:var(--fs-xs);}
+.currency-home-instrument-card{background:var(--bg-0);}
+.currency-home-instrument-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin-top:8px;}
+.currency-home-instrument-grid>div{display:flex;min-width:0;flex-direction:column;gap:4px;}
+.currency-home-instrument-grid span{color:var(--text-tertiary);font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:.04em;}
+.currency-home-instrument-grid strong{overflow:hidden;color:var(--text-primary);font-family:var(--font-mono);font-size:var(--fs-sm);text-overflow:ellipsis;white-space:nowrap;}
+.currency-option-chain{margin:12px 0 20px;padding:14px 16px;}
+.currency-chain-status{margin:0;color:var(--text-tertiary);font-size:var(--fs-xs);}
+.oc-ledger-table.currency-chain-table{min-width:760px;}
+.currency-chain-table .c-oi{width:14%!important;}
+.currency-chain-table .c-vol{width:14%!important;}
+.currency-chain-table .c-ltp{width:14%!important;}
+.currency-chain-table .c-strike{width:16%!important;}
+.currency-chain-table thead tr:nth-child(2) th{top:31px;}
+.currency-chain-table td.oi,.currency-chain-table td.volume{color:var(--text-secondary);}
+.currency-chain-table td.ltp{padding-top:5px!important;padding-bottom:5px!important;}
+.currency-chain-table td.strike strong{display:block;font-family:var(--font-display);font-size:15px;}
+.currency-chain-table td.strike small{display:block;margin-top:2px;color:var(--warn);font-size:9px;}
+.currency-spot-block{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;padding:0;}
+.instrument-mode-price{display:inline-flex;align-items:baseline;min-height:20px;padding-left:8px;font-family:var(--font-mono);font-size:var(--fs-base);font-weight:700;white-space:nowrap;}
+.instrument-mode-price .spot{font-size:var(--fs-base);}
+.commodity-topbar .commodity-topbar-quote{margin-left:0;}
+.commodity-topbar .top-bar-left{gap:4px;}
 .commodity-topbar-quote{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;white-space:nowrap;}
+.commodity-topbar .commodity-topbar-quote{align-self:start;margin:27px 0 0;}
+.equity-topbar .spot-block,.currency-topbar .spot-block{align-self:start;margin:27px 0 0;}
 .commodity-topbar-price-row,.commodity-topbar-contract-row{display:flex;align-items:baseline;gap:9px;}
 .commodity-topbar-lot{color:var(--text-tertiary);font-size:var(--fs-xs);}
 .commodity-topbar-lot b{color:var(--text-secondary);font-family:var(--font-mono);}
@@ -76,7 +108,7 @@ body.commodity-mode #dashboard .dashboard-workspace:not([hidden]){display:block!
   min-height:auto;
   width:100%;
   box-sizing:border-box;
-  padding:12px 16px;
+  padding:0 16px 12px;
   overflow:visible;
 }
 
@@ -252,7 +284,7 @@ body.commodity-mode .equity-momentum-stats{display:none!important;}
 }
 
 .commodity-option-chain{
-  margin-top:22px;
+  margin-top:0;
   border:1px solid var(--border);
   border-radius:var(--radius);
   overflow:hidden;

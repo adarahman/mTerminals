@@ -154,9 +154,10 @@ ChainView.prototype.buildAdvancedAnalyticsHtml = function(d) {
       <span class="chev">\u25b6</span>
     </summary>
     <div class="detail-body">
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Conviction \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:10px;">Market Regime \u00b7 Conviction \u00b7 Capital Confirmation \u00b7 Futures\u2013Options Divergence</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div style="grid-column:1/-1;">${buildConvictionGaugeHtml(d)}</div>
+        ${app.exec.buildMarketRegimeCard(d)}
         ${_aaCapitalConfirmationHtml(d)}
         ${_aaFuturesOptionsDivergenceHtml(d)}
       </div>

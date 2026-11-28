@@ -242,7 +242,7 @@ ChainView.prototype.buildGreeksAlertsHtml = function(greeks, atm, d) {
       <span class="section-title nav-card-header-label"><span class="section-icon">Δ</span>Greeks / Net GEX <span class="section-sub">Θ WATCH · Live, Visible Range</span></span>
       <span class="nav-card-header-arrow" aria-hidden="true">↗</span>
     </button>
-    <div style="display:flex;flex-direction:column;padding:2px 0;">
+    <div class="greeks-hover-content" style="display:flex;flex-direction:column;padding:2px 0;">
       ${rows}
     </div>
   </div>`;

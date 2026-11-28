@@ -121,6 +121,7 @@ class SmartApiMarketData:
             "Contract": future.get("symbol"),
             "Underlying": underlying,
             "Expiry": datetime.strptime(future["expiry"], "%d%b%Y").strftime("%d-%b-%Y"),
+            "LotSize": _safe_positive_int(future.get("lotsize")),
             "LTP": ltp,
             "Change": change,
             "PctChange": percent_change,

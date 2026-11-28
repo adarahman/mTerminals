@@ -25,21 +25,21 @@ class ExecView {
   <!-- ── CARD 1: MARKET CONTEXT & RANGE ── -->
   <!-- Only context not already owned by the hero/top bar lives here. -->
   <div class="exec-card c-blue">
-    <div class="exec-title">📊 Market Context &amp; Range</div>
+    <div class="exec-title" tabindex="0" aria-label="Market Context &amp; Range. Focus or hover to reveal details">📊 Market Context &amp; Range</div>
     ${(() => {
       const atmStraddlePrem = (d.callPremium||0) + (d.putPremium||0);
       const stratName = dec.autoStrategy?.name || null;
       return `
+        <div class="exec-card-hover-content">
         <div style="font-size:12px;line-height:1.55;color:var(--txt2);padding:2px 0 10px;">Expected range and premium context for the selected expiry.</div>
         <div class="kv-grid">
-          <div class="kv"><span class="k">Fut Basis</span><span class="v">${fmtSigned(d.basis||0,1)}</span></div>
           <div class="kv"><span class="k">Expected Move</span><span class="v">±${Math.round(atmStraddlePrem)}</span></div>
-          <div class="kv"><span class="k">ATM Straddle</span><span class="v">₹${fmtN(atmStraddlePrem,1)}</span></div>
           <div class="kv"><span class="k">Call Premium</span><span class="v">₹${fmtN(d.callPremium||0,1)}</span></div>
           <div class="kv"><span class="k">Put Premium</span><span class="v">₹${fmtN(d.putPremium||0,1)}</span></div>
           <div class="kv"><span class="k">ATM Θ / day</span><span class="v">${fmtN(d.atmTheta,2)}</span></div>
         </div>
-        ${stratName ? `<div class="story" style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}`;
+        ${stratName ? `<div class="story" style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);">Engine Pick <strong style="color:var(--amber);">${stratName}</strong></div>` : ''}
+        </div>`;
     })()}
   </div>
 
@@ -59,12 +59,10 @@ class ExecView {
   <!-- Cards 4-6 (Market Regime & Smart Money / Institutional Footprint
        Score / Capital Concentration) moved out of this grid — IA redesign
        step 1 (Zone reorg, see dashboard-redesign-proposal.md §2.1/§5).
-       Those three are Institutional-zone cards, not Structure &
-       Positioning; they now render from renderInstitutionalGrid() below,
-       called separately by chain-renderer.js's renderDashboard() so they
-       sit with Institutional Activity Crux / Smart Money Ranking instead
-       of wrapping onto this grid's second row. No computation changes —
-       same three builder calls, just moved to a different container. -->
+       Capital Concentration remains in Institutional Positioning Details;
+       Market Regime now sits in Advanced Analytics beside its confirmation
+       vote. The separate Footprint Score list is omitted because the
+       Institutional Activity Crux already summarizes ranked strikes. -->
 
 </div>
 
@@ -80,21 +78,13 @@ class ExecView {
 `;}
 
   // ── INSTITUTIONAL ZONE GRID (Zone E) ──
-  // IA redesign step 1: Market Regime & Smart Money / Institutional
-  // Footprint Score / Capital Concentration used to render as cards 4-6
-  // of the Structure exec-grid above, purely because that's where the
-  // Institutional Positioning Analytics layer was first added — not
-  // because they answer a "structure" question. They're institutional-
-  // intent cards, so they now render together with Institutional
-  // Activity Crux in their own zone (chain-renderer.js calls this right
-  // before the Institutional Activity Crux card). Same three builder
-  // calls as before, same .exec-grid CSS class (3-col, wraps to its own
-  // row for a 3-card set) — layout-only move, no computation changes.
+  // Capital Concentration stays with Institutional Activity Crux. Market
+  // Regime moved into Advanced Analytics beside its confirmation vote;
+  // Footprint Score is omitted because Crux already summarizes the ranked
+  // strikes and links to the full multi-strike report.
   renderInstitutionalGrid(d){
     return `
-<div class="exec-grid">
-  ${this.buildMarketRegimeCard(d)}
-  ${this.buildFootprintScoreCard(d)}
+<div class="exec-grid" style="grid-template-columns:1fr;">
   ${this.buildCapitalConcentrationCard(d)}
 </div>
 `;

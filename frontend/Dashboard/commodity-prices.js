@@ -154,7 +154,7 @@ class CommodityPricesView {
       const amount = Number(cachedQuoteIsFresh && cached.quote.Change);
       const percent = Number(cachedQuoteIsFresh && cached.quote.PctChange);
       change.textContent = Number.isFinite(amount) && Number.isFinite(percent)
-        ? `${amount >= 0 ? '+' : ''}${this._format(amount)} (${percent >= 0 ? '+' : ''}${this._format(percent)}%)`
+        ? `${amount >= 0 ? '+' : ''}${this._format(amount)} ${percent >= 0 ? '▲' : '▼'} ${this._format(Math.abs(percent))}%`
         : '—';
       change.classList.remove('up', 'down');
       change.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
@@ -384,7 +384,7 @@ class CommodityPricesView {
     const changeElement = document.getElementById('commodity-price-change');
     if (changeElement) {
       changeElement.textContent = Number.isFinite(change) && Number.isFinite(percent)
-        ? `${change >= 0 ? '+' : ''}${this._format(change)} (${percent >= 0 ? '+' : ''}${this._format(percent)}%)`
+        ? `${change >= 0 ? '+' : ''}${this._format(change)} ${percent >= 0 ? '▲' : '▼'} ${this._format(Math.abs(percent))}%`
         : '—';
       changeElement.classList.toggle('up', Number.isFinite(percent) && percent >= 0);
       changeElement.classList.toggle('down', Number.isFinite(percent) && percent < 0);
@@ -784,7 +784,7 @@ class CommodityPricesView {
       }
       if (changeElement) {
         changeElement.textContent = Number.isFinite(change) && Number.isFinite(percent)
-          ? `${change >= 0 ? '+' : ''}${this._format(change)} (${percent >= 0 ? '+' : ''}${this._format(percent)}%)`
+          ? `${change >= 0 ? '+' : ''}${this._format(change)} ${percent >= 0 ? '▲' : '▼'} ${this._format(Math.abs(percent))}%`
           : '—';
         changeElement.classList.toggle('up', percent >= 0);
         changeElement.classList.toggle('down', percent < 0);

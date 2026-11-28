@@ -66,11 +66,9 @@ function _probSmartMoneyRankingHtml(d) {
 }
 
 // ── top-level wrapper ──
-// Collapsed by default, matching every other Tier-3 <details class="card">
-// in the Confirmation zone (Volatility, Advanced Analytics, Strategy
-// Payoff / Institutional F&O Simulator) — one question, one card, opened
-// after the Tier-1 verdict rather than competing with it for
-// always-visible space (§3 of the IA redesign proposal).
+// Collapsed by default within the Institutional Activity workspace, next
+// to Institutional Activity Crux so both visible-range strike rankings
+// can be compared in one place.
 ChainView.prototype.buildProbabilityHtml = function(d) {
   return `
   <details class="card" id="probability-card">

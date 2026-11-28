@@ -55,7 +55,7 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
     const futuresExpiryEl = document.getElementById('futuresExpirySelect');
     if(futuresExpiryEl && d.futuresExpiry) futuresExpiryEl.value = d.futuresExpiry;
     const futChgEl = document.getElementById('topbar-fut-chg');
-    if (futChgEl && d.futureChgPct !== undefined) {
+    if (futChgEl && d.futureChgPct != null) {
       const futPct = Number(d.futureChgPct) || 0;
       futChgEl.className = futPct >= 0 ? 'chg-pos' : 'chg-neg';
       futChgEl.textContent = `${futPct >= 0 ? '+' : ''}${futPct.toFixed(2)}%`;
@@ -119,22 +119,42 @@ ChainView.prototype.patchTopBarAndDecision = function(d) {
 // previously did.
 ChainView.prototype.refreshDecisionBoxGuarded = function(d) {
   const decEl = document.getElementById('sec-decision');
-  if (decEl) {
-    const detailNode = decEl.querySelector('#decision-detail-card');
-    const decisionDetailWasOpen = !!(detailNode && detailNode.open);
-    // decisionDetailWasOpen alone only covers the box once the browser has
-    // already committed the toggle. Between mousedown and mouseup on
-    // <summary> — the actual click gesture — `open` hasn't been set yet,
-    // so this check reports false for that whole window and the rebuild
-    // below would still fire mid-click, which is the bug this guard was
-    // meant to fix in the first place. _decisionDetailPending (set/cleared
-    // by _bindDecisionDetailGuard) covers exactly that gap.
-    const clickInFlight = !!this._decisionDetailPending;
-    const decisionHoverActive = !!decEl.querySelector('.decision-evidence-hover:hover, .decision-evidence-hover:focus-within, .verdict-reason-hover:hover, .verdict-reason-hover:focus-within');
-    if (!decisionDetailWasOpen && !clickInFlight && !decisionHoverActive) {
-      decEl.outerHTML = this.renderDecisionBoxHtml(d, { open: decisionDetailWasOpen });
-      this._bindDecisionDetailGuard();
-    }
+  if (!decEl) return;
+
+  const detailNode = document.getElementById('decision-detail-card');
+  const decisionHoverActive = !!decEl.querySelector('.decision-evidence-hover:hover, .decision-evidence-hover:focus-within, .verdict-reason-hover:hover, .verdict-reason-hover:focus-within');
+  if (decisionHoverActive) return;
+
+  // Build once, then refresh the docked supporting card independently from
+  // the decision anchor so Active Signals stays current.
+  const template = document.createElement('template');
+  template.innerHTML = this.renderDecisionBoxHtml(d);
+  const freshDecision = template.content.querySelector('#sec-decision');
+  const freshDetail = template.content.querySelector('#decision-detail-card');
+  const detailDock = document.getElementById('decision-detail-dock');
+
+  // Preserve expanded observations and avoid replacing a summary while it
+  // has focus or is being activated by a pointer or keyboard.
+  const detailInteractionActive = detailNode && (
+    detailNode.contains(document.activeElement) ||
+    detailNode.querySelector('summary:hover, summary:focus-within')
+  );
+  if (detailNode && freshDetail && !detailInteractionActive) {
+    const oldDetails = [...detailNode.querySelectorAll('details')];
+    freshDetail.querySelectorAll('details').forEach((details, index) => {
+      if (oldDetails[index]?.open) details.open = true;
+    });
+  }
+
+  if (freshDecision) {
+    // Keep the docked card outside #sec-decision when replacing the
+    // decision anchor; it is updated independently below.
+    if (freshDetail) freshDetail.remove();
+    decEl.outerHTML = freshDecision.outerHTML;
+  }
+  if (detailDock && freshDetail && !detailInteractionActive) {
+    if (detailNode) detailNode.replaceWith(freshDetail);
+    else detailDock.appendChild(freshDetail);
   }
 };
 
@@ -260,7 +280,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // No analytics are duplicated or recomputed here.
   const visibleWorkspaces = new Set(
     activeDestination === 'market'
-      ? ['positioning', 'flow']
+      ? ['positioning']
       : activeDestination === 'analytics'
         ? ['flow', 'institutional', 'validation']
         : []
@@ -294,7 +314,7 @@ ChainView.prototype.renderDashboard = function(d) {
   // Divider styling (was inline `style=`, repeated identically at all
   // four zone boundaries) moved to .zone-divider/.zone-divider--* in
   // layout.css as of step 5 — see that block for the weight rationale.
-  h += '<div id="zone-structure" class="zone-divider zone-divider--primary"><span class="zone-divider-title">Positioning Evidence</span><span class="zone-divider-subtitle">Price, OI and dealer exposure</span></div>';
+  h += '<div id="zone-structure" hidden></div>';
 
   // Built here and mounted later beside Institutional Activity Crux.
   const greeksMoneynessHtml = this.buildGreeksMoneynessHtml(d);
@@ -597,6 +617,9 @@ ChainView.prototype.renderDashboard = function(d) {
   }
   }
 
+  // Greeks by Moneyness belongs with the positioning and dealer-exposure
+  // context above, not inside the Institutional Activity section.
+  h += greeksMoneynessHtml;
   h += '</section>';
 
   // ── ZONE: CAPITAL FLOW ──
@@ -648,25 +671,20 @@ ChainView.prototype.renderDashboard = function(d) {
   </div></section>`;
 
   // ── ZONE: INSTITUTIONAL (IA redesign step 1) ──
-  // Who is moving the market, and where. Market Regime & Smart Money /
-  // Institutional Footprint Score / Capital Concentration used to render
+  // Who is moving the market, and where. Capital Concentration used to render
   // as cards 4-6 of the Structure exec-grid (see exec-view.js's
   // renderExecutiveDashboard — split out into renderInstitutionalGrid());
   // Institutional Activity Crux used to pair with Greeks by Moneyness in
   // this same #sec-tier2 slot for no reason tied to either card's
   // question (Greeks by Moneyness moved to Structure & Positioning
-  // above). All four institutional-intent cards now sit together here.
-  // Smart Money Ranking now lives in its own Probability card
-  // (probability-view.js, Confirmation zone) as of step 7's second pass —
-  // not here. Conviction Gauge's Smart Money Lean pillar stays inside
-  // Advanced Analytics for now; it's a derived input to that card's
-  // verdict, not a standalone ranking, so it doesn't map to Probability
-  // the way the ranking itself did.
+  // above). The Institutional Activity Crux and visible-range Smart Money
+  // Ranking now sit together here; Market Regime moved into Advanced
+  // Analytics beside its confirmation vote.
   h += `<section id="workspace-institutional" class="dashboard-workspace" data-dashboard-workspace="institutional"${workspaceVisible('institutional')?'':' hidden'}>`;
   h += '<div id="zone-institutional" class="zone-divider zone-divider--secondary"><span class="zone-divider-title">Institutional Activity</span><span class="zone-divider-subtitle">Large positioning and participant confirmation</span></div>';
   h += `<div class="institutional-crux-grid">
-    ${greeksMoneynessHtml}
     ${app.exec.buildInstitutionalActivitySummaryCard(d)}
+    ${this.buildProbabilityHtml(d)}
   </div>`;
   h += `<details class="card" id="institutional-detail-card">
     <summary>
@@ -681,30 +699,14 @@ ChainView.prototype.renderDashboard = function(d) {
   // Supporting evidence that validates or challenges the Decision
   // Engine's call, opened after the Tier-1 verdict rather than competing
   // with it for always-visible space (§3 of the IA redesign proposal).
-  // Volatility (IV Rank details), Probability (Smart Money Ranking), and
-  // Scenario Analysis (Scenario P&L) are the three sub-cards pulled out
-  // of Advanced Analytics into their own purpose-specific cards so far
-  // (roadmap step 7, dashboard-redesign-proposal.md §2.3 — see
-  // volatility-view.js / probability-view.js / scenario-analysis-view.js);
-  // mounted first since they now stand alone rather than living inside
-  // the Advanced Analytics grid. The rest of Advanced Analytics (GEX
-  // table / OI Velocity / per-strike Greeks / Capital Confirmation /
-  // Futures-Options Divergence) stays one collapsible — none of it maps
-  // cleanly to Volatility/Probability/Scenario Analysis, and the fourth
-  // named destination (Cross-Market) has no candidate content yet, so
-  // this is likely close to Advanced Analytics' final shape. Strategy
-  // Payoff / Institutional F&O Simulator sits right after Scenario
-  // Analysis: both are "what if" scenario tools (Tier 3) answering
-  // adjacent questions (single-straddle expiry payoff vs. multi-leg
-  // strategy payoff / GEX-scenario exposure) — built earlier
-  // (stratSimulatorHtml, needs strats/spot/greeksData in scope) but
-  // appended here so build order matches display order.
+  // Advanced Analytics leads with regime, conviction and confirmation
+  // context. Volatility and Scenario Analysis follow as focused detail
+  // cards; the multi-leg payoff simulator remains last as a deeper tool.
   h += `<section id="workspace-validation" class="dashboard-workspace" data-dashboard-workspace="validation"${workspaceVisible('validation')?'':' hidden'}>`;
-  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary"><span class="zone-divider-title">Strategy, Risk &amp; Validation</span><span class="zone-divider-subtitle">Volatility, probability and scenario tools</span></div>';
-  h += this.buildVolatilityHtml(d);
-  h += this.buildProbabilityHtml(d);
-  h += this.buildScenarioAnalysisHtml(d);
+  h += '<div id="zone-confirmation" class="zone-divider zone-divider--tertiary"><span class="zone-divider-title">Strategy, Risk &amp; Validation</span><span class="zone-divider-subtitle">Regime, volatility and scenario tools</span></div>';
   h += this.buildAdvancedAnalyticsHtml(d);
+  h += this.buildVolatilityHtml(d);
+  h += this.buildScenarioAnalysisHtml(d);
   // Collapsed by default (no `open` attribute, matching Advanced Analytics'
   // own <details class="card"> right above) — closes the gap where this
   // block previously rendered as a plain, always-open <div>, undermining
@@ -724,6 +726,7 @@ ChainView.prototype.renderDashboard = function(d) {
   </details>`;
   }
   h += '</section>';
+  h += '<div id="decision-detail-dock" class="market-bottom-detail"></div>';
 
 
   // Risk Dashboard (Trade grade / IV regime / Trap warning / key levels)
@@ -787,6 +790,14 @@ ChainView.prototype.renderDashboard = function(d) {
   }
   
   $i('dashboard').innerHTML = h;
+  // Analytics opens on institutional positioning, then participant flow,
+  // before the deeper validation workspace.
+  const institutionalWorkspace = document.getElementById('workspace-institutional');
+  const flowWorkspace = document.getElementById('workspace-flow');
+  if (institutionalWorkspace && flowWorkspace) institutionalWorkspace.before(flowWorkspace);
+  const decisionDetail = document.getElementById('decision-detail-card');
+  const decisionDetailDock = document.getElementById('decision-detail-dock');
+  if (decisionDetail && decisionDetailDock) decisionDetailDock.appendChild(decisionDetail);
   if(dashEl) dashEl.dataset.stratsSig = _stratsSig;
   const initialExecWrap = document.getElementById('exec-section-wrap');
   if(initialExecWrap) initialExecWrap.dataset.lastHtml = executiveDashboardHtml;

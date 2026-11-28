@@ -133,14 +133,14 @@
         </div>
         <p id="commodity-analytics-reason" class="commodity-analytics-reason">Change in call and put open interest across the selected expiry.</p>
       </section>
-      <details class="commodity-news">
+      <details class="commodity-news" data-dashboard-workspace="institutional">
         <summary>
           <span>Latest commodity news</span>
           <small id="commodity-news-status" role="status">Recent headlines for the selected contract</small>
         </summary>
         <ul id="commodity-news-list" class="commodity-news-list" aria-label="Latest commodity news"></ul>
       </details>
-      <small class="commodity-price-note">Read-only MCX quotes. Futures refresh every 1 second; option chain refreshes every 10 seconds while this screen is open.</small>
+      <small class="commodity-price-note" data-dashboard-workspace="positioning">Read-only MCX quotes. Futures refresh every 1 second; option chain refreshes every 10 seconds while this screen is open.</small>
     </div>
   </div>
 </div>
@@ -649,14 +649,6 @@
             onclick="desktopPrimaryNav('market', this)"
             title="Market — positioning, futures and OI flow">
       <span>▥</span><strong>Market</strong>
-    </button>
-
-    <button type="button"
-            class="sec-btn primary-nav-btn"
-            data-primary-nav="chain"
-            onclick="desktopPrimaryNav('chain', this)"
-            title="Option Chain">
-      <span>≋</span><strong>Chain</strong>
     </button>
 
     <button type="button"
